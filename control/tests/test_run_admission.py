@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -33,6 +32,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 
 def setup(

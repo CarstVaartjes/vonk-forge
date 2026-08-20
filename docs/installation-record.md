@@ -102,7 +102,7 @@ Later host changes continued to use worker-first ordering wherever possible so
 GPU node 1 remained the recovery point while GPU node 2 was validated.
 
 The detailed maintenance, recovery-media, reboot, and validation procedure is
-in [Vonk Forge GPU node platform update](runbooks/platform-update.md).
+in [Platform operations](runbooks/platform-operations.md).
 
 ### 5. Capture the pre-change platform inventory
 
@@ -128,7 +128,7 @@ large; subsequent validation reused the local image.
 This distinguishes three separate components that are easy to conflate: the
 host driver, the optional host CUDA Toolkit, and the container's CUDA user-space
 runtime. The exact validation gate is in
-[Vonk Forge GPU node platform update](runbooks/platform-update.md).
+[Platform operations](runbooks/platform-operations.md).
 
 ### 7. Confirm the memory-killer prerequisite
 

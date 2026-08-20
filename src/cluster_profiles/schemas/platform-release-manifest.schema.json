@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vonk-forge.invalid/schemas/platform-update-manifest.schema.json",
-  "title": "Vonk Forge platform update manifest",
+  "$id": "https://vonk-forge.invalid/schemas/platform-release-manifest.schema.json",
+  "title": "Vonk Forge platform release manifest",
   "$comment": "Schema-only validation is not authorization. Consumers MUST use PlatformRelease.from_bytes so cross-field digest, range, package, and target-identity invariants are enforced.",
   "type": "object",
   "additionalProperties": false,

@@ -11,7 +11,6 @@ import pytest
 import vonk_control.recipe_builds as recipe_builds_module
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
@@ -46,6 +45,8 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 
 class RecordingQueue:

@@ -75,13 +75,12 @@ sudo stat -c '%n %U:%G %a %s bytes' \
   /srv/vonk-forge/secrets/tailscale-oauth-client-secret
 ```
 
-Set only the file paths in the root-owned site environment. The installed host
-updater starts the complete selected generation during first install, upgrade,
-rollback, or recovery. Verify it without invoking Compose from a checkout:
+Set only the file paths in the site environment. Start and verify the complete
+released Compose graph from its deployment directory:
 
 ```bash
-sudo vonk-control-offline doctor
-sudo vonk-control-offline maintenance status
+docker compose up -d --wait --remove-orphans
+docker compose ps
 ```
 
 Keep the OAuth client secret file equal to the raw value issued by Tailscale;
@@ -101,9 +100,9 @@ Authentication or approval failure leaves ingress closed; there is no LAN
 fallback.
 
 If the Tailscale console labels a permanent gateway **Ephemeral**, do not treat
-its Service approval as final. Select a corrected platform generation, stop
-only the Tailscale gateway/configurator, remove only that generation's
-Tailscale state and socket volumes, and start the selected generation again.
+its Service approval as final. Stop only the Tailscale gateway/configurator,
+remove only the stack's Tailscale state and socket volumes, and start them
+again.
 Approve the replacement advertisement if the exact Service auto-approval has
 not yet been installed, verify it is no longer ephemeral, then revoke the old
 gateway entry. Never delete database, repository, model, control-state, or
@@ -160,11 +159,9 @@ and Tailscale HTTPS own that name and certificate.
 ## Verification
 
 ```bash
-sudo vonk-control-offline maintenance tailscale-status
-sudo vonk-control-offline maintenance tailscale-serve-status
-sudo vonk-control-offline maintenance tailscale-serve-config
-sudo vonk-control-offline maintenance logs \
-  --service tailscale-configurator --since-minutes 30
+docker compose exec tailscale-gateway tailscale status --json
+docker compose exec tailscale-gateway tailscale serve status --json
+docker compose logs --since 30m tailscale-configurator
 ```
 
 Development must report exactly one Service: `svc:vonk-forge` with `HTTPS:
@@ -178,13 +175,11 @@ reach either Hermes endpoint.
 
 ## Drain, revocation, and recovery
 
-Do not run `docker compose down`; it bypasses the selected-generation journal.
-A platform transition or recovery uses the updater's fixed stop/start sequence.
 For a full host drain, withdraw GPU node routes and human access, complete the
-encrypted control-host backup, then stop the Docker host through its normal OS
-shutdown procedure. Back up `tailscale-state` and the OAuth files with the same
-encrypted generation as the control database and Hermes state. Restore state
-before startup when possible.
+NAS platform's encrypted volume backup, then stop the Docker host through its
+normal OS shutdown procedure. Back up `tailscale-state` and the OAuth files
+with the control database and Hermes state. Restore state before startup when
+possible.
 
 If state cannot be restored, recreate the project with the OAuth files. Verify
 exactly one current tagged node advertises the one development Service or all
@@ -193,6 +188,5 @@ compromise, revoke OAuth, the node, and its tag/Service approvals; for
 development, capture both replacement values and run the documented
 `--rotate-tailscale-oauth` transaction with one stable non-secret UUIDv4
 `--tailscale-oauth-rotation-id` before republishing and choosing
-**Pull** then **Redeploy** with every named volume preserved. Production uses
-its selected-generation secret and host-updater boundary. Never add a
+**Pull** then **Redeploy** with every named volume preserved. Never add a
 temporary LAN human endpoint.

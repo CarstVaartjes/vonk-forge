@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -42,6 +41,8 @@ from vonk_control.node_leases import NodeLeaseConflict, NodeLeaseService
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
+
+from .runtime_identity_support import claim_agent
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

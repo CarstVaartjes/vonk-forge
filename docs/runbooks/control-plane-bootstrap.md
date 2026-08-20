@@ -2,9 +2,9 @@
 
 For a NAS production deployment, begin with the authoritative
 [Docker control-host deployment guide](../../deploy/compose/README.md). It
-covers root-owned host state, site-local configuration and secrets,
-Tailscale-only access, the production step-ca overlay, first selection, and
-rollback. This runbook provides control-plane context, but the deployment guide
+covers site-local configuration and secrets, Tailscale-only access, the
+canonical step-ca service, and first startup. This runbook provides
+control-plane context, but the deployment guide
 owns the executable bootstrap sequence so operators have one source of truth.
 
 The control plane runs on any Docker Compose-capable Linux machine. The first
@@ -22,10 +22,9 @@ or Hermes.
 GPU node reservations are recommended, but no GPU node IP belongs in Compose or fleet
 identity: authenticated agent presence supplies the current validated address.
 
-1. Prepare `/srv/vonk-forge/control-host` and `/srv/vonk-forge/site` with their
-   documented root ownership and copy the non-secret settings from
-   `deploy/compose/.env.example` to `/srv/vonk-forge/site/.env`. The selected
-   platform target, not this file, supplies image and deployment assets.
+1. Download and prepare the generated deployment bundle as described in
+   [Prepare the deployment directory](../../deploy/compose/README.md). Keep its
+   Compose file, `.env`, and `secrets/` directory together on the NAS.
 2. Create the database URL, PostgreSQL password, token-signing-key, Tailscale
    OAuth, and Hermes API-key files outside Git. Restrict them
    to the service administrator. Follow the [Tailscale](tailscale.md) and
@@ -41,14 +40,10 @@ identity: authenticated agent presence supplies the current validated address.
 
    Spaces, internal line breaks, padding, and other punctuation are rejected
    by both Caddy and the control API.
-3. Run the exact root-owned updater commands in
-   [Install and first selection](../../deploy/compose/README.md#install-and-first-selection).
-   Preview `upgrade --target-name` first, then apply the same exact target. The
-   updater validates the TUF-authorized manifest, verified generation, OCI
-   bundle, images, site state, backup, migration, and readiness while holding
-   one operation lock. Production never executes Compose from the repository checkout,
-   and operators must not reproduce the updater sequence manually.
-4. After the guide's successful first selection, check `/api/v1/healthz`
+3. Validate and start the generated Compose project with the commands in
+   [Start the stack](../../deploy/compose/README.md). Production uses only the
+   generated bundle, never a repository checkout.
+4. After startup, check `/api/v1/healthz`
    through the `svc:vonk-forge` Tailscale Service.
 
    Step CA is part of the canonical graph in every release channel. There is no
@@ -80,10 +75,10 @@ and no ingress-network direct path is supported. Hermes uses the fixed
 creates the bridge so terminal tools cannot connect directly to GPU node
 management/fabric networks or sibling control-plane networks.
 
-The checked-in LiteLLM file is a fail-closed empty bootstrap. The API retains
-Git authority and evaluates current-head, eligibility, and commit-pinned Hermes
-policy for the repository-less worker over a dedicated internal two-party
-network. Requests and short-lived responses are nonce-bound and HMAC-authenticated
+The checked-in LiteLLM file is a fail-closed empty bootstrap. PostgreSQL is the
+control authority, and the API evaluates the current persisted revision and
+Hermes policy for the worker over a dedicated internal two-party network.
+Requests and short-lived responses are nonce-bound and HMAC-authenticated
 with the independent `worker-api-token`; Caddy denies every `/internal/*` path.
 After a successful commit-pinned reconciliation, the worker derives the live
 config from stable

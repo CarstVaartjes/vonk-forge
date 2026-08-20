@@ -3,12 +3,11 @@
 This is the authoritative operator entry point for a production NAS deployment.
 It applies a reviewed platform release to any supported `linux/amd64`,
 Docker-capable control host. A NAS is convenient but not required. Production
-never executes Compose from the repository checkout: the root-owned host
-updater selects a TUF-authorized platform target, loads the verified OCI deployment bundle,
-and runs only the resulting immutable generation.
+never executes Compose from the repository checkout: operators download the
+published OCI deployment bundle and run its digest-pinned Compose project.
 
-The checkout and TUF release described here govern platform services, fleet
-policy, and the compatibility workload-release projection. They are not a
+The published release described here governs platform services and the
+compatibility workload-release projection. It is not a
 recipe authoring gate. Local PostgreSQL is authoritative for recipe families,
 authored/imported recipe revisions, WorkloadRun import reports, installations,
 placements, and runs; those records remain available when Git or the optional
@@ -103,111 +102,50 @@ silently widens a recipe allowlist to unrestricted network access.
 
 This source-first path applies to recipe workloads only. The API, worker, and
 optional Hermes images used by this Compose project remain platform release
-artifacts and are selected from the signed, digest-pinned platform target
-described below.
+artifacts.
 
 ## Current release state
 
 No images are currently being published. Repository variables
-`VONK_CONTAINER_RELEASES_ENABLED` and `VONK_PLATFORM_RELEASES_ENABLED` are
-deliberately unset (default-off) until the entire repository is release-ready.
-A maintainer must set both to `true` in a protected GitHub environment before
+`VONK_CONTAINER_RELEASES_ENABLED` is deliberately unset (default-off) until
+the entire repository is release-ready. A maintainer must set it to `true` in
+a protected GitHub environment before
 the stable-tag workflow can publish. Dependabot cannot publish: it only opens
 weekly dependency-update pull requests, which a maintainer must review, merge,
 and deliberately release with a stable version tag after enablement.
 
 When enabled, one stable version tag builds and publishes these three packages
-and the matching ARM64 `vonk-forge-agent` Debian package as one platform
+and matching ARM64 and AMD64 `vonk-forge-agent` Debian packages as one platform
 release:
 
 ```text
 ghcr.io/carstvaartjes/vonk-forge-api
 ghcr.io/carstvaartjes/vonk-forge-worker
 ghcr.io/carstvaartjes/vonk-forge-hermes
-GitHub Release assets: the signed `vonk-forge-agent_<version>_arm64.deb`
+GitHub Release assets: signed `vonk-forge-agent_<version>_{arm64,amd64}.deb`
 ```
 
-Do not deploy an individual package, a tag, or a workflow summary. Select the
-immutable `platform/releases/<version>/<sha256>.json` target published by the
-release workflow. That target pins all three images, the exact agent package
-evidence, and one verified OCI deployment bundle containing the exact Compose
-graph and configuration assets. Never install an agent package or deploy an
-image from a different tag than the selected platform target.
-Maintainers use [Platform release publication](../../docs/runbooks/platform-release-publication.md);
-control-host operators use
-[Platform release update](../../docs/runbooks/platform-release-update.md).
+Do not mix assets from different tags or workflow runs. The immutable GitHub
+Release binds the digest-pinned images, native agent packages, release manifest,
+and verified OCI deployment bundle. Maintainers use
+[Platform release publication](../../docs/runbooks/platform-release-publication.md).
 
 ## Host and network prerequisites
 
-Use a supported `linux/amd64` machine with Docker Engine plus the Docker
-Compose plugin, ORAS 1.3, age, POSIX ACL tools (`setfacl` and `getfacl`), local
-DNS, and persistent storage. Install the reviewed host-updater package as a
-root-owned executable; neither that executable nor its Python package may be
-writable by a service UID. Keep the host updater, site configuration,
-application data, and deployment secrets in separate host trees:
+Use a supported `linux/amd64` NAS with Docker Engine and Docker Compose.
+Keep the Compose bundle, `.env`, and `secrets/` together in one
+operator-owned directory. PostgreSQL and named Docker volumes own mutable
+runtime state; the control API does not mount a source checkout.
 
-```bash
-sudo install -d -m 0755 -o root -g root /srv/vonk-forge
-sudo install -d -m 0700 -o root -g root /srv/vonk-forge/control-host
-sudo install -d -m 0755 -o root -g root /srv/vonk-forge/control-identity
-sudo install -d -m 0700 -o root -g root /srv/vonk-forge/site
-sudo install -d -m 0700 /srv/vonk-forge/secrets /srv/vonk-forge/hermes /srv/vonk-forge/step-ca
-```
-
-The updater reads site values from the root-owned `/srv/vonk-forge/site`
-boundary and release assets from verified generations. The control API does
-not mount a source checkout and does not write Git metadata. PostgreSQL is the
-authoritative store for control-plane documents, proposals, recipe data, source
-bundles, job logs, and fleet state; the deployment bundle contains only the
-immutable service configuration and runtime assets.
-
-Reserve a host management-LAN address and put it in the host-local `.env`:
-
-```dotenv
-NAS_LAN_IP=10.0.0.2
-```
-
-`NAS_LAN_IP` is the NAS host's physical management-LAN address: it is not the Docker bridge, not a Tailscale `100.x` address, and not the public WAN address. Resolve these names only on the management LAN:
-
-```text
-enroll.vonk-forge.lan   10.0.0.2
-agents.vonk-forge.lan   10.0.0.2
-registry.vonk-forge.lan 10.0.0.2
-```
-
-Allow TCP 8443 to that LAN address only from the canonical GPU node management
-CIDRs (preferably reserved GPU node leases). Human control, Grafana, inference,
-and Hermes have no LAN or WAN access: use the exact Tailscale Services in
-[the Tailscale runbook](../../docs/runbooks/tailscale.md). There is no LAN
-fallback for tailnet-only access.
-
-`control.vonk-forge.lan is not a LAN-accessible human endpoint`: do not create a
-general-purpose LAN record or firewall rule for it. Human control reaches the
-Tailscale `svc:vonk-forge` Service; the only published NAS LAN listener is the
-GPU node-restricted TCP 8443 backend.
+Set `NAS_LAN_IP` to the NAS management-LAN address, configure the agent DNS
+names to that address, and permit TCP 8443 only from the GPU-node management
+CIDRs. Human control, Grafana, inference, and Hermes remain tailnet-only.
 
 ## Select a complete platform release
 
-The protected release workflow publishes the deployment bundle first, then an
-immutable TUF target, and updates the signed `stable` channel last. Production
-selects the signed `stable` channel through the trusted host updater, which
-resolves it to one immutable TUF target. The operator never turns a channel, a
-Git tag, or an OCI tag into a Compose install target:
-
-```text
-platform/releases/X.Y.Z/REPLACE_MANIFEST_SHA256.json
-```
-
-The target binds the canonical manifest bytes, all three image digests, the
-deployment-bundle manifest and layer descriptors, supported host-updater ABI,
-database revision, and exact authorized predecessors. The updater downloads
-OCI manifest and layer bytes by digest, verifies their media types, sizes, and
-digests, verifies the canonical bundle, and renders Compose inside a new
-root-owned generation. A public package needs no NAS GitHub token. For each
-newly created package, a maintainer performs the one-time GitHub web setting:
-package page → **Package settings** → **Danger Zone** → **Change visibility**
-→ **Set package visibility to Public**. Never put a GitHub token in site
-configuration to work around package visibility.
+Download the rendered Compose file and matching release assets from one
+immutable GitHub Release. The file pins the released API and worker images by
+digest. Do not mix images or Compose files from different releases.
 
 ## Host-local `.env` inputs
 
@@ -344,96 +282,36 @@ The offline root private key never enters this NAS. The generated PKI paths and
 permissions in [agent PKI](../../docs/runbooks/agent-pki.md) remain authoritative
 for the step-ca material.
 
-## Bootstrap the production-shaped step-ca overlay
+## Bootstrap and install
 
-Follow [agent PKI](../../docs/runbooks/agent-pki.md) first to create the
-offline root, online intermediate, provisioner material, generated
-`/srv/vonk-forge/step-ca/ca.json`, and all PKI secret files. Then follow
-[Tailscale](../../docs/runbooks/tailscale.md) to create the scoped OAuth client,
-tailnet policy, and exact Services. Do this in order:
+Follow [agent PKI](../../docs/runbooks/agent-pki.md) to create the Step CA
+material, then [Tailscale](../../docs/runbooks/tailscale.md) for policy and OAuth
+configuration. Complete `.env` and every referenced secret file before
+starting the graph.
 
-1. Prepare the host paths, local DNS, all `.env` entries, and secret files.
-2. Complete the agent-PKI production step-ca material and copy only its online
-   artifacts to the paths named in `.env`.
-3. Complete Tailscale policy and OAuth secret setup; do not enable a LAN
-   fallback.
-4. Record the exact immutable TUF target name and verify that the current
-   trusted metadata retains every predecessor required for rollback.
-5. Preview first selection with the root-owned host updater and review the
-   release, bundle, image, database, space, site-config, and backup bindings.
-6. Apply that exact plan. The updater initializes PostgreSQL, migrates, starts
-   the candidate API in inert preselection mode, selects the generation, and
-   requires generation-bound API and worker readiness.
-
-The canonical graph includes Step CA for both production and development.
-Development uses different immutable release identities and site-local
-credentials; the provider topology does not change.
-
-## Install and first selection
-
-Install ORAS and age at the absolute paths configured by the host-updater
-package. Install the package and its `vonk-control-offline` entry point as
-`root:root`, mode `0755`, from the signed first-release bootstrap artifact. The
-bootstrap artifact is the only out-of-band first-install input; after this,
-successor tooling is accepted only when the currently installed updater
-supports the target's declared updater ABI. Never install this entry point from
-an unreviewed branch checkout.
-
-Configure the trusted TUF root, metadata/target URLs, root-owned age-recipient
-file, and root-owned site environment as described in
-[Platform release update](../../docs/runbooks/platform-release-update.md).
-Preview the immutable target without mutation, then apply the same target:
-
-```bash
-target_name=platform/releases/X.Y.Z/REPLACE_MANIFEST_SHA256.json
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  upgrade --target-name "$target_name"
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  upgrade --target-name "$target_name" --apply
+```sh
+docker compose config --quiet
+docker compose pull
+docker compose up -d --wait --remove-orphans
 ```
 
-The updater holds one operation lock through TUF refresh, OCI acquisition,
-bundle validation, fixed backup, migration, candidate preselection, selection,
-and generation-bound worker readiness. It runs Compose only from the verified
-generation directory and records an immutable hash-chained journal. After the
-first successful selection, create the first administrator through the web/CLI
-admin workflow and apply the Hermes egress rule documented in
-[Hermes Agent](../../docs/runbooks/hermes-agent.md). Verify the exact Tailscale
-Services and confirm ordinary LAN clients cannot reach human or Hermes
-endpoints.
+The API pre-exec path serializes the fresh PostgreSQL schema initialization.
+There is no separate migration, bootstrap, generation-selection, or updater
+container.
 
-## Upgrade and rollback
+## Upgrade
 
-For an upgrade, resolve the next signed channel document to its immutable target
-name, then preview and apply that exact name. Never edit image names or a
-Compose model as the deployment mechanism:
+Replace the Compose file with the one from the next immutable release, retain
+the site `.env`, secrets, and Docker volumes, then run:
 
-```bash
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  upgrade --target-name "$target_name"
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  upgrade --target-name "$target_name" --apply
+```sh
+docker compose pull
+docker compose up -d --wait --remove-orphans
 ```
 
-If an operation is unfinished, preview and apply only its journaled recovery:
-
-```bash
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host recover
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host recover --apply
-```
-
-For an operator-requested rollback, use the recorded predecessor generation.
-The current TUF target set must still authorize its exact target and bundle:
-
-```bash
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  rollback --generation REPLACE_GENERATION_ID
-sudo vonk-control-offline --state-path /srv/vonk-forge/control-host \
-  rollback --generation REPLACE_GENERATION_ID --apply
-```
-
-Do not deploy a partial publication, a digest copied from a registry page, a
-revoked predecessor, or a release whose OCI bundle cannot be verified exactly.
+Back up PostgreSQL and named volumes using the NAS platform's supported backup
+mechanism before an upgrade. Vonk Forge does not maintain predecessor slots or
+perform application-managed host rollback.
 
 ## Evaluation-only `latest`
 

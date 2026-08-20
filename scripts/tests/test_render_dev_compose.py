@@ -43,8 +43,8 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     assert "tailscale-gateway" in document["services"]
     assert "hermes-agent" in document["services"]
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
-    assert text.count(API_IMAGE) >= 2
-    assert text.count(WORKER_IMAGE) >= 4
+    assert document["services"]["control-api"]["image"] == API_IMAGE
+    assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     assert document["services"]["caddy"]["configs"]
     assert "configs:" in text
@@ -130,7 +130,6 @@ def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path)
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert "step-ca" in document["services"]
     api_secrets = document["services"]["control-api"]["secrets"]
-    assert "admin-grant-private-key" in api_secrets
     assert "step-ca-password" in api_secrets
 
 

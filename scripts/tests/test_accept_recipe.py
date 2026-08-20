@@ -95,14 +95,14 @@ class FleetServer(ThreadingHTTPServer):
     def __init__(self, address):
         super().__init__(address, FleetHandler)
         self.requests: list[tuple[str, str]] = []
-        self.supervisor_generation = 1
+        self.event_cursor = 1
         self.disk_free_bytes = 1_000_000_000_000
         self.host_memory_free_bytes = 127_000_000_000
         self.fabric_address: str | None = None
         self.fabric_bandwidth_mbps: int | None = None
         self.node_ids = [NODE]
         self.fabric_addresses: dict[str, str] = {}
-        self.agent_sha256 = "c" * 64
+        self.binary_digest = "c" * 64
 
 
 class FleetHandler(BaseHTTPRequestHandler):
@@ -129,9 +129,9 @@ class FleetHandler(BaseHTTPRequestHandler):
                 json.dumps(
                     {
                     "schema_version": 1,
-                    "event_cursor": self.server.supervisor_generation,
+                    "event_cursor": self.server.event_cursor,
                     "generated_at": "2026-08-16T12:00:00+00:00",
-                    "repository_commit": "a" * 40,
+                    "authority_revision": "a" * 64,
                     "nodes": [
                         _fleet_node(self.server, node_id, index)
                         for index, node_id in enumerate(self.server.node_ids)
@@ -152,9 +152,7 @@ class FleetHandler(BaseHTTPRequestHandler):
                             "protocol_version": 3,
                             "platform_version": "0.1.0",
                             "build_digest": "sha256:" + "b" * 64,
-                            "active_slot": "A",
-                            "agent_sha256": self.server.agent_sha256,
-                            "supervisor_generation": self.server.supervisor_generation,
+                            "binary_digest": self.server.binary_digest,
                             "capabilities": [
                                 "build.rootless-podman.v1",
                                 "recipe.operations.v1",
@@ -457,7 +455,7 @@ def test_preflight_records_exact_recipe_entity_node_and_host_identities_canonica
     assert evidence["nodes"][0]["ssh_target"] == SSH_TARGETS[0]
     assert evidence["nodes"][0]["node_id"] == NODE
     assert evidence["nodes"][0]["agent_build_digest"] == "sha256:" + "b" * 64
-    assert evidence["nodes"][0]["supervisor_generation"] == 1
+    assert evidence["nodes"][0]["agent_binary_digest"] == "c" * 64
     assert {reference["kind"] for reference in evidence["entity_references"]} == {
         "execution-harness",
         "model",
@@ -718,7 +716,7 @@ def test_acceptance_refuses_status_that_overstates_completed_phases(
 def test_preflight_rejects_malformed_agent_content_identity_before_ssh(
     tmp_path: Path, fleet_server: FleetServer
 ) -> None:
-    fleet_server.agent_sha256 = "not-a-sha256"
+    fleet_server.binary_digest = "not-a-sha256"
 
     result, _evidence_path, ssh_log = _run(
         tmp_path, fleet_server, "--preflight-only"
@@ -772,13 +770,11 @@ def _complete_runner_evidence(
     restart_checkpoint = {
         NODE: {
             "boot_id": "11111111-1111-4111-8111-111111111111",
-            "supervisor_generation": 1,
         }
     }
     restart_identity = {
         NODE: {
             "boot_id": "22222222-2222-4222-8222-222222222222",
-            "supervisor_generation": 2,
         }
     }
     restart_binding = {
@@ -843,7 +839,7 @@ def _complete_runner_evidence(
     evidence_path.chmod(0o600)
 
 
-def test_spark_acceptance_requires_exact_outputs_and_advanced_supervisor_generation(
+def test_spark_acceptance_requires_exact_outputs_and_packaged_agent_identity(
     tmp_path: Path, fleet_server: FleetServer
 ) -> None:
     evidence = tmp_path / "acceptance.json"
@@ -851,7 +847,7 @@ def test_spark_acceptance_requires_exact_outputs_and_advanced_supervisor_generat
         tmp_path, fleet_server, "--preflight-only", evidence=evidence
     )
     assert initial.returncode == 0, initial.stderr
-    fleet_server.supervisor_generation = 2
+    fleet_server.event_cursor = 2
     qualification = evidence.with_name("acceptance.qualification.json")
     qualification.write_bytes(_qualification(DS4))
     qualification.chmod(0o600)
@@ -893,7 +889,7 @@ def test_complete_state_names_cannot_overstate_missing_exact_evidence(
         tmp_path, fleet_server, "--preflight-only", evidence=evidence
     )
     assert initial.returncode == 0, initial.stderr
-    fleet_server.supervisor_generation = 2
+    fleet_server.event_cursor = 2
     qualification = evidence.with_name("acceptance.qualification.json")
     qualification.write_bytes(_qualification(DS4))
     qualification.chmod(0o600)

@@ -63,14 +63,12 @@ HTTP, or a fallback list.
 ## Apply the one-off host egress boundary
 
 Compose networks do not replace a host firewall. The hardening program is part
-of the signed deployment bundle; never run the similarly named file from a Git
-checkout. After the updater has selected a generation and Docker has created
-the networks, resolve the immutable active generation, review the plan, apply
-it once, and verify it:
+of the downloaded deployment bundle. After Docker has created the networks,
+run the bundle-local program from the project directory, review the plan,
+apply it once, and verify it:
 
 ```bash
-active=$(sudo cat /srv/vonk-forge/control-host/active-generation)
-hardener="/srv/vonk-forge/control-host/generations/$active/bin/harden-hermes-egress"
+hardener="./bin/harden-hermes-egress"
 export COMPOSE_PROJECT_NAME=vonk-forge-control
 export VONK_MANAGEMENT_CIDRS=10.0.0.0/24
 export VONK_DIRECT_FABRIC_CIDRS=192.168.100.0/24,192.168.101.0/24
@@ -134,10 +132,8 @@ disposable.
 ## Start and verify
 
 ```bash
-sudo vonk-control-offline doctor
-sudo vonk-control-offline maintenance status
-sudo vonk-control-offline maintenance logs --service hermes-agent --since-minutes 30
-sudo vonk-control-offline maintenance logs --service tailscale-configurator --since-minutes 30
+docker compose ps
+docker compose logs --since 30m hermes-agent tailscale-configurator
 ```
 
 Confirm Hermes and LiteLLM are healthy. Serve status must show HTTPS 443 for
@@ -163,18 +159,12 @@ acceptance checks.
 
 ## Backup and recovery
 
-The root-owned `HostBackupBoundary` includes Hermes `data` and `workspaces` in
-the authenticated encrypted upgrade archive and excludes cache. Back up the
-external API-key file and Tailscale state/OAuth files in the same encrypted
-off-host generation.
-
-Journaled control-host recovery verifies the exact backup receipt before its
-fixed boundary restores the selected Hermes trees with their configured
-UID/GID and owner-only permissions. There is no repository restore script or
-operator-supplied decryption command. Restore and verify the API-key file
-separately, then let the updater start the selected generation. Fresh GPU node
-presence and a new LiteLLM lease are required; restored routes do not become
-live merely because they existed in a backup.
+Use the NAS platform's supported encrypted volume backup for Hermes `data` and
+`workspaces`; cache is disposable. Back up the external API-key file and
+Tailscale state/OAuth files with the same snapshot. Restore those volumes and
+files before starting Compose. Fresh GPU node presence and a new LiteLLM lease
+are required; restored routes do not become live merely because they existed
+in a backup.
 
 If Tailscale state is lost, the scoped OAuth client performs unattended tagged
 re-enrollment. Verify the replacement and revoke the orphan. Loss of Hermes

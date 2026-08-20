@@ -232,38 +232,14 @@ class Observation(Base):
 
 
 class ControlProcessHeartbeat(Base):
-    """A completed scheduler loop bound to one immutable control generation."""
+    """A completed scheduler loop bound to one running worker process."""
 
     __tablename__ = "control_process_heartbeats"
     __table_args__ = (
-        UniqueConstraint(
-            "process_kind",
-            "start_nonce",
-            name="uq_control_process_heartbeats_process_start",
-        ),
+        UniqueConstraint("process_kind", name="uq_control_process_heartbeats_kind"),
         CheckConstraint(
             "process_kind = 'worker'",
             name="ck_control_process_heartbeats_process_kind",
-        ),
-        CheckConstraint(
-            "length(generation_id) BETWEEN 1 AND 128",
-            name="ck_control_process_heartbeats_generation_id_length",
-        ),
-        CheckConstraint(
-            "length(release_digest) = 71 AND "
-            "substr(release_digest, 1, 7) = 'sha256:' AND "
-            f"({_lower_hex('substr(release_digest, 8, 64)', 64)})",
-            name="ck_control_process_heartbeats_release_digest",
-        ),
-        CheckConstraint(
-            "length(build_digest) = 71 AND "
-            "substr(build_digest, 1, 7) = 'sha256:' AND "
-            f"({_lower_hex('substr(build_digest, 8, 64)', 64)})",
-            name="ck_control_process_heartbeats_build_digest",
-        ),
-        CheckConstraint(
-            _lower_hex("start_nonce", 64),
-            name="ck_control_process_heartbeats_start_nonce",
         ),
         CheckConstraint(
             _lower_hex("process_instance_id", 64),
@@ -279,10 +255,6 @@ class ControlProcessHeartbeat(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     process_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    generation_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    release_digest: Mapped[str] = mapped_column(String(71), nullable=False)
-    build_digest: Mapped[str] = mapped_column(String(71), nullable=False)
-    start_nonce: Mapped[str] = mapped_column(String(64), nullable=False)
     process_instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
     loop_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(

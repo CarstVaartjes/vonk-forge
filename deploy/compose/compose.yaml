@@ -8,19 +8,7 @@ x-bounded-logging: &bounded-logging
     max-size: 10m
     max-file: "5"
 
-x-selected-generation-environment: &selected-generation-environment
-  VONK_CONTROL_STARTUP_MODE: selected
-  VONK_CONTROL_GENERATION_ID: ${VONK_CONTROL_GENERATION_ID:?set selected generation ID}
-  VONK_DATABASE_REVISION: ${VONK_DATABASE_REVISION:?set selected database revision}
-  VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
-  VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
-  VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
-  # This is per selection attempt and must be supplied by the root host updater,
-  # never persisted in the site .env file or immutable generation environment.
-  VONK_CONTROL_START_NONCE: ${VONK_CONTROL_START_NONCE:?set fresh selected start nonce}
-
 x-api-environment: &api-environment
-  <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
@@ -39,19 +27,14 @@ x-api-environment: &api-environment
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
   VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
-  VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
-  VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
 
 x-worker-environment: &worker-environment
-  <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
-  VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
   postgres:
@@ -107,12 +90,6 @@ services:
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /run/vonk-forge/control-identity
-        read_only: true
-        bind:
-          create_host_path: false
     # OCI archives are transfer staging only; PostgreSQL owns the build
     # authority and the enrolled node owns the imported runtime image. Never
     # make the controller's temporary upload bytes part of persistent state.
@@ -145,12 +122,6 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /run/vonk-forge/control-identity
-        read_only: true
-        bind:
-          create_host_path: false
     tmpfs: [/tmp]
     networks: [data, worker-authority]
     depends_on:

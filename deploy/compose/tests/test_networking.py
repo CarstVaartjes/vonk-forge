@@ -24,13 +24,6 @@ def _rendered() -> dict:
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
         "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "CONTROL_IDENTITY_PATH": "/srv/vonk-forge/control-identity",
-        "VONK_PLATFORM_VERSION": "1.0.0",
-        "VONK_PLATFORM_RELEASE_DIGEST": "sha256:" + "2" * 64,
-        "VONK_PLATFORM_BUILD_DIGEST": "sha256:" + "3" * 64,
-        "VONK_CONTROL_GENERATION_ID": "gen-" + "2" * 24,
-        "VONK_DATABASE_REVISION": "0012_control_process_heartbeats",
-        "VONK_CONTROL_START_NONCE": "4" * 64,
         "GRAFANA_ADMIN_PASSWORD_FILE": "/dev/null",
         "LITELLM_MASTER_KEY_FILE": "/dev/null",
         "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
@@ -210,7 +203,6 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/routes",
         "/supervisor",
         "/state",
-        "/run/vonk-forge/control-identity",
         "/run/vonk-normalized-secrets",
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
@@ -231,61 +223,6 @@ def test_deleted_workload_signer_path_is_absent_from_fresh_graph() -> None:
         "workload-snapshot-key",
         "workload-timestamp-key",
     } & set(_rendered()["secrets"])
-
-
-def test_selected_services_reopen_the_root_owned_identity_directory_read_only() -> None:
-    rendered = _rendered()
-    services = rendered["services"]
-    expected_mount = {
-        "type": "bind",
-        "source": "/srv/vonk-forge/control-identity",
-        "target": "/run/vonk-forge/control-identity",
-        "read_only": True,
-        "bind": {"create_host_path": False},
-    }
-
-    assert "signer-activation-init" not in services
-    assert not any(
-        name.endswith("signer-active-control") for name in rendered["volumes"]
-    )
-    for service_name in ("control-api", "control-worker"):
-        service = services[service_name]
-        mounts = {volume["target"]: volume for volume in service["volumes"]}
-        assert mounts["/run/vonk-forge/control-identity"] == expected_mount
-        assert not any(
-            "control-host" in volume.get("source", "")
-            or "control-generations" in volume.get("source", "")
-            for volume in service["volumes"]
-        )
-
-    assert services["control-api"]["environment"]["VONK_CONTROL_IDENTITY_ROOT"] == (
-        "/run/vonk-forge/control-identity"
-    )
-    assert services["control-worker"]["environment"]["VONK_CONTROL_IDENTITY_ROOT"] == (
-        "/run/vonk-forge/control-identity"
-    )
-
-
-def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity() -> (
-    None
-):
-    services = _rendered()["services"]
-    api = services["control-api"]
-    worker = services["control-worker"]
-    common = {
-        "VONK_CONTROL_STARTUP_MODE": "selected",
-        "VONK_CONTROL_GENERATION_ID": "gen-" + "2" * 24,
-        "VONK_DATABASE_REVISION": "0012_control_process_heartbeats",
-        "VONK_PLATFORM_VERSION": "1.0.0",
-        "VONK_PLATFORM_RELEASE_DIGEST": "sha256:" + "2" * 64,
-        "VONK_PLATFORM_BUILD_DIGEST": "sha256:" + "3" * 64,
-        "VONK_CONTROL_START_NONCE": "4" * 64,
-    }
-
-    for service in (api, worker):
-        assert common.items() <= service["environment"].items()
-    assert api["environment"]["VONK_CONTROL_PROCESS_IMAGE"] == api["image"]
-    assert worker["environment"]["VONK_CONTROL_PROCESS_IMAGE"] == worker["image"]
 
 
 def test_control_api_has_only_the_capabilities_required_by_its_preexec() -> None:

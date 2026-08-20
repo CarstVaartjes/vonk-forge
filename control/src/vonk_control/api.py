@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
-import os
 import re
 import secrets
-import stat
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -91,23 +88,16 @@ from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient
 from .recipe_operations import RecipeOperationService
-from .settings import StartupMode
 from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
 from .workload_run_workflow import WorkloadRunWorkflow
 
-_CONTROL_GENERATION = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
-_CONTROL_OPERATION = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
-_CONTROL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_CONTROL_IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
-_CONTROL_START_NONCE = re.compile(r"[0-9a-f]{64}\Z")
 _RECIPE_IMAGE_UPLOAD = re.compile(
     r"/agent/v1/recipe-builds/"
     r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/image\Z"
 )
-_MAX_IDENTITY_PROJECTION_BYTES = 64 * 1024
 _LOGIN_PATH = "/api/v1/auth/login"
 _TELEMETRY_PATH = "/agent/v1/telemetry"
 _MAX_TELEMETRY_BODY_BYTES = 64 * 1024
@@ -141,491 +131,6 @@ async def _bounded_request_body(request: Request, maximum: int) -> bytes:
     bounded = bytes(body)
     request._body = bounded
     return bounded
-
-
-class GenerationReadinessError(RuntimeError):
-    """A control generation has not established exact readiness."""
-
-
-@dataclass(frozen=True)
-class GenerationProcessIdentity:
-    """Immutable identity injected into one control process at startup."""
-
-    startup_mode: StartupMode
-    operation_id: str | None
-    generation_id: str
-    release_digest: str
-    build_digest: str
-    platform_version: str
-    process_image: str
-    database_revision: str
-    start_nonce: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.startup_mode, StartupMode):
-            raise TypeError("startup mode is invalid")
-        if _CONTROL_GENERATION.fullmatch(self.generation_id) is None:
-            raise ValueError("generation ID is invalid")
-        if _CONTROL_GENERATION.fullmatch(self.database_revision) is None:
-            raise ValueError("database revision is invalid")
-        if _CONTROL_DIGEST.fullmatch(self.release_digest) is None:
-            raise ValueError("release digest is invalid")
-        if _CONTROL_DIGEST.fullmatch(self.build_digest) is None:
-            raise ValueError("build digest is invalid")
-        if (
-            re.fullmatch(
-                r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-                self.platform_version,
-            )
-            is None
-        ):
-            raise ValueError("platform version is invalid")
-        if _CONTROL_IMAGE.fullmatch(self.process_image) is None:
-            raise ValueError("process image is invalid")
-        if _CONTROL_START_NONCE.fullmatch(self.start_nonce) is None:
-            raise ValueError("process start nonce is invalid")
-        if self.startup_mode is StartupMode.PRESELECTION:
-            if (
-                self.operation_id is None
-                or _CONTROL_OPERATION.fullmatch(self.operation_id) is None
-            ):
-                raise ValueError("preselection operation ID is invalid")
-        elif self.operation_id is not None:
-            raise ValueError("selected identity cannot carry an operation ID")
-
-
-class IdentityProjectionSource(Protocol):
-    """Narrow read-only projection interface supplied by host state."""
-
-    def load_candidate(self, operation_id: str) -> object | None: ...
-
-    def load_active(self) -> object | None: ...
-
-
-class DirectoryIdentityProjectionSource:
-    """Safely reopen immutable projections from a read-only directory mount."""
-
-    def __init__(self, identity_root: Path, *, expected_owner: int = 0) -> None:
-        self._root = Path(identity_root)
-        if not self._root.is_absolute():
-            raise GenerationReadinessError("identity projection root must be absolute")
-        self._expected_owner = expected_owner
-
-    def load_candidate(self, operation_id: str) -> Mapping[str, object] | None:
-        if _CONTROL_OPERATION.fullmatch(operation_id) is None:
-            raise GenerationReadinessError("candidate operation ID is invalid")
-        return self._read(("candidates",), f"{operation_id}.json")
-
-    def load_active(self) -> Mapping[str, object] | None:
-        return self._read((), "active.json")
-
-    def _read(
-        self, directory_parts: tuple[str, ...], filename: str
-    ) -> Mapping[str, object] | None:
-        descriptors: list[int] = []
-        try:
-            try:
-                descriptor = os.open(
-                    self._root,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                )
-            except FileNotFoundError:
-                return None
-            except OSError as error:
-                raise GenerationReadinessError(
-                    "identity projection root is unsafe"
-                ) from error
-            descriptors.append(descriptor)
-            self._require_directory(descriptor)
-            for part in directory_parts:
-                try:
-                    descriptor = os.open(
-                        part,
-                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                        dir_fd=descriptor,
-                    )
-                except FileNotFoundError:
-                    return None
-                except OSError as error:
-                    raise GenerationReadinessError(
-                        "identity projection directory is unsafe"
-                    ) from error
-                descriptors.append(descriptor)
-                self._require_directory(descriptor)
-            try:
-                projection_fd = os.open(
-                    filename,
-                    os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                    dir_fd=descriptor,
-                )
-            except FileNotFoundError:
-                return None
-            except OSError as error:
-                raise GenerationReadinessError(
-                    "identity projection file is unsafe"
-                ) from error
-            descriptors.append(projection_fd)
-            before = os.fstat(projection_fd)
-            if (
-                not stat.S_ISREG(before.st_mode)
-                or stat.S_IMODE(before.st_mode) != 0o444
-                or before.st_uid != self._expected_owner
-                or before.st_nlink != 1
-                or not 0 < before.st_size <= _MAX_IDENTITY_PROJECTION_BYTES
-            ):
-                raise GenerationReadinessError("identity projection file is unsafe")
-            chunks: list[bytes] = []
-            remaining = _MAX_IDENTITY_PROJECTION_BYTES + 1
-            while remaining:
-                chunk = os.read(projection_fd, min(remaining, 16 * 1024))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                remaining -= len(chunk)
-            raw = b"".join(chunks)
-            after = os.fstat(projection_fd)
-            stable_fields = (
-                "st_dev",
-                "st_ino",
-                "st_mode",
-                "st_uid",
-                "st_nlink",
-                "st_size",
-                "st_mtime_ns",
-                "st_ctime_ns",
-            )
-            if any(
-                getattr(before, field) != getattr(after, field)
-                for field in stable_fields
-            ):
-                raise GenerationReadinessError(
-                    "identity projection changed while being read"
-                )
-            if len(raw) > _MAX_IDENTITY_PROJECTION_BYTES:
-                raise GenerationReadinessError("identity projection file is unsafe")
-            try:
-                value = json.loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise GenerationReadinessError(
-                    "identity projection is invalid"
-                ) from error
-            if not isinstance(value, dict) or not all(
-                isinstance(key, str) for key in value
-            ):
-                raise GenerationReadinessError("identity projection is invalid")
-            canonical = (
-                json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode()
-            if raw != canonical:
-                raise GenerationReadinessError("identity projection is not canonical")
-            self._require_exact_document(value)
-            return value
-        finally:
-            for descriptor in reversed(descriptors):
-                os.close(descriptor)
-
-    def _require_directory(self, descriptor: int) -> None:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != self._expected_owner
-            or stat.S_IMODE(metadata.st_mode) & 0o022
-        ):
-            raise GenerationReadinessError("identity projection directory is unsafe")
-
-    @staticmethod
-    def _require_exact_document(document: Mapping[str, object]) -> None:
-        from .host_state import (
-            HostOperationPlan,
-            HostStateConflict,
-            SelectionReceipt,
-        )
-
-        kind = document.get("projection_kind")
-        content = dict(document)
-        content.pop("projection_kind", None)
-        try:
-            if kind == "candidate":
-                HostOperationPlan.from_document(content)
-                return
-            if kind != "active":
-                raise GenerationReadinessError("identity projection kind is invalid")
-            if (
-                set(document)
-                != {
-                    "generation_receipt_sha256",
-                    "projection_kind",
-                    "projection_sequence",
-                    "schema_version",
-                    "selection",
-                    "selection_receipt_sha256",
-                }
-                or document.get("schema_version") != 1
-            ):
-                raise GenerationReadinessError("active projection is invalid")
-            sequence = document.get("projection_sequence")
-            if (
-                isinstance(sequence, bool)
-                or not isinstance(sequence, int)
-                or sequence < 1
-            ):
-                raise GenerationReadinessError("active projection is invalid")
-            selection_document = document.get("selection")
-            if not isinstance(selection_document, dict):
-                raise GenerationReadinessError("active projection is invalid")
-            receipt = SelectionReceipt.from_document(selection_document)
-            canonical_generation = (
-                json.dumps(
-                    receipt.generation.document(),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            ).encode()
-            canonical_selection = (
-                json.dumps(
-                    receipt.document(),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            ).encode()
-            generation_sha256 = hashlib.sha256(canonical_generation).hexdigest()
-            selection_sha256 = hashlib.sha256(canonical_selection).hexdigest()
-            if not secrets.compare_digest(
-                str(document.get("generation_receipt_sha256")),
-                generation_sha256,
-            ):
-                raise GenerationReadinessError(
-                    "active projection receipt digest does not match"
-                )
-            if not secrets.compare_digest(
-                str(document.get("selection_receipt_sha256")),
-                selection_sha256,
-            ):
-                raise GenerationReadinessError(
-                    "active projection selection digest does not match"
-                )
-        except (HostStateConflict, TypeError, ValueError) as error:
-            raise GenerationReadinessError(
-                "identity projection fields are invalid"
-            ) from error
-
-
-class GenerationReadinessService:
-    """Prove candidate identity or selected API plus one real worker DB loop."""
-
-    def __init__(
-        self,
-        sessions: Any,
-        identity: GenerationProcessIdentity,
-        projections: IdentityProjectionSource,
-        *,
-        clock: Callable[[], datetime],
-        database_revision: Callable[[], str],
-        heartbeat_maximum_age_seconds: int = 15,
-    ) -> None:
-        if not 1 <= heartbeat_maximum_age_seconds <= 90:
-            raise ValueError("heartbeat maximum age must be between one and 90 seconds")
-        self.sessions = sessions
-        self._identity = identity
-        self._projections = projections
-        self._clock = clock
-        self._database_revision = database_revision
-        self._maximum_age = heartbeat_maximum_age_seconds
-
-    def candidate(self, generation_id: str, start_nonce: str) -> Mapping[str, object]:
-        identity = self._require_call_identity(
-            StartupMode.PRESELECTION, generation_id, start_nonce
-        )
-        assert identity.operation_id is not None
-        projection = self._projections.load_candidate(identity.operation_id)
-        if projection is None:
-            raise GenerationReadinessError("candidate projection is unavailable")
-        self._require_projection(
-            projection,
-            kind="candidate",
-            operation_id=identity.operation_id,
-        )
-        self._require_database_revision()
-        return {
-            "build_digest": identity.build_digest,
-            "database_revision": identity.database_revision,
-            "generation_id": identity.generation_id,
-            "mode": StartupMode.PRESELECTION.value,
-            "operation_id": identity.operation_id,
-            "release_digest": identity.release_digest,
-            "start_nonce": identity.start_nonce,
-            "status": "ready",
-        }
-
-    def selected(self, generation_id: str, start_nonce: str) -> Mapping[str, object]:
-        from sqlalchemy import select
-
-        from .models import ControlProcessHeartbeat
-
-        identity = self._require_call_identity(
-            StartupMode.SELECTED, generation_id, start_nonce
-        )
-        projection = self._projections.load_active()
-        if projection is None:
-            raise GenerationReadinessError("active projection is unavailable")
-        self._require_projection(projection, kind="active", operation_id=None)
-        self._require_database_revision()
-        with self.sessions() as session:
-            heartbeat = session.scalar(
-                select(ControlProcessHeartbeat).where(
-                    ControlProcessHeartbeat.process_kind == "worker",
-                    ControlProcessHeartbeat.generation_id == identity.generation_id,
-                    ControlProcessHeartbeat.release_digest == identity.release_digest,
-                    ControlProcessHeartbeat.build_digest == identity.build_digest,
-                    ControlProcessHeartbeat.start_nonce == identity.start_nonce,
-                )
-            )
-        if heartbeat is None or heartbeat.loop_sequence < 1:
-            raise GenerationReadinessError("worker heartbeat is unavailable")
-        completed_at = _aware_utc(heartbeat.completed_at)
-        now = _aware_utc(self._clock())
-        age = (now - completed_at).total_seconds()
-        if not 0 <= age <= self._maximum_age:
-            raise GenerationReadinessError("worker heartbeat is stale")
-        return {
-            "build_digest": identity.build_digest,
-            "database_revision": identity.database_revision,
-            "generation_id": identity.generation_id,
-            "mode": StartupMode.SELECTED.value,
-            "release_digest": identity.release_digest,
-            "start_nonce": identity.start_nonce,
-            "status": "ready",
-            "worker_loop_sequence": heartbeat.loop_sequence,
-        }
-
-    def _require_call_identity(
-        self, mode: StartupMode, generation_id: str, start_nonce: str
-    ) -> GenerationProcessIdentity:
-        identity = self._identity
-        if identity.startup_mode is not mode:
-            raise GenerationReadinessError(f"{mode.value} mode is not active")
-        if generation_id != identity.generation_id:
-            raise GenerationReadinessError(
-                "requested generation does not match process"
-            )
-        if start_nonce != identity.start_nonce:
-            raise GenerationReadinessError(
-                "requested start nonce does not match process"
-            )
-        return identity
-
-    def _require_projection(
-        self,
-        projection: object,
-        *,
-        kind: str,
-        operation_id: str | None,
-    ) -> None:
-        identity = self._identity
-        actual_kind = _projection_field(projection, "projection_kind")
-        if actual_kind != kind:
-            raise GenerationReadinessError(f"{kind} projection kind is invalid")
-        expected: tuple[tuple[str, object, str], ...] = (
-            ("generation_id", identity.generation_id, "generation"),
-            ("release_digest", identity.release_digest, "release"),
-            ("build_digest", identity.build_digest, "build"),
-            ("platform_version", identity.platform_version, "platform version"),
-            ("api_image", identity.process_image, "image"),
-            ("database_revision", identity.database_revision, "database revision"),
-        )
-        if operation_id is not None:
-            expected += (("operation_id", operation_id, "operation"),)
-        for field, wanted, label in expected:
-            if _projection_field(projection, field) != wanted:
-                raise GenerationReadinessError(
-                    f"{kind} projection {label} does not match process"
-                )
-        if kind == "active":
-            sequence = _projection_field(projection, "projection_sequence")
-            if (
-                isinstance(sequence, bool)
-                or not isinstance(sequence, int)
-                or sequence < 1
-            ):
-                raise GenerationReadinessError("active projection sequence is invalid")
-
-    def _require_database_revision(self) -> None:
-        try:
-            revision = self._database_revision()
-        except Exception as error:
-            raise GenerationReadinessError(
-                "database revision is unavailable"
-            ) from error
-        if revision != self._identity.database_revision:
-            raise GenerationReadinessError(
-                "database revision does not match generation"
-            )
-
-
-def _aware_utc(value: datetime) -> datetime:
-    if not isinstance(value, datetime):
-        raise GenerationReadinessError("worker heartbeat timestamp is invalid")
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    if value.utcoffset() is None:
-        raise GenerationReadinessError("worker heartbeat timestamp is invalid")
-    return value.astimezone(UTC)
-
-
-def _projection_field(projection: object, field: str) -> object:
-    if isinstance(projection, Mapping):
-        if field in projection:
-            return projection[field]
-        selection = projection.get("selection")
-        if not isinstance(selection, Mapping):
-            return None
-        if field in {"operation_id", "plan_digest", "previous_generation"}:
-            return selection.get(field)
-        generation = selection.get("generation")
-        if isinstance(generation, Mapping):
-            return generation.get(field)
-        return None
-    return getattr(projection, field, None)
-
-
-def _generation_readiness_route(
-    app: FastAPI, service: GenerationReadinessService, mode: StartupMode
-) -> None:
-    @app.get("/internal/v1/generation/readiness", include_in_schema=False)
-    def generation_readiness() -> Mapping[str, object]:
-        identity = service._identity
-        try:
-            if mode is StartupMode.PRESELECTION:
-                return service.candidate(identity.generation_id, identity.start_nonce)
-            return service.selected(identity.generation_id, identity.start_nonce)
-        except GenerationReadinessError:
-            raise HTTPException(
-                status_code=503, detail="generation readiness unavailable"
-            ) from None
-
-
-def create_preselection_app(service: GenerationReadinessService) -> FastAPI:
-    """Return an inert route-only candidate app with no production registration."""
-
-    app = FastAPI(
-        title="Vonk Forge Control Preselection",
-        version="1.0",
-        openapi_url=None,
-        docs_url=None,
-        redoc_url=None,
-    )
-    _generation_readiness_route(app, service, StartupMode.PRESELECTION)
-    return app
-
-
-def install_selected_generation_readiness(
-    app: FastAPI, service: GenerationReadinessService
-) -> None:
-    """Install the host-only final gate on an already-selected production app."""
-
-    _generation_readiness_route(app, service, StartupMode.SELECTED)
 
 
 @dataclass(frozen=True)
@@ -1605,7 +1110,7 @@ def create_app(
 
 
 def production_app() -> FastAPI:
-    from sqlalchemy import func, select, text
+    from sqlalchemy import func, select
 
     from .agent_reconciliation import (
         bind_reconciliation_result_consumer,
@@ -1635,49 +1140,13 @@ def production_app() -> FastAPI:
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
-    from .settings import GenerationStartupSettings, Settings
+    from .settings import Settings
     from .telemetry import TelemetryRepository
     from .worker_authority import WorkerAuthorityService
 
-    generation = GenerationStartupSettings.from_env_and_secrets()
-    sessions = session_factory(build_engine(generation.database_url))
-    clock = lambda: datetime.now(UTC)
-
-    def database_revision() -> str:
-        with sessions() as session:
-            revision = session.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-        if not isinstance(revision, str):
-            raise TypeError("database revision is invalid")
-        return revision
-
     settings = Settings.from_env_and_secrets()
-    if settings.database_url != generation.database_url:
-        raise RuntimeError("generation and production database settings differ")
-    generation_readiness = GenerationReadinessService(
-        sessions,
-        GenerationProcessIdentity(
-            startup_mode=generation.startup_mode,
-            operation_id=generation.operation_id,
-            generation_id=generation.generation_id,
-            release_digest=generation.release_digest,
-            build_digest=generation.build_digest,
-            platform_version=generation.platform_version,
-            process_image=generation.process_image,
-            database_revision=generation.database_revision,
-            start_nonce=generation.start_nonce,
-        ),
-        DirectoryIdentityProjectionSource(generation.identity_root),
-        clock=clock,
-        database_revision=database_revision,
-    )
-    if generation.startup_mode is StartupMode.PRESELECTION:
-        return create_preselection_app(generation_readiness)
-
-    actual_revision = database_revision()
-    if actual_revision != generation.database_revision:
-        raise RuntimeError("selected database revision does not match generation")
+    sessions = session_factory(build_engine(settings.database_url))
+    clock = lambda: datetime.now(UTC)
     with sessions.begin() as session:
         seed_builtin_harnesses(session, clock())
 
@@ -1689,12 +1158,7 @@ def production_app() -> FastAPI:
     proposals = DatabaseProposalService(authority)
     changes = DatabaseChangeService(authority, proposals)
     database_bundles = DatabaseSourceBundleStore(sessions)
-    dashboard = DashboardService(
-        authority,
-        sessions,
-        protocol_minimum=generation.protocol_minimum,
-        protocol_maximum=generation.protocol_maximum,
-    )
+    dashboard = DashboardService(authority, sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
@@ -1725,8 +1189,6 @@ def production_app() -> FastAPI:
         metrics,
         sessions,
         clock=clock,
-        protocol_minimum=generation.protocol_minimum,
-        protocol_maximum=generation.protocol_maximum,
     )
     revision_eligible = lambda revision: revision == authority.head()
     current_revision = authority.head
@@ -1899,7 +1361,6 @@ def production_app() -> FastAPI:
         ),
         recipe_operations=recipe_operations,
     )
-    install_selected_generation_readiness(app, generation_readiness)
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")

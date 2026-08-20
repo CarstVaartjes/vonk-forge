@@ -48,9 +48,6 @@ def active_agents(payload: object) -> dict[str, dict[str, Any]]:
     indexed: dict[str, dict[str, Any]] = {}
     for agent in agents:
         node_id = agent.get("node_id") if isinstance(agent, dict) else None
-        generation = (
-            agent.get("supervisor_generation") if isinstance(agent, dict) else None
-        )
         if (
             not isinstance(agent, dict)
             or not isinstance(node_id, str)
@@ -58,9 +55,6 @@ def active_agents(payload: object) -> dict[str, dict[str, Any]]:
             or node_id in indexed
             or agent.get("state") != "active"
             or agent.get("stale") is not False
-            or not isinstance(generation, int)
-            or isinstance(generation, bool)
-            or generation < 1
         ):
             raise ValueError("agent response is invalid")
         indexed[node_id] = agent
@@ -73,20 +67,16 @@ def restart_identity(
     *,
     required_capabilities: Collection[str] = (),
 ) -> dict[str, object]:
-    """Extract the independently advancing host/supervisor restart identity."""
+    """Extract the independently advancing host boot identity."""
 
     if not is_ready_node(node, required_capabilities=required_capabilities):
         raise ValueError("fleet node is not ready")
     if not isinstance(agent, dict):
         raise TypeError("agent response is invalid")
-    generation = agent.get("supervisor_generation")
     if (
         agent.get("node_id") != node.get("id")
         or agent.get("state") != "active"
         or agent.get("stale") is not False
-        or not isinstance(generation, int)
-        or isinstance(generation, bool)
-        or generation < 1
     ):
         raise ValueError("agent response is invalid")
     telemetry = node.get("telemetry")
@@ -98,4 +88,4 @@ def restart_identity(
         raise ValueError("fleet boot identity is invalid") from exc
     if parsed_boot_id is None or str(parsed_boot_id) != boot_id:
         raise ValueError("fleet boot identity is invalid")
-    return {"boot_id": boot_id, "supervisor_generation": generation}
+    return {"boot_id": boot_id}

@@ -37,9 +37,4 @@ run. It never reads `config/workloads`, `config/cluster-profiles`, a model
 maturity report, or an operator-supplied address. Hermes is available only when
 an accepted v1 run owns the exact `hermes-agent` alias.
 
-## Recovery boundary
-
-Do not use `vonk-control-offline` for ordinary recipe or platform changes. Its
-exclusive lock and stopped-service proof are reserved for documented bootstrap
-and recovery operations. Never use SSH to bypass a queued preview, route lease,
-or evidence gate.
+Never use SSH to bypass a queued preview, route lease, or evidence gate.

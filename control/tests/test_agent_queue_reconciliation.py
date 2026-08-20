@@ -5,7 +5,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult
@@ -21,6 +20,8 @@ from vonk_control.models import (
     Reconciliation,
     ReconciliationOperation,
 )
+
+from .runtime_identity_support import claim_agent
 
 NODE_ID = "spk_" + "a" * 32
 COMMIT = "a" * 64

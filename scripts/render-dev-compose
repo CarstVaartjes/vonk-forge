@@ -253,8 +253,8 @@ def render(
         raise ValueError("output parent must exist")
     document = _compose_document(template)
     if (
-        _count_template_token(template, TOKENS["api"]) != 2
-        or _count_template_token(template, TOKENS["worker"]) != 2
+        _count_template_token(template, TOKENS["api"]) != 1
+        or _count_template_token(template, TOKENS["worker"]) != 1
     ):
         raise ValueError("template control image inputs changed")
     document = _replace_image_tokens(

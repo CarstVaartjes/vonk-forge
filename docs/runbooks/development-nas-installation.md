@@ -105,6 +105,5 @@ export VONK_DEV_WORKER_IMAGE='<previous-worker-image@sha256:digest>'
 scripts/dev-compose up -d --wait --pull always
 ```
 
-Production release selection remains governed by the production host updater.
-The deployment graph and site contract are shared; only the chosen published
-application image/version differs.
+The production deployment graph and site contract are shared; only the chosen
+published application image/version differs.

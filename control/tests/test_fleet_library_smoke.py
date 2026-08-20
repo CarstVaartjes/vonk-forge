@@ -7,7 +7,7 @@ CONTROL_SRC = Path(__file__).resolve().parents[2] / "control" / "src"
 if str(CONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(CONTROL_SRC))
 
-from fleet_library_smoke import run_fresh_fleet_library_smoke
+from .fleet_library_smoke import run_fresh_fleet_library_smoke
 
 
 def test_fresh_fleet_library_smoke() -> None:

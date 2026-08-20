@@ -16,7 +16,7 @@ import yaml
 API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
 WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
 HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
-TOKEN_COUNTS = {API_TOKEN: 2, WORKER_TOKEN: 2, HERMES_TOKEN: 1}
+TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1}
 IMAGE_PATTERN = re.compile(
     r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes)"
     r":latest@sha256:[0-9a-f]{64}\Z"

@@ -6,17 +6,11 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import vonk_control.browser_auth as browser_auth_module
-import vonk_control.db as db_module
-import vonk_control.offline as offline_module
-import vonk_control.settings as settings_module
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -470,6 +464,39 @@ def test_resolution_rejects_session_when_exact_browser_authority_changes(
         service.resolve(issued.token)
 
 
+def _concurrently_reserve(
+    limiter: LoginRateLimiter, subjects: tuple[str, ...]
+) -> list[object]:
+    start = threading.Barrier(len(subjects) + 1)
+    reserved = threading.Barrier(len(subjects) + 1)
+    release = threading.Event()
+    attempts: list[object] = []
+    attempts_lock = threading.Lock()
+
+    def reserve(subject: str) -> None:
+        start.wait(timeout=5)
+        attempt = limiter.reserve(subject)
+        with attempts_lock:
+            attempts.append(attempt)
+        reserved.wait(timeout=5)
+        assert release.wait(timeout=5)
+        if attempt is not None:
+            limiter.fail(attempt)
+
+    threads = [
+        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
+    ]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    reserved.wait(timeout=5)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5)
+    assert all(not thread.is_alive() for thread in threads)
+    return attempts
+
+
 def test_limiter_reservations_bound_inflight_attempts_for_one_subject() -> None:
     """Splitting admission from failure recording would admit a sixth in-flight attempt."""
     limiter = LoginRateLimiter(
@@ -630,220 +657,3 @@ def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
         rows = db.scalars(select(LoginSession)).all()
     assert len(rows) == 1
     assert rows[0].revoked_at is not None
-
-
-@pytest.mark.parametrize("operation", ["bootstrap", "rotation"])
-def test_postgres_browser_authority_writer_blocks_offline_admin_insertion(
-    postgres_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operation: str,
-) -> None:
-    """Every browser authority mutation must exclude a concurrent admin insert."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    if operation == "rotation":
-        add_admin(sessions)
-    service = browser_auth(sessions, Clock(), opaque(35), opaque(36))
-    browser_read_finished = threading.Event()
-    release_browser_writer = threading.Event()
-    offline_database_attempted = threading.Event()
-    browser_results: list[object] = []
-    offline_results: list[object] = []
-
-    def observe_statements(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        thread = threading.current_thread().name
-        if thread == "browser-authority-writer" and "FROM users" in statement:
-            browser_read_finished.set()
-            assert release_browser_writer.wait(timeout=5)
-        if thread == "offline-authority-writer" and (
-            "LOCK TABLE users" in statement or "INSERT INTO users" in statement
-        ):
-            offline_database_attempted.set()
-
-    def mutate_browser_authority() -> None:
-        try:
-            if operation == "bootstrap":
-                result = service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
-            else:
-                result = service.rotate_admin(hash_password("replacement password"))
-            browser_results.append(result)
-        except BaseException as error:  # noqa: BLE001 - report thread failure
-            browser_results.append(error)
-
-    def create_offline_admin() -> None:
-        offline_results.append(
-            offline_module.main(
-                [
-                    "--state-path",
-                    str(tmp_path / "state"),
-                    "create-admin",
-                    "--subject",
-                    "synthetic-offline-administrator",
-                ]
-            )
-        )
-
-    monkeypatch.setattr(db_module, "build_engine", lambda _url: postgres_engine)
-    monkeypatch.setattr(
-        settings_module.Settings,
-        "from_env_and_secrets",
-        classmethod(
-            lambda _cls: SimpleNamespace(database_url=str(postgres_engine.url))
-        ),
-    )
-    monkeypatch.setattr(
-        offline_module, "require_offline", lambda *_args, **_kwargs: nullcontext()
-    )
-    event.listen(postgres_engine, "before_cursor_execute", observe_statements)
-    try:
-        browser_thread = threading.Thread(
-            target=mutate_browser_authority, name="browser-authority-writer"
-        )
-        offline_thread = threading.Thread(
-            target=create_offline_admin, name="offline-authority-writer"
-        )
-        browser_thread.start()
-        assert browser_read_finished.wait(timeout=5)
-        offline_thread.start()
-        assert offline_database_attempted.wait(timeout=5)
-        offline_thread.join(timeout=0.5)
-        offline_was_blocked = offline_thread.is_alive()
-        release_browser_writer.set()
-        browser_thread.join(timeout=5)
-        offline_thread.join(timeout=5)
-    finally:
-        release_browser_writer.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_statements)
-
-    assert not browser_thread.is_alive()
-    assert not offline_thread.is_alive()
-    assert offline_was_blocked
-    expected = "created" if operation == "bootstrap" else "rotated"
-    assert browser_results == [BootstrapResult(expected)]
-    assert offline_results == [0]
-
-
-def test_postgres_offline_admin_writer_blocks_bootstrap_until_its_commit(
-    postgres_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Offline create-admin must hold the same authority lock as bootstrap."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    service = browser_auth(sessions, Clock(), opaque(37), opaque(38))
-    offline_insert_started = threading.Event()
-    release_offline_insert = threading.Event()
-    browser_database_attempted = threading.Event()
-    offline_results: list[object] = []
-    browser_results: list[object] = []
-
-    def observe_statements(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        thread = threading.current_thread().name
-        if thread == "offline-authority-holder" and "INSERT INTO users" in statement:
-            offline_insert_started.set()
-            assert release_offline_insert.wait(timeout=5)
-        if thread == "blocked-browser-bootstrap" and (
-            "LOCK TABLE users" in statement or "FROM users" in statement
-        ):
-            browser_database_attempted.set()
-
-    def create_offline_admin() -> None:
-        offline_results.append(
-            offline_module.main(
-                [
-                    "--state-path",
-                    str(tmp_path / "state"),
-                    "create-admin",
-                    "--subject",
-                    "synthetic-offline-administrator",
-                ]
-            )
-        )
-
-    def bootstrap() -> None:
-        try:
-            browser_results.append(
-                service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
-            )
-        except BaseException as error:  # noqa: BLE001 - report thread failure
-            browser_results.append(error)
-
-    monkeypatch.setattr(db_module, "build_engine", lambda _url: postgres_engine)
-    monkeypatch.setattr(
-        settings_module.Settings,
-        "from_env_and_secrets",
-        classmethod(
-            lambda _cls: SimpleNamespace(database_url=str(postgres_engine.url))
-        ),
-    )
-    monkeypatch.setattr(
-        offline_module, "require_offline", lambda *_args, **_kwargs: nullcontext()
-    )
-    event.listen(postgres_engine, "before_cursor_execute", observe_statements)
-    try:
-        offline_thread = threading.Thread(
-            target=create_offline_admin, name="offline-authority-holder"
-        )
-        browser_thread = threading.Thread(
-            target=bootstrap, name="blocked-browser-bootstrap"
-        )
-        offline_thread.start()
-        assert offline_insert_started.wait(timeout=5)
-        browser_thread.start()
-        assert browser_database_attempted.wait(timeout=5)
-        browser_thread.join(timeout=0.5)
-        browser_was_blocked = browser_thread.is_alive()
-        release_offline_insert.set()
-        offline_thread.join(timeout=5)
-        browser_thread.join(timeout=5)
-    finally:
-        release_offline_insert.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_statements)
-
-    assert not offline_thread.is_alive()
-    assert not browser_thread.is_alive()
-    assert browser_was_blocked
-    assert offline_results == [0]
-    assert len(browser_results) == 1
-    assert isinstance(browser_results[0], BrowserAuthenticationError)
-
-
-def _concurrently_reserve(
-    limiter: LoginRateLimiter, subjects: tuple[str, ...]
-) -> list[object]:
-    start = threading.Barrier(len(subjects) + 1)
-    reserved = threading.Barrier(len(subjects) + 1)
-    release = threading.Event()
-    attempts: list[object] = []
-    attempts_lock = threading.Lock()
-
-    def reserve(subject: str) -> None:
-        start.wait(timeout=5)
-        attempt = limiter.reserve(subject)
-        with attempts_lock:
-            attempts.append(attempt)
-        reserved.wait(timeout=5)
-        assert release.wait(timeout=5)
-        if attempt is not None:
-            limiter.fail(attempt)
-
-    threads = [
-        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
-    ]
-    for thread in threads:
-        thread.start()
-    start.wait(timeout=5)
-    reserved.wait(timeout=5)
-    release.set()
-    for thread in threads:
-        thread.join(timeout=5)
-    assert all(not thread.is_alive() for thread in threads)
-    return attempts

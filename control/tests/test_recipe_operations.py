@@ -17,7 +17,6 @@ import pytest
 from sqlalchemy import create_engine, event, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.auth import TokenCodec
@@ -65,6 +64,8 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionService
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 
 class RecordingQueue:

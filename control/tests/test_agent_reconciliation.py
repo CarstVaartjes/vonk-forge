@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
@@ -38,6 +37,8 @@ from vonk_control.models import (
 from vonk_control.orchestration import OperationNode
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
+
+from .runtime_identity_support import claim_agent
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

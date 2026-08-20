@@ -259,10 +259,10 @@ On every Ubuntu 24.04 ARM64 node:
    Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
    systemd cgroup manager exactly as shown in that guide before pairing.
 3. Registration is the authority. In Fleet, **Add Spark** records the
-   node-bound bootstrap grant and defines the runtime inputs for that Spark.
+   node-bound pairing grant and defines the runtime inputs for that Spark.
    Copy only the public CA and `host-runtime-grant-public-key`; manual
    `agent.toml` editing is unsupported. Run the displayed
-   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command exactly
+   `/usr/lib/vonk-forge/vonk-agent pair` command exactly
    as issued, approve the pending evidence, then run the same command again to
    collect the issued identity.
 4. Create the root-owned `docker-firewall.conf`, including every accepted
@@ -289,14 +289,14 @@ For each node, complete this order without reusing its one-use grant:
 
 1. Create the node-bound registration intent in Fleet through **Add Spark**.
 2. Run the exact Fleet-issued
-   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command. It
+   `/usr/lib/vonk-forge/vonk-agent pair` command. It
    uses `/etc/vonk-forge-agent/agent.toml`, `/var/lib/vonk-forge-agent`, and
    `/etc/vonk-forge-agent/controller-ca.pem`; do not add path flags or
    hand-author the TOML.
 3. Review the pending approval evidence in Fleet and approve only the matching
    node.
 4. Run the same command once more to collect the issued identity, then start
-   the supervisor.
+   `vonk-forge-agent.service`.
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
 and fresh inventory. Repeat for each additional node.
@@ -371,10 +371,8 @@ returns. Closing every terminal must not affect browser availability.
   then **Redeploy**. Keep the Compose file, secrets, and named volumes.
   Reopen the same stable Service URL, log in, verify both Sparks, and use
   **Logout** when finished. A restart without Pull is not an update.
-- GPU nodes: after the accepted APT `dev` publication is complete, follow
-  [Update and switch channels](../operations/agent-package-release.md#update-and-switch-channels).
-  Run `sudo vonk-agent-upgrade` on each node. For a manually controlled
-  canary, activate and prove one node, wait for fresh controller inventory,
-  then repeat on the next node.
-- Never substitute production `latest` tags or a local build. Production is
-  selected only through its signed release and trusted host updater.
+- GPU nodes: after publication is complete, run
+  `curl -fsSL https://install.vonkforge.ai/spark | sh` on one canary, wait for
+  fresh controller inventory, then repeat on the next node.
+- Never substitute production `latest` tags or a local build. Production uses
+  only the digest-pinned assets from one immutable release.

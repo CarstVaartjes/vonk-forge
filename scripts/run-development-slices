@@ -982,7 +982,7 @@ class Runner:
             or isinstance(cursor, bool)
             or cursor < 0
             or not isinstance(fleet.get("generated_at"), str)
-            or re.fullmatch(r"[0-9a-f]{40}", str(fleet.get("repository_commit"))) is None
+            or re.fullmatch(r"[0-9a-f]{64}", str(fleet.get("authority_revision"))) is None
             or not isinstance(nodes, list)
         ):
             raise SliceError("fleet response is invalid")
@@ -1777,11 +1777,7 @@ class Runner:
             current_identity = identities[node_id]
             if (
                 not isinstance(before, dict)
-                or not isinstance(before.get("supervisor_generation"), int)
-                or isinstance(before.get("supervisor_generation"), bool)
                 or not isinstance(before.get("boot_id"), str)
-                or current_identity["supervisor_generation"]
-                <= before["supervisor_generation"]
                 or current_identity["boot_id"] == before["boot_id"]
             ):
                 raise SliceError("restart checkpoint identity did not advance")

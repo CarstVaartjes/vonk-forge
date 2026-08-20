@@ -12,11 +12,7 @@ from typing import Any
 
 from .jobs import JobService
 
-_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_GENERATION = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
-_START_NONCE = re.compile(r"[0-9a-f]{64}\Z")
-_SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
-_IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
+_PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -33,99 +29,21 @@ def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) ->
     return hashlib.sha256(material).hexdigest()
 
 
-class WorkerSelectedIdentityVerifier:
-    """Freshly bind every worker heartbeat to the selected worker image."""
-
-    def __init__(
-        self,
-        projections: Any,
-        *,
-        generation_id: str,
-        release_digest: str,
-        build_digest: str,
-        platform_version: str,
-        process_image: str,
-        database_revision: str,
-    ) -> None:
-        if not callable(getattr(projections, "load_active", None)):
-            raise TypeError("worker identity projection source is invalid")
-        if (
-            _GENERATION.fullmatch(generation_id) is None
-            or _DIGEST.fullmatch(release_digest) is None
-            or _DIGEST.fullmatch(build_digest) is None
-            or _SEMVER.fullmatch(platform_version) is None
-            or _IMAGE.fullmatch(process_image) is None
-            or _GENERATION.fullmatch(database_revision) is None
-        ):
-            raise ValueError("worker selected identity is invalid")
-        self._projections = projections
-        self._expected = (
-            ("projection_kind", "active", "projection kind"),
-            ("generation_id", generation_id, "generation"),
-            ("release_digest", release_digest, "release"),
-            ("build_digest", build_digest, "build"),
-            ("platform_version", platform_version, "platform version"),
-            ("worker_image", process_image, "worker image"),
-            ("database_revision", database_revision, "database revision"),
-        )
-
-    def verify(self) -> None:
-        projection = self._projections.load_active()
-        if projection is None:
-            raise RuntimeError("active worker identity projection is unavailable")
-        for field, expected, label in self._expected:
-            actual = _selected_projection_field(projection, field)
-            if actual != expected:
-                raise RuntimeError(f"active worker {label} does not match process")
-
-
-def _selected_projection_field(projection: object, field: str) -> object:
-    if not isinstance(projection, Mapping):
-        return getattr(projection, field, None)
-    if field in projection:
-        return projection[field]
-    selection = projection.get("selection")
-    if not isinstance(selection, Mapping):
-        return None
-    generation = selection.get("generation")
-    if isinstance(generation, Mapping):
-        return generation.get(field)
-    return None
-
-
 class WorkerHeartbeatRecorder:
-    """Persist proof only after a real scheduler loop returns."""
+    """Persist readiness for the currently running scheduler process."""
 
     def __init__(
         self,
         sessions: Any,
         *,
-        generation_id: str,
-        release_digest: str,
-        build_digest: str,
-        start_nonce: str,
         process_instance_id: str,
         clock: Callable[[], datetime],
-        verify_selected: Callable[[], object] | None = None,
     ) -> None:
-        if _GENERATION.fullmatch(generation_id) is None:
-            raise ValueError("worker generation ID is invalid")
-        if _DIGEST.fullmatch(release_digest) is None:
-            raise ValueError("worker release digest is invalid")
-        if _DIGEST.fullmatch(build_digest) is None:
-            raise ValueError("worker build digest is invalid")
-        if _START_NONCE.fullmatch(start_nonce) is None:
-            raise ValueError("worker start nonce is invalid")
-        if _START_NONCE.fullmatch(process_instance_id) is None:
+        if _PROCESS_INSTANCE.fullmatch(process_instance_id) is None:
             raise ValueError("worker process instance ID is invalid")
         self._sessions = sessions
-        self._generation_id = generation_id
-        self._release_digest = release_digest
-        self._build_digest = build_digest
-        self._start_nonce = start_nonce
         self._process_instance_id = process_instance_id
         self._clock = clock
-        self._verify_selected = verify_selected
         self._register_process_start()
 
     def _register_process_start(self) -> None:
@@ -136,28 +54,19 @@ class WorkerHeartbeatRecorder:
         with self._sessions.begin() as session:
             heartbeat = session.scalar(
                 select(ControlProcessHeartbeat)
-                .where(
-                    ControlProcessHeartbeat.process_kind == "worker",
-                    ControlProcessHeartbeat.start_nonce == self._start_nonce,
-                )
+                .where(ControlProcessHeartbeat.process_kind == "worker")
                 .with_for_update()
             )
             if heartbeat is None:
-                heartbeat = ControlProcessHeartbeat(
-                    process_kind="worker",
-                    generation_id=self._generation_id,
-                    release_digest=self._release_digest,
-                    build_digest=self._build_digest,
-                    start_nonce=self._start_nonce,
-                    process_instance_id=self._process_instance_id,
-                    loop_sequence=0,
-                    completed_at=None,
+                session.add(
+                    ControlProcessHeartbeat(
+                        process_kind="worker",
+                        process_instance_id=self._process_instance_id,
+                        loop_sequence=0,
+                        completed_at=None,
+                    )
                 )
-                session.add(heartbeat)
                 return
-            heartbeat.generation_id = self._generation_id
-            heartbeat.release_digest = self._release_digest
-            heartbeat.build_digest = self._build_digest
             heartbeat.process_instance_id = self._process_instance_id
             heartbeat.loop_sequence = 0
             heartbeat.completed_at = None
@@ -167,34 +76,26 @@ class WorkerHeartbeatRecorder:
 
         from .models import ControlProcessHeartbeat
 
-        if self._verify_selected is not None:
-            self._verify_selected()
         completed_at = self._clock()
-        if not isinstance(completed_at, datetime) or completed_at.tzinfo is None:
+        if (
+            not isinstance(completed_at, datetime)
+            or completed_at.tzinfo is None
+            or completed_at.utcoffset() is None
+        ):
             raise ValueError("worker heartbeat clock must be timezone-aware")
-        if completed_at.utcoffset() is None:
-            raise ValueError("worker heartbeat clock must be timezone-aware")
-        completed_at = completed_at.astimezone(UTC)
         with self._sessions.begin() as session:
             heartbeat = session.scalar(
                 select(ControlProcessHeartbeat)
-                .where(
-                    ControlProcessHeartbeat.process_kind == "worker",
-                    ControlProcessHeartbeat.start_nonce == self._start_nonce,
-                )
+                .where(ControlProcessHeartbeat.process_kind == "worker")
                 .with_for_update()
             )
-            if heartbeat is None:
-                raise RuntimeError("worker process instance is unavailable")
             if (
-                heartbeat.generation_id != self._generation_id
-                or heartbeat.release_digest != self._release_digest
-                or heartbeat.build_digest != self._build_digest
+                heartbeat is None
                 or heartbeat.process_instance_id != self._process_instance_id
             ):
                 raise RuntimeError("worker process instance changed")
             heartbeat.loop_sequence += 1
-            heartbeat.completed_at = completed_at
+            heartbeat.completed_at = completed_at.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -365,32 +266,19 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from .agent_jobs import AgentJobService
-    from .api import DirectoryIdentityProjectionSource
     from .db import build_engine, session_factory
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
     )
-    from .settings import GenerationStartupSettings, StartupMode, WorkerSettings
+    from .settings import WorkerSettings
     from .worker_authority import HttpWorkerAuthority
 
     settings = WorkerSettings.from_env_and_secrets()
-    generation = GenerationStartupSettings.from_env_and_secrets()
-    if generation.startup_mode is not StartupMode.SELECTED:
-        raise RuntimeError("control worker requires selected startup mode")
     sessions = session_factory(build_engine(settings.database_url))
     clock = lambda: datetime.now(UTC)
     jobs = JobService(sessions, clock=clock)
-    selected_identity = WorkerSelectedIdentityVerifier(
-        DirectoryIdentityProjectionSource(generation.identity_root),
-        generation_id=generation.generation_id,
-        release_digest=generation.release_digest,
-        build_digest=generation.build_digest,
-        platform_version=generation.platform_version,
-        process_image=generation.process_image,
-        database_revision=generation.database_revision,
-    )
     address_policy = ManagementAddressPolicy.parse(
         settings.management_cidrs,
         forbidden_cidrs=settings.direct_fabric_cidrs,
@@ -436,13 +324,8 @@ if __name__ == "__main__":
         worker_id=os.environ.get("HOSTNAME", "control-worker"),
         loop_heartbeat=WorkerHeartbeatRecorder(
             sessions,
-            generation_id=generation.generation_id,
-            release_digest=generation.release_digest,
-            build_digest=generation.build_digest,
-            start_nonce=generation.start_nonce,
             process_instance_id=current_worker_instance_id(),
             clock=clock,
-            verify_selected=selected_identity.verify,
         ).completed_loop,
     )
     while True:

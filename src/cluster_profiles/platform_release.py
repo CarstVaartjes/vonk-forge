@@ -16,11 +16,6 @@ from jsonschema import ValidationError, validators
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _DIGEST = re.compile(r"sha256:([0-9a-f]{64})\Z")
-_VERSIONED_TARGET = re.compile(
-    r"platform/releases/"
-    r"(?P<version>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))/"
-    r"(?P<sha256>[0-9a-f]{64})\.json\Z"
-)
 _OCI_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
 _OCI_HOST_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _OCI_REFERENCE = re.compile(
@@ -166,35 +161,17 @@ class PlatformRelease:
             digest="sha256:" + hashlib.sha256(canonical).hexdigest(),
         )
 
-    def validate_target_identity(self, target_name: str, target_sha256: str) -> None:
-        """Bind this parsed release to its independently TUF-verified target bytes."""
-        match = (
-            _VERSIONED_TARGET.fullmatch(target_name)
-            if isinstance(target_name, str)
-            else None
-        )
-        if (
-            match is None
-            or not isinstance(target_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", target_sha256) is None
-            or match.group("version") != self.platform_version
-            or match.group("sha256") != target_sha256
-        ):
-            raise PlatformReleaseError("platform release target identity is invalid")
-
-
-
 def _schema() -> dict[str, Any]:
     try:
         schema = resources.files("cluster_profiles").joinpath(
-            "schemas", "platform-update-manifest.schema.json"
+            "schemas", "platform-release-manifest.schema.json"
         )
         with schema.open(encoding="utf-8") as stream:
             value = json.load(stream)
     except (OSError, ValueError) as error:
-        raise RuntimeError("platform update schema is unavailable") from error
+        raise RuntimeError("platform release schema is unavailable") from error
     if not isinstance(value, dict):
-        raise TypeError("platform update schema is invalid")
+        raise TypeError("platform release schema is invalid")
     return value
 
 

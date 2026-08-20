@@ -666,7 +666,7 @@ def _fleet(client: Client) -> tuple[dict[str, Any], dict[str, dict[str, Any]], s
         or isinstance(cursor, bool)
         or cursor < 0
         or not isinstance(fleet.get("generated_at"), str)
-        or re.fullmatch(r"[0-9a-f]{40}", str(fleet.get("repository_commit"))) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(fleet.get("authority_revision"))) is None
         or not isinstance(nodes, list)
     ):
         raise AcceptanceError("fleet response is invalid")
@@ -903,14 +903,10 @@ def _node_record(
     agent: dict[str, Any],
 ) -> dict[str, Any]:
     build_digest = agent.get("build_digest")
-    agent_sha256 = agent.get("agent_sha256")
-    generation = agent.get("supervisor_generation")
+    binary_digest = agent.get("binary_digest")
     if (
         IMAGE_DIGEST.fullmatch(str(build_digest)) is None
-        or SHA256.fullmatch(str(agent_sha256)) is None
-        or not isinstance(generation, int)
-        or isinstance(generation, bool)
-        or generation < 1
+        or SHA256.fullmatch(str(binary_digest)) is None
         or not isinstance(node.get("display_name"), str)
         or not node["display_name"]
         or not isinstance(node.get("hostname"), str)
@@ -926,8 +922,7 @@ def _node_record(
         "display_name": node["display_name"],
         "hostname": node["hostname"],
         "agent_build_digest": build_digest,
-        "agent_sha256": agent_sha256,
-        "supervisor_generation": generation,
+        "agent_binary_digest": binary_digest,
         "certificate_expires_at": agent["certificate_expires_at"],
     }
 
@@ -940,14 +935,10 @@ def _same_node_binding(initial: dict[str, Any], current: dict[str, Any]) -> bool
         "display_name",
         "hostname",
         "agent_build_digest",
-        "agent_sha256",
+        "agent_binary_digest",
         "certificate_expires_at",
     }
-    return (
-        all(initial.get(key) == current.get(key) for key in stable)
-        and isinstance(initial.get("supervisor_generation"), int)
-        and current["supervisor_generation"] >= initial["supervisor_generation"]
-    )
+    return all(initial.get(key) == current.get(key) for key in stable)
 
 
 def _host_evidence(
@@ -1231,12 +1222,6 @@ def _validate_runner_outputs(
                 or not _canonical_uuid(before.get("boot_id"))
                 or not _canonical_uuid(after.get("boot_id"))
                 or before["boot_id"] == after["boot_id"]
-                or not isinstance(before.get("supervisor_generation"), int)
-                or isinstance(before.get("supervisor_generation"), bool)
-                or not isinstance(after.get("supervisor_generation"), int)
-                or isinstance(after.get("supervisor_generation"), bool)
-                or after["supervisor_generation"]
-                <= before["supervisor_generation"]
             ):
                 raise AcceptanceError("runner evidence is incomplete")
         binding = {
@@ -1356,7 +1341,7 @@ class Acceptance:
         self.evidence["preflight"] = {
             "fleet_evidence_sha256": fleet_digest,
             "fleet_event_cursor": fleet["event_cursor"],
-            "repository_commit": fleet["repository_commit"],
+            "authority_revision": fleet["authority_revision"],
             "resources": resources,
             "hosts": hosts,
         }
@@ -1627,11 +1612,10 @@ class Acceptance:
             if (
                 not isinstance(current, dict)
                 or current.get("build_digest") != initial["agent_build_digest"]
-                or not isinstance(current.get("supervisor_generation"), int)
-                or current["supervisor_generation"] <= initial["supervisor_generation"]
+                or current.get("binary_digest") != initial["agent_binary_digest"]
             ):
                 raise AcceptanceError(
-                    "spark acceptance requires an advanced supervisor generation"
+                    "spark acceptance requires the exact packaged agent identity"
                 )
         _complete_phase(self.evidence, "spark-accepted")
         self.evidence["runner_evidence_sha256"] = hashlib.sha256(raw).hexdigest()

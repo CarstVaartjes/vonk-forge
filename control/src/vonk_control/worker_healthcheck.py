@@ -12,10 +12,6 @@ from .models import ControlProcessHeartbeat
 def verify_worker_ready(
     sessions,
     *,
-    start_nonce: str,
-    generation_id: str,
-    release_digest: str,
-    build_digest: str,
     process_instance_id: str,
     now: datetime,
     maximum_age_seconds: int = 30,
@@ -28,7 +24,6 @@ def verify_worker_ready(
         heartbeat = session.scalar(
             select(ControlProcessHeartbeat).where(
                 ControlProcessHeartbeat.process_kind == "worker",
-                ControlProcessHeartbeat.start_nonce == start_nonce,
             )
         )
     if heartbeat is None:
@@ -38,16 +33,9 @@ def verify_worker_ready(
         raise RuntimeError("worker readiness evidence is invalid or stale")
     if completed_at.tzinfo is None or completed_at.utcoffset() is None:
         completed_at = completed_at.replace(tzinfo=UTC)
-    expected = (generation_id, release_digest, build_digest, process_instance_id)
-    observed = (
-        heartbeat.generation_id,
-        heartbeat.release_digest,
-        heartbeat.build_digest,
-        heartbeat.process_instance_id,
-    )
     age = timestamp - completed_at.astimezone(UTC)
     if (
-        observed != expected
+        heartbeat.process_instance_id != process_instance_id
         or heartbeat.loop_sequence < 1
         or age < timedelta(0)
         or age > timedelta(seconds=maximum_age_seconds)
@@ -57,17 +45,12 @@ def verify_worker_ready(
 
 def main() -> None:
     from .db import build_engine, session_factory
-    from .settings import GenerationStartupSettings, WorkerSettings
+    from .settings import WorkerSettings
     from .worker import current_worker_instance_id
 
     worker = WorkerSettings.from_env_and_secrets()
-    generation = GenerationStartupSettings.from_env_and_secrets()
     verify_worker_ready(
         session_factory(build_engine(worker.database_url)),
-        start_nonce=generation.start_nonce,
-        generation_id=generation.generation_id,
-        release_digest=generation.release_digest,
-        build_digest=generation.build_digest,
         process_instance_id=current_worker_instance_id(),
         now=datetime.now(UTC),
     )

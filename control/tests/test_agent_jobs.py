@@ -9,10 +9,6 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 
 import pytest
-from runtime_identity_support import (
-    PACKAGED_RUNTIME_IDENTITY,
-    claim_agent,
-)
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
@@ -28,6 +24,11 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
+
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

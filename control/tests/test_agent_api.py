@@ -22,8 +22,6 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
-from test_catalog_service import _resolve_entity, _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -67,6 +65,9 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+
+from .test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
+from .test_catalog_service import _resolve_entity, _seed_recipe_dependencies
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

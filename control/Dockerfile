@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
-ARG VONK_DEV_SOURCE_COMMIT=0000000000000000000000000000000000000000
 FROM ${NODE_IMAGE} AS web
 WORKDIR /web
 COPY control/web/package.json control/web/package-lock.json ./
@@ -35,71 +34,9 @@ COPY control/migrations /srv/vonk-control/migrations
 RUN chmod -R a+rX /srv/vonk-control/migrations
 
 FROM runtime-root AS worker-root
-ARG VONK_DEV_SOURCE_COMMIT
-RUN python - "$VONK_DEV_SOURCE_COMMIT" "worker" <<'PY'
-import os
-import sys
-import tempfile
-
-from vonk_control.dev_cohort import (
-    DEVELOPMENT_IMAGE_IDENTITY_PATH,
-    build_identity,
-)
-
-identity = build_identity(role=sys.argv[2], source_commit=sys.argv[1])
-target = DEVELOPMENT_IMAGE_IDENTITY_PATH
-target.parent.mkdir(parents=True, exist_ok=True)
-descriptor, temporary_name = tempfile.mkstemp(
-    prefix=f".{target.name}.", dir=target.parent
-)
-try:
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(identity.to_bytes())
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.chmod(temporary_name, 0o444)
-    os.replace(temporary_name, target)
-except BaseException:
-    try:
-        os.unlink(temporary_name)
-    except FileNotFoundError:
-        pass
-    raise
-PY
 
 FROM runtime-root AS api-root
-ARG VONK_DEV_SOURCE_COMMIT
 RUN install -d -o 0 -g 0 -m 0700 /run/secrets
-RUN python - "$VONK_DEV_SOURCE_COMMIT" "api" <<'PY'
-import os
-import sys
-import tempfile
-
-from vonk_control.dev_cohort import (
-    DEVELOPMENT_IMAGE_IDENTITY_PATH,
-    build_identity,
-)
-
-identity = build_identity(role=sys.argv[2], source_commit=sys.argv[1])
-target = DEVELOPMENT_IMAGE_IDENTITY_PATH
-target.parent.mkdir(parents=True, exist_ok=True)
-descriptor, temporary_name = tempfile.mkstemp(
-    prefix=f".{target.name}.", dir=target.parent
-)
-try:
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(identity.to_bytes())
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.chmod(temporary_name, 0o444)
-    os.replace(temporary_name, target)
-except BaseException:
-    try:
-        os.unlink(temporary_name)
-    except FileNotFoundError:
-        pass
-    raise
-PY
 
 FROM scratch AS worker
 COPY --from=worker-root / /

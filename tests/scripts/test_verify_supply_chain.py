@@ -8,7 +8,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-supply-chain"
-RUNBOOK = ROOT / "docs/runbooks/supply-chain.md"
 
 
 def _copy(tmp_path: Path) -> Path:
@@ -26,27 +25,17 @@ def _copy(tmp_path: Path) -> Path:
         "Cargo.lock",
         "pyproject.toml",
         "schemas/control-deployment-bundle.schema.json",
-        "schemas/platform-update-manifest.schema.json",
+        "schemas/platform-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "schemas/global/catalog-entity-v1.schema.json",
         "schemas/global/recipe-v1.schema.json",
         "schemas/global/harness-evidence-v1.schema.json",
         "src/cluster_profiles/deployment_bundle.py",
-        "src/cluster_profiles/platform_authority_client.py",
-        "src/cluster_profiles/platform_publication.py",
         "src/cluster_profiles/platform_release.py",
         "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
-        "src/cluster_profiles/schemas/platform-update-manifest.schema.json",
+        "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
         "agent_protocol/pyproject.toml",
         ".dockerignore", "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
-        "bin/vonk-control-offline",
-        "control/src/vonk_control/offline.py",
-        "control/src/vonk_control/generation_launch.py",
-        "control/src/vonk_control/host_backup.py",
-        "control/src/vonk_control/host_commands.py",
-        "control/src/vonk_control/host_state.py",
-        "control/src/vonk_control/oci_bundle.py",
-        "control/src/vonk_control/upgrade.py",
         "control/src/vonk_control/catalog_contract.py",
         "control/src/vonk_control/recipe_contract.py",
         "control/src/vonk_control/catalog_entities.py",
@@ -83,9 +72,9 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/step-ca/ca.json",
         "deploy/compose/trust/litellm-cosign.pub",
         "scripts/build-control-deployment-bundle",
+        "scripts/publish-control-deployment-bundle",
         "scripts/build-agent-deb",
         "scripts/build-agent-package-evidence",
-        "scripts/build-host-updater-artifact",
         "scripts/build-platform-manifest",
         "scripts/collect-platform-artifact-evidence",
         "scripts/container-release-metadata",
@@ -97,13 +86,9 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-release-tag-authority",
         "scripts/render-dev-compose",
         "scripts/render-production-compose",
-        "scripts/platform-release-authority",
-        "scripts/publish-platform-target",
         "scripts/refuse-existing-image-version",
         "scripts/validate-container-release-digests",
-        "scripts/verify-platform-release",
         "scripts/verify-public-image-inputs",
-        "scripts/verify-dev-image-secrets",
         "scripts/verify-agent-deb",
         "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
@@ -113,7 +98,6 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/import-recipe-library",
         "scripts/validate-recipe-library",
         "scripts/workload-artifact-metadata",
-        "src/cluster_profiles/update_trust.py",
         "config/recipe-library-manifest.json",
     ):
         destination = target / path
@@ -188,22 +172,11 @@ def test_verifier_accepts_write_manifest_alias(tmp_path: Path) -> None:
     assert '"ok":true' in result.stdout
 
 
-def test_supply_chain_runbook_separates_workload_build_and_promotion() -> None:
-    text = " ".join(RUNBOOK.read_text().split())
-
-    assert "Workload artifact build and promotion boundary" in text
-    assert "build-only publisher" in text
-    assert "successful build is only a promotion candidate" in text
-    assert "workload TUF key" in text
-    assert "cannot change NAS desired state" in text
-    assert "separate from platform TUF" in text
-
-
-def test_supply_chain_manifest_binds_platform_target_publisher(
+def test_supply_chain_manifest_binds_deployment_bundle_publisher(
     tmp_path: Path,
 ) -> None:
     repository = _copy(tmp_path)
-    publisher = repository / "scripts/publish-platform-target"
+    publisher = repository / "scripts/publish-control-deployment-bundle"
     publisher.write_bytes(publisher.read_bytes() + b"\n# drift\n")
 
     result = subprocess.run(
@@ -292,24 +265,6 @@ def test_supply_chain_manifest_binds_agent_package_channel_authority(
     assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
-def test_supply_chain_manifest_binds_installed_host_updater_sources(
-    tmp_path: Path,
-) -> None:
-    repository = _copy(tmp_path)
-    updater = repository / "control/src/vonk_control/offline.py"
-    updater.write_bytes(updater.read_bytes() + b"\n# drift\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
-
-
 def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
     tmp_path: Path,
 ) -> None:
@@ -369,8 +324,8 @@ def test_supply_chain_manifest_binds_recipe_authority_edges(
     "path",
     (
         "src/cluster_profiles/platform_release.py",
-        "schemas/platform-update-manifest.schema.json",
-        "src/cluster_profiles/schemas/platform-update-manifest.schema.json",
+        "schemas/platform-release-manifest.schema.json",
+        "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
     ),
 )
 def test_supply_chain_manifest_binds_platform_parser_and_both_schemas(

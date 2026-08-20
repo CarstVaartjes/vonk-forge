@@ -68,8 +68,8 @@ docker buildx imagetools inspect \
 All three inspections must work anonymously. A private package is a blocker;
 do not place a GHCR token on the NAS, a GPU node, in Compose, or in an image.
 Development uses mutable `:dev` only for operator-selected pull/redeploy.
-Production remains selected by the trusted host updater and immutable TUF
-target; `:latest` is never production deployment authority.
+Production uses the digest-pinned Compose and package assets from one immutable
+release; `:latest` is never production deployment authority.
 
 Confirm both nodes report `aarch64`, Ubuntu `24.04`, NVIDIA GB10 compute
 capability 12.1, rootless Podman build isolation with at least 65,536
@@ -354,8 +354,8 @@ scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
 On each node, install the CA and helper public key as documented in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
 Registration is the authority. Fleet **Add Spark** records the node-bound
-bootstrap grant and the two explicit `:8443` origins plus DER CA fingerprint.
-Manual `agent.toml` editing is unsupported; the shipped Rust bootstrap command
+pairing grant and the enrollment origin plus DER CA fingerprint.
+Manual `agent.toml` editing is unsupported; the shipped Rust pairing command
 generates the node's unique `spk_…` identity and materializes the packaged
 placeholder at the canonical paths.
 
@@ -363,12 +363,12 @@ Pair one node at a time in this strict order:
 
 1. Create the node-bound registration intent through Fleet **Add Spark**.
 2. Run the displayed
-   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command exactly
+   `/usr/lib/vonk-forge/vonk-agent pair` command exactly
    as issued on that node.
 3. Review and approve the pending enrollment after comparing the node, CSR,
    host-key, hardware, agent, and boot evidence.
 4. Run the same command once more, then enable the package-helper socket and
-   supervisor and confirm the controller reports the certificate-bound `spk_`
+   agent service and confirm the controller reports the certificate-bound `spk_`
    identity.
 
 Hostnames and IP addresses are observations; the certificate-bound `spk_`
@@ -502,12 +502,11 @@ scripts/run-development-slices \
   --stop-after inference-ok
 ```
 
-Record the checkpoint's Fleet telemetry boot ID and `/api/v1/agents`
-supervisor generation, reboot the Spark offline, restart the NAS stack, and
+Record the checkpoint's Fleet telemetry boot ID, reboot the Spark offline,
+restart the NAS stack, and
 wait for fresh inventory. Resume with the identical command and evidence file
 without `--stop-after`. A heartbeat or changed Fleet generation timestamp is
-not restart evidence: the boot ID must differ and the supervisor generation
-must strictly increase before cleanup can begin. The
+not restart evidence: the boot ID must differ before cleanup can begin. The
 86,720,111,488-byte target and
 5,989,114,272-byte support model remain separate immutable cache objects. An
 exact verified cache hit must not download either model again.
@@ -648,8 +647,8 @@ dedicated [MIA DeepSeek V4 Flash two-Spark runbook](mia-deepseek-v4-flash.md)
 for its exact qualification, host-network firewall, build, run, recovery, and
 cleanup commands.
 
-For the single-node checkpoint, reboot the target Spark offline so both its
-host boot ID and agent supervisor generation advance, then use
+For the single-node checkpoint, reboot the target Spark offline so its host
+boot ID changes, then use
 the NAS UI durability action **Stop project**, wait until the project is
 stopped, and then **Start project**. Its CLI equivalent, run from the project
 directory, is the ordered project stop followed by the full Compose start:

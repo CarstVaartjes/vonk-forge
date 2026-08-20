@@ -62,20 +62,17 @@ jobs:
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
             deploy/compose/tests/test_production_shaped_development.py \
             scripts/tests/test_dev_admin_token.py \
-            scripts/tests/test_verify_dev_image_secrets.py \
             scripts/tests/test_render_production_compose.py
           npm ci --prefix control/web
           npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
           npm run build --prefix control/web
           uv run --project control --frozen pytest -q \
-            control/tests/test_dev_cohort.py \
             control/tests/test_dev_auth_init.py \
             control/tests/test_passwords.py \
             control/tests/test_browser_auth.py \
             control/tests/test_auth_api.py \
             control/tests/test_api.py \
             control/tests/test_dev_runtime_assets.py \
-            control/tests/test_generation_readiness.py \
             control/tests/test_settings.py
           scripts/verify-public-image-inputs
 
@@ -123,7 +120,6 @@ jobs:
             --output "type=oci,dest=$api_archive" \
             --sbom=true \
             --provenance=mode=max \
-            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
           docker buildx build \
@@ -133,7 +129,6 @@ jobs:
             --output "type=oci,dest=$worker_archive" \
             --sbom=true \
             --provenance=mode=max \
-            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
 
@@ -321,14 +316,6 @@ jobs:
             ((found_sbom == 1))
             ((found_provenance == 1))
           done
-          scripts/verify-dev-image-secrets \
-            --expected-commit "$GITHUB_SHA" \
-            --expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --forbid-bytes-dir "$canary_root" \
-            --scan-path "$publication_root" \
-            --scan-path "$evidence_root" \
-            vonk-forge-api:dev-local vonk-forge-worker:dev-local
-
       - name: Upload accepted publication inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

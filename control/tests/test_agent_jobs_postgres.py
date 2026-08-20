@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,6 +27,8 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
+
+from .runtime_identity_support import claim_agent
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

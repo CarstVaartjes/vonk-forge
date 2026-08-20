@@ -26,27 +26,26 @@ The web client formats structured FastAPI validation details into bounded,
 human-readable text. It no longer displays a nested validation object as
 `[object Object]`.
 
-### 3. The generated command has the four required values
+### 3. The generated command has the required values
 
-The Fleet UI emits a shell-quoted, one-time command containing exactly the
-grant token, controller endpoint, enrollment endpoint, and CA fingerprint:
+The Fleet UI emits a shell-quoted command containing the enrollment endpoint
+and CA fingerprint. The one-time token is read only from standard input:
 
 ```text
-sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \
-  --token '<token>' \
-  --controller-endpoint '<controller-origin>' \
-  --enrollment-endpoint '<enrollment-origin>' \
-  --ca-fingerprint '<64-lowercase-hex>'
+sudo /usr/lib/vonk-forge/vonk-agent pair \
+  --enrollment '<enrollment-origin>' \
+  --ca-sha256 '<64-lowercase-hex>' \
+  --token-stdin
 ```
 
-The shipped Rust bootstrap command supplies the canonical paths; the operator
+The shipped Rust pairing command supplies the canonical paths; the operator
 does not pass local path flags:
 
 - configuration: `/etc/vonk-forge-agent/agent.toml`
 - data directory: `/var/lib/vonk-forge-agent`
 - controller CA: `/etc/vonk-forge-agent/controller-ca.pem`
 
-Bootstrap replaces only the packaged placeholder, generates the canonical
+Pairing replaces only the packaged placeholder, generates the canonical
 node identity locally, and never writes the grant token to `agent.toml`. A
 matching valid configuration is preserved; conflicting local values fail
 closed. The same command drives the existing Rust pairing path before and

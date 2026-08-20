@@ -69,10 +69,9 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Recipe operations](runbooks/model-switching.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
-- [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)
 - [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
 - [Model switching](runbooks/model-switching.md)
-- [Platform updates](runbooks/platform-update.md)
+- [Platform release publication](runbooks/platform-release-publication.md)
 - [Security threat model](security/threat-model.md)
 
 Commands in these pages are plan-first by default. They show the exact

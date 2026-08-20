@@ -6,11 +6,9 @@ import os
 import re
 import secrets
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .dev_cohort import DevelopmentCohortError, require_selected_cohort
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -18,26 +16,8 @@ class SettingsError(ValueError):
     pass
 
 
-class StartupMode(StrEnum):
-    """Explicit control-process mode during host generation selection."""
-
-    PRESELECTION = "preselection"
-    SELECTED = "selected"
-
-
 _AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
 _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
-_GENERATION_IDENTITY_ENVIRONMENT = (
-    "VONK_CONTROL_GENERATION_ID",
-    "VONK_DATABASE_REVISION",
-    "VONK_PLATFORM_VERSION",
-    "VONK_PLATFORM_RELEASE_DIGEST",
-    "VONK_PLATFORM_BUILD_DIGEST",
-    "VONK_CONTROL_PROCESS_IMAGE",
-    "VONK_CONTROL_START_NONCE",
-    "VONK_AGENT_PROTOCOL_MINIMUM",
-    "VONK_AGENT_PROTOCOL_MAXIMUM",
-)
 
 
 def _secret(name: str, *, production: bool) -> str:
@@ -131,154 +111,6 @@ def _fixed_https_origin(name: str, value: str) -> str:
     ):
         raise SettingsError(f"{name} must be a fixed HTTPS origin")
     return value.rstrip("/")
-
-
-@dataclass(frozen=True)
-class GenerationStartupSettings:
-    """Minimal immutable identity shared by one generation's API and worker."""
-
-    database_url: str
-    startup_mode: StartupMode
-    identity_root: Path
-    operation_id: str | None
-    generation_id: str
-    release_digest: str
-    build_digest: str
-    platform_version: str
-    process_image: str
-    database_revision: str
-    start_nonce: str
-    protocol_minimum: int
-    protocol_maximum: int
-
-    @classmethod
-    def from_env_and_secrets(cls) -> GenerationStartupSettings:
-        deployment_mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
-        if deployment_mode not in {"development", "test", "production"}:
-            raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        raw_mode = os.environ.get("VONK_CONTROL_STARTUP_MODE", "selected")
-        try:
-            startup_mode = StartupMode(raw_mode)
-        except ValueError as error:
-            raise SettingsError("VONK_CONTROL_STARTUP_MODE is invalid") from error
-        database_url = _secret(
-            "VONK_DATABASE_URL_FILE",
-            production=deployment_mode == "production",
-        )
-        if urlsplit(database_url).scheme not in {
-            "postgresql",
-            "postgresql+psycopg",
-        }:
-            raise SettingsError("database URL must use PostgreSQL")
-        operation_id = os.environ.get("VONK_CONTROL_OPERATION_ID")
-        if startup_mode is StartupMode.PRESELECTION:
-            if operation_id is None or re.fullmatch(
-                r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?",
-                operation_id,
-            ) is None:
-                raise SettingsError(
-                    "VONK_CONTROL_OPERATION_ID is required for preselection"
-                )
-        elif operation_id is not None:
-            raise SettingsError(
-                "VONK_CONTROL_OPERATION_ID is forbidden in selected mode"
-            )
-        selected_name = "VONK_DEV_SELECTED_COHORT_FILE"
-        if selected_name in os.environ:
-            if deployment_mode != "development":
-                raise SettingsError(
-                    "VONK_DEV_SELECTED_COHORT_FILE is development-only"
-                )
-            if startup_mode is not StartupMode.SELECTED:
-                raise SettingsError(
-                    "development selected cohort requires selected startup mode"
-                )
-            if any(name in os.environ for name in _GENERATION_IDENTITY_ENVIRONMENT):
-                raise SettingsError(
-                    "explicit generation identity cannot be combined with "
-                    "VONK_DEV_SELECTED_COHORT_FILE"
-                )
-            role = os.environ.get("VONK_CONTROL_PROCESS_ROLE", "")
-            if role not in {"api", "worker"}:
-                raise SettingsError(
-                    "VONK_CONTROL_PROCESS_ROLE must be api or worker"
-                )
-            selected_path = os.environ.get(selected_name, "")
-            if not selected_path:
-                raise SettingsError(f"{selected_name} is required")
-            try:
-                selected = require_selected_cohort(Path(selected_path), role)
-            except DevelopmentCohortError as error:
-                raise SettingsError(
-                    "development selected cohort is invalid"
-                ) from error
-            generation_id = selected.generation_id
-            database_revision = selected.database_revision
-            version = selected.platform_version
-            release = selected.release_digest
-            build = selected.build_digest
-            image = selected.api_image if role == "api" else selected.worker_image
-            nonce = selected.start_nonce
-            protocol_minimum = selected.protocol_minimum
-            protocol_maximum = selected.protocol_maximum
-        else:
-            generation_id = os.environ.get("VONK_CONTROL_GENERATION_ID", "")
-            database_revision = os.environ.get("VONK_DATABASE_REVISION", "")
-            version = os.environ.get("VONK_PLATFORM_VERSION", "")
-            release = os.environ.get("VONK_PLATFORM_RELEASE_DIGEST", "")
-            build = os.environ.get("VONK_PLATFORM_BUILD_DIGEST", "")
-            image = os.environ.get("VONK_CONTROL_PROCESS_IMAGE", "")
-            nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
-            try:
-                protocol_minimum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "3")
-                )
-                protocol_maximum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "3")
-                )
-            except ValueError as error:
-                raise SettingsError("agent protocol range is invalid") from error
-        if re.fullmatch(
-            r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?", generation_id
-        ) is None:
-            raise SettingsError("VONK_CONTROL_GENERATION_ID is invalid")
-        if re.fullmatch(
-            r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?", database_revision
-        ) is None:
-            raise SettingsError("VONK_DATABASE_REVISION is invalid")
-        if re.fullmatch(
-            r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version
-        ) is None:
-            raise SettingsError("VONK_PLATFORM_VERSION is invalid")
-        for name, value in (
-            ("VONK_PLATFORM_RELEASE_DIGEST", release),
-            ("VONK_PLATFORM_BUILD_DIGEST", build),
-        ):
-            if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
-                raise SettingsError(f"{name} is invalid")
-        if re.fullmatch(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}", image) is None:
-            raise SettingsError("VONK_CONTROL_PROCESS_IMAGE is invalid")
-        if re.fullmatch(r"[0-9a-f]{64}", nonce) is None:
-            raise SettingsError("VONK_CONTROL_START_NONCE is invalid")
-        if not 1 <= protocol_minimum <= protocol_maximum <= 65535:
-            raise SettingsError("agent protocol range is invalid")
-        return cls(
-            database_url=database_url,
-            startup_mode=startup_mode,
-            identity_root=_absolute_root(
-                "VONK_CONTROL_IDENTITY_ROOT", "/control-identity"
-            ),
-            operation_id=operation_id,
-            generation_id=generation_id,
-            release_digest=release,
-            build_digest=build,
-            platform_version=version,
-            process_image=image,
-            database_revision=database_revision,
-            start_nonce=nonce,
-            protocol_minimum=protocol_minimum,
-            protocol_maximum=protocol_maximum,
-        )
 
 
 @dataclass(frozen=True)
