@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Render a public curl bootstrap with exact native-installer digests."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PLATFORMS = {
+    "nas": ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"),
+    "spark": ("linux-amd64", "linux-arm64"),
+}
+MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+PLACEHOLDER = re.compile(r"@[A-Z0-9_]+_SHA256@")
+
+
+class RenderError(ValueError):
+    pass
+
+
+def _read_regular(path: Path, label: str, maximum: int) -> bytes:
+    try:
+        before = path.stat(follow_symlinks=False)
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise RenderError(f"{label} is unavailable or unsafe") from error
+    try:
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_ino != after.st_ino
+            or before.st_dev != after.st_dev
+            or after.st_nlink != 1
+            or not 0 < after.st_size <= maximum
+        ):
+            raise RenderError(f"{label} is unavailable or unsafe")
+        content = b""
+        while len(content) < after.st_size:
+            chunk = os.read(descriptor, after.st_size - len(content))
+            if not chunk:
+                raise RenderError(f"{label} changed while read")
+            content += chunk
+        final = os.fstat(descriptor)
+        if (
+            final.st_ino != after.st_ino
+            or final.st_dev != after.st_dev
+            or final.st_size != after.st_size
+            or final.st_mtime_ns != after.st_mtime_ns
+        ):
+            raise RenderError(f"{label} changed while read")
+        return content
+    finally:
+        os.close(descriptor)
+
+
+def _artifact_arguments(values: list[str]) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for value in values:
+        platform, separator, raw_path = value.partition("=")
+        if not separator or platform in result or not raw_path:
+            raise RenderError("installer artifact arguments are invalid")
+        result[platform] = Path(raw_path)
+    return result
+
+
+def render(kind: str, artifacts: dict[str, Path]) -> bytes:
+    expected = set(PLATFORMS[kind])
+    if set(artifacts) != expected:
+        raise RenderError(f"{kind} installer platforms are incomplete")
+    template = _read_regular(ROOT / "install" / kind, "bootstrap template", 64 * 1024)
+    try:
+        rendered = template.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise RenderError("bootstrap template is not ASCII") from error
+    for platform, path in artifacts.items():
+        digest = hashlib.sha256(
+            _read_regular(path, f"{platform} installer", MAX_ARTIFACT_BYTES)
+        ).hexdigest()
+        placeholder = f"@{kind}_{platform}_sha256@".upper().replace("-", "_")
+        if rendered.count(placeholder) != 1:
+            raise RenderError(f"bootstrap template is missing {platform}")
+        rendered = rendered.replace(placeholder, digest)
+    if PLACEHOLDER.search(rendered):
+        raise RenderError("bootstrap template has unresolved digests")
+    return rendered.encode("ascii")
+
+
+def _write_new(path: Path, content: bytes) -> None:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o755,
+        )
+    except OSError as error:
+        raise RenderError("output already exists or is unsafe") from error
+    try:
+        offset = 0
+        while offset < len(content):
+            offset += os.write(descriptor, content[offset:])
+        os.fchmod(descriptor, 0o755)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="render-install-bootstrap")
+    parser.add_argument("--kind", choices=tuple(PLATFORMS), required=True)
+    parser.add_argument("--artifact", action="append", default=[])
+    parser.add_argument("--output", type=Path, required=True)
+    arguments = parser.parse_args(argv)
+    try:
+        rendered = render(
+            arguments.kind,
+            _artifact_arguments(arguments.artifact),
+        )
+        _write_new(arguments.output, rendered)
+    except (OSError, RenderError) as error:
+        print(f"render-install-bootstrap: {error}", file=sys.stderr)
+        return 2
+    print("sha256:" + hashlib.sha256(rendered).hexdigest())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
