@@ -131,18 +131,20 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                     "docker",
                     "exec",
                     container,
-                    "pg_isready",
+                    "psql",
                     "-U",
                     "control",
                     "-d",
                     "control",
+                    "-tAc",
+                    "SELECT 1",
                 ],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if probe.returncode == 0:
+            if probe.returncode == 0 and probe.stdout.strip() == "1":
                 break
             time.sleep(0.25)
         else:
