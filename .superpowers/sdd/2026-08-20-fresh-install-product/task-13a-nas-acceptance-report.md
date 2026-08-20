@@ -13,6 +13,8 @@ Task 13A implementation and fix-round commits in scope:
 - `c46a0908` — corrected current-state report
 - `d6813094dd1799d4b40357af9586b5e0312865b2` — routed-service, tunnel-exit,
   DIND-fixture, and candidate-receipt fixes
+- `fd25eb1bc8056661a0087950d45e7ed333a7c749` — exact structured Tailnet Serve
+  status and upstream-map validation
 
 This evidence update is committed separately. The implementation commit changes
 only `.github/workflows/installer-publication.yml`, the NAS acceptance runner,
@@ -31,7 +33,7 @@ unstaged.
 | Bundle and workstation contract | The constrained PTY path, exact three-item output, POSIX modes, repeatability, secret isolation, and site-secret preservation remain asserted. |
 | Routed LiteLLM and database behavior | The advertised Tailscale/Caddy route accepts authenticated `/v1/models` only with the generated LiteLLM key and returns JSON model data. Missing and wrong credentials must return 401/403. The PostgreSQL check also requires a nonempty initialized LiteLLM public schema. |
 | Routed Prometheus and Grafana behavior | Authenticated traffic through the advertised Tailscale/Caddy Grafana route verifies the administrator API, provisioned Prometheus datasource, both dashboards, and a successful `up{job="vonk-control"}` query through Grafana’s configured datasource proxy. Missing and wrong Grafana credentials must return 401/403. |
-| Routed registry and tailnet behavior | The configured external Caddy registry SNI `/v2/` rejects no-client-certificate traffic and returns exactly `{}` to a short-lived client certificate chained to the candidate CA. The Tailnet Serve status remains exact, and the successful LiteLLM/Grafana checks traverse its advertised `svc:vonk-forge` HTTPS route. |
+| Routed registry and tailnet behavior | The configured external Caddy registry SNI `/v2/` rejects no-client-certificate traffic and returns exactly `{}` to a short-lived client certificate chained to the candidate CA. Tailscale acceptance parses `serve status --json` and requires the exact selected HTTPS listener object, then parses `serve get-config --all` and requires the exact selected service-to-upstream map; duplicate, extra, missing, wrong-port, wrong-protocol, and wrong-target data fail closed. Successful LiteLLM/Grafana checks traverse the advertised `svc:vonk-forge` HTTPS route. |
 | PTY/tunnel hardening | Partial writes and TLS WANT_READ/WANT_WRITE handling remain. The HTTPS-over-command helper now closes stdin, waits for the tunnel child, and requires exit status zero after a successful HTTP response; cleanup cannot mask the primary failure. |
 | Gate authority and custody | Parsed workflow NAS gates feed the real acceptance authority and gate drift fails closed. Protected GitHub environment execution copies remain; no GitHub/1Password secret or OIDC runtime dependency changed. |
 
@@ -67,14 +69,36 @@ $ uv run pytest tests/test_installer_publication_workflow.py::test_nas_dind_fixt
 4 passed in 0.40s
 ```
 
+Tailnet Serve parser red/green evidence:
+
+```text
+$ uv run pytest tests/test_fresh_nas_acceptance.py::test_tailnet_serve_status_requires_the_exact_selected_routes -q
+F
+1 failed in 0.06s
+
+$ uv run pytest tests/test_fresh_nas_acceptance.py::test_tailnet_serve_configuration_requires_exact_selected_upstreams -q
+F
+1 failed in 0.07s
+
+$ uv run pytest tests/test_fresh_nas_acceptance.py::test_tailnet_serve_status_requires_the_exact_selected_routes tests/test_fresh_nas_acceptance.py::test_tailnet_serve_configuration_requires_exact_selected_upstreams -q
+..
+2 passed in 0.03s
+```
+
+The first red test established that no structured status assertion existed. The
+second established that acceptance did not obtain or compare `serve get-config
+--all`. The final test accepts only the complete selected default/Hermes Serve
+objects and rejects extra/missing services and routes, wrong upstream targets,
+wrong ports/protocols, node listeners, and duplicate JSON keys.
+
 ## Final verification
 
 ```text
 $ uv run pytest tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py -q
-....................................................                     [100%]
-52 passed in 11.31s
+......................................................                   [100%]
+54 passed in 11.38s
 
-$ uvx --from ruff==0.16.1 ruff check --force-exclude tests/acceptance/runtime.py tests/acceptance/test_fresh_nas_install.py tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/test_installer_publication_workflow.py
+$ uvx --from ruff==0.16.1 ruff check --force-exclude tests/acceptance/test_fresh_nas_install.py tests/test_fresh_nas_acceptance.py
 All checks passed!
 
 $ uv run python -c '<parse workflow; bash -n DIND/start/acceptance/cleanup steps>'
