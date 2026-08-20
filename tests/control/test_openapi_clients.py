@@ -48,14 +48,12 @@ def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
     }
 
 
-def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> None:
+def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None:
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
     successes = {
-        "approveAgentEnrollment": ("200", "EnrollmentDecisionResponse"),
         "createEnrollmentGrant": ("201", "EnrollmentGrantResponse"),
         "listAgentEnrollments": ("200", "EnrollmentListResponse"),
-        "rejectAgentEnrollment": ("200", "EnrollmentDecisionResponse"),
     }
     for operation_id, (status_code, component) in successes.items():
         response_schema = operations[operation_id]["responses"][status_code][
@@ -67,11 +65,11 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
         assert schema["components"]["schemas"][component][
             "additionalProperties"
         ] is False
-    decision = schema["components"]["schemas"]["EnrollmentDecisionResponse"]
-    assert set(decision["properties"]) == {"id", "node_id", "state"}
+    assert "approveAgentEnrollment" not in operations
+    assert "rejectAgentEnrollment" not in operations
+    assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
 
     expected_errors = {
-        "approveAgentEnrollment": {"401", "403", "409", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
