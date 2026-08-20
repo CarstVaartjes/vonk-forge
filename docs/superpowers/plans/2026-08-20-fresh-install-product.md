@@ -181,9 +181,10 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: release workflows and artifact metadata
 
 - [ ] Build a secret-free canonical template containing no runtime subfolders.
-- [ ] Make the executable require no command-line arguments: resolve its
-      verified payload automatically, use the current directory as the output
-      parent, and infer fresh install versus upgrade from `./vonk-forge`.
+- [ ] Make the public curl command require no arguments: the bootstrap supplies
+      only its verified temporary payload path to the executable, uses the
+      current directory as the output parent, and infers fresh install versus
+      upgrade from `./vonk-forge`.
 - [ ] Generate/import every required secret and coherent Step CA/controller PKI.
 - [ ] Prompt through `/dev/tty`, hide secret input, and reject symlinks or unsafe
       existing files.
