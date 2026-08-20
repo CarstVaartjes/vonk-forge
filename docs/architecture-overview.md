@@ -105,7 +105,7 @@ Routine GPU node work is pull-based. Each GPU node agent opens an outbound mTLS 
 claims only operations for its certificate-bound node identity and compatible
 protocol/capabilities, heartbeats a fenced attempt, and returns digest-bound
 evidence. The control plane does not open SSH, SCP, or an agent connection to a
-GPU node. SSH remains available to trusted administrators for initial onboarding,
+GPU node. SSH remains available to trusted administrators for break-glass host maintenance,
 fabric recovery, and explicit break-glass inspection.
 
 ## Service placement

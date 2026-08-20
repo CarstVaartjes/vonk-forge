@@ -111,6 +111,40 @@ def test_control_wheel_has_no_offline_updater_entrypoint_or_modules(
         assert f"vonk_control/{module}.py" not in names
 
 
+def test_operator_wheel_has_no_local_ssh_fleet_compatibility_modules(
+    tmp_path: Path,
+) -> None:
+    """Catches packaging the pre-agent local fleet and placement runtime."""
+    output = tmp_path / "dist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--offline",
+            "--wheel",
+            "--out-dir",
+            str(output),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(output.glob("vonk_cluster_profiles-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+
+    assert "cluster_profiles/placement.py" not in names
+    assert not any(name.startswith("cluster_profiles/fleet/") for name in names)
+    for schema in (
+        "node-health-raw.schema.json",
+        "node-health.schema.json",
+        "placement-requirements.schema.json",
+        "topology.schema.json",
+    ):
+        assert f"cluster_profiles/schemas/{schema}" not in names
+
+
 def test_compose_runtime_has_no_host_generation_identity() -> None:
     """Catches coupling the NAS stack to an external host-generation selector."""
     compose = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())
