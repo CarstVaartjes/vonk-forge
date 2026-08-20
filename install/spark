@@ -1,0 +1,100 @@
+#!/bin/sh
+set -eu
+umask 077
+
+kind=spark
+base_url=${VONK_INSTALL_BASE_URL:-https://install.vonkforge.ai/artifacts}
+release_manifest=${VONK_INSTALL_RELEASE_MANIFEST:-}
+release_signature=${VONK_INSTALL_RELEASE_SIGNATURE:-}
+
+fail() {
+    printf '%s\n' "vonk-forge ${kind} installer: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 0 ] || fail "this installer does not accept arguments"
+case "$release_manifest" in /*) ;; *) fail "the signed release manifest is required" ;; esac
+case "$release_signature" in /*) ;; *) fail "the signed release signature is required" ;; esac
+[ -f "$release_manifest" ] && [ ! -L "$release_manifest" ] && [ -r "$release_manifest" ] ||
+    fail "the signed release manifest is unavailable"
+[ -f "$release_signature" ] && [ ! -L "$release_signature" ] && [ -r "$release_signature" ] ||
+    fail "the signed release signature is unavailable"
+
+[ "$(uname -s)" = Linux ] || fail "Spark installation requires Linux"
+platform=linux
+case $(uname -m) in
+    x86_64|amd64) architecture=amd64 ;;
+    aarch64|arm64) architecture=arm64 ;;
+    *) fail "this CPU architecture is not supported" ;;
+esac
+
+case "$platform-$architecture" in
+    linux-amd64)
+        expected='@SPARK_LINUX_AMD64_SHA256@'
+        package_expected='@SPARK_LINUX_AMD64_PACKAGE_SHA256@'
+        package_version='@SPARK_LINUX_AMD64_PACKAGE_VERSION@'
+        ;;
+    linux-arm64)
+        expected='@SPARK_LINUX_ARM64_SHA256@'
+        package_expected='@SPARK_LINUX_ARM64_PACKAGE_SHA256@'
+        package_version='@SPARK_LINUX_ARM64_PACKAGE_VERSION@'
+        ;;
+    *) fail "this platform is not supported" ;;
+esac
+[ "${#expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
+case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+[ "${#package_expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
+case "$package_expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+case "$package_version" in
+    ''|*[!A-Za-z0-9.+~:-]*) fail "this installer endpoint is not published correctly" ;;
+esac
+
+[ -r /etc/os-release ] || fail "Spark installation requires Debian or Ubuntu"
+# shellcheck disable=SC1091
+. /etc/os-release
+case "${ID:-}" in debian|ubuntu) ;; *) fail "Spark installation requires Debian or Ubuntu" ;; esac
+[ -d /run/systemd/system ] || fail "Spark installation requires systemd"
+for required in curl dpkg-deb apt-get sudo systemctl; do
+    command -v "$required" >/dev/null 2>&1 || fail "$required is required"
+done
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}.XXXXXX") || fail "cannot create a temporary directory"
+cleanup() {
+    rm -rf -- "$temporary"
+}
+trap cleanup EXIT HUP INT TERM
+
+artifact="$temporary/vonk-${kind}-setup"
+url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
+setup_signature="$temporary/vonk-${kind}-setup.sig"
+setup_signature_url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup.sig"
+package="$temporary/vonk-forge-agent_${package_version}_${architecture}.deb"
+package_url="$base_url/$kind/current/$platform-$architecture/vonk-forge-agent.deb"
+
+curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$artifact" || fail "cannot download the setup program"
+curl -fsSL --proto '=https' --tlsv1.2 "$setup_signature_url" -o "$setup_signature" ||
+    fail "cannot download the setup signature"
+curl -fsSL --proto '=https' --tlsv1.2 "$package_url" -o "$package" || fail "cannot download the agent package"
+
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" | awk '{print $NF}'
+    else
+        fail "sha256sum, shasum, or openssl is required"
+    fi
+}
+actual=$(sha256 "$artifact")
+[ "$actual" = "$expected" ] || fail "the setup program failed checksum verification"
+package_actual=$(sha256 "$package")
+[ "$package_actual" = "$package_expected" ] || fail "the agent package failed checksum verification"
+
+chmod 0700 "$artifact"
+"$artifact" \
+    --package "$package" \
+    --release-manifest "$release_manifest" \
+    --release-signature "$release_signature" \
+    --setup-signature "$setup_signature"

@@ -22,8 +22,7 @@ from typing import Any, Protocol
 RECEIPT_KEYS = {
     "channel",
     "distribution",
-    "package",
-    "package_sha256",
+    "packages",
     "snapshot",
     "source_sha",
     "version",
@@ -59,7 +58,7 @@ class ObjectStore(Protocol):
 
 @dataclass(frozen=True)
 class ValidatedBundle:
-    receipt: dict[str, str]
+    receipt: dict[str, Any]
     files: dict[str, bytes]
     directories: frozenset[str]
 
@@ -92,21 +91,33 @@ def parse_canonical_json(raw: bytes) -> Any:
     return value
 
 
-def _validate_receipt(value: object) -> dict[str, str]:
+def _validate_receipt(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != RECEIPT_KEYS:
         raise StateError("publication receipt is invalid")
-    if not all(isinstance(value[key], str) for key in RECEIPT_KEYS):
+    string_keys = RECEIPT_KEYS - {"packages"}
+    if not all(isinstance(value[key], str) for key in string_keys):
         raise StateError("publication receipt is invalid")
     receipt = {key: value[key] for key in RECEIPT_KEYS}
+    packages = receipt["packages"]
+    if not isinstance(packages, dict) or set(packages) != {"amd64", "arm64"}:
+        raise StateError("publication receipt is invalid")
+    for architecture, package in packages.items():
+        if (
+            not isinstance(package, dict)
+            or set(package) != {"filename", "sha256"}
+            or not isinstance(package["filename"], str)
+            or not isinstance(package["sha256"], str)
+            or package["filename"]
+            != f"vonk-forge-agent_{receipt['version']}_{architecture}.deb"
+            or SHA256_RE.fullmatch(package["sha256"]) is None
+        ):
+            raise StateError("publication receipt is invalid")
     authority = CHANNELS.get(receipt["channel"])
     if (
         authority is None
         or receipt["distribution"] != authority[0]
         or SHA_RE.fullmatch(receipt["source_sha"]) is None
-        or SHA256_RE.fullmatch(receipt["package_sha256"]) is None
         or receipt["snapshot"] != f"{receipt['channel']}-{receipt['version']}"
-        or receipt["package"]
-        != f"vonk-forge-agent_{receipt['version']}_arm64.deb"
     ):
         raise StateError("publication receipt is invalid")
     metadata = subprocess.run(
@@ -147,7 +158,7 @@ def _member_name(member: tarfile.TarInfo) -> str:
 
 
 def validate_bundle(
-    raw: bytes, kind: str, expected_receipt: dict[str, str] | None = None
+    raw: bytes, kind: str, expected_receipt: dict[str, Any] | None = None
 ) -> ValidatedBundle:
     if kind not in {"state", "public"} or not 1 <= len(raw) <= MAX_BUNDLE_BYTES:
         raise StateError("bundle is invalid")
@@ -192,17 +203,16 @@ def validate_bundle(
             f"public/dists/{distribution}/Release.gpg",
             f"public/{keyring}",
         }
-        if not required.issubset(files) or not any(
-            Path(name).name == receipt["package"] for name in files
-        ):
+        if not required.issubset(files):
             raise StateError("public bundle is incomplete")
-        package_files = [
-            content
-            for name, content in files.items()
-            if Path(name).name == receipt["package"]
-        ]
-        if len(package_files) != 1 or sha256(package_files[0]) != receipt["package_sha256"]:
-            raise StateError("public package hash does not match receipt")
+        for package in receipt["packages"].values():
+            package_files = [
+                content
+                for name, content in files.items()
+                if Path(name).name == package["filename"]
+            ]
+            if len(package_files) != 1 or sha256(package_files[0]) != package["sha256"]:
+                raise StateError("public package hash does not match receipt")
         for name in files:
             if name == "publication-receipt.json":
                 continue
@@ -232,7 +242,7 @@ def _tar_info(name: str, *, directory: bool, size: int = 0) -> tarfile.TarInfo:
 
 
 def _is_aptly_by_hash_alias(
-    path: Path, root: Path, receipt: dict[str, str]
+    path: Path, root: Path, receipt: dict[str, Any]
 ) -> bool:
     try:
         relative = path.relative_to(root)
@@ -268,7 +278,7 @@ def _is_aptly_by_hash_alias(
     )
 
 
-def build_bundle(root: Path, kind: str, publication: dict[str, str]) -> bytes:
+def build_bundle(root: Path, kind: str, publication: dict[str, Any]) -> bytes:
     receipt = _validate_receipt(publication)
     expected_name = "aptly" if kind == "state" else "public"
     if kind not in {"state", "public"} or root.name != expected_name:
@@ -313,7 +323,7 @@ def build_bundle(root: Path, kind: str, publication: dict[str, str]) -> bytes:
     return raw
 
 
-def _prefix(receipt: dict[str, str]) -> str:
+def _prefix(receipt: dict[str, Any]) -> str:
     return f"versions/{receipt['version']}"
 
 
@@ -322,7 +332,7 @@ def _object_record(key: str, raw: bytes) -> dict[str, object]:
 
 
 def _manifest(
-    receipt: dict[str, str], state_bundle: bytes, public_bundle: bytes
+    receipt: dict[str, Any], state_bundle: bytes, public_bundle: bytes
 ) -> bytes:
     prefix = _prefix(receipt)
     return canonical_json(
@@ -388,7 +398,7 @@ def _write_immutable(store: ObjectStore, key: str, raw: bytes) -> None:
 
 def commit_candidate(
     store: ObjectStore,
-    publication: dict[str, str],
+    publication: dict[str, Any],
     state_bundle: bytes,
     public_bundle: bytes,
 ) -> bytes:
@@ -433,7 +443,7 @@ def _compare_versions(left: str, right: str) -> int:
 
 
 def prepare_candidate(
-    store: ObjectStore, publication: dict[str, str]
+    store: ObjectStore, publication: dict[str, Any]
 ) -> Preparation:
     requested = _validate_receipt(publication)
     committed: list[tuple[dict[str, Any], str, bytes]] = []
@@ -511,7 +521,7 @@ def prepare_candidate(
 def publish_committed(
     state_store: ObjectStore,
     public_store: ObjectStore,
-    publication: dict[str, str],
+    publication: dict[str, Any],
 ) -> bytes:
     receipt = _validate_receipt(publication)
     commit_key = f"{_prefix(receipt)}/commit.json"
@@ -625,17 +635,25 @@ def _sanitize_rclone_error(raw: bytes) -> str:
     return lines[-1][:512] if lines else ""
 
 
-def _receipt_from_environment() -> dict[str, str]:
+def _receipt_from_environment() -> dict[str, Any]:
     names = {
         "channel": "CHANNEL",
         "distribution": "DISTRIBUTION",
-        "package": "PACKAGE",
-        "package_sha256": "PACKAGE_SHA256",
         "snapshot": "SNAPSHOT",
         "source_sha": "SOURCE_SHA",
         "version": "VERSION",
     }
-    return _validate_receipt({name: os.environ.get(variable, "") for name, variable in names.items()})
+    try:
+        packages_raw = os.environ.get("PACKAGES_JSON", "")
+        packages = parse_canonical_json((packages_raw + "\n").encode())
+    except StateError as error:
+        raise StateError("publication receipt is invalid") from error
+    return _validate_receipt(
+        {
+            **{name: os.environ.get(variable, "") for name, variable in names.items()},
+            "packages": packages,
+        }
+    )
 
 
 def _work_directory(value: str) -> Path:
@@ -656,7 +674,7 @@ def extract_bundle(
     raw: bytes,
     kind: str,
     destination: Path,
-    expected_receipt: dict[str, str],
+    expected_receipt: dict[str, Any],
 ) -> None:
     validated = validate_bundle(raw, kind, expected_receipt)
     root = "aptly" if kind == "state" else "public"
@@ -684,7 +702,7 @@ def _state_store() -> RcloneStore:
     return RcloneStore(os.environ.get("R2_APT_STATE_BUCKET", ""))
 
 
-def _prepare(work: Path, receipt: dict[str, str]) -> None:
+def _prepare(work: Path, receipt: dict[str, Any]) -> None:
     prepared = prepare_candidate(_state_store(), receipt)
     if prepared.state_bundle is not None:
         if prepared.has_state:
@@ -704,7 +722,7 @@ def _prepare(work: Path, receipt: dict[str, str]) -> None:
     print(f"needs_generation={str(needs_generation).lower()}")
 
 
-def _bundle(work: Path, receipt: dict[str, str]) -> None:
+def _bundle(work: Path, receipt: dict[str, Any]) -> None:
     state_path = work / "aptly-state.tar.gz"
     if state_path.exists():
         validate_bundle(state_path.read_bytes(), "state", receipt)
@@ -717,7 +735,7 @@ def _bundle(work: Path, receipt: dict[str, str]) -> None:
         _write_private(public_path, build_bundle(work / "public", "public", receipt))
 
 
-def _commit(work: Path, receipt: dict[str, str]) -> None:
+def _commit(work: Path, receipt: dict[str, Any]) -> None:
     manifest = commit_candidate(
         _state_store(),
         receipt,
@@ -727,7 +745,7 @@ def _commit(work: Path, receipt: dict[str, str]) -> None:
     _write_private(work / "commit.json", manifest)
 
 
-def _publish(receipt: dict[str, str]) -> None:
+def _publish(receipt: dict[str, Any]) -> None:
     publish_committed(
         _state_store(),
         RcloneStore(os.environ.get("R2_APT_PUBLIC_BUCKET", "")),

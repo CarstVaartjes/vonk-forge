@@ -103,7 +103,7 @@ def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health
         and volume["source"] == "normalized-private-keys"
         for volume in service["volumes"]
     )
-    assert "/health/liveliness" in json.dumps(service["healthcheck"])
+    assert "/health/readiness" in json.dumps(service["healthcheck"])
 
 
 def test_caddy_routes_native_ui_before_spa_and_blocks_dynamic_model_authority() -> None:

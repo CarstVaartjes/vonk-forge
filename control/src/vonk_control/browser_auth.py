@@ -15,12 +15,12 @@ from itertools import count
 from threading import Lock
 from typing import Literal
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import Actor
 from .models import LoginSession, User
-from .passwords import verify_password
+from .passwords import hash_password, verify_password
 from .user_authority import serialize_user_authority
 
 _ADMIN_SUBJECT = "admin"
@@ -64,7 +64,7 @@ class IssuedBrowserSession:
 
 @dataclass(frozen=True)
 class BootstrapResult:
-    status: Literal["created", "unchanged", "rotated"]
+    status: Literal["created", "unchanged"]
 
 
 @dataclass(frozen=True)
@@ -294,62 +294,6 @@ class BrowserAuthService:
             row, _ = self._active_session(db, digest, now)
             row.revoked_at = now
 
-    def bootstrap_admin(self, verifier: str) -> BootstrapResult:
-        self._verifier(verifier)
-        with self._sessions.begin() as db:
-            serialize_user_authority(db)
-            users = db.scalars(
-                select(User).where(
-                    or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE)
-                )
-            ).all()
-            if not users:
-                db.add(
-                    User(
-                        subject=_ADMIN_SUBJECT,
-                        role=_ADMIN_ROLE,
-                        disabled_at=None,
-                        password_verifier=verifier,
-                    )
-                )
-                return BootstrapResult("created")
-            if len(users) != 1:
-                raise BrowserAuthenticationError()
-            user = users[0]
-            if user.subject != _ADMIN_SUBJECT or user.role != _ADMIN_ROLE:
-                raise BrowserAuthenticationError()
-            if user.password_verifier != verifier:
-                raise BrowserAuthenticationError()
-            return BootstrapResult("unchanged")
-
-    def rotate_admin(self, verifier: str) -> BootstrapResult:
-        self._verifier(verifier)
-        now = self._now()
-        with self._sessions.begin() as db:
-            serialize_user_authority(db)
-            users = db.scalars(
-                select(User)
-                .where(or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE))
-                .with_for_update()
-            ).all()
-            if len(users) != 1:
-                raise BrowserAuthenticationError()
-            user = users[0]
-            if user.subject != _ADMIN_SUBJECT or user.role != _ADMIN_ROLE:
-                raise BrowserAuthenticationError()
-            if user.password_verifier == verifier:
-                return BootstrapResult("unchanged")
-            user.password_verifier = verifier
-            db.execute(
-                update(LoginSession)
-                .where(
-                    LoginSession.user_id == user.id,
-                    LoginSession.revoked_at.is_(None),
-                )
-                .values(revoked_at=now)
-            )
-            return BootstrapResult("rotated")
-
     def _active_session(
         self, db: Session, digest: str, now: datetime
     ) -> tuple[LoginSession, User]:
@@ -404,11 +348,6 @@ class BrowserAuthService:
             )
         return now.astimezone(UTC)
 
-    @staticmethod
-    def _verifier(verifier: str) -> None:
-        if not isinstance(verifier, str) or not 1 <= len(verifier) <= 255:
-            raise BrowserAuthenticationError()
-
 
 def _new_token() -> str:
     return secrets.token_urlsafe(32)
@@ -422,3 +361,37 @@ def _database_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def bootstrap_administrator(
+    sessions: sessionmaker[Session], password: str
+) -> BootstrapResult:
+    """Create the sole administrator or verify the persisted password."""
+    with sessions.begin() as db:
+        serialize_user_authority(db)
+        users = db.scalars(
+            select(User).where(
+                or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE)
+            )
+        ).all()
+        if not users:
+            db.add(
+                User(
+                    subject=_ADMIN_SUBJECT,
+                    role=_ADMIN_ROLE,
+                    disabled_at=None,
+                    password_verifier=hash_password(password),
+                )
+            )
+            return BootstrapResult("created")
+        if len(users) != 1:
+            raise BrowserAuthenticationError()
+        user = users[0]
+        if (
+            user.subject != _ADMIN_SUBJECT
+            or user.role != _ADMIN_ROLE
+            or user.password_verifier is None
+            or not verify_password(user.password_verifier, password).valid
+        ):
+            raise BrowserAuthenticationError()
+        return BootstrapResult("unchanged")

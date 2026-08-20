@@ -1,5 +1,5 @@
 vonk-forge-agent (0.1.0) stable; urgency=medium
 
-  * Initial Rust Vonk Forge agent, helper, and A/B supervisor package.
+  * Initial direct Rust Vonk Forge agent and helper package.
 
  -- Vonk Forge <release@vonkforge.ai>  Thu, 07 Aug 2026 00:00:00 +0000

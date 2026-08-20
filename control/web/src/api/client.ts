@@ -7,7 +7,6 @@ import type {
   AuditResponse,
   AuditSummary,
   ControlApi,
-  EnrollmentDecisionResponse,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetEvidenceResponse,
@@ -16,9 +15,6 @@ import type {
   JobsResponse,
   ProposalInput,
   ProposalPreview,
-  UpdatePlan,
-  UpdateRollout,
-  UpdateSkew,
   CatalogRecipeDocument,
   CatalogRecipeList,
   CatalogRecipeRevision,
@@ -103,31 +99,6 @@ function resultData<T>(result: {data?: T; error?: unknown; response: Response}):
     throw new Error(`Control API returned ${result.response.status}: ${detail}`);
   }
   return result.data;
-}
-
-function requireBoundUpdateTarget(value: unknown): void {
-  if (typeof value !== "object" || value === null || !("target" in value)) {
-    throw new Error("Control API update target identity is invalid");
-  }
-  const target = value.target;
-  if (typeof target !== "object" || target === null) {
-    throw new Error("Control API update target identity is invalid");
-  }
-  const document = target as Record<string, unknown>;
-  const targetSha = document.target_sha256;
-  const releaseDigest = document.release_digest;
-  const release = document.release;
-  const platformVersion = document.platform_version;
-  if (
-    typeof targetSha !== "string"
-    || !/^[0-9a-f]{64}$/.test(targetSha)
-    || releaseDigest !== `sha256:${targetSha}`
-    || typeof platformVersion !== "string"
-    || typeof release !== "string"
-    || release !== `platform/releases/${platformVersion}/${targetSha}.json`
-  ) {
-    throw new Error("Control API update target identity is invalid");
-  }
 }
 
 export class ApiClient implements ControlApi {
@@ -447,19 +418,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/approve", {
-      params: {path: {enrollment_id: enrollmentId}},
-    }));
-  }
-
-  async rejectEnrollment(enrollmentId: string, reason: string): Promise<EnrollmentDecisionResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/reject", {
-      body: {reason},
-      params: {path: {enrollment_id: enrollmentId}},
-    }));
-  }
-
   async revokeAgentNode(nodeId: string): Promise<void> {
     const {response} = await this.generated.POST("/api/v1/agents/nodes/{node_id}/revoke", {
       params: {path: {node_id: nodeId}},
@@ -491,29 +449,4 @@ export class ApiClient implements ControlApi {
   audit() { return this.request<AuditResponse>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
-  async updateSkew() {
-    const result = await this.request<UpdateSkew>("/api/v1/updates/skew");
-    requireBoundUpdateTarget(result);
-    return result;
-  }
-  async planUpdate(release: string) {
-    const result = await this.request<UpdatePlan>("/api/v1/updates/plan", {
-      method: "POST", body: JSON.stringify({release}),
-    });
-    requireBoundUpdateTarget(result);
-    return result;
-  }
-  applyUpdate(planDigest: string) {
-    return this.request<UpdateRollout>("/api/v1/updates", {
-      method: "POST", body: JSON.stringify({plan_digest: planDigest}),
-    });
-  }
-  updateStatus(rolloutId: string) {
-    return this.request<UpdateRollout>(`/api/v1/updates/${encodeURIComponent(rolloutId)}`);
-  }
-  approveUpdateResume(rolloutId: string) {
-    return this.request<UpdateRollout>(`/api/v1/updates/${encodeURIComponent(rolloutId)}/approve-resume`, {
-      method: "POST", body: JSON.stringify({}),
-    });
-  }
 }

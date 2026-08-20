@@ -3,7 +3,8 @@ members = [
     "rust/crates/vonk-agent-protocol",
     "rust/crates/vonk-agent",
     "rust/crates/vonk-agent-helper",
-    "rust/crates/vonk-agent-supervisor",
+    "rust/crates/vonk-nas-setup",
+    "rust/crates/vonk-spark-setup",
 ]
 resolver = "3"
 
@@ -15,12 +16,18 @@ rust-version = "1.97.1"
 
 [workspace.dependencies]
 async-trait = "0.1.89"
+base64ct = { version = "1.8.0", features = ["alloc"] }
 chrono = { version = "0.4.41", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4.5.45", features = ["derive"] }
+ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core"] }
 hex = "0.4.3"
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
+rand_core = { version = "0.6.4", features = ["getrandom"] }
 rcgen = { version = "0.14.8", features = ["pem", "x509-parser"] }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls", "stream"] }
 ring = "0.17.14"
+rpassword = "7.5.4"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustls-pemfile = "2.2.0"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
@@ -32,6 +39,7 @@ sha2 = "0.11.0"
 tempfile = "3.20.0"
 tar = "0.4.44"
 thiserror = "2.0.12"
+time = "0.3.55"
 tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.16", features = ["io"] }
 toml = "1.1.4"

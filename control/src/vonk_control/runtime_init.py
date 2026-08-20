@@ -5,27 +5,32 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
-_DESTINATION_NAME = "admin-grant-private-key.pem"
 
 
 class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
 
 
-def stage_private_key(
-    source: Path,
-    destination: Path,
-    *,
-    owner_uid: int = 0,
-    owner_gid: int = 0,
-    mode: int = 0o444,
-) -> Path:
-    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
+@dataclass(frozen=True)
+class SharedRuntimePaths:
+    """Shared named-volume roots initialized by the control API pre-exec."""
+
+    routes: Path = Path("/routes")
+    supervisor: Path = Path("/supervisor")
+    workload_publication: Path = Path("/workload-tuf")
+
+
+def read_runtime_secret(
+    source: Path, *, maximum_bytes: int = _MAX_PRIVATE_KEY_BYTES
+) -> bytes:
+    """Read one bounded regular Compose secret without following a symlink."""
+    if not 0 < maximum_bytes <= _MAX_PRIVATE_KEY_BYTES:
+        raise RuntimeSecretError("runtime secret size bound is invalid")
     source = Path(source)
-    destination = Path(destination)
     try:
         descriptor = os.open(
             source,
@@ -38,14 +43,14 @@ def stage_private_key(
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_nlink != 1
-            or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
+            or not 0 < before.st_size <= maximum_bytes
         ):
             raise RuntimeSecretError("runtime secret source is unsafe")
         content = bytearray()
-        while len(content) <= _MAX_PRIVATE_KEY_BYTES:
+        while len(content) <= maximum_bytes:
             chunk = os.read(
                 descriptor,
-                min(4096, _MAX_PRIVATE_KEY_BYTES + 1 - len(content)),
+                min(4096, maximum_bytes + 1 - len(content)),
             )
             if not chunk:
                 break
@@ -57,6 +62,20 @@ def stage_private_key(
         raise RuntimeSecretError("runtime secret cannot be read") from error
     finally:
         os.close(descriptor)
+    return bytes(content)
+
+
+def stage_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o444,
+) -> Path:
+    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
+    content = read_runtime_secret(source)
+    destination = Path(destination)
 
     parent = destination.parent
     parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -91,33 +110,22 @@ def stage_private_key(
         raise RuntimeSecretError("runtime secret staging failed") from error
 
 
-def stage_compose_secrets() -> None:
+def stage_compose_secrets(
+    source_root: Path = Path("/run/secrets"),
+    destination_root: Path = Path("/normalized"),
+) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
-    stage_private_key(
-        Path("/run/secrets/admin-grant-private-key"),
-        Path("/normalized/admin-grant-private-key"),
-    )
+    source_root = Path(source_root)
+    destination_root = Path(destination_root)
     for name in (
         "package-helper-grant-private-key",
         "package-helper-receipt-private-key",
         "host-runtime-grant-private-key",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10001,
-            owner_gid=10001,
-            mode=0o400,
-        )
-    for name in (
-        "agent-update-authority-key",
-        "admin-grant-public-key",
-        "agent-tuf-bootstrap-root",
-    ):
-        stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
-            owner_uid=10003,
             owner_gid=10001,
             mode=0o400,
         )
@@ -132,8 +140,8 @@ def stage_compose_secrets() -> None:
         "worker-api-token",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10001,
             owner_gid=10001,
             mode=0o400,
@@ -144,22 +152,22 @@ def stage_compose_secrets() -> None:
         "litellm-database-url",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10002,
             owner_gid=10001,
             mode=0o400,
         )
     stage_private_key(
-        Path("/run/secrets/metrics-token"),
-        Path("/normalized/prometheus-metrics-token"),
+        source_root / "metrics-token",
+        destination_root / "prometheus-metrics-token",
         owner_uid=65534,
         owner_gid=65534,
         mode=0o400,
     )
     stage_private_key(
-        Path("/run/secrets/grafana-admin-password"),
-        Path("/normalized/grafana-admin-password"),
+        source_root / "grafana-admin-password",
+        destination_root / "grafana-admin-password",
         owner_uid=472,
         owner_gid=472,
         mode=0o400,
@@ -170,11 +178,11 @@ def stage_compose_secrets() -> None:
         "step-ca-root-certificate",
         "agent-intermediate-key",
     ):
-        source = Path(f"/run/secrets/{name}")
+        source = source_root / name
         if source.exists():
             stage_private_key(
                 source,
-                Path(f"/normalized/{name}"),
+                destination_root / name,
                 owner_uid=10001,
                 owner_gid=10001,
                 mode=0o400,
@@ -185,7 +193,7 @@ def stage_compose_secrets() -> None:
         "step-ca-intermediate-key",
         "step-ca-password",
     ):
-        source = Path(f"/run/secrets/{name}")
+        source = source_root / name
         if source.exists():
             destination_name = {
                 "step-ca-root-certificate": "root-certificate",
@@ -195,11 +203,59 @@ def stage_compose_secrets() -> None:
             }[name]
             stage_private_key(
                 source,
-                Path(f"/normalized/step-ca/{destination_name}"),
+                destination_root / "step-ca" / destination_name,
                 owner_uid=1000,
                 owner_gid=1000,
                 mode=0o400,
             )
+    stage_private_key(
+        source_root / "step-ca-config",
+        destination_root / "step-ca" / "ca.json",
+        owner_uid=1000,
+        owner_gid=1000,
+        mode=0o400,
+    )
+
+
+def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
+    target = Path(path)
+    if not target.is_absolute() or len(target.parts) < 2:
+        raise RuntimeSecretError("shared runtime directory is unsafe")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = -1
+    try:
+        descriptor = os.open("/", flags)
+        for component in target.parts[1:]:
+            if component in {"", ".", ".."}:
+                raise RuntimeSecretError("shared runtime directory is unsafe")
+            try:
+                os.mkdir(component, mode=mode, dir_fd=descriptor)
+            except FileExistsError:
+                pass
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, mode)
+        return target
+    except RuntimeSecretError:
+        raise
+    except OSError as error:
+        raise RuntimeSecretError("shared runtime directory is unsafe") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
+    """Apply the existing per-consumer ownership contract to shared volumes."""
+    paths = SharedRuntimePaths() if paths is None else paths
+    routes = _directory(paths.routes, 10001, 10001, 0o750)
+    _directory(routes / "generations", 10001, 10001, 0o750)
+    _directory(paths.supervisor, 10002, 10001, 0o750)
+    workload = _directory(paths.workload_publication, 10001, 10001, 0o750)
+    for name in ("metadata", "targets"):
+        _directory(workload / name, 10003, 10001, 0o750)
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:
@@ -214,160 +270,3 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
-
-
-def _snapshot_source(path: Path, *, source_uid: int) -> bytes:
-    try:
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
-        )
-    except OSError as error:
-        raise RuntimeSecretError("admin grant private key source is unsafe") from error
-    try:
-        before = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_uid != source_uid
-            or before.st_nlink != 1
-            or stat.S_IMODE(before.st_mode) != 0o444
-            or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
-        ):
-            raise RuntimeSecretError("admin grant private key source is unsafe")
-        content = bytearray()
-        while len(content) <= _MAX_PRIVATE_KEY_BYTES:
-            chunk = os.read(
-                descriptor,
-                min(4096, _MAX_PRIVATE_KEY_BYTES + 1 - len(content)),
-            )
-            if not chunk:
-                break
-            content.extend(chunk)
-        after = os.fstat(descriptor)
-        if len(content) != before.st_size or _identity(before) != _identity(after):
-            raise RuntimeSecretError("admin grant private key changed while read")
-        return bytes(content)
-    except OSError as error:
-        raise RuntimeSecretError("admin grant private key cannot be read") from error
-    finally:
-        os.close(descriptor)
-
-
-def _validate_existing(parent: int, *, api_uid: int, api_gid: int) -> None:
-    try:
-        descriptor = os.open(
-            _DESTINATION_NAME,
-            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
-            dir_fd=parent,
-        )
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime key is unsafe") from error
-    try:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or metadata.st_uid != api_uid
-            or metadata.st_gid != api_gid
-            or stat.S_IMODE(metadata.st_mode) != 0o400
-            or not 0 < metadata.st_size <= _MAX_PRIVATE_KEY_BYTES
-        ):
-            raise RuntimeSecretError("admin grant runtime key is unsafe")
-    finally:
-        os.close(descriptor)
-
-
-def install_admin_grant_key(
-    source: Path,
-    runtime_root: Path,
-    *,
-    source_uid: int = 0,
-    api_uid: int = 10001,
-    api_gid: int = 10001,
-) -> Path:
-    """Atomically project one root-owned 0444 key as API-only 0400 state."""
-    source = Path(source)
-    runtime_root = Path(runtime_root)
-    if (
-        not source.is_absolute()
-        or not runtime_root.is_absolute()
-        or any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in (source_uid, api_uid, api_gid)
-        )
-    ):
-        raise RuntimeSecretError("admin grant runtime projection is invalid")
-    content = _snapshot_source(source, source_uid=source_uid)
-    try:
-        parent = os.open(
-            runtime_root,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-        )
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime directory is unsafe") from error
-    temporary = f".{_DESTINATION_NAME}.{secrets.token_hex(12)}.new"
-    descriptor = -1
-    try:
-        directory = os.fstat(parent)
-        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid not in {
-            0,
-            os.geteuid(),
-        }:
-            raise RuntimeSecretError("admin grant runtime directory is unsafe")
-        os.fchown(parent, 0 if os.geteuid() == 0 else os.geteuid(), api_gid)
-        os.fchmod(parent, 0o710)
-        _validate_existing(parent, api_uid=api_uid, api_gid=api_gid)
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
-            0o600,
-            dir_fd=parent,
-        )
-        offset = 0
-        while offset < len(content):
-            written = os.write(descriptor, content[offset:])
-            if written <= 0:
-                raise RuntimeSecretError("admin grant runtime key write was incomplete")
-            offset += written
-        os.fchown(descriptor, api_uid, api_gid)
-        os.fchmod(descriptor, 0o400)
-        os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = -1
-        os.replace(
-            temporary,
-            _DESTINATION_NAME,
-            src_dir_fd=parent,
-            dst_dir_fd=parent,
-        )
-        os.fsync(parent)
-    except RuntimeSecretError:
-        raise
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime key cannot be installed") from error
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        try:
-            os.unlink(temporary, dir_fd=parent)
-        except FileNotFoundError:
-            pass
-        os.close(parent)
-    return runtime_root / _DESTINATION_NAME
-
-
-def main() -> None:
-    install_admin_grant_key(
-        Path("/run/secrets/admin-grant-private-key"),
-        Path("/runtime"),
-    )
-
-
-if __name__ == "__main__":
-    main()

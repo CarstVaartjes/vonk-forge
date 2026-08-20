@@ -22,7 +22,6 @@ def test_language_neutral_fixtures_are_canonical_and_manifest_bound() -> None:
         "host-helper-grant.json",
         "operation-poll.json",
         "operation-result.json",
-        "slot-manifest.json",
     }
     for name, expected_digest in manifest.items():
         raw = (ROOT / name).read_bytes().rstrip(b"\n")
@@ -35,9 +34,7 @@ def test_python_protocol_round_trips_every_shared_operation_fixture() -> None:
     claim_document = json.loads((ROOT / "operation-poll.json").read_text())
     claim = AgentClaim.parse(claim_document)
     request = RecipeOperationRequest.parse(claim.operation, claim.payload)
-    result = AgentResult.parse(
-        json.loads((ROOT / "operation-result.json").read_text())
-    )
+    result = AgentResult.parse(json.loads((ROOT / "operation-result.json").read_text()))
     helper = SignedHostHelperGrant.parse(
         json.loads((ROOT / "host-helper-grant.json").read_text())
     )

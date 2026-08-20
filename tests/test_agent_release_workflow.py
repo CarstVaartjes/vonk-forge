@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import re
 import struct
@@ -17,8 +16,25 @@ APT_STATE = ROOT / "scripts/agent-apt-state"
 
 EXPECTED_ACTION_OUTPUTS = {
     "version": "${{ steps.accepted.outputs.version }}",
-    "package": "${{ steps.accepted.outputs.package }}",
+    "arm64_package": "${{ steps.accepted.outputs.arm64_package }}",
+    "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
+    "baseline_version": "${{ steps.accepted.outputs.baseline_version }}",
+    "arm64_baseline_package": (
+        "${{ steps.accepted.outputs.arm64_baseline_package }}"
+    ),
+    "amd64_baseline_package": (
+        "${{ steps.accepted.outputs.amd64_baseline_package }}"
+    ),
+    "baseline_artifact_name": (
+        "${{ steps.accepted.outputs.baseline_artifact_name }}"
+    ),
+    "amd64_lifecycle_package": (
+        "${{ steps.accepted.outputs.amd64_lifecycle_package }}"
+    ),
+    "amd64_lifecycle_artifact_name": (
+        "${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}"
+    ),
 }
 
 
@@ -144,37 +160,27 @@ def run_key_authority(
 
 
 def signing_key_id(private_key: Path, tmp_path: Path) -> str:
-    artifact = tmp_path / "vonk-agent"
-    raw = bytearray(256)
-    raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
-    struct.pack_into("<H", raw, 18, 183)
-    artifact.write_bytes(raw)
-    result = subprocess.run(
-        [
-            ROOT / "scripts/sign-agent-release",
-            "--artifact",
-            artifact,
-            "--private-key",
-            private_key,
-            "--output",
-            tmp_path / "signed",
-        ],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)["key_id"]
+    public_der = public_spki(private_key)
+    assert public_der.startswith(bytes.fromhex("302a300506032b6570032100"))
+    return hashlib.sha256(public_der[-32:]).hexdigest()
 
 
-def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
+def test_slot_manifest_signer_is_absent() -> None:
+    assert not (ROOT / "scripts/sign-agent-release").exists()
+
+
+def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> None:
+    build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
-        raw = bytearray(256)
+    for name in ("vonk-agent", "vonk-agent-helper"):
+        raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
+        marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
+        raw[128 : 128 + len(marker)] = marker
+        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+        raw[256 : 256 + len(semantic_marker)] = semantic_marker
         (binaries / name).write_bytes(raw)
         (binaries / name).chmod(0o555)
     private_key = tmp_path / "release.pem"
@@ -186,6 +192,10 @@ def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
             ROOT / "scripts/build-agent-deb",
             "--version",
             "0.1.0",
+            "--architecture",
+            "linux-arm64",
+            "--build-digest",
+            build_digest,
             "--release-private-key",
             private_key,
             "--binaries-dir",
@@ -215,9 +225,8 @@ def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
     )
     assert extracted.returncode == 0, extracted.stderr
 
-    config = (payload / "etc/vonk-forge-agent/agent.toml").read_text()
-    assert config.count('enrollment_url = "https://enroll.vonkforge.invalid/"') == 1
-    assert config.count('controller_url = "https://controller.vonkforge.invalid/"') == 1
+    assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
+    assert b"vonkforge.invalid" not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
 
 
 def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
@@ -229,7 +238,8 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
         "publication_sequence",
         "version",
         "next_version",
-        "package",
+        "arm64_package",
+        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -325,7 +335,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
     assert "cargo build" not in text
-    assert text.count("scripts/build-agent-deb") >= 3
+    assert text.count("scripts/build-agent-deb") >= 6
     assert "NEXT_VERSION: ${{ inputs.next_version }}" in text
     assert 'IFS=. read -r major minor patch <<< "$VERSION"' not in text
     assert "cmp --silent" in text
@@ -334,15 +344,14 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in text
     assert "cargo test --workspace --locked" in text
     assert "scripts/verify-agent-systemd" in text
-    for expected in (
-        "dpkg -i",
-        "dpkg --remove vonk-forge-agent",
-        "refused downgrade",
-        "/etc/vonk-forge-agent/agent.toml",
-        "/var/lib/vonk-forge-agent",
-        "SYSTEMD_OFFLINE=1",
-    ):
-        assert expected in text
+    assert "scripts/test-agent-package-native-lifecycle" in text
+    for architecture in ("linux-arm64", "linux-amd64"):
+        assert f"--architecture {architecture}" in text
+    for architecture in ("arm64", "amd64"):
+        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in text
+    assert "vonk-agent-supervisor" not in text
+    assert "/var/lib/vonk-forge/slots" not in text
+    assert "/var/lib/vonk-forge/supervisor" not in text
     assert "curl " not in text
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
@@ -350,6 +359,37 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cosign sign-blob --yes --bundle" in text
     assert "agent-release\\.yml@refs/heads/main" in text
     assert "ci\\.yml@refs/tags/v" in text
+
+
+def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+    validation = package_step("Validate package metadata and environment")
+    lifecycle = package_step_run(
+        "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    )
+    upload = package_step("Upload immutable acceptance baseline packages")
+
+    assert "baseline_version:" in text
+    assert "arm64_baseline_package:" in text
+    assert "amd64_baseline_package:" in text
+    assert "baseline_artifact_name:" in text
+    assert "BASELINE_VERSION: ${{ inputs.baseline_version }}" in validation
+    assert "--acceptance-baseline" in lifecycle
+    assert '"$BASELINE_VERSION" "$VERSION"' in lifecycle
+    for architecture in ("arm64", "amd64"):
+        assert f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb" in upload
+    assert "retention-days: 7" in upload
+    assert "overwrite: false" in upload
+
+
+def test_package_build_outputs_and_attestations_name_both_architectures() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+    for architecture in ("arm64", "amd64"):
+        assert re.search(rf"^  {architecture}_package:\n", text, re.MULTILINE)
+        package = f"vonk-forge-agent_${{{{ inputs.version }}}}_{architecture}.deb"
+        assert f"subject-path: dist/{package}" in text
+        assert f"sbom-path: dist/{package[:-4]}.sbom.spdx.json" in text
+    assert "subject-path: dist/vonk-forge-agent_${{ inputs.version }}_*.deb" not in text
 
 
 def assert_agent_key_cleanup_contract(text: str) -> None:
@@ -362,29 +402,27 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         text,
         lifecycle_name,
     )
-    lifecycle_lines = lifecycle.splitlines()
-    final_build = lifecycle_lines.index("  --output-dir lifecycle")
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert lifecycle_lines[final_build + 1] == immediate_cleanup
-    assert lifecycle_lines[final_build + 2] == (
-        'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"'
-    )
-    first_upgrade = lifecycle_lines.index(
-        "sudo env SYSTEMD_OFFLINE=1 dpkg -i \\", final_build + 3
-    )
-    assert lifecycle_lines[first_upgrade + 1] == (
-        '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
-    )
-    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in "\n".join(
-        lifecycle_lines[final_build + 3 :]
-    )
+    assert lifecycle.count("scripts/build-agent-deb") == 3
+    assert "--acceptance-baseline" in lifecycle
+    assert "--architecture linux-arm64" in lifecycle
+    assert "--architecture linux-amd64" in lifecycle
+    final_build = lifecycle.rindex("scripts/build-agent-deb")
+    cleanup = lifecycle.index(immediate_cleanup)
+    helper = lifecycle.rindex("sudo scripts/test-agent-package-native-lifecycle")
+    assert final_build < cleanup < helper
+    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in lifecycle[helper:]
     assert immediate_cleanup in fallback
     assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
     assert step_names[lifecycle_index : lifecycle_index + 3] == [
         lifecycle_name,
         fallback_name,
+        "Upload short-lived AMD64 lifecycle package",
+    ]
+    assert step_names[lifecycle_index + 3 : lifecycle_index + 5] == [
+        "Upload immutable acceptance baseline packages",
         cosign_name,
     ]
     assert text.count(immediate_cleanup) == 2
@@ -439,14 +477,33 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
     )
 
 
-def test_reusable_agent_package_build_uploads_one_immutable_release_set() -> None:
+def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_sets() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert text.count("actions/upload-artifact@") == 1
-    assert "name: ${{ inputs.artifact_name }}" in text
-    assert "overwrite: false" in text
-    assert "if-no-files-found: error" in text
-    assert "path: dist/*" in text
+    assert text.count("actions/upload-artifact@") == 3
+    accepted = workflow_step(text, "Upload exact package release set")
+    baseline = workflow_step(text, "Upload immutable acceptance baseline packages")
+    lifecycle = workflow_step(text, "Upload short-lived AMD64 lifecycle package")
+
+    assert "name: ${{ inputs.artifact_name }}" in accepted
+    assert "retention-days: 30" in accepted
+    assert "path: dist/*" in accepted
+    assert "name: ${{ inputs.baseline_artifact_name }}" in baseline
+    assert "retention-days: 7" in baseline
+    for architecture in ("arm64", "amd64"):
+        package = (
+            f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
+        )
+        assert package in baseline
+        assert f"{package}.sha256" in baseline
+    assert "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
+    assert "retention-days: 1" in lifecycle
+    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
+    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
+    assert "dist/" not in lifecycle
+    for step in (accepted, baseline, lifecycle):
+        assert "overwrite: false" in step
+        assert "if-no-files-found: error" in step
 
 
 def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
@@ -495,18 +552,38 @@ def test_development_agent_workflow_binds_both_literal_environment_boundaries() 
     assert "source_sha: ${{ github.sha }}" in text
     assert "tag_name: ''" in text
     assert "tag_oid: ''" in text
-    assert "needs: [package-metadata, build-test-sign]" in text
+    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
+    for architecture in ("arm64", "amd64"):
+        assert (
+            f"{architecture}_package: "
+            f"${{{{ needs.build-test-sign.outputs.{architecture}_package }}}}" in text
+        )
     assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
     assert "apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}" in text
     assert "r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}" in text
     assert "secrets:" not in text
     for forbidden in (
         "scripts/build-agent-deb",
-        "dpkg -i",
         "cosign sign-blob",
     ):
         assert forbidden not in text
+
+
+def test_development_publication_requires_native_amd64_lifecycle() -> None:
+    text = WORKFLOW.read_text()
+    lifecycle = text.split("\n  native-amd64-lifecycle:\n", 1)[1].split(
+        "\n  publish-apt:\n", 1
+    )[0]
+
+    assert "needs: [package-metadata, build-test-sign]" in lifecycle
+    assert "runs-on: ubuntu-24.04" in lifecycle
+    assert "actions/download-artifact@" in lifecycle
+    assert 'test "$(uname -m)" = x86_64' in lifecycle
+    assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
+    assert 'dpkg -i "$package"' in lifecycle
+    assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
+    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
 
 
 def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
@@ -532,7 +609,8 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     for input_name in (
         "channel",
         "version",
-        "package",
+        "arm64_package",
+        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -566,6 +644,20 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     assert "environment: apt-release" in production
     assert "group: vonk-forge-agent-apt-dev" in development
     assert "group: vonk-forge-agent-apt-stable" in production
+
+
+def test_apt_publisher_verifies_and_indexes_both_architectures_as_one_release() -> None:
+    verify = apt_step("Verify exact downloaded package")
+    generation = apt_step("Generate missing aptly state or public tree")
+
+    for architecture in ("arm64", "amd64"):
+        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in verify
+    assert '.architecture == $architecture' in verify
+    assert 'for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"' in generation
+    assert 'repo add "$REPOSITORY" "dist/$package"' in generation
+    assert 'binary-$architecture/Packages' in generation
+    assert 'architectures:["amd64","arm64"]' in generation
+    assert "-architectures=amd64,arm64" in generation
 
 
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
@@ -814,200 +906,3 @@ def test_development_agent_workflow_has_no_production_authority() -> None:
     assert "gh release" not in text
     assert "actions/create-release" not in text
     assert "contents: write" not in text
-
-
-def test_release_operations_are_documented() -> None:
-    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
-    for expected in (
-        "agent-development",
-        "agent-release",
-        "apt-development",
-        "apt-release",
-        "packages.vonkforge.ai",
-        "VONK_AGENT_RELEASE_PRIVATE_KEY",
-        "VONK_AGENT_RELEASE_KEY_FINGERPRINT",
-        "APT_REPOSITORY_GPG_PRIVATE_KEY",
-        "APT_GPG_PASSPHRASE",
-        "APT_REPOSITORY_GPG_FINGERPRINT",
-        "R2_ACCOUNT_ID",
-        "R2_ACCESS_KEY_ID",
-        "R2_SECRET_ACCESS_KEY",
-        "R2_APT_PUBLIC_BUCKET",
-        "R2_APT_STATE_BUCKET",
-        "cosign verify-blob",
-        "gh attestation verify",
-        "apt install vonk-forge-agent",
-        "apt update",
-        "apt-cache policy vonk-forge-agent",
-        "dpkg --compare-versions",
-        "offline",
-        "key rotation",
-        "interrupted",
-        "versions/<version>/commit.json",
-        "runtime secrets",
-        "NAS secrets",
-    ):
-        assert expected in text
-
-
-def test_release_operations_document_exact_apt_channel_bootstrap() -> None:
-    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
-
-    for expected in (
-        "https://packages.vonkforge.ai/vonk-forge-dev-archive-keyring.gpg",
-        "https://packages.vonkforge.ai/vonk-forge-archive-keyring.gpg",
-        "signed-by=/usr/share/keyrings/vonk-forge-dev-archive-keyring.gpg] https://packages.vonkforge.ai dev main",
-        "signed-by=/usr/share/keyrings/vonk-forge-archive-keyring.gpg] https://packages.vonkforge.ai stable main",
-        "/etc/apt/sources.list.d/vonk-forge-dev.list",
-        "/etc/apt/sources.list.d/vonk-forge.list",
-    ):
-        assert expected in text
-
-    assert "changing the source" in text.lower()
-    assert "does not bypass" in text.lower()
-    assert "do not reconstruct" in text.lower()
-    assert "public bucket" in text.lower()
-
-
-def _package_guide_bash_block(heading: str) -> str:
-    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
-    section = text.split(heading, 1)[1]
-    return section.split("```bash\n", 1)[1].split("\n```", 1)[0]
-
-
-def _generate_openpgp_keyring_fixtures(tmp_path: Path) -> tuple[Path, Path, str, str]:
-    home = tmp_path / "gnupg-generate"
-    home.mkdir(mode=0o700)
-    for identity in (
-        "Vonk Fixture One <one@example.invalid>",
-        "Vonk Fixture Two <two@example.invalid>",
-    ):
-        result = subprocess.run(
-            [
-                "/usr/bin/gpg",
-                "--batch",
-                "--homedir",
-                home,
-                "--pinentry-mode",
-                "loopback",
-                "--passphrase",
-                "",
-                "--quick-generate-key",
-                identity,
-                "ed25519",
-                "sign",
-                "1d",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-    listing = subprocess.run(
-        ["/usr/bin/gpg", "--batch", "--homedir", home, "--with-colons", "--list-keys"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    fingerprints: list[str] = []
-    awaiting_primary = False
-    for line in listing:
-        fields = line.split(":")
-        if fields[0] == "pub":
-            awaiting_primary = True
-        elif awaiting_primary and fields[0] == "fpr":
-            fingerprints.append(fields[9])
-            awaiting_primary = False
-    assert len(fingerprints) == 2
-
-    single = tmp_path / "single-primary.gpg"
-    multiple = tmp_path / "multiple-primary.gpg"
-    single.write_bytes(
-        subprocess.run(
-            ["/usr/bin/gpg", "--batch", "--homedir", home, "--export", fingerprints[0]],
-            check=True,
-            capture_output=True,
-        ).stdout
-    )
-    multiple.write_bytes(
-        subprocess.run(
-            ["/usr/bin/gpg", "--batch", "--homedir", home, "--export", *fingerprints],
-            check=True,
-            capture_output=True,
-        ).stdout
-    )
-    return single, multiple, fingerprints[0], fingerprints[1]
-
-
-def test_apt_bootstrap_rejects_ambiguous_or_wrong_primary_keyrings(
-    tmp_path: Path,
-) -> None:
-    single, multiple, first_fingerprint, second_fingerprint = (
-        _generate_openpgp_keyring_fixtures(tmp_path)
-    )
-    empty = tmp_path / "empty.gpg"
-    empty.write_bytes(b"")
-    corrupt = tmp_path / "corrupt.gpg"
-    corrupt.write_bytes(b"not an OpenPGP keyring\n")
-
-    for heading in ("## Install the `dev` channel", "## Install the `stable` channel"):
-        block = _package_guide_bash_block(heading)
-        assert block.startswith("(\nset -euo pipefail\n")
-        assert block.endswith("\n)")
-        assert block.index("}\nverify_single_primary_keyring ") < block.index(
-            "sudo install"
-        )
-        function = re.search(
-            r"verify_single_primary_keyring\(\) \{\n.*?\n\}", block, re.DOTALL
-        )
-        assert function is not None
-        verify_home = tmp_path / f"verify-{heading.count('dev')}"
-        verify_home.mkdir(mode=0o700, exist_ok=True)
-
-        cases = (
-            (single, first_fingerprint, True),
-            (empty, first_fingerprint, False),
-            (corrupt, first_fingerprint, False),
-            (multiple, first_fingerprint, False),
-            (single, second_fingerprint, False),
-            (single, "A" * 39, False),
-        )
-        for case_index, (keyring, expected, accepted) in enumerate(cases):
-            install_marker = tmp_path / (
-                f"installed-{heading.count('dev')}-{case_index}"
-            )
-            result = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    (
-                        "set -euo pipefail\n"
-                        f"{function.group(0)}\n"
-                        'verify_single_primary_keyring "$KEYRING" "$EXPECTED"\n'
-                        'printf installed > "$INSTALL_MARKER"'
-                    ),
-                ],
-                env={
-                    **os.environ,
-                    "EXPECTED": expected,
-                    "GNUPGHOME": str(verify_home),
-                    "INSTALL_MARKER": str(install_marker),
-                    "KEYRING": str(keyring),
-                },
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            assert (result.returncode == 0) is accepted, result.stderr
-            assert install_marker.exists() is accepted
-
-
-def test_release_operations_document_isolated_signing_and_state_authority() -> None:
-    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
-
-    assert "same `VONK_AGENT_RELEASE_PRIVATE_KEY`" in text
-    assert "different apt signing keys" in text.lower()
-    assert "different private state buckets" in text.lower()
-    assert "never copy" in text.lower()
-    assert "`apt-development`" in text
-    assert "`apt-release`" in text

@@ -46,17 +46,6 @@ def test_workers_cannot_claim_same_job(service) -> None:
     assert claimed[0].job_id == job.id
 
 
-def test_generic_claim_never_claims_platform_update_parent(service) -> None:
-    jobs, clock = service
-    platform = jobs.enqueue("platform.update", "admin", "a" * 40, [], {})
-    clock.now += timedelta(seconds=1)
-    generic = jobs.enqueue("probe", "admin", "a" * 40, [], {})
-
-    claim = jobs.claim("generic-worker", 30)
-
-    assert claim is not None
-    assert claim.job_id == generic.id
-    assert jobs.get(platform.id).state == "queued"
 
 
 def test_job_list_keyset_pages_reach_every_job_in_stable_order(service) -> None:

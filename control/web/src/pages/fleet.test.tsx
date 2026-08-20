@@ -177,7 +177,7 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });
-test("renders a complete shell-quoted Spark bootstrap command", async () => {
+test("renders the one-command Spark installer with enrollment inputs", async () => {
   const visualFleet = vi.fn().mockResolvedValue(snapshot([]));
   const api = control(visualFleet) as ControlApi;
   api.agents = vi.fn().mockResolvedValue({agents: []});
@@ -197,14 +197,10 @@ test("renders a complete shell-quoted Spark bootstrap command", async () => {
   expect(api.createEnrollmentGrant).toHaveBeenCalledWith(ENROLLMENT_GRANT_TTL_SECONDS);
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
-  expect(command.textContent).toBe([
-    "sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap " + "\\",
-    "  --token 'secret-token' " + "\\",
-    "  --controller-endpoint 'https://controller.example.test:9443' " + "\\",
-    "  --enrollment-endpoint 'https://enrollment.example.test:9444' " + "\\",
-    "  --ca-fingerprint 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
-  ].join("\n"));
-  expect(command).not.toHaveTextContent("--config");
-  expect(command).not.toHaveTextContent("--state-root");
-  expect(command).not.toHaveTextContent("--ca-path");
+  expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | sh");
+  expect(command).not.toHaveTextContent("sudo");
+  expect(command).not.toHaveTextContent("vonk-agent pair");
+  expect(screen.getByText("https://controller.example.test:9443")).toBeVisible();
+  expect(screen.getByText("https://enrollment.example.test:9444")).toBeVisible();
+  expect(screen.getByText("secret-token")).toBeVisible();
 });

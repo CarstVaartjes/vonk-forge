@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 mod base_images;
-pub mod bootstrap;
 pub mod build_source;
 pub mod client;
 pub mod config;
@@ -14,10 +13,12 @@ pub mod inventory;
 pub mod oci;
 pub mod pair;
 pub mod process;
+pub mod readiness;
 pub mod recipe_builder;
 pub mod rotation;
+pub mod runtime_identity;
+pub mod self_test;
 pub mod source_policy;
 pub mod state;
-pub mod supervisor_readiness;
 pub mod telemetry;
 pub mod workloads;

@@ -39,8 +39,6 @@ _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/enrollments/grants"): "createEnrollmentGrant",
     ("get", "/api/v1/agents/enrollments"): "listAgentEnrollments",
-    ("post", "/api/v1/agents/enrollments/{enrollment_id}/approve"): "approveAgentEnrollment",
-    ("post", "/api/v1/agents/enrollments/{enrollment_id}/reject"): "rejectAgentEnrollment",
     ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
     ("get", "/api/v1/fleet"): "getFleetStatus",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
@@ -66,14 +64,6 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
     ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
-    ("get", "/api/v1/updates/skew"): "getPlatformUpdateSkew",
-    ("post", "/api/v1/updates/plan"): "planPlatformUpdate",
-    ("post", "/api/v1/updates"): "applyPlatformUpdate",
-    ("get", "/api/v1/updates/{rollout_id}"): "getPlatformUpdate",
-    (
-        "post",
-        "/api/v1/updates/{rollout_id}/approve-resume",
-    ): "approvePlatformUpdateRecovery",
     ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
     ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
     ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
@@ -129,18 +119,14 @@ class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     state: str
     protocol_version: int | None = Field(default=None, ge=1)
-    platform_version: str | None = Field(
+    semantic_version: str | None = Field(
         default=None,
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$",
     )
     build_digest: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    active_slot: str | None = Field(default=None, pattern=r"^[AB]$")
-    agent_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    supervisor_generation: int | None = Field(
-        default=None, ge=1, le=999_999_999, strict=True
-    )
+    binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     capabilities: list[str]
     last_seen_at: str | None
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
@@ -503,11 +489,9 @@ class _DurableOperationProjection:
                     "last_seen_at": None if last_seen is None else last_seen.isoformat(),
                     "node_id": node.node_id,
                     "protocol_version": node.protocol_version,
-                    "platform_version": node.platform_version,
+                    "semantic_version": node.semantic_version,
                     "build_digest": node.build_digest,
-                    "active_slot": node.active_slot,
-                    "agent_sha256": node.agent_sha256,
-                    "supervisor_generation": node.supervisor_generation,
+                    "binary_digest": node.binary_digest,
                     "stale": age is None or age > self._stale_after_seconds,
                     "state": node.state,
                 }
@@ -795,11 +779,9 @@ class NodeStatus(StrictModel):
     agent_last_seen_at: str | None = None
     agent_online: bool = False
     # Version-skew projection remains nullable for pre-enrollment nodes.
-    agent_platform_version: str | None = None
+    agent_semantic_version: str | None = None
     agent_build_digest: str | None = None
-    agent_active_slot: str | None = None
-    agent_sha256: str | None = None
-    agent_supervisor_generation: int | None = None
+    agent_binary_digest: str | None = None
     certificate_expires_at: str | None = None
     certificate_expiry_seconds: float | None = Field(default=None, ge=0)
     compatibility: str = "unknown"

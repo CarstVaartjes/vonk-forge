@@ -65,9 +65,6 @@ EXPECTED_BASELINE_TABLES = {
     "run_nodes",
     "sessions",
     "telemetry_maintenance_state",
-    "update_authorization_intents",
-    "update_rollout_nodes",
-    "update_rollouts",
     "users",
 }
 

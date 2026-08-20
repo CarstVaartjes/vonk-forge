@@ -93,15 +93,6 @@ def test_helper_grant_signing_bytes_are_domain_separated_and_canonical() -> None
     )
 
 
-@pytest.mark.parametrize("operation", ("agent.update", "agent.rollback", "platform.update"))
-def test_helper_grant_cannot_represent_agent_or_platform_updates(operation: str) -> None:
-    document = grant_claims().to_mapping()
-    document["operation"] = operation
-
-    with pytest.raises(AgentProtocolError, match="helper operation"):
-        PackageHelperGrantClaims.parse(document)
-
-
 def test_helper_grant_requires_a_bounded_fifteen_minute_lifetime() -> None:
     with pytest.raises(AgentProtocolError, match="expiry"):
         replace(grant_claims(), expires_at=2_000_000_901)
@@ -178,4 +169,23 @@ def test_host_helper_protocol_rejects_paths_and_untyped_process_control(
     document: dict[str, object],
 ) -> None:
     with pytest.raises(AgentProtocolError):
+        HostHelperOperation.parse(document)
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        {
+            "type": "activate-agent-slot",
+            "slot": "a",
+            "artifact_sha256": "a" * 64,
+            "artifact_signature": "b" * 128,
+        },
+        {"type": "restart-vonk-unit", "unit": "supervisor"},
+    ),
+)
+def test_host_helper_protocol_rejects_removed_agent_lifecycle_operations(
+    document: dict[str, object],
+) -> None:
+    with pytest.raises(AgentProtocolError, match="operation|unit"):
         HostHelperOperation.parse(document)

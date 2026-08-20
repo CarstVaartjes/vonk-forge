@@ -124,7 +124,6 @@ class SliceServer(ThreadingHTTPServer):
         }
         self.fleet_event_cursor = 1
         self.fleet_generated_at = "2026-08-11T10:00:01+00:00"
-        self.supervisor_generations = {NODE: 1, NODE_2: 1}
         self.boot_ids = {
             NODE: "11111111-1111-4111-8111-111111111111",
             NODE_2: "22222222-2222-4222-8222-222222222222",
@@ -267,11 +266,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                             "protocol_version": 3,
                             "platform_version": "0.1.0",
                             "build_digest": "sha256:" + "b" * 64,
-                            "active_slot": "A",
-                            "agent_sha256": "c" * 64,
-                            "supervisor_generation": self.server.supervisor_generations[
-                                node
-                            ],
+                            "binary_digest": "c" * 64,
                             "capabilities": self.server.inventory_capabilities[node],
                             "last_seen_at": self.server.last_seen[node],
                             "last_seen_age_seconds": 1.0,
@@ -287,7 +282,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "schema_version": 1,
                 "event_cursor": self.server.fleet_event_cursor,
                 "generated_at": self.server.fleet_generated_at,
-                "repository_commit": "a" * 40,
+                "authority_revision": "a" * 64,
                 "nodes": [
                     {
                         "id": node,
@@ -996,6 +991,30 @@ def server():
         active.shutdown()
         thread.join(timeout=5)
         active.server_close()
+
+
+def test_protocol_client_is_reusable_outside_the_development_slice_runner(
+    server: SliceServer,
+) -> None:
+    program = (
+        "import json\n"
+        "from development_slice_client import Client\n"
+        f"client = Client('http://127.0.0.1:{server.server_port}', "
+        f"{ADMIN_TOKEN!r}, timeout=5)\n"
+        "status, payload = client.request('GET', '/api/v1/fleet')\n"
+        "print(json.dumps({'status': status, 'schema_version': payload['schema_version']}))\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=ROOT / "scripts",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"schema_version": 1, "status": 200}
 
 
 def _token(path: Path, value: str) -> Path:
@@ -1881,7 +1900,6 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:02:00+00:00",
         NODE_2: "2026-08-11T10:02:00+00:00",
     }
-    server.supervisor_generations = {NODE: 2, NODE_2: 2}
     server.boot_ids = {
         NODE: "33333333-3333-4333-8333-333333333333",
         NODE_2: "44444444-4444-4444-8444-444444444444",
@@ -1919,7 +1937,6 @@ def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
     assert checkpoint["outputs"]["restart_checkpoint"] == {
         NODE: {
             "boot_id": "11111111-1111-4111-8111-111111111111",
-            "supervisor_generation": 1,
         }
     }
 
@@ -1944,7 +1961,6 @@ def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
         for method, path, _body in server.request_bodies
     )
 
-    server.supervisor_generations[NODE] = 2
     server.boot_ids[NODE] = "33333333-3333-4333-8333-333333333333"
     server.last_seen[NODE] = "2026-08-11T10:02:00+00:00"
     server.fleet_event_cursor = 3
@@ -1957,7 +1973,6 @@ def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
     assert accepted["outputs"]["restart_identity"] == {
         NODE: {
             "boot_id": "33333333-3333-4333-8333-333333333333",
-            "supervisor_generation": 2,
         }
     }
 

@@ -11,7 +11,6 @@ import pytest
 import vonk_control.recipe_builds as recipe_builds_module
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
@@ -46,6 +45,8 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 
 class RecordingQueue:
@@ -114,7 +115,10 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                agent_sha256="1" * 64,
+                semantic_version="1.2.3",
+                build_digest="sha256:" + "a" * 64,
+                binary_digest="1" * 64,
+                self_test_passed=True,
                 capabilities=["recipe.build.v1", "recipe.image.import.v1"],
                 last_seen_at=now,
             )
@@ -205,7 +209,7 @@ def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> 
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.agent_sha256 = "2" * 64
+        node.binary_digest = "2" * 64
     second = service.plan(revision.id, node_id, now=now)
 
     assert second.build_id != first.build_id
@@ -235,7 +239,7 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.agent_sha256 = "2" * 64
+        node.binary_digest = "2" * 64
 
     with (
         sessions.begin() as session,
@@ -249,7 +253,7 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.agent_sha256 = None
+        node.binary_digest = None
 
     with pytest.raises(RecipeBuildError, match="inactive or incompatible"):
         RecipeBuildService(sessions, bundles=bundles).plan(

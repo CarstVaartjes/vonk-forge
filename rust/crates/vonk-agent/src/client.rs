@@ -17,7 +17,7 @@ use crate::{
     inventory::Inventory,
     oci::{MAX_MANAGED_RECIPE_RUNS, RecipeRunObservation},
     pair::{IssuedResponse, verify_ca_pin},
-    supervisor_readiness::AgentRuntimeIdentity,
+    runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
     workloads::WorkloadSpec,
 };

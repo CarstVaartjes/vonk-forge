@@ -15,7 +15,6 @@ from pathlib import Path
 
 UNITS = (
     "vonk-forge-agent.service",
-    "vonk-forge-agent-supervisor.service",
     "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
@@ -58,8 +57,8 @@ def _install(root: Path, repository: Path) -> None:
         shutil.copy2(repository / "packaging/systemd" / name, unit_root / name)
     for path in (
         "usr/bin/true",
+        "usr/lib/vonk-forge/vonk-agent",
         "usr/lib/vonk-forge/vonk-agent-helper",
-        "usr/lib/vonk-forge/vonk-agent-supervisor",
         "usr/lib/vonk-forge/vonk-forge-docker-firewall",
     ):
         target = root / path
@@ -147,9 +146,14 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
         raise RuntimeError("package helper socket ownership boundary is invalid")
     if agent["Service"].get("RuntimeDirectory") != "vonk-forge-agent":
         raise RuntimeError("agent runtime ownership boundary is invalid")
+    if agent["Service"].get("ExecStart") != (
+        "/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run"
+    ):
+        raise RuntimeError("agent service does not execute the direct binary")
+    if agent["Unit"].get("PartOf"):
+        raise RuntimeError("agent service has an indirect lifecycle owner")
     if (
-        helper["Service"].get("RuntimeDirectory")
-        != "vonk-forge-package-helper"
+        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-helper"
         or helper["Service"].get("RuntimeDirectoryMode") != "0711"
         or helper["Service"].get("RuntimeDirectoryPreserve") != "yes"
     ):
@@ -173,7 +177,9 @@ def verify(repository: Path) -> dict[str, object]:
             raise RuntimeError("agent services must not receive ambient capabilities")
         for name, unit in units.items():
             if unit["cap_sys_ptrace"]:
-                raise RuntimeError(f"CAP_SYS_PTRACE boundary for {name} does not match policy")
+                raise RuntimeError(
+                    f"CAP_SYS_PTRACE boundary for {name} does not match policy"
+                )
     return {
         "package_helper_socket": package_helper_socket,
         "schema_version": 1,

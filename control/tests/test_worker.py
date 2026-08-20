@@ -167,7 +167,7 @@ def test_worker_alternates_busy_reconciliation_and_generic_job_queues(
     assert handled == ["probe"]
 
 
-def test_worker_round_robins_reconciliation_update_and_generic_without_starvation(
+def test_worker_alternates_reconciliation_and_generic_without_starvation(
     tmp_path,
 ) -> None:
     jobs = _service(tmp_path)
@@ -188,16 +188,13 @@ def test_worker_round_robins_reconciliation_update_and_generic_without_starvatio
         "worker-1",
         {"probe": lambda _request: events.append("generic") or {}},
         reconciliations=Source("reconciliation"),
-        updates=Source("update"),
     )
 
-    assert [worker.run_once() for _ in range(6)] == [True] * 6
+    assert [worker.run_once() for _ in range(4)] == [True] * 4
     assert events == [
         "reconciliation",
-        "update",
         "generic",
         "reconciliation",
-        "update",
         "generic",
     ]
 
@@ -267,7 +264,6 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
             Maintenance(), clock=lambda: current
         ),
         reconciliations=Source("reconciliation"),
-        updates=Source("update"),
     )
 
     for _ in range(3):
@@ -278,7 +274,7 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
         "maintenance",
         "reconciliation",
         "maintenance",
-        "update",
-        "maintenance",
         "generic",
+        "maintenance",
+        "reconciliation",
     ]

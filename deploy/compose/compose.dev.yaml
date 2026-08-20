@@ -1,4 +1,0 @@
-# Development uses the production-shaped Compose graph. Select its published
-# development API and worker images through scripts/dev-compose.
-include:
-  - compose.yaml

@@ -10,14 +10,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from test_catalog_entities import (
-    execution_harness,
-    model,
-    model_group,
-    model_version,
-    patch_bundle,
-    runtime_distribution,
-)
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import (
     CatalogConflict,
@@ -29,6 +21,15 @@ from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base, RecipeImport, RecipeSourceBundle
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+
+from .test_catalog_entities import (
+    execution_harness,
+    model,
+    model_group,
+    model_version,
+    patch_bundle,
+    runtime_distribution,
+)
 
 
 @pytest.fixture

@@ -86,69 +86,6 @@ That historical finding is not a blanket ban on current Sync releases: for a
 fresh site, review the current generated SSH and Netplan changes, use Cluster
 Assistant when they meet policy, and stop for operator review when they do not.
 
-## Historical manual CLI rollout record
-
-This section records the values used in 2026; it is not an installation
-procedure. `nodes/bin/configure-direct-fabric --apply` is retired and refuses
-to write Netplan. The helper retains read-only emit/check/postcheck modes and a
-narrow rollback for a file that an older revision of this helper itself owned.
-
-The official two-GPU node playbook assigns the active `f1` function pair to two
-point-to-point subnets. The staged plan uses the current Linux MTU/default,
-`1500`; no jumbo-MTU value is assumed without primary evidence or a successful
-live validation.
-
-| Node | Interface | HCA | Planned IPv4 | MTU |
-| --- | --- | --- | --- | --- |
-| GPU node 1/head | `enp1s0f1np1` | `rocep1s0f1` | `192.168.100.10/24` | 1500 |
-| GPU node 1/head | `enP2p1s0f1np1` | `roceP2p1s0f1` | `192.168.101.10/24` | 1500 |
-| GPU node 2/worker | `enp1s0f1np1` | `rocep1s0f1` | `192.168.100.11/24` | 1500 |
-| GPU node 2/worker | `enP2p1s0f1np1` | `roceP2p1s0f1` | `192.168.101.11/24` | 1500 |
-
-The archived helper emits the former
-`/etc/netplan/99-vonk-node-direct-fabric.yaml` shape for comparison and refuses
-to mix ownership with `99-nvidia-sync-cluster.yaml` or any other Netplan
-document that mentions either selected CX-7 interface. Its rollback uses
-`netplan try` and applies only when its exact managed file exists. It has no SSH
-or private-key handling.
-
-The current two lab nodes predate NVIDIA Sync Cluster Assistant and still have
-`/etc/netplan/99-dgx-spark-direct-fabric.yaml`. That is a foreign owner by
-design: the fallback helper must refuse to add its own file while this legacy
-document exists. The nodes also retain a narrow historical head-to-worker key.
-Keep both untouched during workload rollout. Migrate network and node-to-node
-SSH ownership together in a separate console-backed maintenance window through
-NVIDIA Sync, which will own `99-nvidia-sync-cluster.yaml`; never rename the
-legacy file to bypass the guard or recreate the old key flow on a fresh cluster.
-
-### Manual rollback
-
-This recovery applies only to
-`/etc/netplan/99-vonk-node-direct-fabric.yaml`, a file created by an older
-helper revision. It intentionally refuses the current lab's foreign
-`99-dgx-spark-direct-fabric.yaml`; migrate that file through NVIDIA Sync.
-
-Run the single reviewed controller sequence from the repository root:
-
-```bash
-nodes/bin/rollback-direct-fabric
-```
-
-It runs with `set -euo pipefail`, derives the checksum in its own scope,
-re-stages `configure-direct-fabric` with `scp -o ForwardAgent=no`, compares
-each remote `sha256sum`, and transfers no key material. GPU node 2 is a hard
-gate: a failed transfer, checksum, worker rollback, or management reconnect
-exits before GPU node 1 is staged or touched. Only after the worker reconnects
-over the management alias does it stage, verify, roll back, and reconnect to
-GPU node 1.
-
-The rollback retains the managed Netplan file under
-`/root/vonk-node-fabric-rollback/` and uses `netplan try`; it does not remove
-the head-only SSH key, which must be removed separately only if the cluster
-relationship is intentionally dismantled. After a deliberately completed
-rollback, verify both nodes over management and remove the two temporary
-`/tmp/configure-direct-fabric` copies.
-
 ## Post-success collection and acceptance
 
 ### Verified live result

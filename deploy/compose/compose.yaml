@@ -8,19 +8,7 @@ x-bounded-logging: &bounded-logging
     max-size: 10m
     max-file: "5"
 
-x-selected-generation-environment: &selected-generation-environment
-  VONK_CONTROL_STARTUP_MODE: selected
-  VONK_CONTROL_GENERATION_ID: ${VONK_CONTROL_GENERATION_ID:?set selected generation ID}
-  VONK_DATABASE_REVISION: ${VONK_DATABASE_REVISION:?set selected database revision}
-  VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
-  VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
-  VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
-  # This is per selection attempt and must be supplied by the root host updater,
-  # never persisted in the site .env file or immutable generation environment.
-  VONK_CONTROL_START_NONCE: ${VONK_CONTROL_START_NONCE:?set fresh selected start nonce}
-
 x-api-environment: &api-environment
-  <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
@@ -30,81 +18,44 @@ x-api-environment: &api-environment
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
-  VONK_AGENT_TUF_METADATA_ROOT: /agent-tuf/metadata
-  VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
   VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
   VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
   VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
-  VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
   VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
-  VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
-  VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
 
 x-worker-environment: &worker-environment
-  <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_UPDATE_SIGNER_SOCKET: /run/vonk-signer/signer.sock
-  VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
-  VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
-  control-bootstrap:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: unless-stopped
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    cap_drop: [ALL]
-    # The fresh Docker volume is root-owned and not writable by other users.
-    # DAC_OVERRIDE lets this root bootstrap process initialize its directories
-    # before assigning ownership to the runtime identities.
-    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
-    security_opt: [no-new-privileges:true]
-    command: [python, -m, vonk_control.compose_bootstrap]
-    depends_on:
-      postgres: {condition: service_healthy}
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
-    volumes:
-      - route-publications:/routes
-      - litellm-supervisor-state:/supervisor
-      - update-signer-socket:/update-socket
-      - signer-tuf-verifier:/verifier
-      - agent-tuf-publication:/agent-publication
-      - workload-tuf-publication:/workload-publication
-      - api-admin-grant-runtime:/api-runtime
-      - normalized-private-keys:/normalized
-    tmpfs: [/tmp]
-    networks: [data]
-    healthcheck:
-      test: [CMD, test, -f, /tmp/bootstrap-ready]
-      interval: 5s
-      timeout: 3s
-      retries: 12
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db}
+    entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
     restart: unless-stopped
     logging: *bounded-logging
     environment:
       POSTGRES_DB: control
       POSTGRES_USER: control
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
-    secrets: [postgres-password]
+    secrets: [postgres-password, litellm-database-password]
     # PostgreSQL 18 stores the cluster in a major-version-specific subdirectory.
     # Mount the parent so future pg_upgrade operations can work across versions.
-    volumes: [postgres-data:/var/lib/postgresql]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/entrypoint.sh:/usr/local/bin/vonk-postgres-entrypoint:ro
+      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro
     networks: [data, litellm-data]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U control -d control"]
+      test: [CMD-SHELL, "pg_isready -U control -d control && psql -U control -d control -tAc 'SELECT 1' | grep -qx 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -115,35 +66,41 @@ services:
     logging: *bounded-logging
     command: [python, -m, vonk_control.api]
     read_only: true
-    user: "10001:10001"
+    user: "0:0"
     cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-    secrets: []
+      VONK_AGENT_RUNTIME: enabled
+      VONK_AGENT_CLIENT_CA_FILE: /run/vonk-normalized-secrets/agent-client-ca
+      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/vonk-normalized-secrets/agent-intermediate-certificate
+      VONK_AGENT_CA_CREDENTIAL_FILE: /run/vonk-normalized-secrets/agent-ca-credential
+      VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE: /run/vonk-normalized-secrets/agent-ca-provisioner-public-jwk
+      VONK_AGENT_CA_ROOT_FILE: /run/vonk-normalized-secrets/step-ca-root-certificate
+      VONK_AGENT_CA_URL: https://step-ca:9000
+      VONK_AGENT_CA_PROVISIONER_NAME: ${AGENT_CA_PROVISIONER_NAME:-vonk-forge-agent}
+      VONK_AGENT_CA_PROVISIONER_KID: ${AGENT_CA_PROVISIONER_KID:?set agent CA provisioner key ID}
+      VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
+      VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
+      VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
+    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
-      - agent-tuf-publication:/agent-tuf
-      - workload-tuf-publication:/workload-tuf:ro
+      - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
-      - api-admin-grant-runtime:/run/vonk-api-secrets:ro
+      - litellm-supervisor-state:/supervisor
+      - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /run/vonk-forge/control-identity
-        read_only: true
-        bind:
-          create_host_path: false
     # OCI archives are transfer staging only; PostgreSQL owns the build
     # authority and the enrolled node owns the imported runtime image. Never
     # make the controller's temporary upload bytes part of persistent state.
     tmpfs:
       - /tmp
       - /state/agent-artifacts
-    networks: [application, data, agent-proxy, worker-authority]
+    networks: [application, data, agent-proxy, worker-authority, ca]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -167,64 +124,37 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
-      - update-signer-socket:/run/vonk-signer
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /run/vonk-forge/control-identity
-        read_only: true
-        bind:
-          create_host_path: false
     tmpfs: [/tmp]
     networks: [data, worker-authority]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
-      control-signer: {condition: service_healthy}
+      control-api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -m, vonk_control.worker_healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
-  control-signer:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
+  step-ca:
+    image: ${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270}
     restart: unless-stopped
     logging: *bounded-logging
-    command: [python, -m, vonk_control.update_signer]
     read_only: true
-    user: "10003:10001"
-    network_mode: none
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    environment:
-      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/vonk-normalized-secrets/agent-update-authority-key
-      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/vonk-normalized-secrets/admin-grant-public-key
-      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/vonk-normalized-secrets/agent-tuf-bootstrap-root
-      VONK_AGENT_TUF_METADATA_ROOT: /publication/metadata
-      VONK_AGENT_TUF_TARGET_ROOT: /publication/targets
-      VONK_AGENT_TUF_VERIFIED_METADATA_ROOT: /verifier/metadata
-      VONK_AGENT_TUF_VERIFIED_TARGET_ROOT: /verifier/targets
-      VONK_CONTROL_IDENTITY_ROOT: /control-identity
-      VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-      VONK_UPDATE_SIGNER_SOCKET: /run/vonk-signer/signer.sock
-      VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
-      VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
-      VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
+    command: [step-ca, /home/step/config/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
+    user: "1000:1000"
     secrets: []
     volumes:
-      - agent-tuf-publication:/publication:ro
-      - signer-tuf-verifier:/verifier
-      - update-signer-socket:/run/vonk-signer
+      - step-ca-data:/home/step
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /control-identity
-        read_only: true
-        bind:
-          create_host_path: false
     tmpfs: [/tmp]
     depends_on:
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
+    networks: [ca]
     healthcheck:
-      test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-signer/signer.sock').st_mode)"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+      test: [CMD, step, ca, health, --ca-url, https://step-ca:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable@sha256:c81eb79cd4333c6cfe374c0ec929110fd23f0ee5f7fd198855a6fbddc77b83ba}
@@ -255,9 +185,9 @@ services:
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -284,6 +214,11 @@ services:
     networks: [application]
     depends_on:
       control-api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana:13.0.2@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2}
@@ -306,7 +241,13 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     networks: [application, ingress]
-    depends_on: [prometheus]
+    depends_on:
+      prometheus: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   caddy:
     image: ${CADDY_IMAGE:-caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9}
@@ -331,13 +272,13 @@ services:
       VONK_AGENT_HOSTNAME: ${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}
       VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
       VONK_BACKEND_PORT: "8443"
-    secrets: [agent-client-ca, agent-proxy-auth]
+    secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
-      control-api: {condition: service_started}
+      control-api: {condition: service_healthy}
       registry: {condition: service_healthy}
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8082/healthz"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -361,10 +302,14 @@ services:
       retries: 10
 
 secrets:
+  admin-password:
+    file: "${ADMIN_PASSWORD_FILE:?set Vonk administrator password secret file}"
   database-url:
     file: "${DATABASE_URL_FILE:?set database URL secret file}"
   postgres-password:
     file: "${POSTGRES_PASSWORD_FILE:?set PostgreSQL password secret file}"
+  litellm-database-password:
+    file: "${LITELLM_DATABASE_PASSWORD_FILE:?set LiteLLM database password secret file}"
   token-signing-key:
     file: "${TOKEN_SIGNING_KEY_FILE:?set token signing key secret file}"
   metrics-token:
@@ -383,24 +328,32 @@ secrets:
     file: "${AGENT_INTERMEDIATE_CERTIFICATE_FILE:?set agent intermediate certificate secret file}"
   controller-ca:
     file: "${CONTROLLER_CA_FILE:?set public controller CA certificate secret file}"
+  controller-server-certificate:
+    file: "${CONTROLLER_SERVER_CERTIFICATE_FILE:?set controller server certificate secret file}"
+  controller-server-key:
+    file: "${CONTROLLER_SERVER_KEY_FILE:?set controller server private key secret file}"
   agent-proxy-auth:
     file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
   worker-api-token:
     file: "${WORKER_API_TOKEN_FILE:?set worker API token secret file}"
-  agent-update-authority-key:
-    file: "${AGENT_UPDATE_AUTHORITY_KEY_FILE:?set agent update authority private key file}"
-  agent-tuf-bootstrap-root:
-    file: "${AGENT_TUF_BOOTSTRAP_ROOT_FILE:?set trusted platform TUF bootstrap root file}"
-  admin-grant-public-key:
-    file: "${ADMIN_GRANT_PUBLIC_KEY_FILE:?set API admin-grant public key file}"
-  admin-grant-private-key:
-    file: "${ADMIN_GRANT_PRIVATE_KEY_FILE:?set API admin-grant private key file}"
   package-helper-grant-private-key:
     file: "${PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE:?set workload package helper grant private key file}"
   package-helper-receipt-private-key:
     file: "${PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE:?set workload package helper receipt private key file}"
   host-runtime-grant-private-key:
     file: "${HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE:?set host runtime grant private key file}"
+  agent-ca-credential:
+    file: "${AGENT_CA_CREDENTIAL_FILE:?set agent CA provider credential secret file}"
+  agent-ca-provisioner-public-jwk:
+    file: "${AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE:?set agent CA provisioner public JWK file}"
+  step-ca-root-certificate:
+    file: "${STEP_CA_ROOT_CERTIFICATE_FILE:?set step-ca root certificate secret file}"
+  step-ca-intermediate-key:
+    file: "${STEP_CA_INTERMEDIATE_KEY_FILE:?set encrypted step-ca intermediate signing key secret file}"
+  step-ca-password:
+    file: "${STEP_CA_PASSWORD_FILE:?set step-ca password secret file}"
+  step-ca-config:
+    file: "${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}"
 
 networks:
   ingress: {}
@@ -415,6 +368,7 @@ networks:
   # No standing service joins this network. A Docker-daemon administrator may
   # attach a digest-pinned one-shot ORAS publisher as documented in registry/README.md.
   registry-publisher: {internal: true}
+  ca: {internal: true}
 
 volumes:
   postgres-data: {}
@@ -426,9 +380,6 @@ volumes:
   grafana-data: {}
   registry-data: {}
   route-publications: {}
-  update-signer-socket: {}
-  signer-tuf-verifier: {}
-  agent-tuf-publication: {}
   workload-tuf-publication: {}
-  api-admin-grant-runtime: {}
   normalized-private-keys: {}
+  step-ca-data: {}

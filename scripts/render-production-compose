@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Render the canonical production graph with digest-locked latest images."""
+"""Render the canonical production graph with versioned digest-locked images."""
 
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import os
 import re
 import tempfile
 from pathlib import Path
 
+import yaml
+
 API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
 WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
-TOKEN_COUNTS = {API_TOKEN: 2, WORKER_TOKEN: 5}
+HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
+TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1}
 IMAGE_PATTERN = re.compile(
-    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker)"
-    r":latest@sha256:[0-9a-f]{64}\Z"
+    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes)"
+    r":v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"@sha256:[0-9a-f]{64}\Z"
 )
 
 
@@ -22,12 +28,29 @@ def _validate_image(image: str, role: str) -> None:
     match = IMAGE_PATTERN.fullmatch(image)
     if match is None or match.group("role") != role:
         raise ValueError(
-            f"{role} image must be the public production alias locked by digest"
+            f"{role} image must use an immutable production version locked by digest"
         )
 
 
-def render(template: Path, output: Path, api_image: str, worker_image: str) -> None:
-    """Render one production Compose file without resolving operator inputs."""
+def _canonical_renderer():
+    script = Path(__file__).with_name("render-dev-compose")
+    loader = importlib.machinery.SourceFileLoader("canonical_compose_renderer", str(script))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise ValueError("canonical Compose renderer is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def render(
+    template: Path,
+    output: Path,
+    api_image: str,
+    worker_image: str,
+    hermes_image: str,
+) -> None:
+    """Render one self-contained production Compose file."""
     if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
@@ -40,15 +63,35 @@ def render(template: Path, output: Path, api_image: str, worker_image: str) -> N
             raise ValueError("template and output must be different files")
     _validate_image(api_image, "api")
     _validate_image(worker_image, "worker")
+    _validate_image(hermes_image, "hermes")
 
     text = template.read_text(encoding="utf-8")
     for token, count in TOKEN_COUNTS.items():
-        if text.count(token) != count:
-            role = "API" if token == API_TOKEN else "worker"
+        actual = (
+            text.count(token)
+            if token in {API_TOKEN, WORKER_TOKEN}
+            else _canonical_renderer()._count_template_token(template, token)
+        )
+        if actual != count:
+            role = {
+                API_TOKEN: "API",
+                WORKER_TOKEN: "worker",
+                HERMES_TOKEN: "Hermes",
+            }[token]
             raise ValueError(f"template {role} image token count changed")
-    rendered = text.replace(API_TOKEN, api_image).replace(WORKER_TOKEN, worker_image)
-    if "CONTROL_API_IMAGE" in rendered or "CONTROL_WORKER_IMAGE" in rendered:
-        raise ValueError("template contains unresolved control image input")
+    canonical_renderer = _canonical_renderer()
+    document = canonical_renderer._compose_document(template)
+    document = canonical_renderer._replace_image_tokens(
+        document,
+        {
+            API_TOKEN: api_image,
+            WORKER_TOKEN: worker_image,
+            HERMES_TOKEN: hermes_image,
+        },
+    )
+    canonical_renderer._resolve_runtime_images(document)
+    canonical_renderer._embed_runtime_assets(document, template.parent)
+    rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("template is not the production graph")
 
@@ -77,6 +120,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
+    parser.add_argument("--hermes-image", required=True)
     return parser.parse_args()
 
 
@@ -87,6 +131,7 @@ def main() -> None:
         arguments.output,
         arguments.api_image,
         arguments.worker_image,
+        arguments.hermes_image,
     )
 
 

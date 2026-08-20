@@ -50,39 +50,16 @@ tailnet-only Service host.
 
 The OAuth client is created under **Tailscale admin console → Trust credentials
 → Credential → OAuth** with only `auth_keys` write scope and only
-`tag:vonk-gateway`. Capture its values once into separate mode `0600` files
-without putting either value in a command argument or terminal output.
+`tag:vonk-gateway`. Enter the ID and secret when the one-command NAS installer
+asks for them:
 
-For development, use the silent-input procedure in
-[Prepare private Tailscale browser access](development-nas-installation.md#prepare-private-tailscale-browser-access),
-pass those files to `scripts/dev-runtime-secrets.py`, and let
-`scripts/dev-runtime-project-remote` publish the exact files on the NAS's real
-filesystem. A direct POSIX-capable Linux mount may use the underlying
-`scripts/dev-runtime-project`. For production, create
-the two empty root-owned mode `0600` NAS files, edit them with the host's
-privileged secret editor, and verify only metadata—never file contents:
-
-```bash
-sudo install -d -m 0700 -o root -g root /srv/vonk-forge/secrets
-sudo install -m 0600 -o root -g root /dev/null \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-id
-sudo install -m 0600 -o root -g root /dev/null \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-secret
-sudoedit /srv/vonk-forge/secrets/tailscale-oauth-client-id
-sudoedit /srv/vonk-forge/secrets/tailscale-oauth-client-secret
-sudo stat -c '%n %U:%G %a %s bytes' \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-id \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-secret
+```sh
+curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-Set only the file paths in the root-owned site environment. The installed host
-updater starts the complete selected generation during first install, upgrade,
-rollback, or recovery. Verify it without invoking Compose from a checkout:
-
-```bash
-sudo vonk-control-offline doctor
-sudo vonk-control-offline maintenance status
-```
+The terminal hides secret input and writes the values directly into the local
+upload bundle. Do not place either credential in a command argument, `.env`, or
+shell history.
 
 Keep the OAuth client secret file equal to the raw value issued by Tailscale;
 do not append query parameters to the operator copy. At startup, the Compose
@@ -101,18 +78,17 @@ Authentication or approval failure leaves ingress closed; there is no LAN
 fallback.
 
 If the Tailscale console labels a permanent gateway **Ephemeral**, do not treat
-its Service approval as final. Select a corrected platform generation, stop
-only the Tailscale gateway/configurator, remove only that generation's
-Tailscale state and socket volumes, and start the selected generation again.
+its Service approval as final. Stop only the Tailscale gateway/configurator,
+remove only the stack's Tailscale state and socket volumes, and start them
+again.
 Approve the replacement advertisement if the exact Service auto-approval has
 not yet been installed, verify it is no longer ephemeral, then revoke the old
 gateway entry. Never delete database, repository, model, control-state, or
 other application volumes during this repair.
 
 The configurator tolerates the bounded control-plane propagation delay after a
-new advertisement. It accepts both the legacy `service-host` capability and
-the current per-Service `services/<name>` capability, but still requires the
-exact HTTPS listeners and upstream map before publishing browser readiness.
+new advertisement and requires the exact HTTPS listeners and upstream map
+before publishing browser readiness.
 
 The configurator waits for Caddy and Hermes health. It resets any missing,
 extra, downgraded, or retargeted Serve map and deterministically creates:
@@ -160,11 +136,9 @@ and Tailscale HTTPS own that name and certificate.
 ## Verification
 
 ```bash
-sudo vonk-control-offline maintenance tailscale-status
-sudo vonk-control-offline maintenance tailscale-serve-status
-sudo vonk-control-offline maintenance tailscale-serve-config
-sudo vonk-control-offline maintenance logs \
-  --service tailscale-configurator --since-minutes 30
+docker compose exec tailscale-gateway tailscale status --json
+docker compose exec tailscale-gateway tailscale serve status --json
+docker compose logs --since 30m tailscale-configurator
 ```
 
 Development must report exactly one Service: `svc:vonk-forge` with `HTTPS:
@@ -178,13 +152,11 @@ reach either Hermes endpoint.
 
 ## Drain, revocation, and recovery
 
-Do not run `docker compose down`; it bypasses the selected-generation journal.
-A platform transition or recovery uses the updater's fixed stop/start sequence.
 For a full host drain, withdraw GPU node routes and human access, complete the
-encrypted control-host backup, then stop the Docker host through its normal OS
-shutdown procedure. Back up `tailscale-state` and the OAuth files with the same
-encrypted generation as the control database and Hermes state. Restore state
-before startup when possible.
+NAS platform's encrypted volume backup, then stop the Docker host through its
+normal OS shutdown procedure. Back up `tailscale-state` and the OAuth files
+with the control database and Hermes state. Restore state before startup when
+possible.
 
 If state cannot be restored, recreate the project with the OAuth files. Verify
 exactly one current tagged node advertises the one development Service or all
@@ -193,6 +165,5 @@ compromise, revoke OAuth, the node, and its tag/Service approvals; for
 development, capture both replacement values and run the documented
 `--rotate-tailscale-oauth` transaction with one stable non-secret UUIDv4
 `--tailscale-oauth-rotation-id` before republishing and choosing
-**Pull** then **Redeploy** with every named volume preserved. Production uses
-its selected-generation secret and host-updater boundary. Never add a
+**Pull** then **Redeploy** with every named volume preserved. Never add a
 temporary LAN human endpoint.

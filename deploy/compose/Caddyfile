@@ -66,6 +66,15 @@
 	}
 }
 
+# Container readiness must not depend on a virtual host or any upstream. This
+# listener is loopback-only and is never published by Compose.
+http://127.0.0.1:8082 {
+	handle /healthz {
+		respond 200
+	}
+	respond 404
+}
+
 # Browser and operator traffic arrives only from the Tailscale gateway over the
 # private tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
 # listener; Docker does not publish port 8080.
@@ -124,17 +133,28 @@
 }
 
 # Bootstrap is server-authenticated but intentionally does not request a client
-# certificate. It exposes exactly the bounded enrollment submission route.
+# certificate. It exposes only bounded discovery and enrollment submission.
 https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 
-	@not_enrollment not path /agent/v1/enroll
-	handle @not_enrollment {
-		respond 404
+	@bootstrap {
+		method GET
+		path /agent/v1/bootstrap
 	}
-	handle /agent/v1/enroll {
+	@enrollment {
+		method POST
+		path /agent/v1/enroll
+	}
+	handle @bootstrap {
+		request_header -X-Vonk-Agent-*
 		import control_proxy
 	}
+	handle @enrollment {
+		request_header -X-Vonk-Agent-*
+		import control_proxy
+	}
+	respond 404
 }
 
 # The agent endpoint is a distinct TLS SNI because client authentication cannot
@@ -142,7 +162,7 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 # node-ID grammar before it reaches the application.
 https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import agent_edge_guards
-	tls {
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
 			mode require_and_verify
@@ -176,7 +196,7 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 # publication uses the private registry network, never this SNI.
 https://{$VONK_REGISTRY_HOSTNAME:registry.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
-	tls {
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
 			mode require_and_verify

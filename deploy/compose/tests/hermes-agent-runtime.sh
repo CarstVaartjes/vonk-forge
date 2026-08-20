@@ -4,19 +4,13 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 compose_root="$(cd -- "${script_dir}/.." && pwd)"
 runtime_root="$(mktemp -d /tmp/vonk-hermes-agent.XXXXXX)"
-runtime_uid="$(id -u)"
-runtime_gid="$(id -g)"
 project="vonk-hermes-runtime-${RANDOM}-$$"
 api_key_file="${runtime_root}/hermes-api-key"
 
 cleanup() {
     docker compose --project-name "${project}" --env-file "${compose_root}/tests/test.env" \
-        -f "${compose_root}/compose.yaml" -f "${compose_root}/compose.step-ca.yaml" \
-        down --remove-orphans >/dev/null 2>&1 || true
-    docker run --rm --entrypoint chown \
-        --mount "type=bind,source=${runtime_root},target=/runtime" \
-        local/hermes-agent:managed -R "${runtime_uid}:${runtime_gid}" /runtime \
-        >/dev/null 2>&1 || true
+        -f "${compose_root}/compose.yaml" \
+        down --volumes --remove-orphans >/dev/null 2>&1 || true
     rm -rf -- "${runtime_root}"
 }
 trap cleanup EXIT
@@ -26,10 +20,8 @@ fail() {
     exit 1
 }
 
-mkdir -p "${runtime_root}/data" "${runtime_root}/workspaces" "${runtime_root}/cache"
 printf '%s\n' 'runtime-test-key-0000000000000000' >"${api_key_file}"
 chmod 600 "${api_key_file}"
-export HERMES_DATA_ROOT="${runtime_root}"
 export HERMES_API_KEY_FILE="${api_key_file}"
 export HERMES_DASHBOARD_ORIGIN="https://hermes.runtime.invalid"
 docker build \
@@ -42,16 +34,11 @@ compose=(
     docker compose --project-name "${project}"
     --env-file "${compose_root}/tests/test.env"
     -f "${compose_root}/compose.yaml"
-    -f "${compose_root}/compose.step-ca.yaml"
 )
 
 docker run --rm --entrypoint chown \
     --mount "type=bind,source=${api_key_file},target=/run-key" \
     local/hermes-agent:managed 0:0 /run-key
-docker run --rm --entrypoint sh \
-    --mount "type=bind,source=${runtime_root},target=/runtime" \
-    local/hermes-agent:managed -c \
-    'chown -R 1100:1100 /runtime/data /runtime/workspaces /runtime/cache && chmod 0700 /runtime/data /runtime/workspaces /runtime/cache'
 "${compose[@]}" up -d --no-deps hermes-agent
 container_id="$("${compose[@]}" ps -q hermes-agent)"
 [ -n "${container_id}" ] || fail "Hermes container did not start"
@@ -134,7 +121,7 @@ if docker exec "${container_id}" sh -c 'touch /etc/must-remain-read-only' 2>/dev
 fi
 
 networks="$(docker inspect --format '{{json .NetworkSettings.Networks}}' "${container_id}")"
-jq -e '(keys | sort) == (["'"${project}"'_hermes-egress", "'"${project}"'_hermes-inference", "'"${project}"'_tailnet-hermes-edge"] | sort)' \
+jq -e '(keys | sort) == (["'"${project}"'_hermes-inference", "'"${project}"'_tailnet-hermes-edge"] | sort)' \
     <<<"${networks}" >/dev/null || fail "Hermes joined an unexpected network"
 
 "${compose[@]}" up -d --no-deps --force-recreate hermes-agent

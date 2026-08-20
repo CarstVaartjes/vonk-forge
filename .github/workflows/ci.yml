@@ -18,6 +18,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  installer-setups:
+    name: Build accepted installer setup programs
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    uses: ./.github/workflows/installer-setups.yml
+
   lint:
     name: Ruff
     runs-on: ubuntu-latest
@@ -82,7 +87,6 @@ jobs:
         run: >-
           uv run --project agent_protocol --frozen pytest -q
           agent_protocol/tests/test_rust_fixtures.py
-          agent_protocol/tests/test_package_helper_authority.py
       - name: Verify controller host-helper authority
         run: >-
           uv run --project control --frozen pytest -q
@@ -138,6 +142,35 @@ jobs:
           enable-cache: true
       - name: Install locked admin web dependencies
         run: npm ci --prefix control/web
+      - name: Pull exact PostgreSQL integration image
+        run: >-
+          docker pull
+          postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+      - name: Run required fresh PostgreSQL integration contracts
+        env:
+          CI: "true"
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          control/tests/test_database_authority_postgres.py
+          deploy/compose/tests/test_postgres_init_databases.py
+      - name: Run canonical runtime readiness model contracts
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
+          deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
+          deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
+          deploy/compose/tests/test_runtime_health_contract.py::test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile
+      - name: Run required Tailscale reconciliation contracts
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          deploy/compose/tests/test_tailscale.py
+      - name: Run required PKI and TLS container integration
+        env:
+          CI: "true"
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
+          deploy/compose/tests/test_pki_tls_integration.py
       - name: Run focused repository contracts
         run: >-
           uv run --python 3.12 --project control --frozen --with-editable .
@@ -224,7 +257,9 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Pull PostgreSQL test image
-        run: docker pull postgres:16
+        run: >-
+          docker pull
+          postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
       - name: Run complete control suite
         shell: bash
         env:
@@ -302,8 +337,13 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       next_version: ${{ steps.release.outputs.next_version }}
-      package: ${{ steps.release.outputs.package }}
+      baseline_version: ${{ steps.release.outputs.baseline_version }}
+      arm64_package: ${{ steps.release.outputs.arm64_package }}
+      amd64_package: ${{ steps.release.outputs.amd64_package }}
+      arm64_baseline_package: ${{ steps.release.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.release.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
+      baseline_artifact_name: ${{ steps.release.outputs.baseline_artifact_name }}
       channel: ${{ steps.release.outputs.channel }}
       image_version_tag: ${{ steps.release.outputs.image_version_tag }}
       commit_tag: ${{ steps.release.outputs.commit_tag }}
@@ -314,8 +354,6 @@ jobs:
       api_dev_source: ${{ steps.release.outputs.api_dev_source }}
       worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
       hermes_image: ${{ steps.release.outputs.hermes_image }}
-      deployment_bundle_repository: ${{ steps.release.outputs.deployment_bundle_repository }}
-      platform_channel: ${{ steps.release.outputs.platform_channel }}
       tag_oid: ${{ steps.authority.outputs.tag_oid }}
     steps:
       - name: Check out tagged commit
@@ -360,7 +398,7 @@ jobs:
             >> "$GITHUB_OUTPUT"
 
   build-agent-package:
-    name: Build and attest the release agent package
+    name: Build and attest AMD64 and ARM64; lifecycle-test ARM64
     if: needs.release-metadata.result == 'success'
     needs: [release-metadata]
     runs-on: ubuntu-24.04-arm
@@ -373,15 +411,20 @@ jobs:
       id-token: write
     outputs:
       version: ${{ steps.package.outputs.version }}
-      package: ${{ steps.package.outputs.package }}
+      arm64_package: ${{ steps.package.outputs.arm64_package }}
+      amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
+      baseline_version: ${{ steps.package.outputs.baseline_version }}
+      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
+      baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Build and attest the release agent package
+      - name: Build and attest AMD64 and ARM64 release agent packages
         id: package
         uses: ./.github/actions/agent-package-build
         with:
@@ -389,17 +432,57 @@ jobs:
           publication_sequence: '0'
           version: ${{ needs.release-metadata.outputs.version }}
           next_version: ${{ needs.release-metadata.outputs.next_version }}
-          package: ${{ needs.release-metadata.outputs.package }}
+          baseline_version: ${{ needs.release-metadata.outputs.baseline_version }}
+          arm64_package: ${{ needs.release-metadata.outputs.arm64_package }}
+          amd64_package: ${{ needs.release-metadata.outputs.amd64_package }}
+          arm64_baseline_package: ${{ needs.release-metadata.outputs.arm64_baseline_package }}
+          amd64_baseline_package: ${{ needs.release-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
+          baseline_artifact_name: ${{ needs.release-metadata.outputs.baseline_artifact_name }}
           environment: agent-release
           source_sha: ${{ github.sha }}
           tag_name: ${{ github.ref_name }}
           tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
           expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
           release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+
+  native-amd64-agent-lifecycle:
+    name: Lifecycle-test accepted AMD64 release package on AMD64
+    needs: [release-metadata, build-agent-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact package acceptance source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download accepted dual-architecture package set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build-agent-package.outputs.artifact_name }}
+          path: accepted
+      - name: Exercise accepted AMD64 package natively
+        shell: bash
+        env:
+          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            acl iproute2 iptables podman shellcheck uidmap
+          package="accepted/$AMD64_PACKAGE"
+          scripts/verify-agent-deb --json "$package"
+          sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
+          test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
+            "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
+          sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
+
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, test, release-metadata, build-agent-package]
+    needs: [lint, generated-clients, test, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
@@ -537,7 +620,7 @@ jobs:
 
   publish-images:
     name: Publish public container images
-    needs: [validate-release-images, release-metadata, build-agent-package]
+    needs: [validate-release-images, release-metadata]
     runs-on: ubuntu-latest
     environment: platform-release
     concurrency:
@@ -739,238 +822,27 @@ jobs:
               "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Set up ORAS
-        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
-        with:
-          version: 1.3.2
-      - name: Download verified agent package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.build-agent-package.outputs.artifact_name }}
-          path: release-output/agent-package
-      - name: Build canonical platform release
+      - name: Render canonical production Compose
         shell: bash
-        env:
-          DEPLOYMENT_BUNDLE_REPOSITORY: ${{ needs.release-metadata.outputs.deployment_bundle_repository }}
-          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
         run: |
           set -euo pipefail
           install -d -m 0700 release-output
           scripts/render-production-compose \
             --output release-output/docker-compose.production.yml \
-            --api-image "${{ needs.release-metadata.outputs.api_image }}:latest@${{ steps.api.outputs.digest }}" \
-            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:latest@${{ steps.worker.outputs.digest }}"
-          release_input="release/platform/${RELEASE_VERSION}.input.json"
-          test -f "$release_input"
-          uv run --frozen scripts/build-control-deployment-bundle \
-            --source-root deploy/compose \
-            --output release-output/control-deployment.tar
-          uv run --frozen scripts/publish-platform-target describe-bundle \
-            --bundle release-output/control-deployment.tar \
-            --repository "$DEPLOYMENT_BUNDLE_REPOSITORY" \
-            > release-output/control-deployment-descriptor.json
-          for artifact in api worker hermes; do
-            case "$artifact" in
-              api)
-                repository="${{ needs.release-metadata.outputs.api_image }}"
-                digest="${{ steps.api.outputs.digest }}"
-                image_tag="${{ needs.release-metadata.outputs.image_version_tag }}"
-                locator=control.images.api
-                ;;
-              worker)
-                repository="${{ needs.release-metadata.outputs.worker_image }}"
-                digest="${{ steps.worker.outputs.digest }}"
-                image_tag="${{ needs.release-metadata.outputs.image_version_tag }}"
-                locator=control.images.worker
-                ;;
-              hermes)
-                repository="${{ needs.release-metadata.outputs.hermes_image }}"
-                digest="${{ steps.hermes.outputs.digest }}"
-                image_tag="$RELEASE_VERSION"
-                locator=control.assets.hermes
-                ;;
-            esac
-            image="${repository}:${image_tag}@${digest}"
-            release_reference="${repository}@${digest}"
-            docker buildx imagetools inspect "$image" --raw \
-              > "release-output/${artifact}-manifest.json"
-            docker buildx imagetools inspect "$image" --format '{{ json .SBOM }}' \
-              | jq -S -c . > "release-output/${artifact}-sbom.json"
-            docker buildx imagetools inspect "$image" --format '{{ json .Provenance }}' \
-              | jq -S -c . > "release-output/${artifact}-provenance.json"
-            uv run --frozen scripts/collect-platform-artifact-evidence \
-              --locator "$locator" \
-              --name "$artifact" \
-              --reference "$release_reference" \
-              --manifest "release-output/${artifact}-manifest.json" \
-              --sbom "release-output/${artifact}-sbom.json" \
-              --provenance "release-output/${artifact}-provenance.json" \
-              --output "release-output/${artifact}-evidence.json"
-          done
-          install -d -m 0700 release-output/wheels
-          uv build --offline --wheel --project . --out-dir release-output/wheels
-          uv build --offline --wheel --project control --out-dir release-output/wheels
-          uv run --frozen scripts/build-host-updater-artifact \
-            --control-wheel release-output/wheels/vonk_control-0.1.0-py3-none-any.whl \
-            --platform-wheel release-output/wheels/vonk_cluster_profiles-0.1.0-py3-none-any.whl \
-            --protocol-wheel inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl \
-            --output release-output/vonk-forge-host-updater.tar
-          sha256sum release-output/vonk-forge-host-updater.tar \
-            > release-output/vonk-forge-host-updater.tar.sha256
-          package="release-output/agent-package/vonk-forge-agent_${RELEASE_VERSION}_arm64.deb"
-          uv run --frozen scripts/build-agent-package-evidence \
-            --package "$package" \
-            --sbom "${package%.deb}.sbom.spdx.json" \
-            --provenance "${package%.deb}.provenance.json" \
-            --sigstore-bundle "${package}.sigstore.json" \
-            --version "$RELEASE_VERSION" \
-            --architecture linux-arm64 \
-            --output release-output/agent-package-evidence.json
-          uv run --frozen scripts/build-platform-manifest \
-            --input "$release_input" \
-            --bundle-descriptor release-output/control-deployment-descriptor.json \
-            --artifact-evidence release-output/api-evidence.json \
-            --artifact-evidence release-output/worker-evidence.json \
-            --artifact-evidence release-output/hermes-evidence.json \
-            --agent-package-evidence release-output/agent-package-evidence.json \
-            --version "$RELEASE_VERSION" \
-            --output release-output/platform-release.json
-          oras_path=$(command -v oras)
-          test -x "$oras_path"
-          printf 'VONK_PLATFORM_ORAS_BIN=%s\n' "$oras_path" >> "$GITHUB_ENV"
-      - name: Revalidate release authority before bundle publication
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          TAG_NAME: ${{ github.ref_name }}
-          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
-
-      - name: Publish immutable deployment bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run --frozen scripts/publish-platform-target publish-bundle \
-            --manifest release-output/platform-release.json \
-            --bundle release-output/control-deployment.tar \
-            > release-output/bundle-publication.json
-      - name: Upload platform build evidence
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
+      - name: Upload production Compose
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           retention-days: 1
           if-no-files-found: error
-          path: |
-            release-output/*-evidence.json
-            release-output/*-manifest.json
-            release-output/*-provenance.json
-            release-output/*-sbom.json
-            release-output/bundle-publication.json
-            release-output/control-deployment-descriptor.json
-            release-output/control-deployment.tar
-            release-output/docker-compose.production.yml
-            release-output/vonk-forge-host-updater.tar
-            release-output/vonk-forge-host-updater.tar.sha256
-            release-output/platform-release.json
-            release-output/agent-package-evidence.json
-
-  attest-host-updater:
-    name: Attest the installable host updater
-    needs: [publish-images, release-metadata]
-    runs-on: ubuntu-latest
-    environment: platform-release
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Check out tagged authority tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Download immutable host updater build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: platform-build-${{ needs.release-metadata.outputs.version }}
-          path: release-output
-      - name: Revalidate release authority before host updater attestation
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          TAG_NAME: ${{ github.ref_name }}
-          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
-
-      - name: Attest host updater provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: release-output/vonk-forge-host-updater.tar
-
-  publish-platform-target:
-    name: Publish immutable platform authority state
-    needs: [publish-images, release-metadata]
-    runs-on: ubuntu-latest
-    environment: platform-release
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Check out tagged publication client
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
-      - name: Download immutable platform build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: platform-build-${{ needs.release-metadata.outputs.version }}
-          path: release-output
-      - name: Revalidate release authority before platform publication
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          TAG_NAME: ${{ github.ref_name }}
-          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
-
-      - name: Publish immutable platform target
-        shell: bash
-        env:
-          VONK_PLATFORM_AUTHORITY_URL: ${{ vars.VONK_PLATFORM_AUTHORITY_URL }}
-          VONK_PLATFORM_AUTHORITY_AUDIENCE: ${{ vars.VONK_PLATFORM_AUTHORITY_AUDIENCE }}
-          VONK_PLATFORM_TUF_PUBLISHER_BIN: ${{ github.workspace }}/scripts/platform-release-authority
-        run: |
-          set -euo pipefail
-          uv run --frozen scripts/publish-platform-target publish-target \
-            --manifest release-output/platform-release.json \
-            --bundle release-output/control-deployment.tar \
-            > release-output/platform-publication.json
-      - name: Upload platform authority evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: platform-authority-${{ needs.release-metadata.outputs.version }}
-          retention-days: 1
-          if-no-files-found: error
-          path: release-output/platform-publication.json
+          path: release-output/docker-compose.production.yml
 
   release-manifest:
     name: Publish container release manifest
-    needs: [release-metadata, publish-images, build-agent-package, attest-host-updater, publish-platform-target]
+    needs: [release-metadata, publish-images, build-agent-package, native-amd64-agent-lifecycle]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -983,11 +855,6 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
-          path: release-output
-      - name: Download platform authority evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: platform-authority-${{ needs.release-metadata.outputs.version }}
           path: release-output
       - name: Download verified agent package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1025,21 +892,30 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE: ${{ needs.build-agent-package.outputs.package }}
+          ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}
+          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
           SOURCE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build-agent-package.outputs.version }}
         run: |
           set -euo pipefail
-          [[ "$PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
+          [[ "$ARM64_PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
+          [[ "$AMD64_PACKAGE" == "vonk-forge-agent_${VERSION}_amd64.deb" ]]
           release_assets=(
-            "release-output/agent-package/$PACKAGE"
-            "release-output/agent-package/${PACKAGE}.sha256"
-            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.cdx.json"
-            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.spdx.json"
-            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.provenance.json"
-            "release-output/agent-package/${PACKAGE}.sigstore.json"
+            "release-output/agent-package/$ARM64_PACKAGE"
+            "release-output/agent-package/$AMD64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )
+          for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"; do
+            architecture=${package%.deb}
+            architecture=${architecture##*_}
+            release_assets+=(
+              "release-output/agent-package/${package}.sha256"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.cdx.json"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.spdx.json"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.provenance.json"
+              "release-output/agent-package/${package}.sigstore.json"
+            )
+          done
           mapfile -t expected_names < <(
             printf '%s\n' "${release_assets[@]##*/}" | LC_ALL=C sort
           )
@@ -1060,12 +936,7 @@ jobs:
             "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$SOURCE_SHA" \
             "Vonk Forge $VERSION" \
             vonk-forge-images.env vonk-forge-images.env.sha256 \
-            release-output/control-deployment-descriptor.json \
             release-output/docker-compose.production.yml \
-            release-output/vonk-forge-host-updater.tar \
-            release-output/vonk-forge-host-updater.tar.sha256 \
-            release-output/platform-release.json \
-            release-output/platform-publication.json \
             "${release_assets[@]}"
 
   advance-production-aliases:
@@ -1164,9 +1035,7 @@ jobs:
           install -d -m 0700 "$evidence_dir"
           for asset in \
             vonk-forge-images.env \
-            vonk-forge-images.env.sha256 \
-            platform-release.json \
-            platform-publication.json; do
+            vonk-forge-images.env.sha256; do
             mapfile -t asset_urls < <(
               jq -r --arg tag "$target_tag" --arg asset "$asset" '
                 [.[] | select(
@@ -1217,9 +1086,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" >/dev/null
           for asset in \
             vonk-forge-images.env \
-            vonk-forge-images.env.sha256 \
-            platform-release.json \
-            platform-publication.json; do
+            vonk-forge-images.env.sha256; do
             test -f "$EVIDENCE_DIR/$asset" && test ! -L "$EVIDENCE_DIR/$asset"
             gh release verify-asset "$TARGET_TAG" \
               "$EVIDENCE_DIR/$asset" \
@@ -1302,27 +1169,6 @@ jobs:
             "hermes_digest=$hermes_digest" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Advance signed stable channel from complete release evidence
-        shell: bash
-        env:
-          EVIDENCE_DIR: ${{ runner.temp }}/vonk-production-alias-evidence
-          PLATFORM_CHANNEL: ${{ needs.release-metadata.outputs.platform_channel }}
-          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
-          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
-          VONK_PLATFORM_AUTHORITY_URL: ${{ vars.VONK_PLATFORM_AUTHORITY_URL }}
-          VONK_PLATFORM_AUTHORITY_AUDIENCE: ${{ vars.VONK_PLATFORM_AUTHORITY_AUDIENCE }}
-          VONK_PLATFORM_CHANNEL_PUBLISHER_BIN: ${{ github.workspace }}/scripts/platform-release-authority
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-          uv run --frozen scripts/publish-platform-target publish-channel \
-            --manifest "$EVIDENCE_DIR/platform-release.json" \
-            --target-receipt "$EVIDENCE_DIR/platform-publication.json" \
-            --channel "$PLATFORM_CHANNEL" \
-            > "$EVIDENCE_DIR/platform-channel-publication.json"
-
       - name: Revalidate selected authority before registry authentication
         shell: bash
         env:
@@ -1373,8 +1219,8 @@ jobs:
             "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
 
   publish-apt:
-    name: Publish the verified agent package to apt
-    needs: [release-metadata, build-agent-package, release-manifest]
+    name: Publish verified AMD64 and ARM64 agent packages to apt
+    needs: [release-metadata, build-agent-package, native-amd64-agent-lifecycle, release-manifest]
     if: needs.release-manifest.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1390,12 +1236,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Publish the verified agent package
+      - name: Publish verified AMD64 and ARM64 agent packages
         uses: ./.github/actions/agent-apt-publish
         with:
           channel: stable
           version: ${{ needs.build-agent-package.outputs.version }}
-          package: ${{ needs.build-agent-package.outputs.package }}
+          arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}
+          amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}
           artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
           environment: apt-release
           source_sha: ${{ github.sha }}

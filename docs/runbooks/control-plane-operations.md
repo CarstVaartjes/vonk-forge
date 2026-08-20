@@ -8,7 +8,7 @@ live node as a test target.
 ## Fleet
 
 Fleet is the authoritative operator view of each node. A node row joins the
-repository fleet definition with authenticated agent evidence: lifecycle,
+persisted PostgreSQL fleet definition with authenticated agent evidence: lifecycle,
 health, profile, agent activity, last-seen time, certificate expiry, capacity,
 and compatibility. Live updates arrive over the Fleet stream; the browser
 reconnects and falls back to polling when the stream is unavailable.

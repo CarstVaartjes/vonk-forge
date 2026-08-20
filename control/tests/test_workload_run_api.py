@@ -9,7 +9,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -22,6 +21,8 @@ from vonk_control.workload_run_workflow import (
     WorkloadRunWorkflow,
     WorkloadRunWorkflowError,
 )
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 
 class Jobs:

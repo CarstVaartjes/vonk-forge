@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .models import AgentNode, NodeMutationLease
 
-_OWNER_KINDS = frozenset({"reconciliation", "update-rollout"})
+_OWNER_KINDS = frozenset({"reconciliation"})
 
 
 class NodeLeaseConflict(RuntimeError):

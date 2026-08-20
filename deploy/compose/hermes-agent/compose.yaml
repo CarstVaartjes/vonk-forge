@@ -1,9 +1,7 @@
 x-hermes-service: &hermes-service
-  # Compose interpolates included anchors even when their service profile is
-  # disabled. Keep the base control-plane graph self-contained; enabling the
-  # hermes profile requires replacing this inert fallback with a published,
-  # digest-pinned Vonk Forge Hermes image in .env.
-  image: ${HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required}
+  # Compose interpolates profiles during validation, so every release manifest
+  # supplies the accepted immutable image even when Hermes remains disabled.
+  image: ${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}
   logging:
     driver: local
     options:
@@ -37,15 +35,9 @@ x-hermes-service: &hermes-service
   secrets:
     - hermes-api-key
   volumes: &hermes-volumes
-    - type: bind
-      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/data
-      target: /opt/data
-    - type: bind
-      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/workspaces
-      target: /workspace
-    - type: bind
-      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/cache
-      target: /opt/data/home/.cache
+    - hermes-data:/opt/data
+    - hermes-workspaces:/workspace
+    - hermes-cache:/opt/data/home/.cache
 
 services:
   hermes-agent:
@@ -56,10 +48,9 @@ services:
     networks:
       - tailnet-hermes-edge
       - hermes-inference
-      - hermes-egress
     depends_on:
       caddy:
-        condition: service_started
+        condition: service_healthy
         restart: true
       litellm:
         condition: service_healthy
@@ -77,22 +68,6 @@ services:
       retries: 12
       start_period: 30s
 
-  hermes-setup:
-    <<: *hermes-service
-    profiles: [setup]
-    restart: "no"
-    stdin_open: true
-    tty: true
-    command: [setup]
-    networks:
-      - hermes-inference
-      - hermes-egress
-    depends_on:
-      caddy:
-        condition: service_started
-      litellm:
-        condition: service_healthy
-
 secrets:
   hermes-api-key:
     file: ${HERMES_API_KEY_FILE:-/dev/null}
@@ -102,4 +77,8 @@ networks:
     internal: true
   hermes-inference:
     internal: true
-  hermes-egress: {}
+
+volumes:
+  hermes-data: {}
+  hermes-workspaces: {}
+  hermes-cache: {}

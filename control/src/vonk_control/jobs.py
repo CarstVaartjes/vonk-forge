@@ -332,7 +332,6 @@ class JobService:
                 select(Job)
                 .where(
                     Job.reconciliation_id.is_(None),
-                    Job.kind != "platform.update",
                     or_(
                         Job.state == "queued",
                         Job.id.in_(

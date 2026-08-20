@@ -142,7 +142,7 @@ def test_issuer_refuses_non_workload_operation_even_when_string_shaped() -> None
             fence="40000000-0000-4000-8000-000000000004",
             release_digest="a" * 64,
             generation="gen-future-stack-001",
-            operation="agent.update",
+            operation="node.probe",
             request_digest="b" * 64,
             expires_in_seconds=30,
         )

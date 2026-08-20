@@ -47,10 +47,11 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     networks:
+      - tailnet-control-plane
       - tailnet-web-edge
       - tailnet-hermes-edge
     healthcheck:
-      test: [CMD, tailscale, --socket=/var/run/tailscale/tailscaled.sock, status, --json]
+      test: [CMD-SHELL, "tailscale --socket=/var/run/tailscale/tailscaled.sock status --json | tr -d '[:space:]' | grep -Fq '\"BackendState\":\"Running\"'"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -65,6 +66,8 @@ services:
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro
+    secrets:
+      - hermes-api-key
     tmpfs:
       - /tmp:size=16m,mode=1777
     depends_on:
@@ -74,6 +77,12 @@ services:
       caddy:
         condition: service_healthy
         restart: true
+    healthcheck:
+      test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /usr/local/bin/configure-tailscale"]
+      interval: 15s
+      # Two sequential Hermes probes are each bounded to 3s.
+      timeout: 8s
+      retries: 12
 
 secrets:
   tailscale-oauth-client-id:
@@ -82,8 +91,9 @@ secrets:
     file: ${TAILSCALE_OAUTH_CLIENT_SECRET_FILE:?set Tailscale OAuth client secret file}
 
 networks:
-  # This edge also supplies the gateway's required outbound control-plane path.
-  tailnet-web-edge: {}
+  tailnet-control-plane: {}
+  tailnet-web-edge:
+    internal: true
   tailnet-hermes-edge:
     internal: true
 

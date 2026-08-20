@@ -11,7 +11,7 @@
     "attempt": {"type": "integer", "minimum": 1},
     "fence": {"type": "string", "format": "uuid"},
     "node_id": {"type": "string", "pattern": "^spk_[0-9a-f]{32}$"},
-    "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "agent.update", "agent.rollback", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
+    "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
     "authority_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload": {

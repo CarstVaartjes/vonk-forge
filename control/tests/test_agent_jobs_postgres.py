@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
-import subprocess
 import threading
 import time
 import uuid
@@ -10,11 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -25,16 +21,15 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
-    NodeMutationLease,
-    UpdateRollout,
-    UpdateRolloutNode,
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 
+from .runtime_identity_support import claim_agent
+
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-COMMIT = "a"  * 64
+COMMIT = "a" * 64
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -83,37 +78,6 @@ class RevokingAuthority(CertificateAuthority):
         return None
 
 
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL locking integration tests")
-    try:
-        container = subprocess.check_output([
-            "docker", "run", "--rm", "-d", "-e", "POSTGRES_PASSWORD=postgres",
-            "-p", "127.0.0.1::5432", "postgres:16",
-        ], text=True).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    try:
-        port = subprocess.check_output([
-            "docker", "inspect", "-f",
-            "{{(index (index .NetworkSettings.Ports \"5432/tcp\") 0).HostPort}}", container,
-        ], text=True).strip()
-        engine = create_engine(f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres")
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
-
-
 @pytest.fixture
 def service(postgres_engine):
     Base.metadata.drop_all(postgres_engine)
@@ -125,21 +89,31 @@ def service(postgres_engine):
             session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
         session.flush()
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentCertificate(
-                serial=serial,
-                node_id=node_id,
-                not_before=clock.now - timedelta(seconds=1),
-                not_after=clock.now + timedelta(hours=1),
-                fingerprint=f"fingerprint-{serial}",
-            ))
+            session.add(
+                AgentCertificate(
+                    serial=serial,
+                    node_id=node_id,
+                    not_before=clock.now - timedelta(seconds=1),
+                    not_after=clock.now + timedelta(hours=1),
+                    fingerprint=f"fingerprint-{serial}",
+                )
+            )
     return sessions, clock
 
 
 def parent(sessions, clock) -> Job:
     job = Job(
-        request_id=str(uuid.uuid4()), kind="agent.operations", state="queued", actor="operator",
-        authority_revision=COMMIT, targets=[NODE_A, NODE_B], payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={}, current_attempt=0, created_at=clock.now, updated_at=clock.now,
+        request_id=str(uuid.uuid4()),
+        kind="agent.operations",
+        state="queued",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_A, NODE_B],
+        payload_digest=hashlib.sha256(b"{}").hexdigest(),
+        payload={},
+        current_attempt=0,
+        created_at=clock.now,
+        updated_at=clock.now,
     )
     with sessions.begin() as session:
         session.add(job)
@@ -193,7 +167,9 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
     assert state(sessions, job.id) == "queued"
 
 
-def test_postgres_claim_locks_only_operations_without_nullable_join(service, postgres_engine) -> None:
+def test_postgres_claim_locks_only_operations_without_nullable_join(
+    service, postgres_engine
+) -> None:
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
@@ -205,7 +181,7 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(service, pos
 
     event.listen(postgres_engine, "before_cursor_execute", record)
     try:
-        assert jobs.claim(NODE_A, "serial-a", 30) is not None
+        assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
     finally:
         event.remove(postgres_engine, "before_cursor_execute", record)
 
@@ -218,12 +194,14 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     sessions, clock = service
     first_service = AgentJobService(sessions, clock=clock)
     second_service = AgentJobService(sessions, clock=clock)
-    operation = first_service.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
+    operation = first_service.enqueue(
+        parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {}
+    )
     barrier = threading.Barrier(2)
 
     def claim(service):
         barrier.wait()
-        return service.claim(NODE_A, "serial-a", 30)
+        return claim_agent(service, NODE_A, "serial-a", 30)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         claims = list(pool.map(claim, (first_service, second_service)))
@@ -233,218 +211,6 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     assert claimed[0].operation_id == operation.id
 
 
-def test_postgres_platform_update_failure_serializes_before_claim_without_deadlock(
-    service, postgres_engine
-) -> None:
-    sessions, clock = service
-    operation_id = str(uuid.uuid4())
-    rollout_id = str(uuid.uuid4())
-    job_id = str(uuid.uuid4())
-    rollout_node_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    lease_fence = str(uuid.uuid4())
-    deadline = int(clock.now.timestamp()) + 600
-    payload = {
-        "artifact": {},
-        "receipt": {
-            "attempt": 1,
-            "claim_deadline": deadline,
-            "expires_at": deadline,
-            "fence": fence,
-            "node_id": NODE_A,
-            "operation_id": operation_id,
-            "previous_generation": 1,
-            "previous_sha256": "f" * 64,
-            "previous_slot": "A",
-        },
-        "release": {},
-        "signature": {},
-    }
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.protocol_version = 3
-        node.platform_version = "1.0.0"
-        node.build_digest = "sha256:" + "1" * 64
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-        node.supervisor_generation = 1
-        objects = [
-                Job(
-                    id=job_id,
-                    request_id=str(uuid.uuid4()),
-                    kind="platform.update",
-                    state="running",
-                    actor="admin",
-                    authority_revision=COMMIT,
-                    targets=[NODE_A],
-                    payload_digest="2" * 64,
-                    payload={},
-                    current_attempt=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                UpdateRollout(
-                    id=rollout_id,
-                    job_id=job_id,
-                    state="updating",
-                    plan_digest="3" * 64,
-                    release_digest="4" * 64,
-                    authority_revision=COMMIT,
-                    fleet_digest="5" * 64,
-                    topology_digest="6" * 64,
-                    agent_input_digest="7" * 64,
-                    target_platform_version="2.0.0",
-                    target_build_digest="sha256:" + "8" * 64,
-                    tuf_targets_version=7,
-                    plan={},
-                    current_batch=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                AgentOperation(
-                    id=operation_id,
-                    parent_job_id=job_id,
-                    node_id=NODE_A,
-                    kind="agent.update",
-                    payload_digest=hashlib.sha256(
-                        canonical_message(payload)
-                    ).hexdigest(),
-                    payload=payload,
-                    authority_revision=COMMIT,
-                    state="queued",
-                    current_attempt=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                NodeMutationLease(
-                    node_id=NODE_A,
-                    owner_kind="update-rollout",
-                    owner_id=rollout_id,
-                    fence=lease_fence,
-                    state="held",
-                    acquired_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                UpdateRolloutNode(
-                    id=rollout_node_id,
-                    rollout_id=rollout_id,
-                    node_id=NODE_A,
-                    batch_index=0,
-                    node_order=0,
-                    is_canary=True,
-                    state="updating",
-                    operation_id=operation_id,
-                    operation_history=[],
-                    source_identity_digest="9" * 64,
-                    target_artifact_digest="a" * 64,
-                    dispatch_at=clock.now,
-                    activation_deadline=clock.now + timedelta(minutes=10),
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-        ]
-        for model in (
-            Job,
-            UpdateRollout,
-            AgentOperation,
-            NodeMutationLease,
-            UpdateRolloutNode,
-        ):
-            session.add_all(item for item in objects if isinstance(item, model))
-            session.flush()
-
-    refreshed_at = clock.now + timedelta(seconds=1)
-    with sessions() as stale_session:
-        cached_operation = stale_session.get(AgentOperation, operation_id)
-        cached_parent = stale_session.get(Job, job_id)
-        assert cached_operation is not None and cached_parent is not None
-        with sessions.begin() as writer:
-            durable_operation = writer.get(AgentOperation, operation_id)
-            durable_parent = writer.get(Job, job_id)
-            assert durable_operation is not None and durable_parent is not None
-            durable_operation.updated_at = refreshed_at
-            durable_parent.updated_at = refreshed_at
-        AgentJobService._lock_platform_update_claim(stale_session, operation_id)
-        assert cached_operation.updated_at == refreshed_at
-        assert cached_parent.updated_at == refreshed_at
-        stale_session.rollback()
-
-    failure_holds_rollout = threading.Event()
-    claim_waits_on_rollout = threading.Event()
-    claim_thread_id: list[int] = []
-
-    def observe_claim_lock(_conn, _cursor, statement, *_args) -> None:
-        if (
-            claim_thread_id
-            and threading.get_ident() == claim_thread_id[0]
-            and "update_rollouts" in statement
-            and "FOR UPDATE" in statement
-        ):
-            claim_waits_on_rollout.set()
-
-    event.listen(postgres_engine, "before_cursor_execute", observe_claim_lock)
-    jobs = AgentJobService(sessions, clock=clock)
-
-    def fail_rollout() -> None:
-        with sessions.begin() as session:
-            rollout = session.scalar(
-                select(UpdateRollout)
-                .where(UpdateRollout.id == rollout_id)
-                .with_for_update(of=UpdateRollout)
-            )
-            assert rollout is not None
-            failure_holds_rollout.set()
-            assert claim_waits_on_rollout.wait(5)
-            rollout_node = session.scalar(
-                select(UpdateRolloutNode)
-                .where(UpdateRolloutNode.id == rollout_node_id)
-                .with_for_update(of=UpdateRolloutNode)
-            )
-            assert rollout_node is not None
-            session.scalar(
-                select(AgentNode)
-                .where(AgentNode.node_id == NODE_A)
-                .with_for_update(of=AgentNode)
-            )
-            session.scalar(
-                select(NodeMutationLease)
-                .where(NodeMutationLease.node_id == NODE_A)
-                .with_for_update(of=NodeMutationLease)
-            )
-            parent_job = session.scalar(
-                select(Job).where(Job.id == job_id).with_for_update(of=Job)
-            )
-            operation = session.scalar(
-                select(AgentOperation)
-                .where(AgentOperation.id == operation_id)
-                .with_for_update(of=AgentOperation)
-            )
-            assert parent_job is not None and operation is not None
-            rollout.state = "paused"
-            rollout_node.state = "failed"
-            parent_job.state = "waiting-for-operator"
-
-    def claim_update():
-        claim_thread_id.append(threading.get_ident())
-        assert failure_holds_rollout.wait(5)
-        return jobs.claim(NODE_A, "serial-a", 1)
-
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            failure = pool.submit(fail_rollout)
-            claim = pool.submit(claim_update)
-            failure.result(timeout=10)
-            result = claim.result(timeout=10)
-    finally:
-        event.remove(postgres_engine, "before_cursor_execute", observe_claim_lock)
-
-    assert result is None
-    with sessions() as session:
-        operation = session.get(AgentOperation, operation_id)
-        assert operation is not None and operation.state == "waiting-for-operator"
-
-
 @pytest.mark.parametrize("agent_action", ("claim", "heartbeat", "result"))
 def test_postgres_revocation_serializes_agent_work_and_contact(
     service, postgres_engine, agent_action: str
@@ -452,11 +218,13 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
     enrollment = EnrollmentService(sessions, RevokingAuthority(), clock=clock)
-    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {}
+    )
     claim = None
     original_deadline = None
     if agent_action != "claim":
-        claim = jobs.claim(NODE_A, "serial-a", 30, protocol_version=3)
+        claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3)
         assert claim is not None
         original_deadline = claim.deadline
     with sessions.begin() as session:
@@ -483,13 +251,19 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     def revoke() -> None:
         try:
             enrollment.revoke_node(NODE_A, "admin")
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             revocation_errors.append(error)
 
     def act() -> None:
         try:
             if agent_action == "claim":
-                action_results.append(jobs.claim(NODE_A, "serial-a", 30))
+                action_results.append(claim_agent(jobs, NODE_A, "serial-a", 30))
             elif agent_action == "heartbeat":
                 assert claim is not None
                 action_results.append(jobs.heartbeat(claim, {"phase": "checking"}, 60))
@@ -497,7 +271,13 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
                 assert claim is not None
                 jobs.succeed(claim, PROBE_RESULT)
                 action_results.append(None)
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             action_results.append(error)
 
     event.listen(postgres_engine, "after_cursor_execute", pause_after_node_lock)
@@ -508,7 +288,9 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         assert revocation_locked.wait(timeout=5)
         worker.start()
         time.sleep(0.25)
-        assert worker.is_alive(), "agent work must wait for the revocation identity lock"
+        assert worker.is_alive(), (
+            "agent work must wait for the revocation identity lock"
+        )
         release_revocation.set()
         revoker.join(timeout=5)
         worker.join(timeout=5)
@@ -527,7 +309,9 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
         node = session.get(AgentNode, NODE_A)
         certificate = session.get(AgentCertificate, "serial-a")
         stored_operation = session.get(AgentOperation, operation.id)
-        assert node is not None and node.state == "retired" and node.last_seen_at is None
+        assert (
+            node is not None and node.state == "retired" and node.last_seen_at is None
+        )
         assert certificate is not None and certificate.state == "revoked"
         assert stored_operation is not None
         if agent_action == "claim":
@@ -535,35 +319,37 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
             assert stored_operation.current_attempt == 0
         else:
             assert claim is not None
-            attempt = session.scalar(select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == claim.attempt,
-            ))
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == claim.attempt,
+                )
+            )
             assert attempt is not None and attempt.state == "running"
             assert attempt.lease_deadline.astimezone(UTC) == original_deadline
             assert attempt.progress is None and attempt.result is None
 
 
-@pytest.mark.parametrize("operation_kind", ("node.probe", "workload.health", "workload.verify"))
-def test_postgres_expired_safe_operation_is_automatically_reclaimed(service, operation_kind: str) -> None:
+@pytest.mark.parametrize(
+    "operation_kind", ("node.probe", "workload.health", "workload.verify")
+)
+def test_postgres_expired_safe_operation_is_automatically_reclaimed(
+    service, operation_kind: str
+) -> None:
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
     jobs.enqueue(parent(sessions, clock).id, NODE_A, operation_kind, COMMIT, {})
-    first = jobs.claim(NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
 
     clock.advance(seconds=30)
-    second = jobs.claim(NODE_A, "serial-a", 30)
+    second = claim_agent(jobs, NODE_A, "serial-a", 30)
 
     assert second is not None
     assert second.operation_id == first.operation_id
     assert second.attempt == 2
 
 
-# ``agent.update`` requires a separately constructed signed-update authority;
-# its PostgreSQL expiry path is covered by the dedicated update tests.  This
-# persistence test intentionally exercises only operations whose payload can
-# be enqueued through the generic service fixture.
 @pytest.mark.parametrize("operation_kind", ("release.install", "workload.start"))
 def test_postgres_expired_mutating_operation_requires_persisted_retry_disposition(
     service, operation_kind: str
@@ -572,21 +358,23 @@ def test_postgres_expired_mutating_operation_requires_persisted_retry_dispositio
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, operation_kind, COMMIT, {})
-    first = jobs.claim(NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
 
     clock.advance(seconds=30)
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
     with sessions() as session:
         gated = session.get(AgentOperation, operation.id)
         assert gated is not None
         assert gated.state == "waiting-for-operator"
         assert gated.retry_disposition is None
         assert gated.retry_disposition_attempt is None
-        attempt = session.scalar(select(AgentOperationAttempt).where(
-            AgentOperationAttempt.operation_id == operation.id,
-            AgentOperationAttempt.attempt == 1,
-        ))
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 1,
+            )
+        )
         assert attempt is not None and attempt.state == "expired"
         assert session.get(Job, parent_job.id).state == "waiting-for-operator"  # type: ignore[union-attr]
 
@@ -596,16 +384,18 @@ def test_postgres_expired_mutating_operation_requires_persisted_retry_dispositio
         gated.retry_disposition = "retry"
         gated.retry_disposition_attempt = 1
 
-    second = jobs.claim(NODE_A, "serial-a", 30)
+    second = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert second is not None
     assert second.operation_id == first.operation_id
     assert second.attempt == 2
 
     clock.advance(seconds=30)
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
 
 
-@pytest.mark.parametrize("terminal_state", ("succeeded", "failed", "waiting-for-operator", "expired"))
+@pytest.mark.parametrize(
+    "terminal_state", ("succeeded", "failed", "waiting-for-operator", "expired")
+)
 def test_postgres_enqueue_rejects_terminal_parent(service, terminal_state: str) -> None:
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
@@ -623,7 +413,7 @@ def test_postgres_enqueue_rejects_parent_commit_mismatch(service) -> None:
     parent_job = parent(sessions, clock)
 
     with pytest.raises(ValueError, match="authority revision"):
-        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b"  * 64, {})
+        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b" * 64, {})
 
 
 def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
@@ -637,18 +427,22 @@ def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
         jobs.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
 
 
-def test_postgres_enqueue_cannot_race_parent_finalization(service, postgres_engine) -> None:
+def test_postgres_enqueue_cannot_race_parent_finalization(
+    service, postgres_engine
+) -> None:
     sessions, clock = service
     finishing = AgentJobService(sessions, clock=clock)
     enqueueing = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     finishing.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
-    claim = finishing.claim(NODE_A, "serial-a", 30)
+    claim = claim_agent(finishing, NODE_A, "serial-a", 30)
     assert claim is not None
     aggregation_read = threading.Event()
     release = threading.Event()
 
-    def pause_after_aggregation_read(_conn, _cursor, statement, _parameters, _context, _many) -> None:
+    def pause_after_aggregation_read(
+        _conn, _cursor, statement, _parameters, _context, _many
+    ) -> None:
         if (
             threading.current_thread().name == "finisher"
             and "FROM agent_operations" in statement
@@ -664,13 +458,25 @@ def test_postgres_enqueue_cannot_race_parent_finalization(service, postgres_engi
     def finish() -> None:
         try:
             finishing.succeed(claim.fence, PROBE_RESULT)
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             finish_errors.append(error)
 
     def enqueue() -> None:
         try:
             enqueueing.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             enqueue_errors.append(error)
 
     event.listen(postgres_engine, "after_cursor_execute", pause_after_aggregation_read)
@@ -687,7 +493,9 @@ def test_postgres_enqueue_cannot_race_parent_finalization(service, postgres_engi
         enqueuer.join(timeout=5)
     finally:
         release.set()
-        event.remove(postgres_engine, "after_cursor_execute", pause_after_aggregation_read)
+        event.remove(
+            postgres_engine, "after_cursor_execute", pause_after_aggregation_read
+        )
 
     assert not finish_errors
     assert len(enqueue_errors) == 1
@@ -695,9 +503,13 @@ def test_postgres_enqueue_cannot_race_parent_finalization(service, postgres_engi
     assert "terminal" in str(enqueue_errors[0])
     assert state(sessions, parent_job.id) == "succeeded"
     with sessions() as session:
-        child_count = session.scalar(select(func.count()).select_from(AgentOperation).where(
-            AgentOperation.parent_job_id == parent_job.id,
-        ))
+        child_count = session.scalar(
+            select(func.count())
+            .select_from(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id == parent_job.id,
+            )
+        )
     assert child_count == 1
 
 
@@ -708,10 +520,8 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     enqueueing = AgentJobService(sessions, clock=clock)
     finishing = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
-    first_operation = finishing.enqueue(
-        parent_job.id, NODE_A, "node.probe", COMMIT, {}
-    )
-    claim = finishing.claim(NODE_A, "serial-a", 30)
+    first_operation = finishing.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
+    claim = claim_agent(finishing, NODE_A, "serial-a", 30)
     assert claim is not None
     node_locked = threading.Event()
     release_enqueue = threading.Event()
@@ -732,17 +542,27 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     def enqueue() -> None:
         try:
             enqueue_results.append(
-                enqueueing.enqueue(
-                    parent_job.id, NODE_A, "workload.health", COMMIT, {}
-                )
+                enqueueing.enqueue(parent_job.id, NODE_A, "workload.health", COMMIT, {})
             )
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             enqueue_results.append(error)
 
     def finish() -> None:
         try:
             finishing.succeed(claim, PROBE_RESULT)
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             finish_errors.append(error)
 
     event.listen(postgres_engine, "after_cursor_execute", pause_after_enqueue_node_lock)
@@ -759,7 +579,9 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
         finisher.join(timeout=5)
     finally:
         release_enqueue.set()
-        event.remove(postgres_engine, "after_cursor_execute", pause_after_enqueue_node_lock)
+        event.remove(
+            postgres_engine, "after_cursor_execute", pause_after_enqueue_node_lock
+        )
 
     assert not enqueuer.is_alive() and not finisher.is_alive()
     assert not finish_errors
@@ -767,9 +589,13 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     assert not isinstance(enqueue_results[0], Exception)
     with sessions() as session:
         first = session.get(AgentOperation, first_operation.id)
-        sibling_count = session.scalar(select(func.count()).select_from(AgentOperation).where(
-            AgentOperation.parent_job_id == parent_job.id,
-        ))
+        sibling_count = session.scalar(
+            select(func.count())
+            .select_from(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id == parent_job.id,
+            )
+        )
         stored_parent = session.get(Job, parent_job.id)
         assert first is not None and first.state == "succeeded"
         assert sibling_count == 2
@@ -783,7 +609,7 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
     completing = AgentJobService(sessions, clock=clock)
     reclaiming = AgentJobService(sessions, clock=clock)
     completing.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
-    first = completing.claim(NODE_A, "serial-a", 30)
+    first = claim_agent(completing, NODE_A, "serial-a", 30)
     assert first is not None
     clock.advance(seconds=30)
     locked = threading.Event()
@@ -791,7 +617,9 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
     errors: list[Exception] = []
     reclaimed: list[object] = []
 
-    def pause_after_operation_lock(_conn, _cursor, statement, _parameters, _context, _many) -> None:
+    def pause_after_operation_lock(
+        _conn, _cursor, statement, _parameters, _context, _many
+    ) -> None:
         if (
             threading.current_thread().name == "finisher"
             and "FROM agent_operations" in statement
@@ -802,16 +630,29 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
 
     event.listen(postgres_engine, "after_cursor_execute", pause_after_operation_lock)
     try:
+
         def finish() -> None:
             try:
                 completing.succeed(first.fence, PROBE_RESULT)
-            except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+            except (
+                AssertionError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                SQLAlchemyError,
+            ) as error:
                 errors.append(error)
 
         def reclaim() -> None:
             try:
-                reclaimed.append(reclaiming.claim(NODE_A, "serial-a", 30))
-            except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+                reclaimed.append(claim_agent(reclaiming, NODE_A, "serial-a", 30))
+            except (
+                AssertionError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                SQLAlchemyError,
+            ) as error:
                 reclaimed.append(error)
 
         finisher = threading.Thread(target=finish, name="finisher")
@@ -820,13 +661,17 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
         assert locked.wait(timeout=5)
         reclaimer.start()
         time.sleep(0.25)
-        assert reclaimer.is_alive(), "reclaim must wait for the active identity transaction"
+        assert reclaimer.is_alive(), (
+            "reclaim must wait for the active identity transaction"
+        )
         release.set()
         finisher.join(timeout=5)
         reclaimer.join(timeout=5)
     finally:
         release.set()
-        event.remove(postgres_engine, "after_cursor_execute", pause_after_operation_lock)
+        event.remove(
+            postgres_engine, "after_cursor_execute", pause_after_operation_lock
+        )
 
     assert len(errors) == 1
     assert isinstance(errors[0], StaleAgentAttempt)
@@ -836,20 +681,24 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
     assert reclaimed[0] is not None
 
 
-def test_postgres_concurrent_final_completions_aggregate_parent_once(service, postgres_engine) -> None:
+def test_postgres_concurrent_final_completions_aggregate_parent_once(
+    service, postgres_engine
+) -> None:
     sessions, clock = service
     first_service = AgentJobService(sessions, clock=clock)
     second_service = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     first_service.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
     first_service.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
-    first = first_service.claim(NODE_A, "serial-a", 30)
-    second = second_service.claim(NODE_B, "serial-b", 30)
+    first = claim_agent(first_service, NODE_A, "serial-a", 30)
+    second = claim_agent(second_service, NODE_B, "serial-b", 30)
     assert first is not None and second is not None
     aggregation_started = threading.Event()
     release = threading.Event()
 
-    def pause_before_aggregation_reads_siblings(_conn, _cursor, statement, _parameters, _context, _many) -> None:
+    def pause_before_aggregation_reads_siblings(
+        _conn, _cursor, statement, _parameters, _context, _many
+    ) -> None:
         if (
             "FROM agent_operations" in statement
             and "parent_job_id" in statement
@@ -858,23 +707,43 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(service, po
             aggregation_started.set()
             assert release.wait(timeout=5)
 
-    event.listen(postgres_engine, "after_cursor_execute", pause_before_aggregation_reads_siblings)
+    event.listen(
+        postgres_engine, "after_cursor_execute", pause_before_aggregation_reads_siblings
+    )
     errors: list[Exception] = []
+
     def complete(service, fence) -> None:
         try:
             service.succeed(fence, PROBE_RESULT)
-        except (AssertionError, OSError, RuntimeError, ValueError, SQLAlchemyError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             errors.append(error)
+
     try:
-        thread_a = threading.Thread(target=complete, args=(first_service, first.fence), name="first-finisher")
-        thread_b = threading.Thread(target=complete, args=(second_service, second.fence), name="second-finisher")
-        thread_a.start(); thread_b.start()
+        thread_a = threading.Thread(
+            target=complete, args=(first_service, first.fence), name="first-finisher"
+        )
+        thread_b = threading.Thread(
+            target=complete, args=(second_service, second.fence), name="second-finisher"
+        )
+        thread_a.start()
+        thread_b.start()
         assert aggregation_started.wait(timeout=5)
         time.sleep(0.25)
         release.set()
-        thread_a.join(timeout=5); thread_b.join(timeout=5)
+        thread_a.join(timeout=5)
+        thread_b.join(timeout=5)
     finally:
-        event.remove(postgres_engine, "after_cursor_execute", pause_before_aggregation_reads_siblings)
+        event.remove(
+            postgres_engine,
+            "after_cursor_execute",
+            pause_before_aggregation_reads_siblings,
+        )
 
     assert not errors
     assert not thread_a.is_alive() and not thread_b.is_alive()

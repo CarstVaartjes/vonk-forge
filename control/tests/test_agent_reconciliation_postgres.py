@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import subprocess
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -13,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -42,10 +39,12 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
+from .runtime_identity_support import claim_agent
+
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
-BASE_COMMIT = "a"  * 64
+BASE_COMMIT = "a" * 64
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
 AGENT_CAPABILITIES = (
     "agent.runtime.rust.v1",
@@ -105,58 +104,6 @@ def _verify_result() -> dict[str, object]:
     }
 
 
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL races")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:16",
-            ],
-            text=True,
-            stderr=subprocess.STDOUT,
-        ).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"Docker daemon is unavailable: {error.output.strip()}")
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            pytest.fail("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(
-            ["docker", "stop", container], check=False, capture_output=True
-        )
-
-
 def test_postgres_node_lease_race_has_one_database_owner(
     postgres_engine: Engine,
 ) -> None:
@@ -174,7 +121,7 @@ def test_postgres_node_lease_race_has_one_database_owner(
                 NodeLeaseService(clock=lambda: NOW).acquire_in_session(
                     session,
                     (NODE_A,),
-                    owner_kind="update-rollout",
+                    owner_kind="reconciliation",
                     owner_id=owner_id,
                 )
             return owner_id
@@ -243,9 +190,7 @@ def _system(
             "port": 8000,
             "path": "/v1",
             "quota": quota,
-            "quota_digest": hashlib.sha256(
-                canonical_message(quota)
-            ).hexdigest(),
+            "quota_digest": hashlib.sha256(canonical_message(quota)).hexdigest(),
         }
     }
     resolved = {
@@ -341,13 +286,15 @@ def _claimed(system):
     sessions, _presence, operations, reconciliations, reconciliation_id, job_id = system
     for _ in range(4):
         assert reconciliations.tick(reconciliation_id) is True
-    claim = operations.claim(NODE_A, "serial-a", 30)
+    claim = claim_agent(operations, NODE_A, "serial-a", 30)
     assert claim is not None
     return sessions, operations, reconciliations, reconciliation_id, job_id, claim
 
 
 def _clone_service(system) -> AgentReconciliationService:
-    sessions, presence, operations, reconciliations, _reconciliation_id, _job_id = system
+    sessions, presence, operations, reconciliations, _reconciliation_id, _job_id = (
+        system
+    )
 
     def endpoint(session, node_id):
         observation = presence.latest_in_session(
@@ -374,29 +321,44 @@ def test_postgres_authority_prefetch_runs_after_snapshot_locks_are_released(
 
     def prefetch(*_args) -> None:
         with sessions.begin() as competing:
-            assert competing.scalar(
-                select(Reconciliation)
-                .where(Reconciliation.id == reconciliation_id)
-                .with_for_update(nowait=True)
-            ) is not None
-            assert competing.scalar(
-                select(Job).where(Job.id == job_id).with_for_update(nowait=True)
-            ) is not None
-            assert competing.scalar(
-                select(AgentNode)
-                .where(AgentNode.node_id == NODE_A)
-                .with_for_update(nowait=True)
-            ) is not None
-            assert competing.scalar(
-                select(AgentCertificate)
-                .where(AgentCertificate.serial == "serial-a")
-                .with_for_update(nowait=True)
-            ) is not None
-            assert competing.scalar(
-                select(AgentPresence)
-                .where(AgentPresence.node_id == NODE_A)
-                .with_for_update(nowait=True)
-            ) is not None
+            assert (
+                competing.scalar(
+                    select(Reconciliation)
+                    .where(Reconciliation.id == reconciliation_id)
+                    .with_for_update(nowait=True)
+                )
+                is not None
+            )
+            assert (
+                competing.scalar(
+                    select(Job).where(Job.id == job_id).with_for_update(nowait=True)
+                )
+                is not None
+            )
+            assert (
+                competing.scalar(
+                    select(AgentNode)
+                    .where(AgentNode.node_id == NODE_A)
+                    .with_for_update(nowait=True)
+                )
+                is not None
+            )
+            assert (
+                competing.scalar(
+                    select(AgentCertificate)
+                    .where(AgentCertificate.serial == "serial-a")
+                    .with_for_update(nowait=True)
+                )
+                is not None
+            )
+            assert (
+                competing.scalar(
+                    select(AgentPresence)
+                    .where(AgentPresence.node_id == NODE_A)
+                    .with_for_update(nowait=True)
+                )
+                is not None
+            )
         observed["unlocked"] = True
 
     reconciliations = AgentReconciliationService(
@@ -479,8 +441,7 @@ def _mark_completed(
         )
         assert reconciliation is not None and job is not None
         generation = (
-            session.scalar(select(func.max(Reconciliation.completion_generation)))
-            or 0
+            session.scalar(select(func.max(Reconciliation.completion_generation))) or 0
         ) + 1
         reconciliation.current_phase = "completed"
         reconciliation.status = "succeeded"
@@ -572,7 +533,8 @@ def test_postgres_contact_failure_rolls_back_claim_lease_and_presence(
     for _ in range(4):
         reconciliations.tick(reconciliation_id)
     with pytest.raises(ValueError, match="contact write rejected"):
-        operations.claim(
+        claim_agent(
+            operations,
             NODE_A,
             "serial-a",
             30,
@@ -584,7 +546,9 @@ def test_postgres_contact_failure_rolls_back_claim_lease_and_presence(
         contact = session.get(AgentPresence, NODE_A)
         assert stored is not None and stored.state == "queued"
         assert stored.current_attempt == 0
-        assert session.scalar(select(func.count()).select_from(AgentOperationAttempt)) == 0
+        assert (
+            session.scalar(select(func.count()).select_from(AgentOperationAttempt)) == 0
+        )
         assert contact is not None and contact.management_address == "10.0.0.42"
 
 
@@ -635,10 +599,12 @@ def test_postgres_stale_result_does_not_write_contact(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     system = _system(postgres_engine, tmp_path / "stale-contact")
-    sessions, presence, operations, _reconciliations, _reconciliation_id, _job_id = system
-    operations.set_contact_consumer(presence.observe_in_session)
-    sessions, operations, _reconciliations, _reconciliation_id, _job_id, claim = _claimed(
+    sessions, presence, operations, _reconciliations, _reconciliation_id, _job_id = (
         system
+    )
+    operations.set_contact_consumer(presence.observe_in_session)
+    sessions, operations, _reconciliations, _reconciliation_id, _job_id, claim = (
+        _claimed(system)
     )
     stale = AgentResult(
         schema_version=1,
@@ -664,15 +630,19 @@ def test_postgres_publication_reuses_tick_session_for_presence(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     system = _system(postgres_engine, tmp_path / "publication-session")
-    _sessions, _presence, operations, reconciliations, reconciliation_id, _job_id = system
-    _sessions, operations, reconciliations, reconciliation_id, _job_id, claim = _claimed(
+    _sessions, _presence, operations, reconciliations, reconciliation_id, _job_id = (
         system
+    )
+    _sessions, operations, reconciliations, reconciliation_id, _job_id, claim = (
+        _claimed(system)
     )
     operations.succeed(claim, _verify_result())
     reconciliations.tick(reconciliation_id)
     reconciliations.tick(reconciliation_id)
 
-    def bounded_lock_wait(_dbapi_connection, connection_record, connection_proxy) -> None:
+    def bounded_lock_wait(
+        _dbapi_connection, connection_record, connection_proxy
+    ) -> None:
         del connection_record, connection_proxy
         with _dbapi_connection.cursor() as cursor:
             cursor.execute("SET lock_timeout = '500ms'")
@@ -692,7 +662,9 @@ def test_postgres_tick_tick_race_enqueues_one_operation(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     system = _system(postgres_engine, tmp_path / "tick-tick")
-    sessions, _presence, _operations, reconciliations, reconciliation_id, _job_id = system
+    sessions, _presence, _operations, reconciliations, reconciliation_id, _job_id = (
+        system
+    )
     for _ in range(3):
         reconciliations.tick(reconciliation_id)
     other = _clone_service(system)
@@ -711,8 +683,8 @@ def test_postgres_result_tick_race_preserves_exact_acceptance(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     system = _system(postgres_engine, tmp_path / "result-tick")
-    sessions, operations, _reconciliations, _reconciliation_id, _job_id, claim = _claimed(
-        system
+    sessions, operations, _reconciliations, _reconciliation_id, _job_id, claim = (
+        _claimed(system)
     )
     other = _clone_service(system)
 
@@ -945,7 +917,9 @@ def test_postgres_successor_authority_loss_withdraws_predecessor_before_wait(
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, _operations, service, old_id, _job_id = system
-    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._revision_eligible = lambda commit: (
+        authority["eligible"] and commit == BASE_COMMIT
+    )
     service._current_revision = lambda: authority["authority_revision"]
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -995,7 +969,9 @@ def test_postgres_pending_successor_does_not_block_fail_closed_owner_withdrawal(
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, _operations, service, old_id, _job_id = system
-    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._revision_eligible = lambda commit: (
+        authority["eligible"] and commit == BASE_COMMIT
+    )
     service._current_revision = lambda: BASE_COMMIT
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -1043,7 +1019,9 @@ def test_postgres_publication_ack_crash_then_authority_loss_withdraws_routes(
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, operations, service, reconciliation_id, _job_id = system
-    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._revision_eligible = lambda commit: (
+        authority["eligible"] and commit == BASE_COMMIT
+    )
     service._current_revision = lambda: BASE_COMMIT
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -1490,9 +1468,7 @@ def _compensation_system(
         "input_digests": {"fleet": "f" * 64},
         "fleet_evidence_digest": "e" * 64,
         "operation_graph": graph,
-        "operation_payloads": {
-            operation_id: payload for operation_id in operation_ids
-        },
+        "operation_payloads": {operation_id: payload for operation_id in operation_ids},
         "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
@@ -1564,9 +1540,7 @@ def _compensation_system(
                     created_at=NOW,
                     updated_at=NOW,
                 )
-                for primary_id, node_id in zip(
-                    primary_ids, selected_nodes, strict=True
-                )
+                for primary_id, node_id in zip(primary_ids, selected_nodes, strict=True)
             ]
         )
         session.add(
@@ -1742,11 +1716,11 @@ def test_postgres_agent_declared_uncertainty_quiesces_all_primary_siblings(
             operation.state = "queued"
             operation.current_attempt = 0
 
-    declared = queue.claim(NODE_A, "serial-a", 30)
+    declared = claim_agent(queue, NODE_A, "serial-a", 30)
     assert declared is not None
     sibling = None
     if sibling_state == "running":
-        sibling = queue.claim(NODE_B, "serial-b", 30)
+        sibling = claim_agent(queue, NODE_B, "serial-b", 30)
         assert sibling is not None
 
     queue.wait_for_operator(declared, "mutation outcome requires operator")
@@ -1776,7 +1750,7 @@ def test_postgres_agent_declared_uncertainty_quiesces_all_primary_siblings(
             )
             assert attempt is not None and attempt.state == "waiting-for-operator"
 
-    assert queue.claim(NODE_B, "serial-b", 30) is None
+    assert claim_agent(queue, NODE_B, "serial-b", 30) is None
     if sibling is not None:
         with pytest.raises(StaleAgentAttempt):
             queue.succeed(sibling, _verify_result())
@@ -1811,7 +1785,7 @@ def test_postgres_claim_fails_closed_on_authoritative_operator_wait(
             operation.state = "queued"
             operation.current_attempt = 0
 
-    assert queue.claim(NODE_B, "serial-b", 30) is None
+    assert claim_agent(queue, NODE_B, "serial-b", 30) is None
     with sessions() as session:
         operation = session.scalar(
             select(AgentOperation).where(AgentOperation.node_id == NODE_B)
@@ -1853,11 +1827,11 @@ def test_postgres_maintenance_sweeps_unsafe_expiry_without_follow_up_claim(
             operation.state = "queued"
             operation.current_attempt = 0
 
-    expired = queue.claim(NODE_A, "serial-a", 30)
+    expired = claim_agent(queue, NODE_A, "serial-a", 30)
     assert expired is not None
     sibling = None
     if sibling_state == "running":
-        sibling = queue.claim(NODE_B, "serial-b", 30)
+        sibling = claim_agent(queue, NODE_B, "serial-b", 30)
         assert sibling is not None
     current[0] += timedelta(seconds=31)
 
@@ -1883,7 +1857,7 @@ def test_postgres_maintenance_sweeps_unsafe_expiry_without_follow_up_claim(
         expected = "failed" if sibling_state == "queued" else "waiting-for-operator"
         assert sibling_operation is not None and sibling_operation.state == expected
 
-    assert queue.claim(NODE_B, "serial-b", 30) is None
+    assert claim_agent(queue, NODE_B, "serial-b", 30) is None
 
 
 def test_postgres_claim_expiry_quiesces_queued_and_running_siblings_and_rejects_callbacks(
@@ -1921,12 +1895,12 @@ def test_postgres_claim_expiry_quiesces_queued_and_running_siblings_and_rejects_
             operation.state = "queued"
             operation.current_attempt = 0
 
-    expired = queue.claim(NODE_A, "serial-a", 10)
-    running = queue.claim(NODE_B, "serial-b", 60)
+    expired = claim_agent(queue, NODE_A, "serial-a", 10)
+    running = claim_agent(queue, NODE_B, "serial-b", 60)
     assert expired is not None and running is not None
     current[0] += timedelta(seconds=11)
 
-    assert queue.claim(NODE_A, "serial-a", 30) is None
+    assert claim_agent(queue, NODE_A, "serial-a", 30) is None
 
     with sessions() as session:
         reconciliation = session.get(Reconciliation, reconciliation_id)
@@ -1971,7 +1945,7 @@ def test_postgres_claim_expiry_quiesces_queued_and_running_siblings_and_rejects_
         queue.heartbeat(running, {"phase": "must-not-persist"}, 60)
     with pytest.raises(StaleAgentAttempt):
         queue.succeed(running, {"status": "must-not-persist"})
-    assert queue.claim(NODE_C, "serial-c", 30) is None
+    assert claim_agent(queue, NODE_C, "serial-c", 30) is None
 
     with sessions() as session:
         attempt = session.scalar(
@@ -2017,7 +1991,7 @@ def test_postgres_active_callbacks_reject_authoritative_operator_wait_without_mu
         operation.state = "queued"
         operation.current_attempt = 0
 
-    claim = queue.claim(NODE_A, "serial-a", 60)
+    claim = claim_agent(queue, NODE_A, "serial-a", 60)
     assert claim is not None
     with sessions.begin() as session:
         reconciliation = session.get(Reconciliation, reconciliation_id)
@@ -2164,7 +2138,9 @@ def test_postgres_automatic_tick_does_not_preempt_running_owner_with_later_plan(
     postgres_engine: Engine,
     tmp_path: Path,
 ) -> None:
-    system = _system(postgres_engine, tmp_path / "automatic-running-owner-serialization")
+    system = _system(
+        postgres_engine, tmp_path / "automatic-running-owner-serialization"
+    )
     sessions, operations, service, old_id, _job_id, claim = _claimed(system)
     later_id, _later_job_id = _insert_successor(sessions, old_id)
 
@@ -2220,7 +2196,7 @@ def test_postgres_automatic_ticks_do_not_starve_older_unsafe_expiry(
         projection.accepted_at = None
         operation.state = "queued"
         operation.current_attempt = 0
-    claim = queue.claim(NODE_A, "serial-a", 10)
+    claim = claim_agent(queue, NODE_A, "serial-a", 10)
     assert claim is not None
     stale_id, _stale_job_id = _insert_successor(
         sessions,
@@ -2302,7 +2278,7 @@ def test_postgres_revocation_quiesces_sibling_mutation_and_compensation(
 
     claim = None
     if operation_state == "running":
-        claim = queue.claim(NODE_A, "serial-a", 30)
+        claim = claim_agent(queue, NODE_A, "serial-a", 30)
         assert claim is not None and claim.operation_id == operation_id
 
     enrollment = EnrollmentService(sessions, RevokingAuthority(), clock=lambda: NOW)

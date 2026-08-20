@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.api import create_app, create_preselection_app
+from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -125,10 +125,6 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
     # retain the ordinary one-MiB API ceiling.
     assert client.post(route, content=body).status_code == 413
     assert client.put(f"{route}/extra", content=body).status_code == 413
-
-
-def test_preselection_is_a_distinct_app_factory() -> None:
-    assert create_preselection_app is not create_app
 
 
 def test_removed_package_and_deployment_routes_are_not_registered() -> None:

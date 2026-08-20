@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{fs, os::unix::fs::PermissionsExt};
+use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
 use chrono::{TimeZone, Utc};
 use rcgen::string::Ia5String;
@@ -16,7 +16,7 @@ use vonk_agent::{
     },
     pair::{
         EnrollmentEvidence, EnrollmentOutcome, EnrollmentResponse, IssuedResponse, PairingError,
-        pair, validate_enrollment_response, validate_issued,
+        complete_pairing_with, pair, validate_enrollment_response, validate_issued,
     },
 };
 
@@ -150,6 +150,64 @@ fn pending_enrollment_never_publishes_credentials() {
             state: "pending-approval".to_owned(),
         })
     );
+}
+
+#[tokio::test]
+async fn pairing_waits_for_human_approval_until_the_certificate_is_issued() {
+    let mut attempts = 0_u8;
+    let mut observed = Vec::new();
+
+    complete_pairing_with(
+        3,
+        Duration::ZERO,
+        || {
+            attempts += 1;
+            let attempt = attempts;
+            async move {
+                Ok(if attempt < 3 {
+                    EnrollmentOutcome::Pending(EnrollmentResponse {
+                        id: "enrollment-1".to_owned(),
+                        node_id: NODE_ID.to_owned(),
+                        state: "pending-approval".to_owned(),
+                    })
+                } else {
+                    EnrollmentOutcome::Issued
+                })
+            }
+        },
+        |pending| observed.push((pending.id.clone(), pending.state.clone())),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(attempts, 3);
+    assert_eq!(
+        observed,
+        vec![
+            ("enrollment-1".to_owned(), "pending-approval".to_owned()),
+            ("enrollment-1".to_owned(), "pending-approval".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn pairing_has_a_bounded_approval_wait() {
+    let error = complete_pairing_with(
+        2,
+        Duration::ZERO,
+        || async {
+            Ok(EnrollmentOutcome::Pending(EnrollmentResponse {
+                id: "enrollment-1".to_owned(),
+                node_id: NODE_ID.to_owned(),
+                state: "pending-approval".to_owned(),
+            }))
+        },
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, PairingError::ApprovalTimeout));
 }
 
 #[tokio::test]

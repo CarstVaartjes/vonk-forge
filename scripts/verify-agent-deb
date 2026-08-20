@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fail-closed verifier for a Vonk Forge ARM64 Debian release package."""
+"""Fail-closed verifier for a Vonk Forge Debian release package."""
 
 from __future__ import annotations
 
@@ -19,28 +19,21 @@ PACKAGE = "vonk-forge-agent"
 MAX_DEB_BYTES = 512 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 REQUIRED_ELF = {
-    "usr/lib/vonk-forge/release/vonk-agent",
+    "usr/lib/vonk-forge/vonk-agent",
     "usr/lib/vonk-forge/vonk-agent-helper",
-    "usr/lib/vonk-forge/vonk-agent-supervisor",
 }
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/bin/vonk-agent-upgrade",
 }
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
-    "etc/vonk-forge-agent/agent.toml",
     "etc/vonk-forge-agent/containers-storage.conf",
     "lib/systemd/system/vonk-forge-agent.service",
-    "lib/systemd/system/vonk-forge-agent-supervisor.service",
     "lib/systemd/system/vonk-forge-docker-firewall.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/bin/vonk-agent-upgrade",
-    "usr/lib/vonk-forge/release/manifest-a.json",
-    "usr/lib/vonk-forge/release/manifest-b.json",
     "usr/lib/vonk-forge/release/artifact.sig",
     "usr/share/doc/vonk-forge-agent/sbom.cdx.json",
     "usr/share/doc/vonk-forge-agent/sbom.spdx.json",
@@ -58,9 +51,11 @@ SEMVER_TEXT = (
     r"(?:0|[1-9][0-9]*)"
 )
 PACKAGE_VERSION = re.compile(
-    rf"(?:{SEMVER_TEXT}|"
+    rf"(?:{SEMVER_TEXT}|{SEMVER_TEXT}\+lifecycle\.1|"
+    rf"{SEMVER_TEXT}~acceptance\.1\+g[0-9a-f]{{12}}|"
     rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
+ARCHITECTURES = {"arm64": 183, "amd64": 62}
 
 
 class VerificationError(RuntimeError):
@@ -103,8 +98,8 @@ def verify(deb: Path) -> dict[str, object]:
     }
     if fields["Package"] != PACKAGE:
         raise VerificationError("package identity is invalid")
-    if fields["Architecture"] != "arm64":
-        raise VerificationError("package architecture is not arm64")
+    if fields["Architecture"] not in ARCHITECTURES:
+        raise VerificationError("package architecture is unsupported")
     if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
     for dependency in ("acl", "iproute2", "iptables", "podman", "uidmap"):
@@ -128,9 +123,9 @@ def verify(deb: Path) -> dict[str, object]:
         members = _members(deb)
         _verify_members(members)
         _verify_control(control)
-        _verify_payload(payload, control)
-        _verify_manifests(payload)
-        _verify_evidence(payload, fields["Version"])
+        _verify_payload(payload, control, fields["Architecture"])
+        _verify_agent_signature(payload)
+        _verify_evidence(payload, fields["Version"], fields["Architecture"])
 
     checksum_path = deb.with_suffix(deb.suffix + ".sha256")
     try:
@@ -149,7 +144,7 @@ def verify(deb: Path) -> dict[str, object]:
     if expected != [actual, deb.name]:
         raise VerificationError("release SHA-256 sidecar is invalid")
     return {
-        "architecture": "arm64",
+        "architecture": fields["Architecture"],
         "package": PACKAGE,
         "sha256": actual,
         "version": fields["Version"],
@@ -210,11 +205,8 @@ def _verify_control(control: Path) -> None:
     if not REQUIRED_CONTROL.issubset(names):
         raise VerificationError("Debian control archive is incomplete")
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
-    if conffiles != [
-        "/etc/vonk-forge-agent/agent.toml",
-        "/etc/vonk-forge-agent/containers-storage.conf",
-    ]:
-        raise VerificationError("agent configuration is not preserved as a conffile")
+    if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
+        raise VerificationError("package conffile set is invalid")
     for name in ("postinst", "preinst", "prerm"):
         raw = (control / name).read_bytes()
         mode = stat.S_IMODE((control / name).stat().st_mode)
@@ -225,15 +217,28 @@ def _verify_control(control: Path) -> None:
         "adduser",
         "usermod --add-subuids",
         "usermod --add-subgids",
-        "vonk-agent-supervisor initialize",
-        "install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor",
-        "deb-systemd-helper enable",
+        "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
+        "openssl rand -hex 32",
+        "install -o root -g vonk-agent -m 0640",
+        "deb-systemd-helper enable vonk-forge-agent.service",
+        "deb-systemd-invoke restart vonk-forge-agent.service",
+        "--config /etc/vonk-forge-agent/agent.toml self-test",
         "daemon-reload",
     ):
         if required not in postinst:
             raise VerificationError("postinst lifecycle is incomplete")
-    if re.search(r"systemctl\s+(?:start|restart)", postinst):
-        raise VerificationError("postinst starts a network service")
+    if any(
+        forbidden in postinst
+        for forbidden in (
+            "supervisor",
+            "/var/lib/vonk-forge/slots",
+            "verify-readiness",
+            "readiness.json",
+            "--property MainPID",
+            " is-active ",
+        )
+    ):
+        raise VerificationError("postinst contains obsolete agent lifecycle state")
     preinst = (control / "preinst").read_text(encoding="utf-8")
     for required in ("dpkg --compare-versions", "refusing downgrade"):
         if required not in preinst:
@@ -242,21 +247,20 @@ def _verify_control(control: Path) -> None:
         raise VerificationError("postinst has an undeclared interpreter dependency")
 
 
-def _verify_payload(payload: Path, control: Path) -> None:
+def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
     for name in REQUIRED_ELF:
         path = payload / name
         raw = path.read_bytes()[:64]
         if (
             len(raw) != 64
             or raw[:7] != b"\x7fELF\x02\x01\x01"
-            or struct.unpack_from("<H", raw, 18)[0] != 183
+            or struct.unpack_from("<H", raw, 18)[0] != ARCHITECTURES[architecture]
         ):
-            raise VerificationError(f"binary is not AArch64 ELF: {name}")
+            raise VerificationError(f"binary architecture is invalid: {name}")
     units = {
         name: (payload / f"lib/systemd/system/{name}").read_text(encoding="utf-8")
         for name in (
             "vonk-forge-agent.service",
-            "vonk-forge-agent-supervisor.service",
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
@@ -264,6 +268,16 @@ def _verify_payload(payload: Path, control: Path) -> None:
     }
     if "User=vonk-agent" not in units["vonk-forge-agent.service"]:
         raise VerificationError("agent unit is not unprivileged")
+    agent_unit = units["vonk-forge-agent.service"]
+    if (
+        "ExecStart=/usr/lib/vonk-forge/vonk-agent --config "
+        "/etc/vonk-forge-agent/agent.toml run"
+        not in agent_unit.splitlines()
+        or "supervisor" in agent_unit
+        or "slot" in agent_unit
+        or "activation-challenge" in agent_unit
+    ):
+        raise VerificationError("agent unit does not execute the direct binary")
     if (
         "SupplementaryGroups=" not in units["vonk-forge-agent.service"]
         or "NoNewPrivileges=no" not in units["vonk-forge-agent.service"]
@@ -278,8 +292,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "DeviceAllow=/dev/fuse rw" not in units["vonk-forge-agent.service"]
         or "DeviceAllow=char-231:* rw" not in units["vonk-forge-agent.service"]
         or "BindPaths=-/dev/fuse" not in units["vonk-forge-agent.service"]
-        or "BindReadOnlyPaths=/run/user"
-        in units["vonk-forge-agent.service"]
+        or "BindReadOnlyPaths=/run/user" in units["vonk-forge-agent.service"]
         or "InaccessiblePaths=/home /root -/run/docker.sock"
         not in units["vonk-forge-agent.service"]
         or "ProtectHome=no" not in units["vonk-forge-agent.service"]
@@ -290,9 +303,9 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "RestrictSUIDSGID=yes" in units["vonk-forge-agent.service"]
     ):
         raise VerificationError("agent build/runtime boundary is invalid")
-    storage = (
-        payload / "etc/vonk-forge-agent/containers-storage.conf"
-    ).read_text(encoding="utf-8")
+    storage = (payload / "etc/vonk-forge-agent/containers-storage.conf").read_text(
+        encoding="utf-8"
+    )
     if (
         'driver = "overlay"' not in storage
         or 'mount_program = "/usr/bin/fuse-overlayfs"' not in storage
@@ -308,8 +321,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("helper address-family boundary is invalid")
     if (
         "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
-        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
-        not in helper.splitlines()
+        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID" not in helper.splitlines()
     ):
         raise VerificationError("helper capability boundary is invalid")
     for boundary in (
@@ -359,7 +371,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("payload checksums do not match")
 
 
-def _verify_manifests(payload: Path) -> None:
+def _verify_agent_signature(payload: Path) -> None:
     public_key = bytes.fromhex(
         (payload / "usr/share/keyrings/vonk-forge-release.pub")
         .read_text(encoding="ascii")
@@ -371,7 +383,7 @@ def _verify_manifests(payload: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="vonk-manifest-key-") as temporary:
         key_path = Path(temporary) / "release.der"
         key_path.write_bytes(prefix + public_key)
-        artifact = payload / "usr/lib/vonk-forge/release/vonk-agent"
+        artifact = payload / "usr/lib/vonk-forge/vonk-agent"
         artifact_digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
         artifact_signature = bytes.fromhex(
             (payload / "usr/lib/vonk-forge/release/artifact.sig")
@@ -403,72 +415,9 @@ def _verify_manifests(payload: Path) -> None:
                 str(artifact_signature_path),
             ]
         )
-        for slot in ("a", "b"):
-            path = payload / f"usr/lib/vonk-forge/release/manifest-{slot}.json"
-            raw = path.read_bytes()
-            document = json.loads(raw)
-            if (
-                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-                != raw
-            ):
-                raise VerificationError("slot manifest is not canonical")
-            if set(document) != {"schema_version", "claims", "signature"}:
-                raise VerificationError("slot manifest fields are invalid")
-            claims = document["claims"]
-            signature = document["signature"]
-            if set(claims) != {
-                "architecture",
-                "artifact_sha256",
-                "artifact_size",
-                "max_readable_state_schema",
-                "min_readable_state_schema",
-                "schema_version",
-                "slot",
-                "writes_state_schema",
-            }:
-                raise VerificationError("slot manifest claims are invalid")
-            if (
-                claims.get("slot") != slot
-                or claims.get("architecture") != "aarch64"
-                or claims.get("artifact_sha256") != artifact_digest
-                or claims.get("artifact_size") != artifact.stat().st_size
-                or signature.get("algorithm") != "ed25519"
-                or signature.get("key_id") != hashlib.sha256(public_key).hexdigest()
-                or claims.get("schema_version") != 1
-                or not 1
-                <= claims.get("min_readable_state_schema", 0)
-                <= claims.get("writes_state_schema", 0)
-                <= claims.get("max_readable_state_schema", 0)
-            ):
-                raise VerificationError("slot manifest binding is invalid")
-            signing = (
-                b"VONK-AGENT-SLOT-MANIFEST-V1\x00"
-                + json.dumps(claims, sort_keys=True, separators=(",", ":")).encode()
-            )
-            signing_path = Path(temporary) / f"{slot}.claims"
-            signature_path = Path(temporary) / f"{slot}.sig"
-            signing_path.write_bytes(signing)
-            signature_path.write_bytes(bytes.fromhex(signature["value"]))
-            command(
-                [
-                    "/usr/bin/openssl",
-                    "pkeyutl",
-                    "-verify",
-                    "-pubin",
-                    "-inkey",
-                    str(key_path),
-                    "-keyform",
-                    "DER",
-                    "-rawin",
-                    "-in",
-                    str(signing_path),
-                    "-sigfile",
-                    str(signature_path),
-                ]
-            )
 
 
-def _verify_evidence(payload: Path, version: str) -> None:
+def _verify_evidence(payload: Path, version: str, architecture: str) -> None:
     documents = {
         name: json.loads(
             (payload / f"usr/share/doc/vonk-forge-agent/{name}").read_text(
@@ -523,11 +472,34 @@ def _verify_evidence(payload: Path, version: str) -> None:
         for item in subject
         if isinstance(item, dict) and isinstance(item.get("digest"), dict)
     }
+    external = (
+        documents["provenance.json"]
+        .get("predicate", {})
+        .get("buildDefinition", {})
+        .get("externalParameters", {})
+    )
+    expected_runtime_architecture = {
+        "arm64": "linux-arm64",
+        "amd64": "linux-amd64",
+    }[architecture]
+    build_digest = external.get("build_digest") if isinstance(external, dict) else None
+    agent_raw = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
+    semantic_match = re.match(SEMVER_TEXT, version)
+    semantic_version = semantic_match.group(0) if semantic_match is not None else None
     if (
         cyclone != expected
         or spdx != expected
         or provenance != expected
         or version not in json.dumps(documents)
+        or not isinstance(external, dict)
+        or external.get("architecture") != expected_runtime_architecture
+        or not isinstance(build_digest, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", build_digest) is None
+        or f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode() not in agent_raw
+        or semantic_version is None
+        or f"VONK_AGENT_SEMANTIC_VERSION={semantic_version}".encode()
+        not in agent_raw
+        or build_digest == f"sha256:{expected['vonk-agent']}"
     ):
         raise VerificationError("package provenance is invalid")
 

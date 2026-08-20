@@ -7,7 +7,7 @@ CONTROL_SRC = Path(__file__).resolve().parents[2] / "control" / "src"
 if str(CONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(CONTROL_SRC))
 
-from fleet_library_smoke import run_fresh_fleet_library_smoke
+from .fleet_library_smoke import run_fresh_fleet_library_smoke
 
 
 def test_fresh_fleet_library_smoke() -> None:
@@ -19,9 +19,8 @@ def test_fresh_fleet_library_smoke() -> None:
     assert report["revoked_fleet_nodes"] == []
     assert report["audit_actions"] == [
         "agent.enrollment.grant.create",
-        "agent.enrollment.approve",
+        "agent.enrollment.submit.approved",
         "agent.node.revoke",
     ]
     assert report["identity_history_revoked"] is True
     assert report["library_recipe_count"] == 0
- 

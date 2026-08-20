@@ -4,47 +4,46 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import posixpath
 import re
-import shutil
 import tempfile
 from pathlib import Path
 
 import yaml
 
 IMAGE = re.compile(
-    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker):"
-    r"(?:dev|dev-sha-[0-9a-f]{40})(?:@sha256:[0-9a-f]{64})?$"
+    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes):"
+    r"dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
 )
+PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
+DEFAULT_IMAGE = re.compile(r"^\$\{[A-Z0-9_]+:-([^}]+)\}$")
 TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
+    "hermes": "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}",
 }
-RUNTIME_ASSETS = (
-    "Caddyfile",
-    "caddy/entrypoint.sh",
-    "grafana/dashboards",
-    "grafana/provisioning",
-    "litellm/bootstrap-config.json",
-    "litellm/config_supervisor.py",
-    "litellm/entrypoint.sh",
-    "prometheus/alerts.yaml",
-    "prometheus/prometheus.yml",
-    "registry/config.yml",
-    "tailscale/configure.sh",
-)
 
 
 def _validate(role: str, image: str, channel: str) -> None:
-    if IMAGE.fullmatch(image) is None:
-        raise ValueError(f"{role} image must be an immutable published development image")
+    if channel == "pinned" and PINNED_IMAGE.fullmatch(image) is not None:
+        return
+    if channel == "dev" and IMAGE.fullmatch(image) is not None:
+        return
+    if channel not in {"dev", "pinned"} or IMAGE.fullmatch(image) is None:
+        raise ValueError(
+            f"{role} image must be an immutable published development image"
+        )
 
 
 def _rebase_relative_paths(value: object, prefix: str) -> object:
     if isinstance(value, str) and value.startswith("./"):
         return f"./{prefix}/{value[2:]}"
     if isinstance(value, dict):
-        return {key: _rebase_relative_paths(item, prefix) for key, item in value.items()}
+        return {
+            key: _rebase_relative_paths(item, prefix) for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_rebase_relative_paths(item, prefix) for item in value]
     return value
@@ -73,16 +72,16 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     seen.add(path)
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
-        raise ValueError(f"Compose document is not a mapping: {path}")
+        raise TypeError(f"Compose document is not a mapping: {path}")
 
     merged: dict[str, object] = {}
     includes = document.pop("include", [])
     if not isinstance(includes, list):
-        raise ValueError(f"Compose include list is invalid: {path}")
+        raise TypeError(f"Compose include list is invalid: {path}")
     for included in includes:
         included_path = included if isinstance(included, str) else included.get("path")
         if not isinstance(included_path, str):
-            raise ValueError(f"Compose include path is invalid: {path}")
+            raise TypeError(f"Compose include path is invalid: {path}")
         child = _compose_document(path.parent / included_path, seen)
         prefix = str(Path(included_path).parent)
         if prefix != ".":
@@ -106,7 +105,120 @@ def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object
     return value
 
 
-def _count_template_token(path: Path, needle: str, seen: set[Path] | None = None) -> int:
+def _runtime_config_name(source: Path) -> str:
+    digest = hashlib.sha256(source.as_posix().encode("utf-8")).hexdigest()[:16]
+    return f"vonk_runtime_{digest}"
+
+
+def _config_content(source: Path) -> str:
+    try:
+        content = source.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"runtime asset must be UTF-8 text: {source}") from error
+    # Compose interpolates config content too. Escape every dollar so the
+    # mounted file retains its exact source bytes after Compose evaluates it.
+    return content.replace("$", "$$")
+
+
+def _config_mode(source: Path) -> str:
+    # Shell programs are executable in the rendered artifact even when the
+    # source graph currently invokes them through /bin/sh. Preserve execute
+    # bits for other program types, but never project writable permissions.
+    executable = source.suffix == ".sh" or bool(source.stat().st_mode & 0o111)
+    return "0555" if executable else "0444"
+
+
+def _config_mounts(
+    source_root: Path, source: str, target: str
+) -> tuple[dict[str, dict[str, str]], list[dict[str, str]]]:
+    if not source.startswith("./"):
+        return {}, []
+    asset = (source_root / source[2:]).resolve()
+    try:
+        asset.relative_to(source_root.resolve())
+    except ValueError as error:
+        raise ValueError(
+            f"runtime asset escapes Compose source root: {source}"
+        ) from error
+    if not asset.exists():
+        raise ValueError(f"runtime asset is missing: {source}")
+
+    files = (
+        [asset]
+        if asset.is_file()
+        else sorted(path for path in asset.rglob("*") if path.is_file())
+    )
+    if not files:
+        raise ValueError(f"runtime asset directory is empty: {source}")
+    configs: dict[str, dict[str, str]] = {}
+    mounts: list[dict[str, str]] = []
+    for file in files:
+        relative = file.relative_to(asset).as_posix() if asset.is_dir() else ""
+        destination = target if not relative else posixpath.join(target, relative)
+        name = _runtime_config_name(file.relative_to(source_root))
+        configs[name] = {"content": _config_content(file)}
+        mounts.append(
+            {"source": name, "target": destination, "mode": _config_mode(file)}
+        )
+    return configs, mounts
+
+
+def _embed_runtime_assets(document: dict[str, object], source_root: Path) -> None:
+    source_root = source_root.resolve()
+    services = document.get("services")
+    if not isinstance(services, dict):
+        raise TypeError("Compose services are invalid")
+    configs = document.setdefault("configs", {})
+    if not isinstance(configs, dict):
+        raise TypeError("Compose configs are invalid")
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            raise TypeError(f"Compose service is invalid: {name}")
+        volumes = service.get("volumes", [])
+        if not isinstance(volumes, list):
+            raise TypeError(f"Compose volumes are invalid: {name}")
+        remaining_volumes: list[object] = []
+        embedded_mounts: list[dict[str, str]] = []
+        for volume in volumes:
+            if not isinstance(volume, str):
+                remaining_volumes.append(volume)
+                continue
+            fields = volume.split(":", 2)
+            if len(fields) < 2 or not fields[0].startswith("./"):
+                remaining_volumes.append(volume)
+                continue
+            embedded, mounts = _config_mounts(source_root, fields[0], fields[1])
+            configs.update(embedded)
+            embedded_mounts.extend(mounts)
+        if embedded_mounts:
+            service["volumes"] = remaining_volumes
+            current_configs = service.get("configs", [])
+            if not isinstance(current_configs, list):
+                raise TypeError(f"Compose service configs are invalid: {name}")
+            service["configs"] = [*current_configs, *embedded_mounts]
+
+
+def _resolve_runtime_images(document: dict[str, object]) -> None:
+    services = document.get("services")
+    if not isinstance(services, dict):
+        raise TypeError("Compose services are invalid")
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            raise TypeError(f"Compose service is invalid: {name}")
+        image = service.get("image")
+        if not isinstance(image, str):
+            raise TypeError(f"Compose service image is invalid: {name}")
+        default = DEFAULT_IMAGE.fullmatch(image)
+        if default is not None:
+            image = default.group(1)
+            service["image"] = image
+        if PINNED_IMAGE.fullmatch(image) is None:
+            raise ValueError(f"runtime service image is not digest pinned: {name}")
+
+
+def _count_template_token(
+    path: Path, needle: str, seen: set[Path] | None = None
+) -> int:
     seen = set() if seen is None else seen
     path = path.resolve()
     if path in seen:
@@ -122,39 +234,46 @@ def _count_template_token(path: Path, needle: str, seen: set[Path] | None = None
     return count
 
 
-def render(template: Path, output: Path, api_image: str, worker_image: str, *, channel: str) -> None:
+def render(
+    template: Path,
+    output: Path,
+    api_image: str,
+    worker_image: str,
+    hermes_image: str,
+    *,
+    channel: str,
+) -> None:
     if channel not in {"dev", "pinned"}:
         raise ValueError("channel must be dev or pinned")
     _validate("API", api_image, channel)
     _validate("worker", worker_image, channel)
+    _validate("Hermes", hermes_image, channel)
     if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
     document = _compose_document(template)
-    if _count_template_token(template, TOKENS["api"]) != 2 or _count_template_token(template, TOKENS["worker"]) != 5:
+    if (
+        _count_template_token(template, TOKENS["api"]) != 1
+        or _count_template_token(template, TOKENS["worker"]) != 1
+    ):
         raise ValueError("template control image inputs changed")
     document = _replace_image_tokens(
         document,
-        {TOKENS["api"]: api_image, TOKENS["worker"]: worker_image},
+        {
+            TOKENS["api"]: api_image,
+            TOKENS["worker"]: worker_image,
+            TOKENS["hermes"]: hermes_image,
+        },
     )
+    _resolve_runtime_images(document)
+    _embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("development channel must render the production graph")
-    # The inlined graph still bind-mounts these runtime assets. Keep the
-    # rendered project small: Compose fragments, build inputs, documentation,
-    # and optional CA/Hermes source files do not belong in the runtime bundle.
-    for relative in RUNTIME_ASSETS:
-        asset = template.parent / relative
-        if not asset.is_file() and not asset.is_dir():
-            raise ValueError(f"runtime asset is missing: {relative}")
-        destination = output.parent / relative
-        if asset.is_dir():
-            shutil.copytree(asset, destination, dirs_exist_ok=True)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(asset, destination)
-    descriptor, staged_name = tempfile.mkstemp(prefix=".render-dev-compose-", dir=output.parent)
+    descriptor, staged_name = tempfile.mkstemp(
+        prefix=".render-dev-compose-", dir=output.parent
+    )
     staged = Path(staged_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
@@ -171,10 +290,13 @@ def render(template: Path, output: Path, api_image: str, worker_image: str, *, c
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--template", type=Path, default=root / "deploy/compose/compose.yaml")
+    parser.add_argument(
+        "--template", type=Path, default=root / "deploy/compose/compose.yaml"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
+    parser.add_argument("--hermes-image", required=True)
     parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
     parser.add_argument("--commit")
     arguments = parser.parse_args()
@@ -183,6 +305,7 @@ def main() -> None:
         arguments.output,
         arguments.api_image,
         arguments.worker_image,
+        arguments.hermes_image,
         channel=arguments.channel,
     )
 

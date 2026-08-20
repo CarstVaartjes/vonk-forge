@@ -1,0 +1,79 @@
+name: Installer setup programs
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-forge-installer-setups-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build and test native setup (${{ matrix.platform }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+            binaries: vonk-nas-setup vonk-spark-setup
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            binaries: vonk-nas-setup vonk-spark-setup
+          - platform: darwin-amd64
+            runner: macos-15-intel
+            binaries: vonk-nas-setup
+          - platform: darwin-arm64
+            runner: macos-15
+            binaries: vonk-nas-setup
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.97.1
+          rustup default 1.97.1
+
+      - name: Test and build exact native setup programs
+        shell: bash
+        env:
+          BINARIES: ${{ matrix.binaries }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          case "$PLATFORM:$(uname -s):$(uname -m)" in
+            linux-amd64:Linux:x86_64|linux-arm64:Linux:aarch64|darwin-amd64:Darwin:x86_64|darwin-arm64:Darwin:arm64) ;;
+            *) echo "installer setup runner architecture does not match" >&2; exit 1 ;;
+          esac
+          output="$RUNNER_TEMP/setup/$PLATFORM"
+          install -d -m 0755 "$output"
+          for binary in $BINARIES; do
+            cargo test --locked --package "$binary"
+            cargo build --locked --release --package "$binary" --bin "$binary"
+            install -m 0555 "target/release/$binary" "$output/$binary"
+          done
+          find "$output" -maxdepth 1 -type f -exec sha256sum {} + |
+            LC_ALL=C sort > "$output/SHA256SUMS"
+
+      - name: Upload accepted native setup programs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-setup-${{ github.sha }}-${{ matrix.platform }}
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+          path: ${{ runner.temp }}/setup

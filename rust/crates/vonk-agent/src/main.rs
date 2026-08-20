@@ -2,29 +2,26 @@
 
 use std::{
     future::Future,
-    io::{self, Read, Write},
+    io::{self, Read},
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
-    bootstrap::{
-        BootstrapRequest, data_directory_owner, generate_node_id, materialize_config,
-        parse_bootstrap_fingerprint, parse_bootstrap_origin, parse_bootstrap_token,
-    },
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
-    executor::{LoopError, RecipeExecutor, run_once},
+    executor::{LoopError, RecipeExecutor, run_once_with_claim_hook},
     inventory::InventoryCollector,
     oci::OciRuntime,
-    pair::{EnrollmentOutcome, collect_evidence, pair},
+    pair::{collect_evidence, complete_pairing_with, pair},
     process::SystemProcessRunner,
+    readiness::{publish_current, verify_current},
     rotation::rotate_if_due,
+    runtime_identity::AgentRuntimeIdentity,
+    self_test,
     state::{StateStore, backoff_delay},
-    supervisor_readiness::SupervisorReadiness,
     telemetry::{
         SystemFileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
         TelemetrySchedule, read_boot_id,
@@ -32,7 +29,11 @@ use vonk_agent::{
 };
 
 #[derive(Parser)]
-#[command(name = "vonk-agent", version, about = "Vonk Forge outbound agent")]
+#[command(
+    name = "vonk-agent",
+    version = env!("VONK_AGENT_SEMANTIC_VERSION"),
+    about = "Vonk Forge outbound agent"
+)]
 struct Cli {
     #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
     config: PathBuf,
@@ -43,15 +44,14 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Run,
-    Bootstrap {
-        #[arg(long, value_parser = parse_bootstrap_token)]
-        token: String,
-        #[arg(long, value_parser = parse_bootstrap_origin)]
-        controller_endpoint: Url,
-        #[arg(long, value_parser = parse_bootstrap_origin)]
-        enrollment_endpoint: Url,
-        #[arg(long, value_parser = parse_bootstrap_fingerprint)]
-        ca_fingerprint: String,
+    SelfTest,
+    VerifyReadiness {
+        #[arg(long, default_value = "/run/vonk-forge-agent/readiness.json")]
+        receipt: PathBuf,
+        #[arg(long)]
+        pid: u32,
+        #[arg(long, default_value_t = 90)]
+        max_age_seconds: u64,
     },
     Pair {
         #[arg(long)]
@@ -68,20 +68,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
-        Command::Bootstrap {
-            token,
-            controller_endpoint,
-            enrollment_endpoint,
-            ca_fingerprint,
-        } => {
-            let request = BootstrapRequest::new(
-                token,
-                controller_endpoint,
-                enrollment_endpoint,
-                ca_fingerprint,
+        Command::SelfTest => {
+            let config = AgentConfig::load(&cli.config)?;
+            let identity = self_test::run(
+                &config,
+                &std::env::current_exe()?,
+                Path::new("/run/vonk-forge-agent"),
             )?;
-            let config = materialize_config(&cli.config, &request, &generate_node_id())?;
-            bootstrap_pair(&cli.config, &config, &request)?;
+            println!("{}", serde_json::to_string(&identity)?);
+        }
+        Command::VerifyReadiness {
+            receipt,
+            pid,
+            max_age_seconds,
+        } => {
+            let config = AgentConfig::load(&cli.config)?;
+            let identity = self_test::run(
+                &config,
+                &std::env::current_exe()?,
+                Path::new("/run/vonk-forge-agent"),
+            )?;
+            verify_current(
+                &receipt,
+                &identity,
+                pid,
+                std::time::Duration::from_secs(max_age_seconds),
+            )?;
         }
         Command::Pair {
             enrollment,
@@ -105,46 +117,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn bootstrap_pair(
-    config_path: &Path,
-    config: &AgentConfig,
-    request: &BootstrapRequest,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (uid, gid) = data_directory_owner(config)?;
-    let executable = std::env::current_exe()?;
-    let mut child = ProcessCommand::new("/usr/bin/setpriv")
-        .arg("--reuid")
-        .arg(uid.to_string())
-        .arg("--regid")
-        .arg(gid.to_string())
-        .arg("--clear-groups")
-        .arg("--")
-        .arg(executable)
-        .env("HOME", &config.data_dir)
-        .env("XDG_DATA_HOME", &config.data_dir)
-        .current_dir(&config.data_dir)
-        .arg("--config")
-        .arg(config_path)
-        .arg("pair")
-        .arg("--enrollment")
-        .arg(request.enrollment_endpoint().as_str())
-        .arg("--ca-sha256")
-        .arg(request.ca_fingerprint())
-        .arg("--token-stdin")
-        .stdin(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or("bootstrap pairing input is unavailable")?
-        .write_all(request.token().as_bytes())?;
-    let status = child.wait()?;
-    if !status.success() {
-        return Err("bootstrap pairing failed".into());
-    }
-    Ok(())
-}
-
 async fn pair_agent(
     config: &AgentConfig,
     enrollment: &Url,
@@ -153,23 +125,37 @@ async fn pair_agent(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
     let evidence = collect_evidence(&executable)?;
-    match pair(config, enrollment, token, ca_sha256, evidence).await? {
-        EnrollmentOutcome::Pending(pending) => {
-            println!("pairing {} is {}", pending.id, pending.state);
-        }
-        EnrollmentOutcome::Issued => println!("paired {}", config.node_id),
-    }
+    complete_pairing_with(
+        180,
+        std::time::Duration::from_secs(5),
+        || {
+            let evidence = evidence.clone();
+            async move { pair(config, enrollment, token, ca_sha256, evidence).await }
+        },
+        |pending| {
+            println!(
+                "pairing {} is {}; waiting for approval",
+                pending.id, pending.state
+            )
+        },
+    )
+    .await?;
+    println!("paired {}", config.node_id);
     Ok(())
 }
 
 async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let supervisor_readiness = SupervisorReadiness::from_process_environment()?;
+    let runtime_identity = self_test::run(
+        config,
+        &std::env::current_exe()?,
+        Path::new("/run/vonk-forge-agent"),
+    )?;
     rotate_if_due(config).await?;
     let client = AgentHttpClient::from_config(config)?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
     let (client_updates, telemetry_client) = tokio::sync::watch::channel(client.clone());
-    let control = run_control_lane(config, supervisor_readiness, client, state, client_updates);
+    let control = run_control_lane(config, runtime_identity, client, state, client_updates);
     let telemetry = run_telemetry_lane(
         config.data_dir.clone(),
         telemetry_client,
@@ -187,7 +173,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 
 async fn run_control_lane(
     config: &AgentConfig,
-    mut supervisor_readiness: SupervisorReadiness,
+    runtime_identity: AgentRuntimeIdentity,
     mut client: AgentHttpClient,
     mut state: StateStore,
     client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
@@ -221,7 +207,6 @@ async fn run_control_lane(
             .collect()?;
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
-                    supervisor_readiness.report()?;
                     failures = 0;
                     next_inventory =
                         tokio::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -272,18 +257,27 @@ async fn run_control_lane(
                     ObservationFailureAction::Stop => return Err(LoopError::Client(error)),
                 },
             }
-            run_once(
+            run_once_with_claim_hook(
                 &client,
                 &mut state,
                 &executor,
                 &capabilities,
                 wait_seconds,
-                supervisor_readiness.runtime_identity(),
+                Some(&runtime_identity),
+                || {
+                    publish_current(
+                        Path::new("/run/vonk-forge-agent/readiness.json"),
+                        &runtime_identity,
+                    )
+                    .map_err(|error| LoopError::Readiness(error.to_string()))
+                },
             )
             .await
         };
         match operation.await {
-            Ok(()) => failures = 0,
+            Ok(()) => {
+                failures = 0;
+            }
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
                 failures = failures.saturating_add(1);

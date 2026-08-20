@@ -486,8 +486,6 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "workload.stop",
         "workload.health",
         "workload.verify",
-        "agent.update",
-        "agent.rollback",
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",

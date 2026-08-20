@@ -142,15 +142,12 @@ def test_openapi_exposes_only_current_document_contract() -> None:
     assert not any(path.startswith("/api/v1/profiles/") for path in paths)
     assert "/api/v1/reconciliations/plan" not in paths
     assert "/api/v1/reconciliations" not in paths
-    assert not any(
-        path.startswith("/api/v1/reconciliations/") for path in paths
-    )
+    assert not any(path.startswith("/api/v1/reconciliations/") for path in paths)
+    assert not any(path.startswith("/api/v1/updates") for path in paths)
     assert "/api/v1/documents" not in paths
 
 
-def test_fleet_exposes_visual_state_and_node_evidence() -> (
-    None
-):
+def test_fleet_exposes_visual_state_and_node_evidence() -> None:
     client, operator, *_ = _client()
 
     visual = client.get("/api/v1/fleet", headers=operator)
@@ -480,11 +477,9 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             "last_seen_at": now.isoformat(),
             "node_id": NODE_ID,
             "protocol_version": 3,
-            "platform_version": None,
+            "semantic_version": None,
             "build_digest": None,
-            "active_slot": None,
-            "agent_sha256": None,
-            "supervisor_generation": None,
+            "binary_digest": None,
             "stale": False,
             "state": "active",
         }
@@ -766,11 +761,9 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         if method in {"delete", "get", "patch", "post", "put"}
     }
     expected = {
-        "approveAgentEnrollment": {"401", "403", "409", "503"},
         "createEnrollmentGrant": {"401", "403", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
-        "rejectAgentEnrollment": {"401", "403", "409", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
         "revokeAgentNode": {"401", "403", "404", "503"},
     }
@@ -801,10 +794,8 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
     }
 
     successes = {
-        "approveAgentEnrollment": "EnrollmentDecisionResponse",
         "createEnrollmentGrant": "EnrollmentGrantResponse",
         "listAgentEnrollments": "EnrollmentListResponse",
-        "rejectAgentEnrollment": "EnrollmentDecisionResponse",
     }
     for operation_id, component in successes.items():
         success = next(

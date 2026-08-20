@@ -316,50 +316,6 @@ it.each(["nonce=", "nonce==", "nonce=middle=="]) (
   },
 );
 
-it("uses one exact API contract for update plan, apply, status, and administrator resume", async () => {
-  // Break caught: the browser update workflow drifts from CLI routes or omits
-  // the exact server plan digest on the only fan-out mutation.
-  document.cookie = "vonk_csrf=csrf-value; path=/";
-  const digest = `sha256:${"c".repeat(64)}`;
-  const targetName = `platform/releases/2.0.0/${"7".repeat(64)}.json`;
-  const target = {
-    platform_version: "2.0.0",
-    release: targetName,
-    release_digest: `sha256:${"7".repeat(64)}`,
-    target_sha256: "7".repeat(64),
-  };
-  const rolloutId = "11111111-1111-4111-8111-111111111111";
-  const requests: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    requests.push(request);
-    const path = new URL(request.url).pathname;
-    if (path === "/api/v1/updates/skew") return new Response(JSON.stringify({prompt_required: false, target}), {status: 200});
-    if (path === "/api/v1/updates/plan") return new Response(JSON.stringify({plan_digest: digest, target}), {status: 200});
-    return new Response(JSON.stringify({id: rolloutId, plan_digest: digest, state: "planned"}), {status: request.method === "POST" ? 202 : 200});
-  });
-  const api = new ApiClient();
-
-  await api.updateSkew();
-  await api.planUpdate(targetName);
-  await api.applyUpdate(digest);
-  await api.updateStatus(rolloutId);
-  await api.approveUpdateResume(rolloutId);
-
-  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/updates/skew"],
-    ["POST", "/api/v1/updates/plan"],
-    ["POST", "/api/v1/updates"],
-    ["GET", `/api/v1/updates/${rolloutId}`],
-    ["POST", `/api/v1/updates/${rolloutId}/approve-resume`],
-  ]);
-  expect(await requests[1].clone().json()).toEqual({release: targetName});
-  expect(await requests[2].clone().json()).toEqual({plan_digest: digest});
-  expect(requests[1].headers.get("X-CSRF-Token")).toBe("csrf-value");
-  expect(requests[2].headers.get("X-CSRF-Token")).toBe("csrf-value");
-  expect(requests[4].headers.get("X-CSRF-Token")).toBe("csrf-value");
-});
-
 it("does not expose orphaned package and deployment helpers after the Fleet/Library cleanup", () => {
   // Break caught: superseded package/deployment client helpers remain on the
   // live web API surface after their last retained consumers were removed.
@@ -389,27 +345,3 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
     expect(name in api).toBe(false);
   }
 });
-
-it.each(["skew", "plan"])(
-  "rejects an update %s whose release digest is not bound to its target bytes",
-  async operation => {
-    const targetSha = "7".repeat(64);
-    const target = {
-      platform_version: "2.0.0",
-      release: `platform/releases/2.0.0/${targetSha}.json`,
-      release_digest: `sha256:${"8".repeat(64)}`,
-      target_sha256: targetSha,
-    };
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({
-      plan_digest: `sha256:${"c".repeat(64)}`,
-      prompt_required: false,
-      target,
-    }), {status: 200}));
-
-    const api = new ApiClient();
-    const request = operation === "skew"
-      ? api.updateSkew()
-      : api.planUpdate(target.release);
-    await expect(request).rejects.toThrow("update target identity is invalid");
-  },
-);

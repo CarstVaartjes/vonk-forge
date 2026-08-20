@@ -55,40 +55,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/enrollments/{enrollment_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve */
-        post: operations["approveAgentEnrollment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/enrollments/{enrollment_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject */
-        post: operations["rejectAgentEnrollment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/agents/nodes/{node_id}/revoke": {
         parameters: {
             query?: never;
@@ -1095,101 +1061,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/updates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply Update */
-        post: operations["applyPlatformUpdate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/updates/plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Update Plan */
-        post: operations["planPlatformUpdate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/updates/skew": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Update Skew */
-        get: operations["getPlatformUpdateSkew"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/updates/{rollout_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Update Status */
-        get: operations["getPlatformUpdate"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/updates/{rollout_id}/approve-resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Update Resume */
-        post: operations["approvePlatformUpdateRecovery"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** AgentSummary */
         AgentSummary: {
-            /** Active Slot */
-            active_slot?: string | null;
-            /** Agent Sha256 */
-            agent_sha256?: string | null;
+            /** Binary Digest */
+            binary_digest?: string | null;
             /** Build Digest */
             build_digest?: string | null;
             /** Capabilities */
@@ -1202,16 +1081,14 @@ export interface components {
             last_seen_at: string | null;
             /** Node Id */
             node_id: string;
-            /** Platform Version */
-            platform_version?: string | null;
             /** Protocol Version */
             protocol_version?: number | null;
+            /** Semantic Version */
+            semantic_version?: string | null;
             /** Stale */
             stale: boolean;
             /** State */
             state: string;
-            /** Supervisor Generation */
-            supervisor_generation?: number | null;
         };
         /** AgentsResponse */
         AgentsResponse: {
@@ -1389,18 +1266,6 @@ export interface components {
             /** State */
             state: string;
         };
-        /** EnrollmentDecisionResponse */
-        EnrollmentDecisionResponse: {
-            /** Id */
-            id: string;
-            /** Node Id */
-            node_id: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "pending_review" | "issuing" | "approved" | "rejected" | "expired" | "certificate_issued";
-        };
         /** EnrollmentGrantResponse */
         EnrollmentGrantResponse: {
             /** Ca Fingerprint */
@@ -1442,10 +1307,6 @@ export interface components {
             created_at: string;
             /** Csr Public Key Fingerprint */
             csr_public_key_fingerprint: string;
-            /** Decided At */
-            decided_at?: string | null;
-            /** Decision Actor */
-            decision_actor?: string | null;
             /** Hardware Fingerprint */
             hardware_fingerprint: string;
             /** Host Key Fingerprint */
@@ -1454,8 +1315,6 @@ export interface components {
             id: string;
             /** Node Id */
             node_id: string;
-            /** Rejection Reason */
-            rejection_reason?: string | null;
             /** State */
             state: string;
         };
@@ -2117,8 +1976,8 @@ export interface components {
         };
         /** NodeStatus */
         NodeStatus: {
-            /** Agent Active Slot */
-            agent_active_slot?: string | null;
+            /** Agent Binary Digest */
+            agent_binary_digest?: string | null;
             /** Agent Build Digest */
             agent_build_digest?: string | null;
             /** Agent Last Seen At */
@@ -2128,17 +1987,13 @@ export interface components {
              * @default false
              */
             agent_online: boolean;
-            /** Agent Platform Version */
-            agent_platform_version?: string | null;
-            /** Agent Sha256 */
-            agent_sha256?: string | null;
+            /** Agent Semantic Version */
+            agent_semantic_version?: string | null;
             /**
              * Agent State
              * @default unregistered
              */
             agent_state: string;
-            /** Agent Supervisor Generation */
-            agent_supervisor_generation?: number | null;
             /** Certificate Expires At */
             certificate_expires_at?: string | null;
             /** Certificate Expiry Seconds */
@@ -2846,11 +2701,6 @@ export interface components {
             /** Stop Order */
             stop_order: string[];
         };
-        /** RejectRequest */
-        RejectRequest: {
-            /** Reason */
-            reason: string;
-        };
         /** RejectedNode */
         RejectedNode: {
             /** Node Id */
@@ -3425,24 +3275,6 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
-        /** UpdateApplyRequest */
-        UpdateApplyRequest: {
-            /** Plan Digest */
-            plan_digest: string;
-        };
-        /** UpdateApproveResumeRequest */
-        UpdateApproveResumeRequest: {
-            /**
-             * Reason
-             * @default administrator approved update recovery
-             */
-            reason: string;
-        };
-        /** UpdatePlanRequest */
-        UpdatePlanRequest: {
-            /** Release */
-            release: string;
-        };
         /** UpdateRecipeDraftRequest */
         UpdateRecipeDraftRequest: {
             /** Document */
@@ -3773,144 +3605,6 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    approveAgentEnrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                enrollment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentDecisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    rejectAgentEnrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                enrollment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RejectRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentDecisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6558,168 +6252,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UninstallPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    applyPlatformUpdate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateApplyRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    planPlatformUpdate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdatePlanRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getPlatformUpdateSkew: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getPlatformUpdate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rollout_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    approvePlatformUpdateRecovery: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rollout_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateApproveResumeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

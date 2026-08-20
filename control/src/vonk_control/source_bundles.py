@@ -11,9 +11,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
-from sqlalchemy.orm import Session, sessionmaker
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session, sessionmaker
 
 
 class SourceBundleError(ValueError):

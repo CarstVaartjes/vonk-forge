@@ -2,11 +2,10 @@
 set -eu
 
 if [ "${1:-}" = remove ]; then
-    deb-systemd-invoke stop vonk-forge-agent-supervisor.service >/dev/null || true
     deb-systemd-invoke stop vonk-forge-agent.service >/dev/null || true
     deb-systemd-invoke stop vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-invoke stop vonk-forge-docker-firewall.service >/dev/null || true
-    deb-systemd-helper disable vonk-forge-agent-supervisor.service >/dev/null || true
+    deb-systemd-helper disable vonk-forge-agent.service >/dev/null || true
     deb-systemd-helper disable vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-helper disable vonk-forge-docker-firewall.service >/dev/null || true
     /usr/bin/loginctl disable-linger vonk-agent >/dev/null || true

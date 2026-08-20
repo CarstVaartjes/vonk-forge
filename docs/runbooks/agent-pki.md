@@ -130,14 +130,14 @@ signed CRL whose update window is current and bounded to that configured hour.
 
 ## Start and verify the production provider
 
-Set `STEP_CA_CONFIG_FILE`, `AGENT_CA_PROVISIONER_KID`, and all file variables in
-the root-owned site environment before selecting the generation. The installed
-updater owns start/stop and Compose rendering. Verify the active immutable
-generation through its fixed diagnostics:
+Set `STEP_CA_CONFIG_FILE`, `AGENT_CA_PROVISIONER_KID`, and all file variables
+before starting the Compose graph. Verify the provider directly:
 
 ```sh
-sudo vonk-control-offline maintenance status
-sudo vonk-control-offline maintenance step-ca-health
+docker compose ps
+docker compose exec step-ca step ca health \
+  --ca-url https://step-ca:9000 \
+  --root /run/vonk-normalized-secrets/step-ca/root-certificate
 ```
 
 Only Caddy publishes a port. step-ca and control-api share the internal `ca`
@@ -164,8 +164,7 @@ serial, then clear/reject the enrollment only through an audited operator
 procedure. Never automatically resubmit its authorization token.
 
 ```sh
-sudo vonk-control-offline maintenance logs --service step-ca --since-minutes 30
-sudo vonk-control-offline maintenance logs --service control-api --since-minutes 30
+docker compose logs --since 30m step-ca control-api
 ```
 
 ## Expiry and identity-loss recovery
@@ -207,28 +206,14 @@ To obtain a consistent CA snapshot, stop issuance/control-api, stop step-ca,
 snapshot its data, and dump PostgreSQL before restarting. Encrypt the archive
 with the operator backup system and test restoration on an isolated network.
 
-Use the root-owned `HostBackupBoundary` described in
-[Control-plane recovery](control-plane-recovery.md). It stops the fixed service
-set, captures PostgreSQL and the configured CA state in one authenticated,
-encrypted generation, and records the exact receipt. There is no supported
-operator-supplied `pg_dump`, tar, decrypt, or Compose restore command.
-
-Restore the step-ca data/config/secrets and PostgreSQL state only from that same
-verified backup generation through `vonk-control-offline recover --apply`.
-Afterward run `maintenance step-ca-health`, compare intermediate and
+Use the NAS platform's supported application-consistent backup mechanism for
+the PostgreSQL and step-ca volumes. Restore both from the same backup point on
+an isolated network. Afterward run the step-ca health command above, compare intermediate and
 provisioner public-key fingerprints, and test one disposable enrollment before
 restoring ingress.
 
-## Built-in-to-step-ca migration
+## Issuer boundary
 
-Built-in mode is an explicit bootstrap/development overlay, not a second active
-issuer. Under the same offline root, prepare step-ca and its deployment-specific
-provisioner, validate it on an isolated network, stop control-api, and replace
-`compose.builtin-ca.yaml` with `compose.step-ca.yaml`. Existing leaves continue
-through the root trust anchor; all new issuance uses Smallstep. Do not merge both
-overlays—the settings guard rejects mixed provider material.
-
-Publish and select a signed platform generation whose reviewed site selector is
-`step-ca`; the updater validates the overlay, renders it from the immutable
-generation, and performs the fixed service transition. There is no supported
-in-place Compose overlay switch.
+Step CA is the sole issuer in the canonical runtime. The setup flow generates
+or imports one coherent Step CA hierarchy and controller certificate set. There
+is no built-in issuer, provider overlay, or in-place provider migration path.

@@ -1,25 +1,13 @@
 from __future__ import annotations
 
 import base64
-import shutil
-import subprocess
 import threading
-import time
 from collections.abc import Callable
-from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-import vonk_control.browser_auth as browser_auth_module
-import vonk_control.db as db_module
-import vonk_control.offline as offline_module
-import vonk_control.settings as settings_module
-from sqlalchemy import create_engine, event, select
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
@@ -28,9 +16,10 @@ from vonk_control.browser_auth import (
     BrowserAuthenticationThrottledError,
     BrowserAuthService,
     LoginRateLimiter,
+    bootstrap_administrator,
 )
 from vonk_control.models import Base, LoginSession, User
-from vonk_control.passwords import hash_password
+from vonk_control.passwords import hash_password, verify_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
@@ -218,100 +207,25 @@ def test_login_cleanup_removes_only_a_bounded_batch_of_expired_sessions(
     assert len(expired) == 1
 
 
-def test_rotate_admin_revokes_every_active_session(
+def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     sessions: sessionmaker[Session],
 ) -> None:
-    """Changing an administrator verifier must invalidate every prior session."""
-    add_admin(sessions)
-    clock = Clock()
-    service = browser_auth(
-        sessions,
-        clock,
-        opaque(17),
-        opaque(18),
-        opaque(19),
-        opaque(20),
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
+        "created"
     )
-    first = service.login("admin", ADMIN_PASSWORD)
-    second = service.login("admin", ADMIN_PASSWORD)
-
-    assert service.rotate_admin(
-        hash_password("new administrator password")
-    ) == BootstrapResult("rotated")
-    with sessions() as db:
-        rows = db.scalars(select(LoginSession)).all()
-    assert len(rows) == 2
-    assert all(row.revoked_at is not None for row in rows)
-    assert all(row.revoked_at.replace(tzinfo=UTC) == NOW for row in rows)
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
+        "unchanged"
+    )
     with pytest.raises(BrowserAuthenticationError):
-        service.resolve(first.token)
-    with pytest.raises(BrowserAuthenticationError):
-        service.resolve(second.token)
+        bootstrap_administrator(sessions, "different administrator password")
 
-
-@pytest.mark.parametrize("conflict", ["second-administrator", "admin-wrong-role"])
-def test_rotate_admin_rejects_non_unique_authority_without_mutation(
-    sessions: sessionmaker[Session], conflict: str
-) -> None:
-    """Rotation must use the exact same admin/administrator authority as bootstrap."""
-    old_verifier = hash_password(ADMIN_PASSWORD)
-    new_verifier = hash_password("synthetic replacement administrator password")
-    with sessions.begin() as db:
-        admin = User(
-            subject="admin",
-            role="operator" if conflict == "admin-wrong-role" else "administrator",
-            disabled_at=None,
-            password_verifier=old_verifier,
-        )
-        db.add(admin)
-        db.flush()
-        db.add(
-            LoginSession(
-                user_id=admin.id,
-                digest=sha256(b"synthetic-authority-conflict-session").hexdigest(),
-                expires_at=NOW + timedelta(hours=1),
-            )
-        )
-        if conflict == "second-administrator":
-            db.add(
-                User(
-                    subject="synthetic-other-administrator",
-                    role="administrator",
-                    disabled_at=None,
-                    password_verifier=hash_password("synthetic other password"),
-                )
-            )
-    service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
-
-    with pytest.raises(BrowserAuthenticationError):
-        service.rotate_admin(new_verifier)
-
-    with sessions() as db:
-        persisted_admin = db.scalar(select(User).where(User.subject == "admin"))
-        login = db.scalar(select(LoginSession))
-    assert persisted_admin is not None
-    assert login is not None
-    assert persisted_admin.password_verifier == old_verifier
-    assert login.revoked_at is None
-
-
-def test_bootstrap_admin_is_exact_and_idempotent(
-    sessions: sessionmaker[Session],
-) -> None:
-    """Changing the bootstrap identity or verifier must not silently replace authority."""
-    service = browser_auth(sessions, Clock(), opaque(21), opaque(22))
-    verifier = hash_password(ADMIN_PASSWORD)
-
-    assert service.bootstrap_admin(verifier) == BootstrapResult("created")
-    assert service.bootstrap_admin(verifier) == BootstrapResult("unchanged")
     with sessions() as db:
         user = db.scalar(select(User))
     assert user is not None
-    assert (user.subject, user.role, user.password_verifier) == (
-        "admin",
-        "administrator",
-        verifier,
-    )
+    assert user.subject == "admin"
+    assert user.role == "administrator"
+    assert user.password_verifier is not None
+    assert verify_password(user.password_verifier, ADMIN_PASSWORD).valid
 
 
 def test_bootstrap_admin_rejects_conflicting_administrator_authority(
@@ -327,10 +241,8 @@ def test_bootstrap_admin_rejects_conflicting_administrator_authority(
                 password_verifier=hash_password(ADMIN_PASSWORD),
             )
         )
-    service = browser_auth(sessions, Clock(), opaque(23), opaque(24))
-
     with pytest.raises(BrowserAuthenticationError):
-        service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
+        bootstrap_administrator(sessions, ADMIN_PASSWORD)
 
 
 def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
@@ -470,6 +382,39 @@ def test_resolution_rejects_session_when_exact_browser_authority_changes(
         service.resolve(issued.token)
 
 
+def _concurrently_reserve(
+    limiter: LoginRateLimiter, subjects: tuple[str, ...]
+) -> list[object]:
+    start = threading.Barrier(len(subjects) + 1)
+    reserved = threading.Barrier(len(subjects) + 1)
+    release = threading.Event()
+    attempts: list[object] = []
+    attempts_lock = threading.Lock()
+
+    def reserve(subject: str) -> None:
+        start.wait(timeout=5)
+        attempt = limiter.reserve(subject)
+        with attempts_lock:
+            attempts.append(attempt)
+        reserved.wait(timeout=5)
+        assert release.wait(timeout=5)
+        if attempt is not None:
+            limiter.fail(attempt)
+
+    threads = [
+        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
+    ]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    reserved.wait(timeout=5)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5)
+    assert all(not thread.is_alive() for thread in threads)
+    return attempts
+
+
 def test_limiter_reservations_bound_inflight_attempts_for_one_subject() -> None:
     """Splitting admission from failure recording would admit a sixth in-flight attempt."""
     limiter = LoginRateLimiter(
@@ -510,340 +455,3 @@ def test_limiter_rejects_the_1025th_tracked_subject() -> None:
     for attempt in attempts:
         assert attempt is not None
         limiter.succeed(attempt)
-
-
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL browser-auth locking tests")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:16",
-            ],
-            text=True,
-        ).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
-
-
-def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
-    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An old-password login concurrent with rotation must leave no active session."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    add_admin(sessions)
-    service = browser_auth(sessions, Clock(), opaque(31), opaque(32))
-    verification_started = threading.Event()
-    release_verification = threading.Event()
-    rotation_select_started = threading.Event()
-    login_results: list[object] = []
-    rotation_results: list[object] = []
-    verify = browser_auth_module.verify_password
-
-    def paused_verify(verifier: str, password: str):
-        verification_started.set()
-        assert release_verification.wait(timeout=5)
-        return verify(verifier, password)
-
-    def observe_rotation_select(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        if (
-            threading.current_thread().name == "browser-auth-rotation"
-            and "FROM users" in statement
-        ):
-            rotation_select_started.set()
-
-    def login() -> None:
-        try:
-            login_results.append(service.login("admin", ADMIN_PASSWORD))
-        except BaseException as error:  # noqa: BLE001 - thread reports test failure
-            login_results.append(error)
-
-    def rotate() -> None:
-        try:
-            rotation_results.append(
-                service.rotate_admin(hash_password("rotated password"))
-            )
-        except BaseException as error:  # noqa: BLE001 - thread reports test failure
-            rotation_results.append(error)
-
-    monkeypatch.setattr(browser_auth_module, "verify_password", paused_verify)
-    event.listen(postgres_engine, "before_cursor_execute", observe_rotation_select)
-    try:
-        login_thread = threading.Thread(target=login, name="browser-auth-login")
-        rotation_thread = threading.Thread(target=rotate, name="browser-auth-rotation")
-        login_thread.start()
-        assert verification_started.wait(timeout=5)
-        rotation_thread.start()
-        assert rotation_select_started.wait(timeout=5)
-        release_verification.set()
-        login_thread.join(timeout=5)
-        rotation_thread.join(timeout=5)
-    finally:
-        release_verification.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_rotation_select)
-
-    assert not login_thread.is_alive()
-    assert not rotation_thread.is_alive()
-    assert len(login_results) == 1
-    assert isinstance(login_results[0], browser_auth_module.IssuedBrowserSession)
-    assert rotation_results == [BootstrapResult("rotated")]
-    with sessions() as db:
-        rows = db.scalars(select(LoginSession)).all()
-    assert len(rows) == 1
-    assert rows[0].revoked_at is not None
-
-
-@pytest.mark.parametrize("operation", ["bootstrap", "rotation"])
-def test_postgres_browser_authority_writer_blocks_offline_admin_insertion(
-    postgres_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operation: str,
-) -> None:
-    """Every browser authority mutation must exclude a concurrent admin insert."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    if operation == "rotation":
-        add_admin(sessions)
-    service = browser_auth(sessions, Clock(), opaque(35), opaque(36))
-    browser_read_finished = threading.Event()
-    release_browser_writer = threading.Event()
-    offline_database_attempted = threading.Event()
-    browser_results: list[object] = []
-    offline_results: list[object] = []
-
-    def observe_statements(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        thread = threading.current_thread().name
-        if thread == "browser-authority-writer" and "FROM users" in statement:
-            browser_read_finished.set()
-            assert release_browser_writer.wait(timeout=5)
-        if thread == "offline-authority-writer" and (
-            "LOCK TABLE users" in statement or "INSERT INTO users" in statement
-        ):
-            offline_database_attempted.set()
-
-    def mutate_browser_authority() -> None:
-        try:
-            if operation == "bootstrap":
-                result = service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
-            else:
-                result = service.rotate_admin(hash_password("replacement password"))
-            browser_results.append(result)
-        except BaseException as error:  # noqa: BLE001 - report thread failure
-            browser_results.append(error)
-
-    def create_offline_admin() -> None:
-        offline_results.append(
-            offline_module.main(
-                [
-                    "--state-path",
-                    str(tmp_path / "state"),
-                    "create-admin",
-                    "--subject",
-                    "synthetic-offline-administrator",
-                ]
-            )
-        )
-
-    monkeypatch.setattr(db_module, "build_engine", lambda _url: postgres_engine)
-    monkeypatch.setattr(
-        settings_module.Settings,
-        "from_env_and_secrets",
-        classmethod(
-            lambda _cls: SimpleNamespace(database_url=str(postgres_engine.url))
-        ),
-    )
-    monkeypatch.setattr(
-        offline_module, "require_offline", lambda *_args, **_kwargs: nullcontext()
-    )
-    event.listen(postgres_engine, "before_cursor_execute", observe_statements)
-    try:
-        browser_thread = threading.Thread(
-            target=mutate_browser_authority, name="browser-authority-writer"
-        )
-        offline_thread = threading.Thread(
-            target=create_offline_admin, name="offline-authority-writer"
-        )
-        browser_thread.start()
-        assert browser_read_finished.wait(timeout=5)
-        offline_thread.start()
-        assert offline_database_attempted.wait(timeout=5)
-        offline_thread.join(timeout=0.5)
-        offline_was_blocked = offline_thread.is_alive()
-        release_browser_writer.set()
-        browser_thread.join(timeout=5)
-        offline_thread.join(timeout=5)
-    finally:
-        release_browser_writer.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_statements)
-
-    assert not browser_thread.is_alive()
-    assert not offline_thread.is_alive()
-    assert offline_was_blocked
-    expected = "created" if operation == "bootstrap" else "rotated"
-    assert browser_results == [BootstrapResult(expected)]
-    assert offline_results == [0]
-
-
-def test_postgres_offline_admin_writer_blocks_bootstrap_until_its_commit(
-    postgres_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Offline create-admin must hold the same authority lock as bootstrap."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    service = browser_auth(sessions, Clock(), opaque(37), opaque(38))
-    offline_insert_started = threading.Event()
-    release_offline_insert = threading.Event()
-    browser_database_attempted = threading.Event()
-    offline_results: list[object] = []
-    browser_results: list[object] = []
-
-    def observe_statements(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        thread = threading.current_thread().name
-        if thread == "offline-authority-holder" and "INSERT INTO users" in statement:
-            offline_insert_started.set()
-            assert release_offline_insert.wait(timeout=5)
-        if thread == "blocked-browser-bootstrap" and (
-            "LOCK TABLE users" in statement or "FROM users" in statement
-        ):
-            browser_database_attempted.set()
-
-    def create_offline_admin() -> None:
-        offline_results.append(
-            offline_module.main(
-                [
-                    "--state-path",
-                    str(tmp_path / "state"),
-                    "create-admin",
-                    "--subject",
-                    "synthetic-offline-administrator",
-                ]
-            )
-        )
-
-    def bootstrap() -> None:
-        try:
-            browser_results.append(
-                service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
-            )
-        except BaseException as error:  # noqa: BLE001 - report thread failure
-            browser_results.append(error)
-
-    monkeypatch.setattr(db_module, "build_engine", lambda _url: postgres_engine)
-    monkeypatch.setattr(
-        settings_module.Settings,
-        "from_env_and_secrets",
-        classmethod(
-            lambda _cls: SimpleNamespace(database_url=str(postgres_engine.url))
-        ),
-    )
-    monkeypatch.setattr(
-        offline_module, "require_offline", lambda *_args, **_kwargs: nullcontext()
-    )
-    event.listen(postgres_engine, "before_cursor_execute", observe_statements)
-    try:
-        offline_thread = threading.Thread(
-            target=create_offline_admin, name="offline-authority-holder"
-        )
-        browser_thread = threading.Thread(
-            target=bootstrap, name="blocked-browser-bootstrap"
-        )
-        offline_thread.start()
-        assert offline_insert_started.wait(timeout=5)
-        browser_thread.start()
-        assert browser_database_attempted.wait(timeout=5)
-        browser_thread.join(timeout=0.5)
-        browser_was_blocked = browser_thread.is_alive()
-        release_offline_insert.set()
-        offline_thread.join(timeout=5)
-        browser_thread.join(timeout=5)
-    finally:
-        release_offline_insert.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_statements)
-
-    assert not offline_thread.is_alive()
-    assert not browser_thread.is_alive()
-    assert browser_was_blocked
-    assert offline_results == [0]
-    assert len(browser_results) == 1
-    assert isinstance(browser_results[0], BrowserAuthenticationError)
-
-
-def _concurrently_reserve(
-    limiter: LoginRateLimiter, subjects: tuple[str, ...]
-) -> list[object]:
-    start = threading.Barrier(len(subjects) + 1)
-    reserved = threading.Barrier(len(subjects) + 1)
-    release = threading.Event()
-    attempts: list[object] = []
-    attempts_lock = threading.Lock()
-
-    def reserve(subject: str) -> None:
-        start.wait(timeout=5)
-        attempt = limiter.reserve(subject)
-        with attempts_lock:
-            attempts.append(attempt)
-        reserved.wait(timeout=5)
-        assert release.wait(timeout=5)
-        if attempt is not None:
-            limiter.fail(attempt)
-
-    threads = [
-        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
-    ]
-    for thread in threads:
-        thread.start()
-    start.wait(timeout=5)
-    reserved.wait(timeout=5)
-    release.set()
-    for thread in threads:
-        thread.join(timeout=5)
-    assert all(not thread.is_alive() for thread in threads)
-    return attempts

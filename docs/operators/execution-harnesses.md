@@ -47,73 +47,13 @@ submission, progress, cancellation, and result artifacts use the declared
 controller/job interface directly; a result location is not placed in LiteLLM.
 Health and cleanup still use the same harness lifecycle and exact node evidence.
 
-## Clean development reset
-
-The reset is intentionally destructive and pre-production-only. It first
-requires both exact gates:
-
-```bash
-scripts/reset-development-recipe-domain \
-  --environment development \
-  --project-name vonk-forge \
-  --journal-file /volume1/vonk-reset-state/task-9-reset.json \
-  --docker-mode sudo \
-  --confirm-destructive-preproduction-reset
-```
-
-Run the reset as the unprivileged NAS operator with non-interactive
-`sudo -n docker` authority. Do not run the whole script through `sudo`: its
-short-lived administrator token must remain a mode-`0600`, operator-owned file.
-The permanent NAS project still contains only `docker-compose.yaml` and
-`secrets/`; stage the repository script and token outside that directory for
-the reset and remove both afterward.
-
-Before mutation, the script resolves Compose with explicit project name
-`vonk-forge`, validates the exact development services and named volumes, and
-freezes a mode-`0400`, SHA-256-bound Compose snapshot beside a mode-`0600`
-phase journal outside the permanent project. It inspects the actual project
-containers, service labels, mounts, volumes, and project/volume labels. Any
-orphan, anonymous mount, foreign label, changed graph, or unexpected object
-fails before teardown. Every later Compose call uses the immutable snapshot
-and explicit project name. Teardown uses bounded `compose stop` and `compose
-down` without broad volume/orphan flags, then removes only each prevalidated
-named volume explicitly.
-
-The journal advances only after drain, stop, down, exact volume deletion,
-PostgreSQL startup, migration, stack startup, and verification. An interrupted
-run resumes from that hash-bound phase without assuming the API is available
-during teardown. Final verification requires `/api/v1/agents` to be empty;
-PostgreSQL Fleet registrations are empty, so no nodes are projected and no
-inventory, telemetry, workload, or reservation state remains. Terminally
-paginated Library reads must contain exactly the eight built-in harness
-identities and their checked-in content digests, no recipes, and no prototype
-state. Migration head must be exactly `0001_fleet_library_baseline`.
-
-This is a truly fresh control domain: all control database rows, users, browser
-sessions, agent enrollments, route publications, repository projection,
-supervisor state, generated runtime configuration, control identity, LiteLLM
-database state, and Tailscale gateway state in the project volumes are removed.
-The NAS `secrets/` source generation is retained. Spark-local model and build
-caches are outside this reset; they may be reused only when the acceptance run
-independently verifies the exact required digest. There is no legacy migration,
-prototype conversion, compatibility import, or preservation path.
-
-After reset, let the development auth initializer recreate exact administrator
-subject `admin` from the retained verifier, sign in to establish a fresh browser
-session, create a fresh one-use grant for each Spark, and perform the strict
-grant/pair/approve/pair sequence from
-[Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not use a
-pre-reset browser cookie, pairing token, certificate enrollment, acceptance
-file, or node binding as proof. Create a fresh short-lived administrator token
-for the post-reset acceptance and remove it when the run finishes.
-
 ## Acceptance evidence
 
 `scripts/accept-recipe` checks recipe node count before credentials or network
 access. Structural qualification resolves every exact checked-in catalog
 reference and source bundle. Read-only Fleet and agent snapshots bind each
-operator selector to one certificate-bound `spk_…` identity, agent build,
-supervisor generation, certificate expiry, fresh inventory, capacity, and
+operator selector to one certificate-bound `spk_…` identity, packaged agent
+build and binary digests, certificate expiry, fresh inventory, capacity, and
 fabric. Fleet selectors and SSH destinations are separate inputs: current
 Fleet hostnames `spark-3542` and `spark-2297` map explicitly to inventory SSH
 aliases `vonk-node-1` and `vonk-node-2`. The mapping is validated before any
@@ -132,124 +72,20 @@ prefix of `authored`, `structurally-verified`, `container-verified`,
 `spark-canary`, and `spark-accepted`. A phase advances only after independently
 validating all exact runner outputs required at that point. State names without
 an image digest, artifact-set digest, inference digest, cleanup operation, or
-advanced post-restart supervisor generation cannot overstate acceptance. A
+changed post-restart host boot ID cannot overstate acceptance. A
 changed recipe, Library digest, node/certificate binding, qualification file,
 API origin, topology, or noncanonical sidecar cannot resume older evidence.
 
-At each restart checkpoint the runner records both the supervisor generation
-from `/api/v1/agents` and the host boot ID from serialized Fleet telemetry.
-Heartbeat timestamps and Fleet `generated_at` are not restart proof. Every
-selected node must return with both a strictly greater generation and a
-different boot ID before route and inference evidence can be bound to the new
-identity; cleanup remains deferred until that gate succeeds.
+At each restart checkpoint the runner records the host boot ID from serialized
+Fleet telemetry. Heartbeat timestamps and Fleet `generated_at` are not restart
+proof. Every selected node must return with a different boot ID before route
+and inference evidence can be bound to the new identity; cleanup remains
+deferred until that gate succeeds.
 
 One-Spark acceptance pauses after canary inference for an offline restart.
 Distributed acceptance additionally pauses for failure-rank loss, route
 withdrawal, rank recovery, recovered inference, and a final offline restart.
 The same command is rerun after each explicit operator action; checkpoint exit
 code `4` means the evidence is valid but not complete. Only the full single-node
-ladder, or the full distributed rank-loss/recovery ladder, cleanup, and advanced
-supervisor generations can write `spark-accepted`.
-
-## Controller execution sequence
-
-These commands are an execution handoff, not evidence that the physical steps
-have run. Keep pre-reset preflight evidence separate from fresh acceptance
-evidence so stale enrollment identity can never be promoted.
-
-```bash
-install -d -m 0700 .state/recipe-acceptance
-scripts/dev-admin-token \
-  --output "$PWD/.state/recipe-acceptance/admin-token" \
-  --signing-key-file '<DEVELOPMENT_TOKEN_SIGNING_KEY_FILE>' \
-  --ttl-seconds 3600
-
-scripts/accept-recipe \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --library-root ../vonk-forge-recipes \
-  --nodes spark-3542 \
-  --ssh-target spark-3542=vonk-node-1 \
-  --preflight-only \
-  --evidence-file "$PWD/.state/recipe-acceptance/pre-reset-ds4.json"
-
-scripts/accept-recipe \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json \
-  --library-root ../vonk-forge-recipes \
-  --nodes spark-3542,spark-2297 \
-  --ssh-target spark-3542=vonk-node-1 \
-  --ssh-target spark-2297=vonk-node-2 \
-  --preflight-only \
-  --evidence-file "$PWD/.state/recipe-acceptance/pre-reset-mia.json"
-
-scp scripts/reset-development-recipe-domain \
-  "${NAS_SSH_HOST}:/tmp/vonk-reset-development-recipe-domain"
-scp "$PWD/.state/recipe-acceptance/admin-token" \
-  "${NAS_SSH_HOST}:/tmp/vonk-reset-admin-token"
-ssh -t "$NAS_SSH_HOST" '
-  set -eu
-  trap "rm -f /tmp/vonk-reset-development-recipe-domain /tmp/vonk-reset-admin-token" EXIT
-  install -d -m 0700 /volume1/vonk-reset-state
-  chmod 0700 /tmp/vonk-reset-development-recipe-domain
-  chmod 0600 /tmp/vonk-reset-admin-token
-  /tmp/vonk-reset-development-recipe-domain \
-    --environment development \
-    --project-directory /volume1/docker/vonk-forge \
-    --project-name vonk-forge \
-    --journal-file /volume1/vonk-reset-state/task-9-reset.json \
-    --api-base http://127.0.0.1:8080 \
-    --admin-token-file /tmp/vonk-reset-admin-token \
-    --docker-mode sudo \
-    --confirm-destructive-preproduction-reset
-'
-rm -f "$PWD/.state/recipe-acceptance/admin-token"
-```
-
-After the reset, sign in as the newly recreated `admin`. For each Spark, create
-a different one-use grant in that fresh browser session, run the exact command
-displayed by Fleet, approve the displayed pending enrollment in the browser,
-then run the same command once more:
-
-```bash
-sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \
-  --token '<ONE_USE_TOKEN>' \
-  --controller-endpoint 'https://<CONTROLLER_HOSTNAME>:8443/' \
-  --enrollment-endpoint 'https://<ENROLLMENT_HOSTNAME>:8443/' \
-  --ca-fingerprint '<64_LOWERCASE_HEX_FROM_SHA256SUM>'
-```
-
-The command uses `/etc/vonk-forge-agent/agent.toml`,
-`/var/lib/vonk-forge-agent`, and
-`/etc/vonk-forge-agent/controller-ca.pem`; do not add local path flags or edit
-the TOML. Start the supervisor only after the second bootstrap succeeds and
-verify both fresh `spk_…` identities and inventories in Fleet. Then create
-fresh token files as described in
-[Development agent workload acceptance](../runbooks/development-agent-workloads.md)
-and run the physical ladders with new evidence paths:
-
-```bash
-scripts/accept-recipe \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --library-root ../vonk-forge-recipes \
-  --nodes spark-3542 \
-  --ssh-target spark-3542=vonk-node-1 \
-  --level spark \
-  --evidence-file "$PWD/.state/recipe-acceptance/fresh-ds4.json"
-
-scripts/accept-recipe \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json \
-  --library-root ../vonk-forge-recipes \
-  --nodes spark-3542,spark-2297 \
-  --ssh-target spark-3542=vonk-node-1 \
-  --ssh-target spark-2297=vonk-node-2 \
-  --level spark \
-  --evidence-file "$PWD/.state/recipe-acceptance/fresh-mia.json"
-```
-
-At a Mia rank checkpoint, keep the Rust agent running and execute only the
-emitted inspect plus exact `vonk-<run-id>` container stop/start action after all
-three managed/run/runtime-request labels match. At every checkpoint, perform
-only the named restart or failure/recovery action from the script, confirm
-Fleet reflects it, and rerun the identical command.
-Archive the final private evidence outside Git. Do not call the result accepted
-until both documents say exact status `spark-accepted` and all expected routes
-are withdrawn after cleanup.
+ladder, or the full distributed rank-loss/recovery ladder, cleanup, and changed
+boot identities can write `spark-accepted`.

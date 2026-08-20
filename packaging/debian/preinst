@@ -3,45 +3,23 @@ set -eu
 
 new_version='@VERSION@'
 
-test_root=${VONK_PACKAGE_TEST_ROOT:-}
-if [ -n "$test_root" ]; then
-    if [ "$(id -u)" -eq 0 ] || [ "${test_root#/}" = "$test_root" ] \
-        || [ ! -d "$test_root" ] || [ -L "$test_root" ]; then
-        echo "vonk-forge-agent: package test root is invalid" >&2
-        exit 1
-    fi
-fi
+case "${1:-}" in
+install|upgrade)
+    old_version=${2:-}
+    ;;
+abort-upgrade)
+    # The old package's abort path must remain available to dpkg recovery.
+    old_version=
+    ;;
+*)
+    old_version=
+    ;;
+esac
 
-if [ "${1:-}" = upgrade ] && [ -n "${2:-}" ]; then
-    if dpkg --compare-versions "$new_version" lt "$2"; then
-        echo "vonk-forge-agent: refusing downgrade from $2 to $new_version" >&2
+if [ -n "$old_version" ]; then
+    if dpkg --compare-versions "$new_version" lt "$old_version"; then
+        echo "vonk-forge-agent: refusing downgrade from $old_version to $new_version" >&2
         exit 1
-    fi
-
-    state="$test_root/var/lib/vonk-forge/supervisor/state.json"
-    supervisor="$test_root/usr/lib/vonk-forge/vonk-agent-supervisor"
-    if [ -e "$state" ]; then
-        if [ -L "$state" ] || [ ! -f "$state" ] \
-            || [ "$(stat -c %a "$state")" != 644 ]; then
-            echo "vonk-forge-agent: supervisor state is unsafe" >&2
-            exit 1
-        fi
-        if [ -z "$test_root" ] && [ "$(stat -c %u "$state")" != 0 ]; then
-            echo "vonk-forge-agent: supervisor state is unsafe" >&2
-            exit 1
-        fi
-        if [ -x "$supervisor" ] \
-            && "$supervisor" --help 2>/dev/null \
-                | grep -Fq 'package-staging-slot'; then
-            if ! "$supervisor" package-staging-slot >/dev/null; then
-                echo "vonk-forge-agent: supervisor state is not stable" >&2
-                exit 1
-            fi
-        elif [ "$(LC_ALL=C sed -n \
-            's/.*"status":"\([a-z-]*\)".*/\1/p' "$state")" != stable ]; then
-            echo "vonk-forge-agent: supervisor state is not stable" >&2
-            exit 1
-        fi
     fi
 fi
 

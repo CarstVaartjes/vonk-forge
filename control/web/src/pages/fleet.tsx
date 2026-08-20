@@ -1,5 +1,5 @@
-import {useEffect, useMemo, useRef, useState} from "react";
-import type {ControlApi, EnrollmentGrantResponse, UpdateSkew} from "../api/types";
+import {useMemo, useRef, useState} from "react";
+import type {ControlApi, EnrollmentGrantResponse} from "../api/types";
 import {NodeCard} from "../components/node-card";
 import {NodeDetail} from "../components/node-detail";
 import {StatusPill} from "../components/status-pill";
@@ -7,37 +7,14 @@ import {useFleetStream} from "../hooks/use-fleet-stream";
 import {usePoliteAnnouncement} from "../hooks/use-polite-announcement";
 import {formatBytes, summarizeFleet} from "../lib/fleet";
 
-const DISMISSED_SKEW_KEY = "vonk-forge.dismissed-update-skew";
 export const ENROLLMENT_GRANT_TTL_SECONDS = 900;
-
-function bounded(value: string, maximum = 256): string {
-  return value.length > maximum ? `${value.slice(0, maximum)}…` : value;
-}
-
-function previouslyDismissed(digest: string): boolean {
-  try {
-    return localStorage.getItem(DISMISSED_SKEW_KEY) === digest;
-  } catch {
-    return false;
-  }
-}
 
 function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\"'\"'")}'`;
-}
-
-function bootstrapCommand(grant: EnrollmentGrantResponse): string {
-  return [
-    "sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \\",
-    "  --token " + shellQuote(grant.token) + " \\",
-    "  --controller-endpoint " + shellQuote(grant.controller_endpoint) + " \\",
-    "  --enrollment-endpoint " + shellQuote(grant.enrollment_endpoint) + " \\",
-    `  --ca-fingerprint ${shellQuote(grant.ca_fingerprint)}`,
-  ].join("\n");
+function bootstrapCommand(): string {
+  return "curl -fsSL https://install.vonkforge.ai/spark | sh";
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {
@@ -68,18 +45,18 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
 
   return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title">
-      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived, pinned bootstrap command.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
       <div className="library-action-dialog-body">
         {!grant && <>
-          <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><strong>Create</strong><span>Generate a one-time grant here.</span></li><li><strong>Run</strong><span>Copy the command to the Spark.</span></li><li><strong>Review</strong><span>Approve the pending enrollment.</span></li></ol>
-          <p className="onboarding-guidance">The Spark generates its immutable <code>spk_…</code> identity locally. The command carries the controller endpoints and CA fingerprint required for a pinned bootstrap.</p>
+          <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><strong>Create</strong><span>Generate a one-time grant here.</span></li><li><strong>Run</strong><span>Run the public installer on the Spark.</span></li><li><strong>Enter</strong><span>Provide the values shown here when prompted.</span></li></ol>
+          <p className="onboarding-guidance">The Spark generates its immutable <code>spk_…</code> identity locally. The installer verifies the release before requesting sudo and pins the controller CA.</p>
           {error && <p role="alert" className="dialog-error">{error}</p>}
         </>}
         {grant && <>
           <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
-          <p>Run this command on the Spark, then approve the enrollment from the Fleet queue.</p>
-          <code className="onboarding-command">{bootstrapCommand(grant)}</code>
-          <dl className="grant-facts"><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
+          <p>Run this command on the Spark. Enter the enrollment URL, CA fingerprint, and one-time token below when prompted; the installer discovers the controller endpoint.</p>
+          <code className="onboarding-command">{bootstrapCommand()}</code>
+          <dl className="grant-facts"><div><dt>One-time token</dt><dd><code>{grant.token}</code></dd></div><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
       </div>
       <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
@@ -90,25 +67,9 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
 
 export function FleetPage({api}: {api: ControlApi}) {
   const fleet = useFleetStream(api);
-  const [skew, setSkew] = useState<UpdateSkew>();
-  const [dismissed, setDismissed] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
   const detailTrigger = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (typeof api.updateSkew !== "function") return;
-    let current = true;
-    api.updateSkew().then(result => {
-      if (!current) return;
-      setSkew(result);
-      setDismissed(previouslyDismissed(result.digest) ? result.digest : "");
-    }).catch(() => {
-      // Fleet visibility remains useful when the update authority is
-      // temporarily unavailable; the update workflow reports it.
-    });
-    return () => { current = false; };
-  }, [api]);
 
   const summary = useMemo(
     () => fleet.snapshot ? summarizeFleet(fleet.snapshot, fleet.now) : undefined,
@@ -121,16 +82,6 @@ export function FleetPage({api}: {api: ControlApi}) {
   const selectedNode = fleet.snapshot?.nodes.find(node => node.id === selectedNodeId);
   const connection = connectionPresentation(fleet.connection);
 
-  function dismissUpdate() {
-    if (!skew) return;
-    try {
-      localStorage.setItem(DISMISSED_SKEW_KEY, skew.digest);
-    } catch {
-      // Session-local dismissal still works if durable browser storage is denied.
-    }
-    setDismissed(skew.digest);
-  }
-
   function selectNode(nodeId: string) {
     if (document.activeElement instanceof HTMLElement) detailTrigger.current = document.activeElement;
     setSelectedNodeId(nodeId);
@@ -141,7 +92,6 @@ export function FleetPage({api}: {api: ControlApi}) {
     queueMicrotask(() => detailTrigger.current?.focus());
   }
 
-  const showUpdate = skew?.prompt_required === true && dismissed !== skew.digest;
   return <div className="fleet-page">
     <header className="fleet-hero">
       <div>
@@ -160,14 +110,6 @@ export function FleetPage({api}: {api: ControlApi}) {
     {onboarding && <SparkOnboarding api={api} onClose={() => setOnboarding(false)}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
-
-    {showUpdate && skew && <section className="update-notice" aria-label="GPU node update available">
-      <h3>Vonk Forge update available for GPU nodes</h3>
-      <p>The NAS is running {bounded(skew.target.platform_version)} at <code>{bounded(skew.target.build_digest)}</code>. Review and explicitly confirm the signed rollout; this notice never updates a GPU node by itself.</p>
-      <p>Affected GPU nodes: {skew.nodes.filter(node => skew.affected_nodes.includes(node.node_id)).slice(0, 1024).map(node => `${bounded(node.display_name)} (${bounded(node.node_id)})`).join(", ") || "none"}.</p>
-      {skew.offline_pending.length > 0 && <p>Offline pending: {skew.offline_pending.map(bounded).join(", ")}.</p>}
-      <p className="update-actions"><span>Review this signed rollout through the maintenance workflow.</span><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
-    </section>}
 
     {summary && <section className="fleet-summary" aria-label="Fleet summary">
       <div className="fleet-capacity">

@@ -95,3 +95,43 @@ def test_evidence_rejects_filename_version_mismatch(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "package filename" in result.stderr
+
+
+def test_evidence_uses_linux_amd64_for_the_amd64_package(tmp_path: Path) -> None:
+    prefix = tmp_path / "vonk-forge-agent_1.2.0_amd64"
+    package = tmp_path / f"{prefix.name}.deb"
+    sbom = tmp_path / f"{prefix.name}.sbom.spdx.json"
+    provenance = tmp_path / f"{prefix.name}.provenance.json"
+    sigstore = tmp_path / f"{prefix.name}.deb.sigstore.json"
+    output = tmp_path / "evidence.json"
+    for path in (package, sbom, provenance, sigstore):
+        _write(path, path.name.encode())
+
+    result = subprocess.run(
+        [
+            SCRIPT,
+            "--package",
+            package,
+            "--sbom",
+            sbom,
+            "--provenance",
+            provenance,
+            "--sigstore-bundle",
+            sigstore,
+            "--version",
+            "1.2.0",
+            "--architecture",
+            "linux-amd64",
+            "--output",
+            output,
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(output.read_bytes())
+    assert evidence["locator"] == "agent_packages.linux-amd64"
+    assert evidence["package"]["architecture"] == "linux-amd64"

@@ -30,15 +30,8 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/schemas/workload.schema.json" = "cluster_profiles/schemas/workload.schema.json"
 "src/cluster_profiles/schemas/cluster-profile.schema.json" = "cluster_profiles/schemas/cluster-profile.schema.json"
 "src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
-"src/cluster_profiles/schemas/node-health-raw.schema.json" = "cluster_profiles/schemas/node-health-raw.schema.json"
-"src/cluster_profiles/schemas/node-health.schema.json" = "cluster_profiles/schemas/node-health.schema.json"
-"src/cluster_profiles/schemas/topology.schema.json" = "cluster_profiles/schemas/topology.schema.json"
-"src/cluster_profiles/schemas/platform-release-evidence.schema.json" = "cluster_profiles/schemas/platform-release-evidence.schema.json"
-"src/cluster_profiles/schemas/placement-requirements.schema.json" = "cluster_profiles/schemas/placement-requirements.schema.json"
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
-"src/cluster_profiles/schemas/platform-update-manifest.schema.json" = "cluster_profiles/schemas/platform-update-manifest.schema.json"
-"src/cluster_profiles/schemas/control-deployment-bundle.schema.json" = "cluster_profiles/schemas/control-deployment-bundle.schema.json"
 
 [tool.ruff]
 required-version = "==0.16.1"
@@ -46,9 +39,6 @@ target-version = "py312"
 extend-exclude = [
     "src/cluster_profiles/generated_control",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"control/src/vonk_control/resources/dev/litellm-supervisor.py" = ["N999"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

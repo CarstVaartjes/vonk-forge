@@ -5,8 +5,8 @@ Vonk Forge GPU node agents. Caddy is the only published ingress; Tailscale is th
 default remote-access boundary; GPU node agents make outbound mTLS connections;
 LiteLLM publishes only routes acknowledged by the control plane.
 Normal administration uses the stable private Tailscale HTTPS
-`svc:vonk-forge` Service in a browser without an SSH or PowerShell tunnel. See
-[Open the stable browser URL](runbooks/development-nas-installation.md#open-the-stable-browser-url).
+`svc:vonk-forge` Service in a browser without an SSH or PowerShell tunnel. The
+generated deployment's configurator logs the exact URL after startup.
 
 ## Authority boundary
 
@@ -17,9 +17,9 @@ Normal administration uses the stable private Tailscale HTTPS
   metadata and model-target research. It never stores image layers, model
   weights, or cluster state. Vonk Forge Web may later provide a browser-facing
   catalog, but it is not the recipe authority.
-- Git/TUF remains the authority for platform source, fleet/topology policy,
-  and the independent generic-package release projection. It is not a second
-  model or recipe authority.
+- GitHub and signed release metadata establish the provenance of immutable
+  installation artifacts. They are not runtime desired state: fleet topology,
+  platform policy, and proposals are persisted in local PostgreSQL.
 
 ## Deployment boundary
 
@@ -55,6 +55,8 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
+- [PostgreSQL authority administration](runbooks/authority-administration.md) —
+  immutable revisions, proposals, and the runtime authority boundary
 - [Model and recipe identities](operators/model-catalog.md) — model identity, recipes,
   topology, install/update, and exact-revision rollback
 - [Model target ledger](operators/model-targets.md) — current defaults,
@@ -69,10 +71,9 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Recipe operations](runbooks/model-switching.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
-- [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)
 - [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
 - [Model switching](runbooks/model-switching.md)
-- [Platform updates](runbooks/platform-update.md)
+- [Platform release publication](runbooks/platform-release-publication.md)
 - [Security threat model](security/threat-model.md)
 
 Commands in these pages are plan-first by default. They show the exact

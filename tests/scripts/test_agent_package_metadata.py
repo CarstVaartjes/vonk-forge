@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-package-metadata"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -23,8 +22,6 @@ def run_metadata(*arguments: str, root: Path = ROOT) -> subprocess.CompletedProc
 
 
 def metadata_workspace(tmp_path: Path) -> Path:
-    if not SCRIPT.is_file():
-        pytest.skip("agent-package-metadata has not been implemented")
     workspace = tmp_path / "workspace"
     for relative in (
         "Cargo.toml",
@@ -46,8 +43,13 @@ def test_development_metadata_emits_canonical_debian_outputs() -> None:
     assert result.stdout.splitlines() == [
         "version=0.1.0~dev.417+g0123456789ab",
         "next_version=0.1.0~dev.418+g0123456789ab",
-        "package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
+        "baseline_version=0.0.0~acceptance.1+g0123456789ab",
+        "arm64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
+        "amd64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_amd64.deb",
+        "arm64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_arm64.deb",
+        "amd64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_amd64.deb",
         f"artifact_name=vonk-agent-development-{SHA}",
+        f"baseline_artifact_name=vonk-agent-development-{SHA}-acceptance-baseline",
         "channel=dev",
         "snapshot=dev-0.1.0~dev.417+g0123456789ab",
     ]
@@ -59,9 +61,14 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "version=0.1.0",
-        "next_version=0.1.1",
-        "package=vonk-forge-agent_0.1.0_arm64.deb",
+        "next_version=0.1.0+lifecycle.1",
+        "baseline_version=0.0.0~acceptance.1+g0123456789ab",
+        "arm64_package=vonk-forge-agent_0.1.0_arm64.deb",
+        "amd64_package=vonk-forge-agent_0.1.0_amd64.deb",
+        "arm64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_arm64.deb",
+        "amd64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_amd64.deb",
         f"artifact_name=vonk-agent-production-{SHA}",
+        f"baseline_artifact_name=vonk-agent-production-{SHA}-acceptance-baseline",
         "channel=stable",
         "snapshot=stable-0.1.0",
     ]

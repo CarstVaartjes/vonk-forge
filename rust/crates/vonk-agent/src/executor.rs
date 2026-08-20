@@ -3,7 +3,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
 use std::{future::Future, path::Path, time::Duration};
 
-use crate::supervisor_readiness::AgentRuntimeIdentity;
+use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     client::{AgentHttpClient, ClientError},
     health::{HealthEvidence, wait_ready},
@@ -517,6 +517,16 @@ pub enum LoopError {
     State(#[from] StateError),
     #[error("agent heartbeat task failed")]
     HeartbeatTask,
+    #[error("agent readiness publication failed: {0}")]
+    Readiness(String),
+}
+
+#[derive(Clone, Copy)]
+struct RunOncePolicy<'a> {
+    capabilities: &'a [&'a str],
+    wait_seconds: u64,
+    runtime_identity: Option<&'a AgentRuntimeIdentity>,
+    heartbeat_interval: Duration,
 }
 
 pub async fn run_once<C: LoopClient, E: Executor>(
@@ -531,31 +541,71 @@ pub async fn run_once<C: LoopClient, E: Executor>(
         client,
         state,
         executor,
-        capabilities,
-        wait_seconds,
-        runtime_identity,
-        HEARTBEAT_INTERVAL,
+        RunOncePolicy {
+            capabilities,
+            wait_seconds,
+            runtime_identity,
+            heartbeat_interval: HEARTBEAT_INTERVAL,
+        },
+        || Ok(()),
     )
     .await
 }
 
-async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
+pub async fn run_once_with_claim_hook<C, E, F>(
     client: &C,
     state: &mut StateStore,
     executor: &E,
     capabilities: &[&str],
     wait_seconds: u64,
     runtime_identity: Option<&AgentRuntimeIdentity>,
-    heartbeat_interval: Duration,
-) -> Result<(), LoopError> {
+    on_claim_accepted: F,
+) -> Result<(), LoopError>
+where
+    C: LoopClient,
+    E: Executor,
+    F: FnOnce() -> Result<(), LoopError>,
+{
+    run_once_with_heartbeat_interval(
+        client,
+        state,
+        executor,
+        RunOncePolicy {
+            capabilities,
+            wait_seconds,
+            runtime_identity,
+            heartbeat_interval: HEARTBEAT_INTERVAL,
+        },
+        on_claim_accepted,
+    )
+    .await
+}
+
+async fn run_once_with_heartbeat_interval<C, E, F>(
+    client: &C,
+    state: &mut StateStore,
+    executor: &E,
+    policy: RunOncePolicy<'_>,
+    on_claim_accepted: F,
+) -> Result<(), LoopError>
+where
+    C: LoopClient,
+    E: Executor,
+    F: FnOnce() -> Result<(), LoopError>,
+{
     for result in state.pending_results()? {
         client.submit_result(&result).await?;
         state.acknowledge(&result)?;
     }
-    let Some(claim) = client
-        .claim(capabilities, wait_seconds, runtime_identity)
-        .await?
-    else {
+    let claim = client
+        .claim(
+            policy.capabilities,
+            policy.wait_seconds,
+            policy.runtime_identity,
+        )
+        .await?;
+    on_claim_accepted()?;
+    let Some(claim) = claim else {
         return Ok(());
     };
     let result = match state.begin(&claim, Utc::now()) {
@@ -570,7 +620,7 @@ async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
                 claim.clone(),
                 lease_deadline_sender,
                 heartbeat_stop,
-                heartbeat_interval,
+                policy.heartbeat_interval,
             ));
             let executed =
                 normalize_execution_result(&claim, executor.execute(&claim, lease_deadline).await);
@@ -665,12 +715,10 @@ async fn run_heartbeats<C: LoopClient>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, LoopClient, run_once_with_heartbeat_interval,
-        wait_ready_with_runtime_guard,
+        ExecutionResult, Executor, LoopClient, RunOncePolicy, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, wait_ready_with_runtime_guard,
     };
-    use crate::{
-        client::ClientError, state::StateStore, supervisor_readiness::AgentRuntimeIdentity,
-    };
+    use crate::{client::ClientError, runtime_identity::AgentRuntimeIdentity, state::StateStore};
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
     use serde_json::json;
@@ -789,6 +837,25 @@ mod tests {
         }
     }
 
+    struct OrderingExecutor {
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    #[async_trait(?Send)]
+    impl Executor for OrderingExecutor {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        ) -> ExecutionResult {
+            self.events.lock().unwrap().push("execute");
+            ExecutionResult {
+                state: "succeeded",
+                body: json!({"status": "ok"}),
+            }
+        }
+    }
+
     fn claim() -> AgentClaim {
         let payload = json!({"plan_digest": "a".repeat(64)});
         AgentClaim {
@@ -805,6 +872,40 @@ mod tests {
             payload,
             schema_version: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn successful_claim_publishes_readiness_before_job_execution() {
+        let directory = tempdir().unwrap();
+        let client = RecordingClient {
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let executor = OrderingExecutor {
+            events: events.clone(),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let hook_events = events.clone();
+
+        run_once_with_claim_hook(
+            &client,
+            &mut state,
+            &executor,
+            &["recipe.install"],
+            0,
+            None,
+            move || {
+                hook_events.lock().unwrap().push("readiness");
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*events.lock().unwrap(), ["readiness", "execute"]);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -830,10 +931,13 @@ mod tests {
             &client,
             &mut state,
             &executor,
-            &["recipe.install"],
-            0,
-            None,
-            Duration::from_millis(10),
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+            },
+            || Ok(()),
         )
         .await
         .unwrap();
@@ -869,10 +973,13 @@ mod tests {
             &client,
             &mut state,
             &executor,
-            &["recipe.install"],
-            0,
-            None,
-            Duration::from_millis(10),
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+            },
+            || Ok(()),
         )
         .await
         .unwrap_err();
@@ -899,10 +1006,13 @@ mod tests {
             &client,
             &mut state,
             &FailedExecutor,
-            &["recipe.install"],
-            0,
-            None,
-            Duration::from_secs(10),
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_secs(10),
+            },
+            || Ok(()),
         )
         .await
         .unwrap();

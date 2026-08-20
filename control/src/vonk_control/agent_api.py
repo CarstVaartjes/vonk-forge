@@ -46,10 +46,10 @@ from .auth import (
     agent_source_from_scope,
 )
 from .enrollment import (
-    EnrollmentDenied,
-    EnrollmentService,
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
-    PendingEnrollment,
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+    EnrollmentService,
     RemoteRevocationUncertain,
     RenewalInProgress,
 )
@@ -72,11 +72,6 @@ from .models import (
     RecipeSourceBundle,
 )
 from .operation_api import bounded_error_responses
-from .workload_helper_authority import (
-    WorkloadHelperAuthorityError,
-    WorkloadHelperAuthorityService,
-)
-from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
@@ -91,6 +86,10 @@ from .telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
+from .workload_helper_authority import (
+    WorkloadHelperAuthorityError,
+    WorkloadHelperAuthorityService,
+)
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
@@ -104,17 +103,6 @@ _MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
-_MAX_TUF_METADATA_BYTES = 2 * 1024 * 1024
-_MAX_TUF_TARGET_BYTES = 16 * 1024 * 1024
-_TUF_METADATA_NAME = re.compile(
-    r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|"
-    r"[a-z0-9][a-z0-9._-]{0,126})\.json\Z"
-)
-_TUF_PLATFORM_TARGET_NAME = re.compile(
-    r"platform/releases/"
-    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)/"
-    r"[0-9a-f]{64}\.json\Z"
-)
 _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|families|releases|"
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
@@ -139,15 +127,11 @@ class AgentApiServices:
     presence: AgentPresenceService
     artifact_root: Path
     source_bundles: SourceBundleStore
-    tuf_metadata_root: Path = Path("/state/agent-tuf/metadata")
-    tuf_target_root: Path = Path("/state/agent-tuf/targets")
     workload_tuf_metadata_root: Path = Path("/state/workload-tuf/metadata")
     workload_tuf_target_root: Path = Path("/state/workload-tuf/targets")
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
     max_recipe_image_bytes: int = MAX_RECIPE_IMAGE_BYTES
     max_range_bytes: int = _MAX_RANGE_BYTES
-    max_tuf_metadata_bytes: int = _MAX_TUF_METADATA_BYTES
-    max_tuf_target_bytes: int = _MAX_TUF_TARGET_BYTES
     max_workload_tuf_metadata_bytes: int = 2 * 1024 * 1024
     max_workload_tuf_target_bytes: int = 1024 * 1024
     workload_helper_authority: WorkloadHelperAuthorityService | None = None
@@ -196,6 +180,7 @@ class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
+
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     grant_token: str = Field(min_length=43, max_length=64)
@@ -222,31 +207,12 @@ class EnrollmentSubmitRequest(BaseModel):
         return evidence
 
 
-class RejectRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reason: str = Field(min_length=1, max_length=1024)
-
-
-class EnrollmentDecisionResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=128)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: Literal["pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"]
-
-
-_ENROLLMENT_API_STATES = frozenset(
-    {"pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"}
-)
+_ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
 def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
-    if enrollment.state == "pending-approval":
-        return "pending_review"
-    if enrollment.state == "approved":
-        return "certificate_issued" if enrollment.certificate_serial else "approved"
-    if enrollment.state == "issuing":
-        return "issuing"
     return enrollment.state
+
 
 class EnrollmentGrantResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -257,6 +223,15 @@ class EnrollmentGrantResponse(BaseModel):
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class EnrollmentBootstrapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    controller_endpoint: str = Field(min_length=1, max_length=2048)
+    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
+    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    ca_pem: str = Field(min_length=1, max_length=64 * 1024)
+
 
 class EnrollmentSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -269,9 +244,6 @@ class EnrollmentSummary(BaseModel):
     agent_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     boot_id: str = Field(min_length=1, max_length=512)
     created_at: str = Field(min_length=1, max_length=64)
-    decision_actor: str | None = Field(default=None, max_length=200)
-    decided_at: str | None = Field(default=None, max_length=64)
-    rejection_reason: str | None = Field(default=None, max_length=1024)
     certificate_serial: str | None = Field(default=None, max_length=256)
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
@@ -284,18 +256,13 @@ class EnrollmentListResponse(BaseModel):
 
 class AgentRuntimeIdentityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    architecture: Literal["linux-arm64", "linux-x86_64"]
-    platform_version: str = Field(
+    architecture: Literal["linux-amd64", "linux-arm64"]
+    semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
     )
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    active_slot: str = Field(pattern=r"^[AB]$")
-    agent_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    supervisor_generation: int = Field(ge=1, le=999_999_999, strict=True)
-    supervisor_ready_generation: int | None = Field(
-        default=None, ge=1, le=999_999_999, strict=True
-    )
-    self_test_passed: bool = Field(default=False, strict=True)
+    binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    self_test_passed: Literal[True]
 
 
 class ClaimRequest(BaseModel):
@@ -304,7 +271,7 @@ class ClaimRequest(BaseModel):
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=32)
-    runtime_identity: AgentRuntimeIdentityRequest | None = None
+    runtime_identity: AgentRuntimeIdentityRequest
     wait_seconds: int = Field(default=0, ge=0, le=60)
 
 
@@ -372,9 +339,7 @@ class RecipeRunObservationsRequest(BaseModel):
 
 class TelemetryDetailsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    accelerator_name: str | None = Field(
-        default=None, min_length=1, max_length=256
-    )
+    accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
     accelerator_performance_state: str | None = Field(
         default=None, min_length=1, max_length=32
     )
@@ -504,9 +469,6 @@ class ActivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation: int = Field(ge=1)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
-_DEFAULT_CLAIM_REQUEST = ClaimRequest()
 
 
 def _wire(value: object) -> object:
@@ -755,7 +717,9 @@ async def _bounded_enrollment_body(
         if len(chunk) > remaining:
             scan = _scan_enrollment_grants(token_prefix)
             _consume_enrollment_denial(services, scan.tokens)
-            raise HTTPException(status_code=413, detail="enrollment request is too large")
+            raise HTTPException(
+                status_code=413, detail="enrollment request is too large"
+            )
         buffered.extend(chunk)
     return buffered
 
@@ -771,14 +735,9 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
         "agent_digest": enrollment.agent_digest,
         "boot_id": enrollment.boot_id,
         "created_at": _now(enrollment.created_at).isoformat(),
-        "decision_actor": enrollment.decision_actor,
-        "decided_at": _now(enrollment.decided_at).isoformat() if enrollment.decided_at else None,
-        "rejection_reason": enrollment.rejection_reason,
         "certificate_serial": enrollment.certificate_serial,
         "certificate_fingerprint": enrollment.certificate_fingerprint,
     }
-
-
 
 
 def _references_digest(value: object, digest: str) -> bool:
@@ -1146,7 +1105,9 @@ def install_agent_routes(
                 detail="agent enrollment bootstrap is unavailable",
             )
         try:
-            grant = required.enrollment.create(None, authenticated.subject, body.ttl_seconds)
+            grant = required.enrollment.create(
+                None, authenticated.subject, body.ttl_seconds
+            )
         except (TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         audits.append(
@@ -1190,15 +1151,7 @@ def install_agent_routes(
             if state is not None:
                 if state not in _ENROLLMENT_API_STATES:
                     raise HTTPException(status_code=422, detail="state is invalid")
-                persistence_state = {
-                    "pending_review": "pending-approval",
-                    "issuing": "issuing",
-                    "approved": "approved",
-                    "certificate_issued": "approved",
-                    "rejected": "rejected",
-                    "expired": "expired",
-                }[state]
-                statement = statement.where(AgentEnrollment.state == persistence_state)
+                statement = statement.where(AgentEnrollment.state == state)
             if cursor is not None:
                 cursor_record = session.get(AgentEnrollment, cursor)
                 if cursor_record is None:
@@ -1228,75 +1181,6 @@ def install_agent_routes(
                 for record in page
             ],
             next_cursor=(page[-1].id if len(records) > limit and page else None),
-        )
-
-    @human.post(
-        "/enrollments/{enrollment_id}/approve",
-        response_model=EnrollmentDecisionResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def approve(
-        enrollment_id: str,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentDecisionResponse:
-        _require_administrator(
-            authenticated, "/api/v1/agents/enrollments/{enrollment_id}/approve"
-        )
-        required = _require_services(services)
-        try:
-            issued = required.enrollment.approve(enrollment_id, authenticated.subject)
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.enrollment.approve",
-                None,
-                (enrollment_id, issued.node_id),
-            )
-        )
-        return EnrollmentDecisionResponse(
-            id=enrollment_id,
-            node_id=issued.node_id,
-            state="approved",
-        )
-
-    @human.post(
-        "/enrollments/{enrollment_id}/reject",
-        response_model=EnrollmentDecisionResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def reject(
-        enrollment_id: str,
-        body: RejectRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentDecisionResponse:
-        _require_administrator(
-            authenticated, "/api/v1/agents/enrollments/{enrollment_id}/reject"
-        )
-        required = _require_services(services)
-        try:
-            record = required.enrollment.reject(
-                enrollment_id, authenticated.subject, body.reason
-            )
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.enrollment.reject",
-                None,
-                (record.id, record.node_id),
-            )
-        )
-        return EnrollmentDecisionResponse(
-            id=record.id,
-            node_id=record.node_id,
-            state="rejected",
         )
 
     @human.post(
@@ -1330,7 +1214,28 @@ def install_agent_routes(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/enroll", status_code=status.HTTP_202_ACCEPTED)
+    @agent.get(
+        "/bootstrap",
+        response_model=EnrollmentBootstrapResponse,
+        responses=bounded_error_responses(503),
+    )
+    def enrollment_bootstrap() -> Response:
+        required = _require_services(services)
+        if required.bootstrap is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agent enrollment bootstrap is unavailable",
+            )
+        return _json_response(
+            EnrollmentBootstrapResponse(
+                controller_endpoint=required.bootstrap.controller_endpoint,
+                enrollment_endpoint=required.bootstrap.enrollment_endpoint,
+                ca_fingerprint=required.bootstrap.ca_fingerprint,
+                ca_pem=required.bootstrap.ca_pem,
+            ).model_dump()
+        )
+
+    @agent.post("/enroll")
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1390,6 +1295,20 @@ def install_agent_routes(
             outcome = required.enrollment.submit(
                 body["grant_token"], csr_bytes, service_evidence
             )
+        except EnrollmentIssuanceUncertain as error:
+            token_identifier = hashlib.sha256(
+                body["grant_token"].encode("utf-8")
+            ).hexdigest()
+            audits.append(
+                AuditRecord(
+                    request.state.request_id,
+                    "agent-enrollment",
+                    "agent.enrollment.submit.uncertain",
+                    None,
+                    (f"token-sha256:{token_identifier}",),
+                )
+            )
+            raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             token_identifier = hashlib.sha256(
                 body["grant_token"].encode("utf-8")
@@ -1405,25 +1324,6 @@ def install_agent_routes(
             )
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
-        if isinstance(outcome, IssuedCertificate):
-            token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
-            ).hexdigest()
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    "agent-enrollment",
-                    "agent.enrollment.submit.approved",
-                    None,
-                    (
-                        f"token-sha256:{token_identifier}",
-                        outcome.node_id,
-                        f"certificate-serial:{outcome.serial}",
-                    ),
-                )
-            )
-            return _json_response(_issued_response(outcome))
-        assert isinstance(outcome, PendingEnrollment)
         token_identifier = hashlib.sha256(
             body["grant_token"].encode("utf-8")
         ).hexdigest()
@@ -1431,20 +1331,19 @@ def install_agent_routes(
             AuditRecord(
                 request.state.request_id,
                 "agent-enrollment",
-                f"agent.enrollment.submit.{outcome.state}",
+                "agent.enrollment.submit.approved",
                 None,
-                (f"token-sha256:{token_identifier}", outcome.id, outcome.node_id),
+                (
+                    f"token-sha256:{token_identifier}",
+                    outcome.node_id,
+                    f"certificate-serial:{outcome.serial}",
+                ),
             )
         )
-        return _json_response(
-            {"id": outcome.id, "node_id": outcome.node_id, "state": outcome.state},
-            status_code=status.HTTP_202_ACCEPTED,
-        )
+        return _json_response(_issued_response(outcome))
 
     @agent.post("/claim")
-    def claim(
-        request: Request, body: ClaimRequest = _DEFAULT_CLAIM_REQUEST
-    ) -> Response:
+    def claim(request: Request, body: ClaimRequest) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
@@ -1458,9 +1357,7 @@ def install_agent_routes(
                 body.wait_seconds,
                 body.protocol_version,
                 body.capabilities,
-                None
-                if body.runtime_identity is None
-                else body.runtime_identity.model_dump(),
+                runtime_identity=body.runtime_identity.model_dump(),
                 source=source,
             )
         except ValueError as error:
@@ -2035,42 +1932,6 @@ def install_agent_routes(
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",
-        )
-
-    @agent.get("/tuf/metadata/{name}")
-    def tuf_metadata(name: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _TUF_METADATA_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="TUF file not found")
-        raw = _read_tuf_file(
-            required.tuf_metadata_root,
-            name,
-            required.max_tuf_metadata_bytes,
-        )
-        return Response(
-            content=raw,
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
-        )
-
-    @agent.get("/tuf/targets/{name:path}")
-    def tuf_target(name: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _TUF_PLATFORM_TARGET_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="TUF file not found")
-        raw = _read_tuf_file(
-            required.tuf_target_root,
-            name,
-            required.max_tuf_target_bytes,
-        )
-        return Response(
-            content=raw,
-            media_type="application/octet-stream",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
         )
 
     @agent.get("/workload-tuf/metadata/{name}")

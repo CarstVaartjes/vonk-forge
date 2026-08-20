@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
@@ -25,6 +24,8 @@ from vonk_control.models import (
     RecipeInstallation,
     ResourceReservation,
 )
+
+from .test_catalog_service import _seed_recipe_dependencies
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 

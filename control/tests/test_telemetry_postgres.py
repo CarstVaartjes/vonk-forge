@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
 import threading
 import time
 import uuid
@@ -9,9 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     AgentNode,
@@ -31,55 +28,6 @@ NODE_A = "spk_" + "a" * 32
 BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
 BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
-
-
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL telemetry concurrency tests")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:16",
-            ],
-            text=True,
-        ).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
 
 
 def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:

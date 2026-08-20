@@ -137,8 +137,8 @@ class RecipeBuildService:
                     "build.node_unknown", "builder GPU node is unknown"
                 )
             _validate_builder(node)
-            assert node.agent_sha256 is not None
-            builder_agent_sha256 = node.agent_sha256
+            assert node.binary_digest is not None
+            builder_binary_digest = node.binary_digest
             document = copy.deepcopy(revision.document)
             try:
                 resolve_recipe_entities(session, document)
@@ -228,7 +228,7 @@ class RecipeBuildService:
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": revision.content_sha256,
             "source_bundle_sha256": source_sha256,
-            "builder_agent_sha256": builder_agent_sha256,
+            "builder_binary_digest": builder_binary_digest,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
             "base_images": base_images,
             "base_image_storage_bytes": base_image_storage_bytes,
@@ -270,7 +270,7 @@ class RecipeBuildService:
             "source_bundle_sha256": policy.source_bundle_sha256,
             "dockerfile": policy.dockerfile,
             "findings": [asdict(item) for item in policy.findings],
-            "builder_agent_sha256": builder_agent_sha256,
+            "builder_binary_digest": builder_binary_digest,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
         }
         with self._sessions.begin() as session:
@@ -387,8 +387,8 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.dependencies_stale", "exact recipe dependencies are unavailable"
             ) from error
-        expected_agent = (
-            build.policy_report.get("builder_agent_sha256")
+        expected_binary_digest = (
+            build.policy_report.get("builder_binary_digest")
             if build is not None and isinstance(build.policy_report, dict)
             else None
         )
@@ -418,7 +418,7 @@ class RecipeBuildService:
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)
-        if node.agent_sha256 != expected_agent:
+        if node.binary_digest != expected_binary_digest:
             raise RecipeBuildError(
                 "build.runtime_changed", "builder runtime identity changed"
             )
@@ -567,8 +567,8 @@ def _validate_builder(node: AgentNode) -> None:
         node.state != "active"
         or node.revoked_at is not None
         or node.architecture != "linux-arm64"
-        or not isinstance(node.agent_sha256, str)
-        or _SHA256.fullmatch(node.agent_sha256) is None
+        or not isinstance(node.binary_digest, str)
+        or _SHA256.fullmatch(node.binary_digest) is None
         or "recipe.build.v1" not in node.capabilities
     ):
         raise RecipeBuildError(

@@ -210,9 +210,8 @@ recipe's selected interface. The final physical pair run used only
 former, rank 1 completed the versioned HELLO from the latter, and management
 and unlisted paths remained denied. Stopping and restarting only rank 1
 withdrew and republished the route while the same rank-0 coordinator remained
-alive. See the
-[development workload acceptance record](development-agent-workload-acceptance.md)
-for redacted artifact and operation identities.
+alive. Those pre-release identities are intentionally not retained as current
+deployment instructions.
 
 ## Physical and operational gates
 
