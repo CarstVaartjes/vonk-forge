@@ -284,6 +284,25 @@ def test_agent_authority_mode_runtime_matrix(
     assert settings.worker_api_token == b"w" * 32
 
 
+def test_agent_certificate_lifetime_defaults_and_is_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_agent_authority(tmp_path, monkeypatch, mode="development")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+
+    assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 86400
+
+    monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "90")
+    assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 90
+
+    for value in ("not-a-number", "89", "86401"):
+        monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", value)
+        with pytest.raises(SettingsError, match="certificate lifetime") as caught:
+            Settings.from_env_and_secrets()
+        assert value not in str(caught.value)
+
+
 def test_enabled_development_agent_authority_requires_management_cidrs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
