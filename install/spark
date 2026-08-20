@@ -1,0 +1,51 @@
+#!/bin/sh
+set -eu
+
+kind=spark
+base_url=${VONK_INSTALL_BASE_URL:-https://install.vonkforge.ai/artifacts}
+
+fail() {
+    printf '%s\n' "vonk-forge ${kind} installer: $*" >&2
+    exit 1
+}
+
+[ "$(uname -s)" = Linux ] || fail "Spark installation requires Linux"
+platform=linux
+case $(uname -m) in
+    x86_64|amd64) architecture=amd64 ;;
+    aarch64|arm64) architecture=arm64 ;;
+    *) fail "this CPU architecture is not supported" ;;
+esac
+
+case "$platform-$architecture" in
+    linux-amd64) expected='@SPARK_LINUX_AMD64_SHA256@' ;;
+    linux-arm64) expected='@SPARK_LINUX_ARM64_SHA256@' ;;
+    *) fail "this platform is not supported" ;;
+esac
+[ "${#expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
+case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}.XXXXXX") || fail "cannot create a temporary directory"
+cleanup() {
+    rm -rf -- "$temporary"
+}
+trap cleanup EXIT HUP INT TERM
+
+artifact="$temporary/vonk-${kind}-setup"
+url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
+
+curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$artifact" || fail "cannot download the setup program"
+
+if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$artifact" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$artifact" | awk '{print $1}')
+elif command -v openssl >/dev/null 2>&1; then
+    actual=$(openssl dgst -sha256 "$artifact" | awk '{print $NF}')
+else
+    fail "sha256sum, shasum, or openssl is required"
+fi
+[ "$actual" = "$expected" ] || fail "the setup program failed checksum verification"
+
+chmod 0700 "$artifact"
+"$artifact" "$@"
