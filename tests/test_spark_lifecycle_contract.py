@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import subprocess
@@ -9,6 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from scripts import spark_lifecycle_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY_POINT = ROOT / "tests/acceptance/test_spark_lifecycle.py"
@@ -135,6 +136,11 @@ def _record(root: Path, relative: str, content: bytes) -> dict[str, object]:
     }
 
 
+def _write_canonical(path: Path, document: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+
+
 def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     objects = tmp_path / "objects"
     candidate_artifacts = {
@@ -163,20 +169,31 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
         "schema_version": 1,
         "source_sha": SOURCE_SHA,
     }
-    candidate = tmp_path / "candidate.json"
-    candidate.write_text(
-        json.dumps(common | {"artifacts": candidate_artifacts, "version": "1.2.3"})
+    candidate = (
+        objects / f"artifacts/dev/releases/{GENERATION}/release.json"
     )
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            common
-            | {
-                "acceptance_only": True,
-                "artifacts": baseline_artifacts,
-                "version": "1.2.2~acceptance.1+gbbbbbbbbbbbb",
-            }
-        )
+    _write_canonical(
+        candidate,
+        common
+        | {
+            "artifacts": candidate_artifacts,
+            "bootstraps": {},
+            "version": "1.2.3",
+        },
+    )
+    baseline = (
+        objects
+        / f"artifacts/dev/releases/{GENERATION}/acceptance-baseline/release.json"
+    )
+    _write_canonical(
+        baseline,
+        common
+        | {
+            "acceptance_only": True,
+            "artifacts": baseline_artifacts,
+            "bootstraps": {},
+            "version": "1.2.2~acceptance.1+gbbbbbbbbbbbb",
+        },
     )
     return objects, candidate, baseline, common
 
@@ -328,7 +345,7 @@ def test_publication_graph_rejects_any_missing_native_package_record(
     release_path = {"candidate": candidate, "baseline": baseline}[release_name]
     release = json.loads(release_path.read_text())
     release["artifacts"].pop(f"agent-package-{platform}")
-    release_path.write_text(json.dumps(release))
+    _write_canonical(release_path, release)
 
     result = subprocess.run(
         _graph_command(objects, candidate, baseline),
@@ -344,8 +361,7 @@ def test_publication_graph_rejects_any_missing_native_package_record(
 def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    objects, candidate_path, _, _ = _graph_inputs(tmp_path)
-    candidate = json.loads(candidate_path.read_text())
+    objects, candidate_path, baseline_path, _ = _graph_inputs(tmp_path)
     expected_path = (
         f"artifacts/dev/releases/{GENERATION}/spark/current/"
         "linux-amd64/vonk-forge-agent.deb"
@@ -353,31 +369,30 @@ def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
     artifact = objects / expected_path
     replacement = artifact.with_name("replacement.deb")
     replacement.write_bytes(b"substitute-linux-amd64")
-    specification = importlib.util.spec_from_file_location(
-        "spark_lifecycle_descriptor_test", ENTRY_POINT
-    )
-    assert specification is not None and specification.loader is not None
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
     original_read = os.read
     substituted = False
 
     def substitute_after_open(descriptor: int, size: int) -> bytes:
         nonlocal substituted
-        if not substituted:
+        descriptor_path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if not substituted and descriptor_path == artifact:
             os.replace(replacement, artifact)
             substituted = True
         return original_read(descriptor, size)
 
-    monkeypatch.setattr(module.os, "read", substitute_after_open)
+    monkeypatch.setattr(spark_lifecycle_contract.os, "read", substitute_after_open)
 
-    with pytest.raises(module.LifecycleError, match="changed while read"):
-        module._verified_artifact(
-            candidate,
+    with pytest.raises(
+        spark_lifecycle_contract.ContractError, match="changed while read"
+    ):
+        spark_lifecycle_contract.recompute_publication_graphs(
+            candidate_release=candidate_path,
+            baseline_release=baseline_path,
             object_root=objects,
-            key="agent-package-linux-amd64",
-            expected_path=expected_path,
-            label="candidate release",
+            channel="dev",
+            version="1.2.3",
+            source_sha=SOURCE_SHA,
+            generation=GENERATION,
         )
 
     assert substituted

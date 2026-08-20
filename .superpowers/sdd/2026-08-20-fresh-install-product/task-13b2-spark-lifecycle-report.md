@@ -177,3 +177,86 @@ No full lifecycle orchestration, placeholder proof input, pre-generated gate
 evidence, skip, security bypass, or fabricated passing report was added. The
 workflow remains fail closed until the real controller-backed lifecycle creates
 evidence that satisfies this contract.
+
+## Contract-seam review remediation round 2 (base `2debb4df`)
+
+Status: DONE for the immutable-publication authority finding. The parent 13B2
+rollout remains BLOCKED only on the separately deferred real-controller `run`
+orchestration.
+
+### Authority-owned publication graph
+
+`install-release-publication accept` now requires three explicit local inputs:
+the candidate release object, the acceptance-baseline release object, and their
+immutable object root. Before reading Spark reports or signing a receipt, the
+authority independently:
+
+- requires both release paths to be the exact channel/generation paths beneath
+  that object root;
+- descriptor-traverses and reads both canonical release documents without
+  following any path component or final-file symlink;
+- binds both release identities to the requested channel, generation, source
+  SHA, and candidate version, and requires the baseline's acceptance-only
+  identity and strict Debian version ordering;
+- requires the candidate and baseline immutable image graphs to match, contain
+  only digest-pinned non-mutable references, and records their canonical graph
+  digest;
+- verifies the exact package records, immutable paths, sizes, and descriptor-
+  streamed SHA-256 identities for candidate and baseline packages on both
+  `linux-amd64` and `linux-arm64`;
+- rejects hardlink ambiguity, symlinked components/files, concurrent
+  substitution, missing objects, matching baseline/candidate package identity,
+  and any release-record/object mismatch; and
+- recomputes the exact per-platform graph object once from those four package
+  objects, then requires each submitted Spark report's embedded graph to equal
+  the corresponding authority graph before signing.
+
+The descriptor and graph implementation now lives only in the shared
+`scripts/spark_lifecycle_contract.py` contract. Both
+`check-publication-graph` and the acceptance authority consume it, so report
+production and signing no longer maintain separate path/digest protocols.
+Package contents are hashed as bounded streams from verified descriptors and
+are not retained in authority memory.
+
+### Immutable CI handoff
+
+The aggregate acceptance job now downloads the exact immutable candidate
+artifact named by the authority channel and candidate generation. It passes
+explicit local candidate release, baseline release, and object-root paths to
+`accept`. This uses only the immutable same-run GitHub artifact; no mutable
+channel pointer or network publication lookup is involved. Native ownership is
+unchanged: `spark_job` remains ARM64-only.
+
+### TDD evidence
+
+Red evidence was recorded before production changes:
+
+- A fully canonical and internally consistent pair of Spark reports with an
+  invented ARM64 candidate package digest was signed successfully (`returncode
+  0`), proving that JSON-only validation remained forgeable.
+- After adding the required authority inputs to the positive fixture, the CLI
+  failed with `unrecognized arguments: --candidate-release ...
+  --baseline-release ... --object-root ...`.
+- The workflow contract failed because `Download exact candidate publication
+  graph` did not exist.
+
+The positive authority tests now derive graph evidence from actual assembled
+release records and actual package bytes. Added negative tests reject an
+internally consistent invented digest, wrong object root, wrong candidate
+release, cross-generation release path, and a missing native package object.
+The pre-existing symlinked-parent/file, hardlink, dual-native graph, and
+substitution-race tests now exercise the same shared verifier used by the
+signer.
+
+### Verification evidence
+
+- `.venv/bin/pytest -q tests/test_spark_lifecycle_contract.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py`
+  — 54 passed in 19.78s.
+- `uvx --from ruff==0.16.1 ruff check scripts/install-release-publication scripts/spark_lifecycle_contract.py tests/acceptance/test_spark_lifecycle.py tests/test_spark_lifecycle_contract.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py`
+  — all checks passed.
+- Parsed `.github/workflows/installer-publication.yml` with `yaml.BaseLoader` and
+  ran `bash -n` over all 16 Bash steps — passed.
+- `git diff --check` — passed.
+
+No full lifecycle orchestration, pre-generated proof, mutable publication
+lookup, architecture-policy change, or CI security weakening was introduced.

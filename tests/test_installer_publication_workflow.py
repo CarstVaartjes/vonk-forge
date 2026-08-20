@@ -204,6 +204,34 @@ def test_complete_acceptance_is_signed_before_the_channel_can_advance() -> None:
     assert promote["concurrency"]["cancel-in-progress"] == "false"
 
 
+def test_acceptance_authority_binds_reports_to_downloaded_candidate_objects() -> None:
+    acceptance = _workflow()["jobs"]["acceptance"]
+    steps = _steps(acceptance)
+    candidate = steps["Download exact candidate publication graph"]
+    assert candidate["uses"].startswith("actions/download-artifact@")
+    assert candidate["with"] == {
+        "name": (
+            "installer-candidate-${{ needs.authority.outputs.channel }}-"
+            "${{ needs.candidate.outputs.generation }}"
+        ),
+        "path": "${{ runner.temp }}/candidate-publication",
+    }
+    signing = steps["Bind and sign complete acceptance"]["run"]
+    immutable_root = (
+        '"$RUNNER_TEMP/candidate-publication/installer-publication/objects"'
+    )
+    assert f"--object-root {immutable_root}" in signing
+    assert (
+        "--candidate-release "
+        f'{immutable_root[:-1]}/artifacts/$CHANNEL/releases/$GENERATION/release.json"'
+    ) in signing
+    assert (
+        "--baseline-release "
+        f'{immutable_root[:-1]}/artifacts/$CHANNEL/releases/$GENERATION/'
+        'acceptance-baseline/release.json"'
+    ) in signing
+
+
 def test_publication_refreshes_both_signed_channels_before_expiry() -> None:
     workflow = _workflow()
     assert workflow["on"]["schedule"] == [{"cron": "17 3 * * *"}]

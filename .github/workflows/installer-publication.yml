@@ -678,6 +678,12 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.authority.outputs.source_sha }}
 
+      - name: Download exact candidate publication graph
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          path: ${{ runner.temp }}/candidate-publication
+
       - name: Download exact behavioral gate reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -718,6 +724,9 @@ jobs:
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
             --generation "$GENERATION"
+            --candidate-release "$RUNNER_TEMP/candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$GENERATION/release.json"
+            --baseline-release "$RUNNER_TEMP/candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$GENERATION/acceptance-baseline/release.json"
+            --object-root "$RUNNER_TEMP/candidate-publication/installer-publication/objects"
             --run-id "$GITHUB_RUN_ID"
             --signing-key "$signing_key"
             --signing-public-key "$public_key"

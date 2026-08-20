@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from spark_lifecycle_contract import GATES as SPARK_GATES
 from spark_lifecycle_contract import ContractError as SparkContractError
-from spark_lifecycle_contract import validate_lifecycle
+from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
 
 ROOT = Path(__file__).resolve().parents[1]
 NAS_PLATFORMS = (
@@ -804,6 +804,20 @@ def accept(arguments: argparse.Namespace) -> None:
     _signing_public_key(arguments.signing_key, arguments.signing_public_key)
     if not arguments.gate_report:
         raise PublicationError("behavioral acceptance gates are incomplete")
+    try:
+        authority_graphs = recompute_publication_graphs(
+            candidate_release=arguments.candidate_release,
+            baseline_release=arguments.baseline_release,
+            object_root=arguments.object_root,
+            channel=arguments.channel,
+            version=arguments.version,
+            source_sha=arguments.source_sha,
+            generation=arguments.generation,
+        )
+    except SparkContractError as error:
+        raise PublicationError(
+            f"candidate publication graph is invalid: {error}"
+        ) from error
 
     observed: set[str] = set()
     observed_spark_platforms: set[str] = set()
@@ -871,6 +885,7 @@ def accept(arguments: argparse.Namespace) -> None:
                     version=arguments.version,
                     source_sha=arguments.source_sha,
                     generation=arguments.generation,
+                    expected_publication_graph=authority_graphs[platform],
                 )
             except SparkContractError as error:
                 raise PublicationError(f"Spark gate report is invalid: {error}") from error
@@ -1421,6 +1436,9 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--version", required=True)
     approval.add_argument("--source-sha", required=True)
     approval.add_argument("--generation", required=True)
+    approval.add_argument("--candidate-release", type=Path, required=True)
+    approval.add_argument("--baseline-release", type=Path, required=True)
+    approval.add_argument("--object-root", type=Path, required=True)
     approval.add_argument("--run-id", required=True, type=int)
     approval.add_argument("--gate-report", action="append", default=[], type=Path)
     approval.add_argument("--signing-key", type=Path, required=True)

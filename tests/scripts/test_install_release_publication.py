@@ -321,6 +321,54 @@ def _gate_report(
     return path
 
 
+def _actual_publication_graph(
+    publication: Path, platform: str
+) -> dict[str, object]:
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    object_root = publication / "objects"
+    release_root = (
+        object_root
+        / f"artifacts/{plan['channel']}/releases/{plan['generation']}"
+    )
+    candidate = json.loads((release_root / "release.json").read_text())
+    baseline = json.loads(
+        (release_root / "acceptance-baseline/release.json").read_text()
+    )
+    packages: dict[str, dict[str, str]] = {}
+    for native_platform in SPARK_PLATFORMS:
+        candidate_record = candidate["artifacts"][
+            f"agent-package-{native_platform}"
+        ]
+        baseline_record = baseline["artifacts"][
+            f"agent-package-{native_platform}"
+        ]
+        candidate_bytes = (object_root / candidate_record["path"]).read_bytes()
+        baseline_bytes = (object_root / baseline_record["path"]).read_bytes()
+        packages[native_platform] = {
+            "baseline_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+            "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+        }
+    return {
+        "baseline_package_sha256": packages[platform]["baseline_sha256"],
+        "baseline_version": baseline["version"],
+        "candidate_package_sha256": packages[platform]["candidate_sha256"],
+        "candidate_version": candidate["version"],
+        "channel": candidate["channel"],
+        "generation": candidate["generation"],
+        "images_sha256": hashlib.sha256(
+            json.dumps(
+                candidate["images"], sort_keys=True, separators=(",", ":")
+            ).encode()
+            + b"\n"
+        ).hexdigest(),
+        "packages": packages,
+        "platform": platform,
+        "schema_version": 1,
+        "source_sha": candidate["source_sha"],
+        "verified_platforms": ["linux-amd64", "linux-arm64"],
+    }
+
+
 def _spark_gate_report(
     path: Path,
     publication: Path,
@@ -330,32 +378,8 @@ def _spark_gate_report(
     run_id: int = 123456,
 ) -> Path:
     plan = json.loads((publication / "publication-plan.json").read_text())
-    baseline_version = "0.0.0~acceptance.1+g" + SOURCE_SHA[:12]
-    selected_baseline = "1" * 64 if platform == "linux-amd64" else "3" * 64
-    selected_candidate = "2" * 64 if platform == "linux-amd64" else "4" * 64
-    graph = {
-        "baseline_package_sha256": selected_baseline,
-        "baseline_version": baseline_version,
-        "candidate_package_sha256": selected_candidate,
-        "candidate_version": plan["version"],
-        "channel": plan["channel"],
-        "generation": plan["generation"],
-        "images_sha256": "c" * 64,
-        "packages": {
-            "linux-amd64": {
-                "baseline_sha256": "1" * 64,
-                "candidate_sha256": "2" * 64,
-            },
-            "linux-arm64": {
-                "baseline_sha256": "3" * 64,
-                "candidate_sha256": "4" * 64,
-            },
-        },
-        "platform": platform,
-        "schema_version": 1,
-        "source_sha": SOURCE_SHA,
-        "verified_platforms": ["linux-amd64", "linux-arm64"],
-    }
+    graph = _actual_publication_graph(publication, platform)
+    baseline_version = graph["baseline_version"]
     node_id = "spk_0123456789abcdef0123456789abcdef"
     common_proof: dict[str, object] = {
         "controller_generation": plan["generation"],
@@ -447,8 +471,16 @@ def _accept_command(
     publication: Path,
     output_root: Path,
     reports: list[Path],
+    *,
+    candidate_release: Path | None = None,
+    baseline_release: Path | None = None,
+    object_root: Path | None = None,
 ) -> list[str]:
     plan = json.loads((publication / "publication-plan.json").read_text())
+    release_root = (
+        publication
+        / f"objects/artifacts/{plan['channel']}/releases/{plan['generation']}"
+    )
     inputs = _inputs(output_root / "keys")
     command = [
         sys.executable,
@@ -462,6 +494,12 @@ def _accept_command(
         SOURCE_SHA,
         "--generation",
         plan["generation"],
+        "--candidate-release",
+        str(candidate_release or release_root / "release.json"),
+        "--baseline-release",
+        str(baseline_release or release_root / "acceptance-baseline/release.json"),
+        "--object-root",
+        str(object_root or publication / "objects"),
         "--run-id",
         "123456",
         "--signing-key",
@@ -564,6 +602,190 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         check=False,
     )
     assert verified.returncode == 0, verified.stderr
+
+
+def test_acceptance_authority_rejects_internally_consistent_invented_graph(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    report_root = tmp_path / "reports"
+    report_root.mkdir()
+    nas = _gate_report(
+        report_root / "nas.json",
+        publication,
+        ACCEPTANCE_GATES - AMD64_SPARK_GATES - ARM64_SPARK_GATES,
+    )
+    amd64 = _spark_gate_report(
+        report_root / "amd64.json",
+        publication,
+        AMD64_SPARK_GATES,
+        "linux-amd64",
+    )
+    arm64 = _spark_gate_report(
+        report_root / "arm64.json",
+        publication,
+        ARM64_SPARK_GATES,
+        "linux-arm64",
+    )
+    invented_digest = "f" * 64
+    for report_path in (amd64, arm64):
+        report = json.loads(report_path.read_text())
+        graph = report["lifecycle"]["proof"]["publication_graph"]
+        graph["packages"]["linux-arm64"]["candidate_sha256"] = invented_digest
+        if report["platform"] == "linux-arm64":
+            graph["candidate_package_sha256"] = invented_digest
+            report["lifecycle"]["proof"]["installation"]["candidate"][
+                "package_sha256"
+            ] = invented_digest
+        _canonical(report_path, report)
+
+    result = subprocess.run(
+        _accept_command(publication, tmp_path / "acceptance", [nas, amd64, arm64]),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "publication graph" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
+def _complete_gate_reports(
+    report_root: Path, publication: Path
+) -> list[Path]:
+    report_root.mkdir()
+    return [
+        _gate_report(
+            report_root / "nas.json",
+            publication,
+            ACCEPTANCE_GATES - AMD64_SPARK_GATES - ARM64_SPARK_GATES,
+        ),
+        _spark_gate_report(
+            report_root / "amd64.json",
+            publication,
+            AMD64_SPARK_GATES,
+            "linux-amd64",
+        ),
+        _spark_gate_report(
+            report_root / "arm64.json",
+            publication,
+            ARM64_SPARK_GATES,
+            "linux-arm64",
+        ),
+    ]
+
+
+def test_acceptance_authority_rejects_wrong_publication_object_root(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    reports = _complete_gate_reports(tmp_path / "reports", publication)
+    wrong_root = tmp_path / "wrong-objects"
+    wrong_root.mkdir()
+
+    result = subprocess.run(
+        _accept_command(
+            publication,
+            tmp_path / "acceptance",
+            reports,
+            object_root=wrong_root,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "publication release paths" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
+def test_acceptance_authority_rejects_wrong_candidate_release_path(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    reports = _complete_gate_reports(tmp_path / "reports", publication)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    release_root = (
+        publication
+        / f"objects/artifacts/{plan['channel']}/releases/{plan['generation']}"
+    )
+
+    result = subprocess.run(
+        _accept_command(
+            publication,
+            tmp_path / "acceptance",
+            reports,
+            candidate_release=release_root / "acceptance-baseline/release.json",
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "publication release paths" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
+def test_acceptance_authority_rejects_cross_generation_release_path(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    reports = _complete_gate_reports(tmp_path / "reports", publication)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    cross_generation = (
+        publication
+        / f"objects/artifacts/{plan['channel']}/releases/{'f' * 64}/release.json"
+    )
+
+    result = subprocess.run(
+        _accept_command(
+            publication,
+            tmp_path / "acceptance",
+            reports,
+            candidate_release=cross_generation,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "candidate generation" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
+def test_acceptance_authority_rejects_missing_native_package_object(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    reports = _complete_gate_reports(tmp_path / "reports", publication)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    package = (
+        publication
+        / "objects"
+        / f"artifacts/{plan['channel']}/releases/{plan['generation']}/"
+        "spark/current/linux-arm64/vonk-forge-agent.deb"
+    )
+    package.unlink()
+
+    result = subprocess.run(
+        _accept_command(publication, tmp_path / "acceptance", reports),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "candidate linux-arm64 package object is unavailable" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
 def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
