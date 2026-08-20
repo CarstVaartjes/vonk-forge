@@ -682,8 +682,6 @@ def build_agent_services(
             presence=presence,
             artifact_root=settings.agent_artifact_root,
             source_bundles=DatabaseSourceBundleStore(sessions),
-            tuf_metadata_root=settings.agent_tuf_metadata_root,
-            tuf_target_root=settings.agent_tuf_target_root,
             workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
             workload_tuf_target_root=settings.workload_tuf_target_root,
         )
@@ -714,16 +712,6 @@ def build_agent_services(
         timeout_seconds=settings.agent_ca_timeout_seconds,
         max_response_bytes=settings.agent_ca_max_response_bytes,
     )
-    tuf_metadata_root = getattr(
-        settings,
-        "agent_tuf_metadata_root",
-        settings.agent_artifact_root.parent / "agent-tuf/metadata",
-    )
-    tuf_target_root = getattr(
-        settings,
-        "agent_tuf_target_root",
-        settings.agent_artifact_root.parent / "agent-tuf/targets",
-    )
     workload_tuf_metadata_root = getattr(
         settings,
         "workload_tuf_metadata_root",
@@ -736,8 +724,6 @@ def build_agent_services(
     )
     for root in (
         settings.agent_artifact_root,
-        tuf_metadata_root,
-        tuf_target_root,
         workload_tuf_metadata_root,
         workload_tuf_target_root,
     ):
@@ -798,8 +784,6 @@ def build_agent_services(
         presence=presence,
         artifact_root=settings.agent_artifact_root,
         source_bundles=DatabaseSourceBundleStore(sessions),
-        tuf_metadata_root=tuf_metadata_root,
-        tuf_target_root=tuf_target_root,
         workload_tuf_metadata_root=workload_tuf_metadata_root,
         workload_tuf_target_root=workload_tuf_target_root,
         workload_helper_authority=helper_authority,

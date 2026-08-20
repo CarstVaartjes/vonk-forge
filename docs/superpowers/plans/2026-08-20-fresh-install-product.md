@@ -103,7 +103,7 @@ installers. All legacy and alternate runtime paths are deleted.
 **Files:**
 - Modify: control worker health surface and Compose healthcheck
 - Modify: Prometheus, Grafana, registry, LiteLLM, Tailscale reconciler, Caddy,
-  Step CA, signer, API, and PostgreSQL healthchecks
+  Step CA, API, worker, and PostgreSQL healthchecks
 - Create: `deploy/compose/tests/test_runtime_health_contract.py`
 
 - [ ] Define meaningful readiness for every default long-running service.
@@ -136,12 +136,14 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: `packaging/debian/preinst`
 - Modify: `packaging/debian/postinst`
 - Modify: `packaging/systemd/vonk-forge-agent.service`
-- Modify: controller agent-update logic and tests
+- Modify: controller runtime-identity claim logic and tests
 
 - [ ] Define direct identity fields: semantic version, build digest, binary
       digest, architecture, and self-test result.
 - [ ] Remove slots, generations, activation, rollback, supervisor commands, and
       protocol fields end to end.
+- [ ] Remove controller-driven agent update/rollback operations, runtime signer,
+      and agent-update TUF publication; package releases remain GitHub-owned.
 - [ ] Package one binary at `/usr/lib/vonk-forge/vonk-agent` with a direct
       systemd `ExecStart`.
 - [ ] Make apt/dpkg replacement restart and verify the direct service.

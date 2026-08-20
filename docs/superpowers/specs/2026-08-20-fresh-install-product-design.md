@@ -99,7 +99,7 @@ rollback state, or hidden fallback binary.
 One canonical Compose model contains:
 
 - PostgreSQL;
-- the control API, worker, and update signer;
+- the control API and worker;
 - Step CA;
 - LiteLLM;
 - Caddy;
@@ -198,6 +198,8 @@ Delete, rather than deprecate:
 - Python Spark/node agent and migration code;
 - A/B slots, supervisor crate, supervisor service, activation state, rollback,
   and controller slot/generation protocol fields;
+- the runtime update signer, agent-update TUF publication, and controller-driven
+  agent update or rollback operations;
 - runtime Git repository, proposal, code-host, and signing paths;
 - built-in/local CA deployment choices and flat credential fallbacks;
 - legacy enrollment service implementations superseded by the Rust mTLS flow;

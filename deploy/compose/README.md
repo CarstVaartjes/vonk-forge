@@ -240,13 +240,10 @@ Set `COMPOSE_PROJECT_NAME`, `HERMES_DATA_ROOT`,
 in PostgreSQL; the NAS bundle contains only Compose configuration, secrets,
 images, and Docker volumes.
 `HERMES_DATA_ROOT` contains `data`, `workspaces`, and `cache`.
-The control state volume contains host-generation state and the explicitly
-separated TUF publication roots. OCI upload staging is an API-local tmpfs and
+The control state volume contains durable controller state. OCI upload staging is an API-local tmpfs and
 is deliberately lost on API restart; the build remains retryable from its
-PostgreSQL record. Active mTLS-authenticated GPU nodes can read only bounded,
-strictly named regular files below `/state/agent-tuf/metadata` and
-`/state/agent-tuf/targets`; never place signing keys or registry credentials in
-either publication directory.
+PostgreSQL record. Workload trust metadata remains isolated in the dedicated
+workload TUF publication volume.
 
 ### Hostnames
 
@@ -274,8 +271,6 @@ Set every required secret path in `.env`; these are paths only, never values:
 `DATABASE_URL_FILE`, `POSTGRES_PASSWORD_FILE`, `TOKEN_SIGNING_KEY_FILE`,
 `METRICS_TOKEN_FILE`, `WORKER_API_TOKEN_FILE`,
 `HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE`,
-`AGENT_UPDATE_AUTHORITY_KEY_FILE`, `ADMIN_GRANT_PUBLIC_KEY_FILE`,
-`AGENT_TUF_BOOTSTRAP_ROOT_FILE`,
 `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`,
 `LITELLM_DATABASE_URL_FILE`, `LITELLM_DATABASE_PASSWORD_FILE`,
 `GRAFANA_ADMIN_PASSWORD_FILE`,
@@ -311,7 +306,6 @@ Keep the source files `root:root 0400`; do not add host ACLs just to make a
 non-root service read a bind-mounted secret.
 
 The steady-state service users are `10001:10001` for control-api and control-worker,
-`10003:10001` for the networkless control-signer,
 `10002:10001` for LiteLLM, `65534:65534` for Prometheus, and `472:472` for
 Grafana. The pinned step-ca image runs as `1000:1000` (`step`); Hermes' managed
 process is fixed at `1100:1100`. PostgreSQL, Caddy, Tailscale, and the Hermes
@@ -331,12 +325,9 @@ command line.
 | `TOKEN_SIGNING_KEY_FILE` → `token-signing-key` | API `10001:10001 0400` | At least 32 bytes. |
 | `METRICS_TOKEN_FILE` → `metrics-token` | API `10001:10001 0400`; Prometheus gets a separate `65534:65534 0400` projection | At least 16 non-whitespace characters. |
 | `WORKER_API_TOKEN_FILE` → `worker-api-token` | API/worker `10001:10001 0400` | One unpadded base64url token, at least 32 characters. |
-| `AGENT_UPDATE_AUTHORITY_KEY_FILE` → `agent-update-authority-key` | Signer only, `10003:10001 0400` | Ed25519 PKCS#8 PEM. The API, worker, and every GPU node must never receive this private key. |
-| `ADMIN_GRANT_PUBLIC_KEY_FILE` → `admin-grant-public-key` | Signer only, `10003:10001 0400` | Canonical public document for the separate API admin-action grant authority. |
 | `PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE` → `package-helper-grant-private-key` | Control API `10001:10001`, `10001:10001 0400` | Dedicated Ed25519 PKCS#8 PEM for short-lived workload-helper grants; never install on a GPU node. |
 | `PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE` → `package-helper-receipt-private-key` | Control API `10001:10001`, `10001:10001 0400` | Independent Ed25519 PKCS#8 PEM for object receipts; never reuse the grant key or install on a GPU node. |
 | `HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE` → `host-runtime-grant-private-key` | Control API `10001:10001`, `10001:10001 0400` | Dedicated Ed25519 PKCS#8 PEM for exact Spark Docker runtime grants. Install only its raw 32-byte public key (lowercase hexadecimal plus newline) at `/etc/vonk-forge-agent/host-helper-authority.pub` on GPU nodes. |
-| `AGENT_TUF_BOOTSTRAP_ROOT_FILE` → `agent-tuf-bootstrap-root` | Signer only, `10003:10001 0400` | Explicit trusted public TUF root for platform releases. The corresponding offline root private key never enters the NAS. |
 | `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`, `LITELLM_DATABASE_URL_FILE` → matching `litellm-*` files | LiteLLM `10002:10001`, `10002:10001 0400` | Respectively the master key, dedicated upstream key, and PostgreSQL URL. |
 | `GRAFANA_ADMIN_PASSWORD_FILE` → `grafana-admin-password` | Grafana `472:472`, `472:472 0400` | One Grafana administrator password. |
 | `AGENT_CLIENT_CA_FILE` → `agent-client-ca` | API `10001:10001 0400`; Caddy reads its root-startup secret | PEM trust bundle. |
@@ -352,51 +343,6 @@ command line.
 The offline root private key never enters this NAS. The generated PKI paths and
 permissions in [agent PKI](../../docs/runbooks/agent-pki.md) remain authoritative
 for the step-ca material.
-
-## Pin the GPU node update authority
-
-The host updater writes the selected release identity to
-`/srv/vonk-forge/control-identity/active.json`. API, worker, and signer mount the
-identity **directory** read-only and reopen that file for each validation. They
-never mount `/srv/vonk-forge/control-host`, and no online container can select a
-generation. Do not copy version or digest values into a mutable environment
-file as an alternative authority.
-
-Create one cluster update-signing key on the NAS. Only the networkless
-`control-signer` receives the private key; `control-api`, `control-worker`,
-Caddy, and the GPU nodes receive no signing
-material:
-
-```bash
-sudo -u '#10003' openssl genpkey -algorithm ED25519 \
-  -out /srv/vonk-forge/secrets/agent-update-authority-key.pem
-sudo chown 10003:10001 /srv/vonk-forge/secrets/agent-update-authority-key.pem
-sudo chmod 0400 /srv/vonk-forge/secrets/agent-update-authority-key.pem
-```
-
-During first selection, the trusted updater starts the selected networkless
-signer and records its canonical public authority document in the generation
-evidence. Export that bounded public document for GPU node installation; never run
-a Compose service from the authoring checkout to derive it.
-
-Provide that public document to every GPU node installation with
-`install-vonk-agent --update-authority /path/to/update-authority.json` together
-with the normal enrollment and TUF bootstrap inputs. One public authority is
-valid for any number of GPU nodes in the cluster; receipts are still bound to one
-node, operation, attempt, fence, deadline, and observed supervisor generation.
-The signer verifies the requested agent artifact through its own persistent
-python-tuf cache before signing. It also requires a short-lived action grant
-signed by a separate API/admin authority and bound to the exact rollout, job,
-node set, action, release, expiry, and nonce. The worker receives only the
-signer's Unix socket and cannot read either private authority key, TUF bootstrap
-root, or verifier cache.
-
-Back up the private key as a high-value online recovery secret. Restoring the
-same key preserves all existing GPU node pins. Replacing a lost or compromised key
-requires explicitly reinstalling or reprovisioning each GPU node with the new
-public document before the worker switches signers; there is deliberately no
-unsigned remote key-rotation path. Expired, replayed, source-drifted, or retried
-receipts require a newly approved and signed operation.
 
 ## Bootstrap the production-shaped step-ca overlay
 

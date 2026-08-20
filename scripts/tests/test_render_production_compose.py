@@ -96,10 +96,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     text = output.read_text(encoding="utf-8")
     document = yaml.safe_load(text)
     assert document["services"]["control-api"]["image"] == API_IMAGE
-    assert {
-        document["services"][name]["image"]
-        for name in ("control-worker", "control-signer")
-    } == {WORKER_IMAGE}
+    assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert document["services"]["hermes-agent"]["image"] == HERMES_IMAGE
     assert all(
         isinstance(service, dict)

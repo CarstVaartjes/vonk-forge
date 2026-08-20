@@ -54,8 +54,7 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
         "recipe.uninstall",
     ):
         assert f'"{capability}"' in main
-    for retired in ("agent.update", "agent.rollback", "package.prepare"):
-        assert f'"{retired}"' not in main
+    assert '"package.prepare"' not in main
 
     package_builder = _source("scripts/build-agent-deb")
     assert 'BINARIES = ("vonk-agent", "vonk-agent-helper")' in package_builder

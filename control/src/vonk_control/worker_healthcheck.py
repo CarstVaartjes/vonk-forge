@@ -16,6 +16,7 @@ def verify_worker_ready(
     generation_id: str,
     release_digest: str,
     build_digest: str,
+    process_instance_id: str,
     now: datetime,
     maximum_age_seconds: int = 30,
 ) -> None:
@@ -33,13 +34,16 @@ def verify_worker_ready(
     if heartbeat is None:
         raise RuntimeError("worker readiness heartbeat is unavailable")
     completed_at = heartbeat.completed_at
+    if completed_at is None:
+        raise RuntimeError("worker readiness evidence is invalid or stale")
     if completed_at.tzinfo is None or completed_at.utcoffset() is None:
         completed_at = completed_at.replace(tzinfo=UTC)
-    expected = (generation_id, release_digest, build_digest)
+    expected = (generation_id, release_digest, build_digest, process_instance_id)
     observed = (
         heartbeat.generation_id,
         heartbeat.release_digest,
         heartbeat.build_digest,
+        heartbeat.process_instance_id,
     )
     age = timestamp - completed_at.astimezone(UTC)
     if (
@@ -54,6 +58,7 @@ def verify_worker_ready(
 def main() -> None:
     from .db import build_engine, session_factory
     from .settings import GenerationStartupSettings, WorkerSettings
+    from .worker import current_worker_instance_id
 
     worker = WorkerSettings.from_env_and_secrets()
     generation = GenerationStartupSettings.from_env_and_secrets()
@@ -63,6 +68,7 @@ def main() -> None:
         generation_id=generation.generation_id,
         release_digest=generation.release_digest,
         build_digest=generation.build_digest,
+        process_instance_id=current_worker_instance_id(),
         now=datetime.now(UTC),
     )
 

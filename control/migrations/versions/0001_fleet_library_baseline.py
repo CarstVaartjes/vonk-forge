@@ -57,7 +57,7 @@ def upgrade() -> None:
     sa.Column('capabilities', sa.JSON(), nullable=False),
     sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("architecture IS NULL OR architecture IN ('linux-arm64', 'linux-x86_64')", name='ck_agent_nodes_architecture'),
+    sa.CheckConstraint("architecture IS NULL OR architecture IN ('linux-amd64', 'linux-arm64')", name='ck_agent_nodes_architecture'),
     sa.PrimaryKeyConstraint('node_id')
     )
     op.create_table('audit_events',
@@ -136,14 +136,16 @@ def upgrade() -> None:
     sa.Column('release_digest', sa.String(length=71), nullable=False),
     sa.Column('build_digest', sa.String(length=71), nullable=False),
     sa.Column('start_nonce', sa.String(length=64), nullable=False),
+    sa.Column('process_instance_id', sa.String(length=64), nullable=False),
     sa.Column('loop_sequence', sa.BigInteger(), nullable=False),
-    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.CheckConstraint("length(build_digest) = 71 AND substr(build_digest, 1, 7) = 'sha256:' AND (length(substr(build_digest, 8, 64)) = 64 AND substr(build_digest, 8, 64) = lower(substr(build_digest, 8, 64)) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(substr(build_digest, 8, 64), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_control_process_heartbeats_build_digest'),
     sa.CheckConstraint("length(release_digest) = 71 AND substr(release_digest, 1, 7) = 'sha256:' AND (length(substr(release_digest, 8, 64)) = 64 AND substr(release_digest, 8, 64) = lower(substr(release_digest, 8, 64)) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(substr(release_digest, 8, 64), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_control_process_heartbeats_release_digest'),
     sa.CheckConstraint("length(start_nonce) = 64 AND start_nonce = lower(start_nonce) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(start_nonce, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_control_process_heartbeats_start_nonce'),
+    sa.CheckConstraint("length(process_instance_id) = 64 AND process_instance_id = lower(process_instance_id) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(process_instance_id, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_control_process_heartbeats_process_instance_id'),
     sa.CheckConstraint("process_kind = 'worker'", name='ck_control_process_heartbeats_process_kind'),
     sa.CheckConstraint('length(generation_id) BETWEEN 1 AND 128', name='ck_control_process_heartbeats_generation_id_length'),
-    sa.CheckConstraint('loop_sequence >= 1', name='ck_control_process_heartbeats_loop_sequence'),
+    sa.CheckConstraint('(loop_sequence = 0 AND completed_at IS NULL) OR (loop_sequence >= 1 AND completed_at IS NOT NULL)', name='ck_control_process_heartbeats_loop_sequence'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('process_kind', 'start_nonce', name='uq_control_process_heartbeats_process_start')
     )

@@ -43,16 +43,6 @@ ResultConsumer = Callable[
 ContactConsumer = Callable[[Session, AgentSource], None]
 
 
-
-
-
-
-
-
-
-
-
-
 _SAFE_AUTOMATIC_RECLAIM = frozenset(
     {
         AgentOperation.NODE_PROBE.value,
@@ -101,9 +91,7 @@ _REQUIRED_CAPABILITIES = frozenset(
     }
 )
 _NEXT_CAPABILITIES = (
-    _REQUIRED_CAPABILITIES
-    | frozenset({"agent.runtime.rust.v1"})
-    | _RECIPE_CAPABILITIES
+    _REQUIRED_CAPABILITIES | frozenset({"agent.runtime.rust.v1"}) | _RECIPE_CAPABILITIES
 )
 _CONTROL_OPERATIONS = _NEXT_CAPABILITIES - frozenset({"agent.runtime.rust.v1"})
 
@@ -257,11 +245,6 @@ class AgentJobService:
         session.flush()
         return stored
 
-
-
-
-
-
     def notify_available(self) -> None:
         """Wake long polls after a caller-managed enqueue transaction commits."""
         with self._available:
@@ -302,8 +285,8 @@ class AgentJobService:
         wait_seconds: float = 0,
         protocol_version: int | None = 3,
         capabilities: Sequence[str] | None = tuple(_NEXT_CAPABILITIES),
-        runtime_identity: Mapping[str, object] | None = None,
         *,
+        runtime_identity: Mapping[str, object] | None,
         source: AgentSource | None = None,
     ) -> AgentClaim | None:
         self._mark_started()
@@ -351,7 +334,7 @@ class AgentJobService:
         lease_seconds: int,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: dict[str, object] | None,
+        runtime_identity: dict[str, object],
         source: AgentSource | None,
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
@@ -375,7 +358,9 @@ class AgentJobService:
             if identity is None or not self._identity_is_active(*identity, now):
                 return None
             node, certificate = identity
-            self._validate_agent_contract(protocol_version, capabilities)
+            self._validate_agent_contract(
+                protocol_version, capabilities, runtime_identity
+            )
             self._consume_contact(session, source, node, certificate)
             self._record_contact(
                 node,
@@ -511,7 +496,7 @@ class AgentJobService:
     def _recipe_build_runtime_matches(
         session: Session,
         operation: StoredOperation,
-        runtime_identity: Mapping[str, object] | None,
+        runtime_identity: Mapping[str, object],
     ) -> bool:
         build_id = operation.payload.get("build_id")
         build = (
@@ -571,8 +556,6 @@ class AgentJobService:
                 ),
             )
         self._aggregate_parent(session, operation.parent_job_id)
-
-
 
     def _claim_has_authority(
         self,
@@ -1026,6 +1009,7 @@ class AgentJobService:
     def _validate_agent_contract(
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
+        runtime_identity: Mapping[str, object] | None,
     ) -> None:
         if (
             protocol_version is None
@@ -1074,9 +1058,9 @@ class AgentJobService:
     @staticmethod
     def _runtime_identity(
         value: Mapping[str, object] | None,
-    ) -> dict[str, object] | None:
+    ) -> dict[str, object]:
         if value is None:
-            return None
+            raise ValueError("agent runtime identity is required")
         if not isinstance(value, Mapping):
             raise TypeError("agent runtime identity is invalid")
         document = dict(value)
@@ -1089,13 +1073,12 @@ class AgentJobService:
                 "semantic_version",
                 "self_test_passed",
             }
-            or document["architecture"] not in {"linux-arm64", "linux-x86_64"}
+            or document["architecture"] not in {"linux-amd64", "linux-arm64"}
             or not isinstance(document["architecture"], str)
             or not isinstance(document["binary_digest"], str)
             or re.fullmatch(r"[0-9a-f]{64}", document["binary_digest"]) is None
             or not isinstance(document["build_digest"], str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
-            or document["build_digest"] != f"sha256:{document['binary_digest']}"
             or not isinstance(document["semantic_version"], str)
             or re.fullmatch(
                 r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",

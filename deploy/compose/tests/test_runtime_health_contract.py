@@ -10,7 +10,6 @@ COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
     "caddy",
     "control-api",
-    "control-signer",
     "control-worker",
     "grafana",
     "litellm",
@@ -78,7 +77,6 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),
-        "control-signer": ("vonk_control.signer_healthcheck",),
         "step-ca": ("step ca health",),
         "litellm": ("/health/readiness",),
         "prometheus": ("/-/ready",),

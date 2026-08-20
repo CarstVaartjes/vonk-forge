@@ -81,6 +81,13 @@ CAPABILITIES = [
     "workload.stop",
     "workload.verify",
 ]
+PACKAGED_RUNTIME_IDENTITY = {
+    "architecture": "linux-amd64",
+    "binary_digest": "c" * 64,
+    "build_digest": "sha256:" + "b" * 64,
+    "semantic_version": "1.2.3",
+    "self_test_passed": True,
+}
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -194,6 +201,7 @@ class CurrentAgentClient(TestClient):
                 "lease_seconds": 60,
                 "node_id": headers["x-vonk-agent-node"],
                 "protocol_version": 3,
+                "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
                 "wait_seconds": 0,
             }
             if isinstance(json, dict):
@@ -238,12 +246,8 @@ def agent_system(tmp_path):
         presence=presence,
         artifact_root=tmp_path / "artifacts",
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
-        tuf_metadata_root=tmp_path / "tuf-metadata",
-        tuf_target_root=tmp_path / "tuf-targets",
         workload_tuf_metadata_root=tmp_path / "workload-tuf-metadata",
         workload_tuf_target_root=tmp_path / "workload-tuf-targets",
-        max_tuf_metadata_bytes=128,
-        max_tuf_target_bytes=128,
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         bootstrap=EnrollmentBootstrapConfig(
             controller_endpoint="https://agents.example.test:8443",
@@ -252,8 +256,6 @@ def agent_system(tmp_path):
         ),
     )
     services.artifact_root.mkdir()
-    services.tuf_metadata_root.mkdir()
-    services.tuf_target_root.mkdir()
     services.workload_tuf_metadata_root.mkdir()
     services.workload_tuf_target_root.mkdir()
     codec = TokenCodec(b"k" * 32)
@@ -1217,13 +1219,7 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
             "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
-            "runtime_identity": {
-                "architecture": "linux-arm64",
-                "binary_digest": "c" * 64,
-                "build_digest": "sha256:" + "c" * 64,
-                "semantic_version": "1.2.3",
-                "self_test_passed": True,
-            },
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
             "wait_seconds": 0,
         },
     )
@@ -1236,8 +1232,8 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
         assert node.protocol_version == 3
         assert node.capabilities == CAPABILITIES
         assert node.semantic_version == "1.2.3"
-        assert node.build_digest == "sha256:" + "c" * 64
-        assert node.architecture == "linux-arm64"
+        assert node.build_digest == "sha256:" + "b" * 64
+        assert node.architecture == "linux-amd64"
         assert node.binary_digest == "c" * 64
         assert node.self_test_passed is True
         assert node.contact_certificate_serial == "serial-a"
@@ -1289,8 +1285,9 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         assert node.semantic_version is None
 
 
-def test_claim_rejects_runtime_identity_not_emitted_by_the_rust_binary(
-    agent_system,
+@pytest.mark.parametrize("architecture", ("linux-amd64", "linux-arm64"))
+def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
+    agent_system, architecture: str
 ) -> None:
     client, _services, _, _clock = agent_system
 
@@ -1300,13 +1297,26 @@ def test_claim_rejects_runtime_identity_not_emitted_by_the_rust_binary(
         json={
             "node_id": NODE_A,
             "runtime_identity": {
-                "architecture": "linux-arm64",
+                "architecture": architecture,
                 "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
             },
         },
+    )
+
+    assert response.status_code == 204
+
+
+def test_authenticated_claim_requires_packaged_runtime_identity(agent_system) -> None:
+    client, _services, _, _clock = agent_system
+
+    response = client.request(
+        "POST",
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={"capabilities": CAPABILITIES, "node_id": NODE_A},
     )
 
     assert response.status_code == 422
@@ -3044,35 +3054,19 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
     )
 
 
-def test_authenticated_agents_can_fetch_bounded_platform_tuf_files(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    metadata = b'{"signed":{"_type":"timestamp"}}'
-    target = b'{"platform_version":"1.2.3"}\n'
-    target_name = f"platform/releases/1.2.3/{'a' * 64}.json"
-    (services.tuf_metadata_root / "timestamp.json").write_bytes(metadata)
-    target_path = services.tuf_target_root / target_name
-    target_path.parent.mkdir(parents=True)
-    target_path.write_bytes(target)
+def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
+    client, _, _, _ = agent_system
+    headers = agent_headers(NODE_A, "serial-a")
+    paths = client.get("/openapi.json").json()["paths"]
 
-    metadata_response = client.get(
-        "/agent/v1/tuf/metadata/timestamp.json",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    target_response = client.get(
-        f"/agent/v1/tuf/targets/{target_name}",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-
-    assert metadata_response.status_code == 200
-    assert metadata_response.content == metadata
-    assert metadata_response.headers["content-type"] == "application/json"
-    assert target_response.status_code == 200
-    assert target_response.content == target
-    assert target_response.headers["content-type"] == "application/octet-stream"
-    assert client.get("/agent/v1/tuf/metadata/timestamp.json").status_code == 401
-    assert client.get(f"/agent/v1/tuf/targets/{target_name}").status_code == 401
+    assert not any(path.startswith("/agent/v1/tuf/") for path in paths)
+    assert client.get(
+        "/agent/v1/tuf/metadata/timestamp.json", headers=headers
+    ).status_code == 404
+    assert client.get(
+        f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'a' * 64}.json",
+        headers=headers,
+    ).status_code == 404
 
 
 def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
@@ -3109,149 +3103,6 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
         ).status_code
         == 404
     )
-
-
-@pytest.mark.parametrize(
-    ("kind", "name"),
-    (
-        ("metadata", "../timestamp.json"),
-        ("metadata", "0.root.json"),
-        ("metadata", "Timestamp.json"),
-        ("targets", "../platform-release.json"),
-        ("targets", "platform-release.json"),
-        ("targets", f"platform/releases/latest/{'a' * 64}.json"),
-        ("targets", f"platform/releases/01.2.3/{'a' * 64}.json"),
-        ("targets", f"platform/releases/1.2.3/{'A' * 64}.json"),
-        ("targets", f"platform/releases/1.2.3/{'a' * 63}.json"),
-        ("targets", f"platform/releases/1.2.3//{'a' * 64}.json"),
-        ("targets", ".hidden"),
-        ("targets", "UPPER"),
-    ),
-)
-def test_platform_tuf_routes_reject_unsafe_names(
-    agent_system,
-    kind: str,
-    name: str,
-) -> None:
-    client, _, _, _ = agent_system
-
-    response = client.get(
-        f"/agent/v1/tuf/{kind}/{name}",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-
-    assert response.status_code == 404
-
-
-def test_platform_tuf_routes_reject_symlinks_writable_files_and_oversize(
-    agent_system,
-    tmp_path,
-) -> None:
-    client, services, _, _ = agent_system
-    target_name = f"platform/releases/1.2.3/{'a' * 64}.json"
-    target_directory = services.tuf_target_root / "platform/releases/1.2.3"
-    target_directory.mkdir(parents=True)
-    outside = tmp_path / "outside.json"
-    outside.write_bytes(b"{}")
-    (services.tuf_metadata_root / "timestamp.json").symlink_to(outside)
-    writable = target_directory / f"{'a' * 64}.json"
-    writable.write_bytes(b"{}")
-    writable.chmod(0o666)
-    executable = target_directory / f"{'b' * 64}.json"
-    executable.write_bytes(b"{}")
-    executable.chmod(0o555)
-    oversized = target_directory / f"{'c' * 64}.json"
-    oversized.write_bytes(b"x" * 129)
-
-    headers = agent_headers(NODE_A, "serial-a")
-    assert (
-        client.get("/agent/v1/tuf/metadata/timestamp.json", headers=headers).status_code
-        == 404
-    )
-    assert (
-        client.get(f"/agent/v1/tuf/targets/{target_name}", headers=headers).status_code
-        == 404
-    )
-    assert (
-        client.get(
-            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'b' * 64}.json",
-            headers=headers,
-        ).status_code
-        == 404
-    )
-    assert (
-        client.get(
-            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'c' * 64}.json",
-            headers=headers,
-        ).status_code
-        == 413
-    )
-
-
-def test_platform_tuf_target_rejects_nested_symlinks_and_hardlinks(
-    agent_system,
-    tmp_path,
-) -> None:
-    client, services, _, _ = agent_system
-    headers = agent_headers(NODE_A, "serial-a")
-    outside = tmp_path / "outside"
-    outside_target = outside / "releases/1.2.3" / f"{'d' * 64}.json"
-    outside_target.parent.mkdir(parents=True)
-    outside_target.write_bytes(b"outside")
-    (services.tuf_target_root / "platform").symlink_to(outside)
-
-    assert (
-        client.get(
-            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'d' * 64}.json",
-            headers=headers,
-        ).status_code
-        == 404
-    )
-
-    (services.tuf_target_root / "platform").unlink()
-    target_directory = services.tuf_target_root / "platform/releases/1.2.3"
-    target_directory.mkdir(parents=True)
-    source = target_directory / "source"
-    source.write_bytes(b"hard-linked")
-    os.link(source, target_directory / f"{'e' * 64}.json")
-
-    assert (
-        client.get(
-            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'e' * 64}.json",
-            headers=headers,
-        ).status_code
-        == 404
-    )
-
-
-def test_platform_tuf_target_rejects_file_changed_while_reading(
-    agent_system,
-    monkeypatch,
-) -> None:
-    client, services, _, _ = agent_system
-    target_name = f"platform/releases/1.2.3/{'f' * 64}.json"
-    target = services.tuf_target_root / target_name
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"original")
-    real_read = os.read
-    changed = False
-
-    def changing_read(descriptor: int, count: int) -> bytes:
-        nonlocal changed
-        result = real_read(descriptor, count)
-        if not changed:
-            changed = True
-            target.write_bytes(b"replaced")
-        return result
-
-    monkeypatch.setattr("vonk_control.agent_api.os.read", changing_read)
-
-    response = client.get(
-        f"/agent/v1/tuf/targets/{target_name}",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-
-    assert response.status_code == 404
 
 
 def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:

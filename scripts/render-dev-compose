@@ -32,14 +32,18 @@ def _validate(role: str, image: str, channel: str) -> None:
     if channel == "dev" and IMAGE.fullmatch(image) is not None:
         return
     if channel not in {"dev", "pinned"} or IMAGE.fullmatch(image) is None:
-        raise ValueError(f"{role} image must be an immutable published development image")
+        raise ValueError(
+            f"{role} image must be an immutable published development image"
+        )
 
 
 def _rebase_relative_paths(value: object, prefix: str) -> object:
     if isinstance(value, str) and value.startswith("./"):
         return f"./{prefix}/{value[2:]}"
     if isinstance(value, dict):
-        return {key: _rebase_relative_paths(item, prefix) for key, item in value.items()}
+        return {
+            key: _rebase_relative_paths(item, prefix) for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_rebase_relative_paths(item, prefix) for item in value]
     return value
@@ -124,18 +128,26 @@ def _config_mode(source: Path) -> str:
     return "0555" if executable else "0444"
 
 
-def _config_mounts(source_root: Path, source: str, target: str) -> tuple[dict[str, dict[str, str]], list[dict[str, str]]]:
+def _config_mounts(
+    source_root: Path, source: str, target: str
+) -> tuple[dict[str, dict[str, str]], list[dict[str, str]]]:
     if not source.startswith("./"):
         return {}, []
     asset = (source_root / source[2:]).resolve()
     try:
         asset.relative_to(source_root.resolve())
     except ValueError as error:
-        raise ValueError(f"runtime asset escapes Compose source root: {source}") from error
+        raise ValueError(
+            f"runtime asset escapes Compose source root: {source}"
+        ) from error
     if not asset.exists():
         raise ValueError(f"runtime asset is missing: {source}")
 
-    files = [asset] if asset.is_file() else sorted(path for path in asset.rglob("*") if path.is_file())
+    files = (
+        [asset]
+        if asset.is_file()
+        else sorted(path for path in asset.rglob("*") if path.is_file())
+    )
     if not files:
         raise ValueError(f"runtime asset directory is empty: {source}")
     configs: dict[str, dict[str, str]] = {}
@@ -203,7 +215,9 @@ def _resolve_runtime_images(document: dict[str, object]) -> None:
             raise ValueError(f"runtime service image is not digest pinned: {name}")
 
 
-def _count_template_token(path: Path, needle: str, seen: set[Path] | None = None) -> int:
+def _count_template_token(
+    path: Path, needle: str, seen: set[Path] | None = None
+) -> int:
     seen = set() if seen is None else seen
     path = path.resolve()
     if path in seen:
@@ -238,7 +252,10 @@ def render(
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
     document = _compose_document(template)
-    if _count_template_token(template, TOKENS["api"]) != 2 or _count_template_token(template, TOKENS["worker"]) != 4:
+    if (
+        _count_template_token(template, TOKENS["api"]) != 2
+        or _count_template_token(template, TOKENS["worker"]) != 2
+    ):
         raise ValueError("template control image inputs changed")
     document = _replace_image_tokens(
         document,
@@ -253,7 +270,9 @@ def render(
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("development channel must render the production graph")
-    descriptor, staged_name = tempfile.mkstemp(prefix=".render-dev-compose-", dir=output.parent)
+    descriptor, staged_name = tempfile.mkstemp(
+        prefix=".render-dev-compose-", dir=output.parent
+    )
     staged = Path(staged_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
@@ -270,7 +289,9 @@ def render(
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--template", type=Path, default=root / "deploy/compose/compose.yaml")
+    parser.add_argument(
+        "--template", type=Path, default=root / "deploy/compose/compose.yaml"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)

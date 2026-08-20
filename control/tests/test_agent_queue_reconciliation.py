@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult
@@ -22,7 +23,7 @@ from vonk_control.models import (
 )
 
 NODE_ID = "spk_" + "a" * 32
-COMMIT = "a"  * 64
+COMMIT = "a" * 64
 
 
 class Clock:
@@ -77,7 +78,7 @@ def _parent_id(sessions: sessionmaker[Session]) -> str:
 
 
 def _claim(service: AgentJobService):
-    claim = service.claim(NODE_ID, "serial-a", 30)
+    claim = claim_agent(service, NODE_ID, "serial-a", 30)
     assert claim is not None
     return claim
 
@@ -190,7 +191,9 @@ def test_result_consumer_constructor_rejects_noncallable(queue) -> None:
 
 
 @pytest.mark.parametrize("activity", ("enqueue", "claim", "result"))
-def test_result_consumer_cannot_be_bound_after_queue_activity(queue, activity: str) -> None:
+def test_result_consumer_cannot_be_bound_after_queue_activity(
+    queue, activity: str
+) -> None:
     """A hook installed after activity can miss a result and split projection authority."""
     sessions, clock = queue
     service = AgentJobService(sessions, clock=clock)
@@ -203,7 +206,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(queue, activity: s
             {"workload_id": "model"},
         )
     elif activity == "claim":
-        assert service.claim(NODE_ID, "serial-a", 30) is None
+        assert claim_agent(service, NODE_ID, "serial-a", 30) is None
     else:
         bootstrap = AgentJobService(sessions, clock=clock)
         bootstrap.enqueue(

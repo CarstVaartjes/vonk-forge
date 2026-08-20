@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .jobs import JobService
@@ -15,6 +17,20 @@ _GENERATION = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
 _START_NONCE = re.compile(r"[0-9a-f]{64}\Z")
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
+
+
+def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
+    """Identify one Linux process lifetime without persistent mutable state."""
+    boot_id = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
+    process_stat = (proc_root / str(pid) / "stat").read_text().strip()
+    closing_parenthesis = process_stat.rfind(")")
+    fields_after_name = process_stat[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 1 or len(fields_after_name) < 20:
+        raise RuntimeError("worker process identity is unavailable")
+    start_ticks = fields_after_name[19]
+    pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
+    material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
+    return hashlib.sha256(material).hexdigest()
 
 
 class WorkerSelectedIdentityVerifier:
@@ -88,6 +104,7 @@ class WorkerHeartbeatRecorder:
         release_digest: str,
         build_digest: str,
         start_nonce: str,
+        process_instance_id: str,
         clock: Callable[[], datetime],
         verify_selected: Callable[[], object] | None = None,
     ) -> None:
@@ -99,13 +116,51 @@ class WorkerHeartbeatRecorder:
             raise ValueError("worker build digest is invalid")
         if _START_NONCE.fullmatch(start_nonce) is None:
             raise ValueError("worker start nonce is invalid")
+        if _START_NONCE.fullmatch(process_instance_id) is None:
+            raise ValueError("worker process instance ID is invalid")
         self._sessions = sessions
         self._generation_id = generation_id
         self._release_digest = release_digest
         self._build_digest = build_digest
         self._start_nonce = start_nonce
+        self._process_instance_id = process_instance_id
         self._clock = clock
         self._verify_selected = verify_selected
+        self._register_process_start()
+
+    def _register_process_start(self) -> None:
+        from sqlalchemy import select
+
+        from .models import ControlProcessHeartbeat
+
+        with self._sessions.begin() as session:
+            heartbeat = session.scalar(
+                select(ControlProcessHeartbeat)
+                .where(
+                    ControlProcessHeartbeat.process_kind == "worker",
+                    ControlProcessHeartbeat.start_nonce == self._start_nonce,
+                )
+                .with_for_update()
+            )
+            if heartbeat is None:
+                heartbeat = ControlProcessHeartbeat(
+                    process_kind="worker",
+                    generation_id=self._generation_id,
+                    release_digest=self._release_digest,
+                    build_digest=self._build_digest,
+                    start_nonce=self._start_nonce,
+                    process_instance_id=self._process_instance_id,
+                    loop_sequence=0,
+                    completed_at=None,
+                )
+                session.add(heartbeat)
+                return
+            heartbeat.generation_id = self._generation_id
+            heartbeat.release_digest = self._release_digest
+            heartbeat.build_digest = self._build_digest
+            heartbeat.process_instance_id = self._process_instance_id
+            heartbeat.loop_sequence = 0
+            heartbeat.completed_at = None
 
     def completed_loop(self) -> None:
         from sqlalchemy import select
@@ -130,24 +185,14 @@ class WorkerHeartbeatRecorder:
                 .with_for_update()
             )
             if heartbeat is None:
-                session.add(
-                    ControlProcessHeartbeat(
-                        process_kind="worker",
-                        generation_id=self._generation_id,
-                        release_digest=self._release_digest,
-                        build_digest=self._build_digest,
-                        start_nonce=self._start_nonce,
-                        loop_sequence=1,
-                        completed_at=completed_at,
-                    )
-                )
-                return
+                raise RuntimeError("worker process instance is unavailable")
             if (
                 heartbeat.generation_id != self._generation_id
                 or heartbeat.release_digest != self._release_digest
                 or heartbeat.build_digest != self._build_digest
+                or heartbeat.process_instance_id != self._process_instance_id
             ):
-                raise RuntimeError("worker heartbeat identity changed within a process")
+                raise RuntimeError("worker process instance changed")
             heartbeat.loop_sequence += 1
             heartbeat.completed_at = completed_at
 
@@ -395,6 +440,7 @@ if __name__ == "__main__":
             release_digest=generation.release_digest,
             build_digest=generation.build_digest,
             start_nonce=generation.start_nonce,
+            process_instance_id=current_worker_instance_id(),
             clock=clock,
             verify_selected=selected_identity.verify,
         ).completed_loop,

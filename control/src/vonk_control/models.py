@@ -266,7 +266,12 @@ class ControlProcessHeartbeat(Base):
             name="ck_control_process_heartbeats_start_nonce",
         ),
         CheckConstraint(
-            "loop_sequence >= 1",
+            _lower_hex("process_instance_id", 64),
+            name="ck_control_process_heartbeats_process_instance_id",
+        ),
+        CheckConstraint(
+            "(loop_sequence = 0 AND completed_at IS NULL) OR "
+            "(loop_sequence >= 1 AND completed_at IS NOT NULL)",
             name="ck_control_process_heartbeats_loop_sequence",
         ),
     )
@@ -278,9 +283,10 @@ class ControlProcessHeartbeat(Base):
     release_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     build_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     start_nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    process_instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
     loop_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    completed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
 
@@ -549,7 +555,7 @@ class AgentNode(Base):
     __tablename__ = "agent_nodes"
     __table_args__ = (
         CheckConstraint(
-            "architecture IS NULL OR architecture IN ('linux-arm64', 'linux-x86_64')",
+            "architecture IS NULL OR architecture IN ('linux-amd64', 'linux-arm64')",
             name="ck_agent_nodes_architecture",
         ),
     )

@@ -12,7 +12,6 @@ COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
     "caddy",
     "control-api",
-    "control-signer",
     "control-worker",
     "grafana",
     "litellm",

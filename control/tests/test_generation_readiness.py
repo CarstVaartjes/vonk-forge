@@ -42,6 +42,7 @@ SHA_B = "b" * 64
 GEN_A = f"gen-{SHA_A[:24]}"
 GEN_B = f"gen-{'d' * 24}"
 START_NONCE = "c" * 64
+PROCESS_INSTANCE = "e" * 64
 NOW = datetime(2026, 8, 6, 10, tzinfo=UTC)
 
 
@@ -428,6 +429,7 @@ def test_selected_generation_readiness_requires_exact_fresh_worker_loop(
         release_digest=identity.release_digest,
         build_digest=identity.build_digest,
         start_nonce=identity.start_nonce,
+        process_instance_id=PROCESS_INSTANCE,
         clock=lambda: NOW,
     )
     recorder.completed_loop()
@@ -468,6 +470,7 @@ def test_worker_does_not_publish_heartbeat_when_active_projection_drifts(
         release_digest=f"sha256:{SHA_A}",
         build_digest=f"sha256:{SHA_B}",
         start_nonce=START_NONCE,
+        process_instance_id=PROCESS_INSTANCE,
         clock=lambda: NOW,
         verify_selected=_worker_verifier(projections).verify,
     )
@@ -476,7 +479,10 @@ def test_worker_does_not_publish_heartbeat_when_active_projection_drifts(
         recorder.completed_loop()
 
     with sessions() as session:
-        assert session.scalar(select(ControlProcessHeartbeat)) is None
+        heartbeat = session.scalar(select(ControlProcessHeartbeat))
+        assert heartbeat is not None
+        assert heartbeat.loop_sequence == 0
+        assert heartbeat.completed_at is None
 
 
 @pytest.mark.parametrize(
@@ -530,6 +536,7 @@ def test_selected_generation_readiness_rejects_nonmatching_or_stale_heartbeat(
                 release_digest=release_digest,
                 build_digest=build_digest,
                 start_nonce=start_nonce,
+                process_instance_id=PROCESS_INSTANCE,
                 loop_sequence=1,
                 completed_at=completed_at,
             )
@@ -562,6 +569,7 @@ def test_worker_heartbeat_is_persisted_only_after_scheduler_loop_returns(
         release_digest=identity.release_digest,
         build_digest=identity.build_digest,
         start_nonce=identity.start_nonce,
+        process_instance_id=PROCESS_INSTANCE,
         clock=lambda: NOW,
     )
 
@@ -740,6 +748,7 @@ def test_cohort_derived_api_and_worker_identities_match_strict_active_projection
                 release_digest=selected.release_digest,
                 build_digest=selected.build_digest,
                 start_nonce=selected.start_nonce,
+                process_instance_id=PROCESS_INSTANCE,
                 loop_sequence=1,
                 completed_at=NOW,
             )

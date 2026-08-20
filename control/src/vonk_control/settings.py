@@ -304,8 +304,6 @@ class Settings:
     agent_ca_timeout_seconds: float
     agent_ca_max_response_bytes: int
     agent_artifact_root: Path
-    agent_tuf_metadata_root: Path
-    agent_tuf_target_root: Path
     workload_tuf_metadata_root: Path
     workload_tuf_target_root: Path
     agent_proxy_auth: bytes
@@ -445,12 +443,6 @@ class Settings:
         agent_artifact_root = _absolute_root(
             "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
         )
-        agent_tuf_metadata_root = _absolute_root(
-            "VONK_AGENT_TUF_METADATA_ROOT", "/state/agent-tuf/metadata"
-        )
-        agent_tuf_target_root = _absolute_root(
-            "VONK_AGENT_TUF_TARGET_ROOT", "/state/agent-tuf/targets"
-        )
         workload_tuf_metadata_root = _absolute_root(
             "VONK_WORKLOAD_TUF_METADATA_ROOT", "/state/workload-tuf/metadata"
         )
@@ -459,8 +451,6 @@ class Settings:
         )
         agent_roots = (
             agent_artifact_root,
-            agent_tuf_metadata_root,
-            agent_tuf_target_root,
             workload_tuf_metadata_root,
             workload_tuf_target_root,
         )
@@ -472,7 +462,7 @@ class Settings:
             for right in agent_roots[index + 1 :]
         ):
             raise SettingsError(
-                "agent artifact and TUF roots must be distinct and nonoverlapping"
+                "agent artifact and workload TUF roots must be distinct and nonoverlapping"
             )
         package_helper_grant_private_key_path = (
             _secret_path("VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE")
@@ -530,8 +520,6 @@ class Settings:
             agent_ca_timeout_seconds=agent_ca_timeout_seconds,
             agent_ca_max_response_bytes=agent_ca_max_response_bytes,
             agent_artifact_root=agent_artifact_root,
-            agent_tuf_metadata_root=agent_tuf_metadata_root,
-            agent_tuf_target_root=agent_tuf_target_root,
             workload_tuf_metadata_root=workload_tuf_metadata_root,
             workload_tuf_target_root=workload_tuf_target_root,
             agent_proxy_auth=agent_proxy_auth,

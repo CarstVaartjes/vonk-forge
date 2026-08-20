@@ -93,19 +93,6 @@ def test_helper_grant_signing_bytes_are_domain_separated_and_canonical() -> None
     )
 
 
-@pytest.mark.parametrize(
-    "operation", ("agent.update", "agent.rollback", "platform.update")
-)
-def test_helper_grant_cannot_represent_agent_or_platform_updates(
-    operation: str,
-) -> None:
-    document = grant_claims().to_mapping()
-    document["operation"] = operation
-
-    with pytest.raises(AgentProtocolError, match="helper operation"):
-        PackageHelperGrantClaims.parse(document)
-
-
 def test_helper_grant_requires_a_bounded_fifteen_minute_lifetime() -> None:
     with pytest.raises(AgentProtocolError, match="expiry"):
         replace(grant_claims(), expires_at=2_000_000_901)

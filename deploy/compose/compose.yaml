@@ -30,15 +30,12 @@ x-api-environment: &api-environment
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
-  VONK_AGENT_TUF_METADATA_ROOT: /agent-tuf/metadata
-  VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
   VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
   VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
   VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
-  VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
   VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
@@ -53,7 +50,6 @@ x-worker-environment: &worker-environment
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_UPDATE_SIGNER_SOCKET: /run/vonk-signer/signer.sock
   VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
@@ -103,17 +99,12 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    secrets: [package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
-      - agent-tuf-publication:/agent-tuf
       - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
-      - update-signer-socket:/update-socket
-      - signer-tuf-verifier:/verifier
-      - api-admin-grant-runtime:/api-runtime
-      - api-admin-grant-runtime:/run/vonk-api-secrets:ro
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - type: bind
@@ -154,7 +145,6 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
-      - update-signer-socket:/run/vonk-signer
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
         target: /run/vonk-forge/control-identity
@@ -166,56 +156,10 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
-      control-signer: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.worker_healthcheck]
       interval: 10s
       timeout: 5s
-      retries: 12
-
-  control-signer:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: unless-stopped
-    logging: *bounded-logging
-    command: [python, -m, vonk_control.update_signer]
-    read_only: true
-    user: "10003:10001"
-    network_mode: none
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    environment:
-      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/vonk-normalized-secrets/agent-update-authority-key
-      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/vonk-normalized-secrets/admin-grant-public-key
-      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/vonk-normalized-secrets/agent-tuf-bootstrap-root
-      VONK_AGENT_TUF_METADATA_ROOT: /publication/metadata
-      VONK_AGENT_TUF_TARGET_ROOT: /publication/targets
-      VONK_AGENT_TUF_VERIFIED_METADATA_ROOT: /verifier/metadata
-      VONK_AGENT_TUF_VERIFIED_TARGET_ROOT: /verifier/targets
-      VONK_CONTROL_IDENTITY_ROOT: /control-identity
-      VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-      VONK_UPDATE_SIGNER_SOCKET: /run/vonk-signer/signer.sock
-      VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
-      VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
-      VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
-    secrets: []
-    volumes:
-      - agent-tuf-publication:/publication:ro
-      - signer-tuf-verifier:/verifier
-      - update-signer-socket:/run/vonk-signer
-      - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - type: bind
-        source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
-        target: /control-identity
-        read_only: true
-        bind:
-          create_host_path: false
-    tmpfs: [/tmp]
-    depends_on:
-      control-api: {condition: service_healthy}
-    healthcheck:
-      test: [CMD, python, -m, vonk_control.signer_healthcheck]
-      interval: 5s
-      timeout: 3s
       retries: 12
 
   step-ca:
@@ -418,14 +362,6 @@ secrets:
     file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
   worker-api-token:
     file: "${WORKER_API_TOKEN_FILE:?set worker API token secret file}"
-  agent-update-authority-key:
-    file: "${AGENT_UPDATE_AUTHORITY_KEY_FILE:?set agent update authority private key file}"
-  agent-tuf-bootstrap-root:
-    file: "${AGENT_TUF_BOOTSTRAP_ROOT_FILE:?set trusted platform TUF bootstrap root file}"
-  admin-grant-public-key:
-    file: "${ADMIN_GRANT_PUBLIC_KEY_FILE:?set API admin-grant public key file}"
-  admin-grant-private-key:
-    file: "${ADMIN_GRANT_PRIVATE_KEY_FILE:?set API admin-grant private key file}"
   package-helper-grant-private-key:
     file: "${PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE:?set workload package helper grant private key file}"
   package-helper-receipt-private-key:
@@ -468,10 +404,6 @@ volumes:
   grafana-data: {}
   registry-data: {}
   route-publications: {}
-  update-signer-socket: {}
-  signer-tuf-verifier: {}
-  agent-tuf-publication: {}
   workload-tuf-publication: {}
-  api-admin-grant-runtime: {}
   normalized-private-keys: {}
   step-ca-data: {}

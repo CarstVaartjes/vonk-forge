@@ -97,12 +97,8 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         presence=presence,
         artifact_root=root / "artifacts",
         source_bundles=SourceBundleStore(root / "source-bundles"),
-        tuf_metadata_root=root / "tuf-metadata",
-        tuf_target_root=root / "tuf-targets",
         workload_tuf_metadata_root=root / "workload-tuf-metadata",
         workload_tuf_target_root=root / "workload-tuf-targets",
-        max_tuf_metadata_bytes=128,
-        max_tuf_target_bytes=128,
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         bootstrap=EnrollmentBootstrapConfig(
             controller_endpoint="https://agents.example.test:8443",
@@ -112,8 +108,6 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
     )
     for path in (
         services.artifact_root,
-        services.tuf_metadata_root,
-        services.tuf_target_root,
         services.workload_tuf_metadata_root,
         services.workload_tuf_target_root,
     ):

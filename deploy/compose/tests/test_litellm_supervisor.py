@@ -1393,7 +1393,4 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     worker_volumes = {volume["target"]: volume for volume in worker["volumes"]}
     assert worker_volumes["/routes"].get("read_only", False) is False
     assert worker_volumes["/supervisor"]["read_only"] is True
-    assert worker["depends_on"]["control-signer"] == {
-        "condition": "service_healthy",
-        "required": True,
-    }
+    assert "control-signer" not in worker["depends_on"]

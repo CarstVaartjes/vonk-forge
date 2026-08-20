@@ -406,36 +406,28 @@ def test_management_network_file_rejects_overlap_with_direct_fabric(
         Settings.from_env_and_secrets()
 
 
-def test_platform_tuf_roots_are_explicit_absolute_nonoverlapping_paths(
+def test_workload_tuf_roots_are_explicit_absolute_nonoverlapping_paths(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    metadata = tmp_path / "platform-tuf/metadata"
-    targets = tmp_path / "platform-tuf/targets"
+    metadata = tmp_path / "workload-tuf/metadata"
+    targets = tmp_path / "workload-tuf/targets"
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_AGENT_TUF_METADATA_ROOT", str(metadata))
-    monkeypatch.setenv("VONK_AGENT_TUF_TARGET_ROOT", str(targets))
+    monkeypatch.setenv("VONK_WORKLOAD_TUF_METADATA_ROOT", str(metadata))
+    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", str(targets))
 
     settings = Settings.from_env_and_secrets()
 
-    assert settings.agent_tuf_metadata_root == metadata
-    assert settings.agent_tuf_target_root == targets
+    assert settings.workload_tuf_metadata_root == metadata
+    assert settings.workload_tuf_target_root == targets
 
-    monkeypatch.setenv("VONK_AGENT_TUF_TARGET_ROOT", "relative/targets")
+    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", "relative/targets")
     with pytest.raises(SettingsError, match="absolute"):
         Settings.from_env_and_secrets()
 
-    monkeypatch.setenv("VONK_AGENT_TUF_TARGET_ROOT", str(metadata / "nested"))
+    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", str(metadata / "nested"))
     with pytest.raises(SettingsError, match="distinct"):
         Settings.from_env_and_secrets()
-
-
-def test_agent_tuf_target_root_default_is_not_concatenated(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.agent_tuf_target_root == Path("/state/agent-tuf/targets")
 
 
 def test_development_defaults_agent_runtime_to_disabled(monkeypatch) -> None:

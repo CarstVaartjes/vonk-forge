@@ -21,8 +21,6 @@ class SharedRuntimePaths:
 
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
-    verifier: Path = Path("/verifier")
-    agent_publication: Path = Path("/agent-tuf")
     workload_publication: Path = Path("/workload-tuf")
 
 
@@ -238,12 +236,6 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)
-    _directory(paths.verifier, 10003, 10001, 0o700)
-
-    agent = _directory(paths.agent_publication, 10001, 10001, 0o750)
-    for name in ("metadata", "targets"):
-        _directory(agent / name, 10001, 10001, 0o750)
-
     workload = _directory(paths.workload_publication, 10001, 10001, 0o750)
     for name in ("metadata", "targets"):
         _directory(workload / name, 10003, 10001, 0o750)

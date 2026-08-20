@@ -57,8 +57,6 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         for name in (
             "routes",
             "supervisor",
-            "verifier",
-            "agent_publication",
             "workload_publication",
         )
     }
@@ -77,10 +75,6 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         roots["routes"]: (10001, 10001),
         roots["routes"] / "generations": (10001, 10001),
         roots["supervisor"]: (10002, 10001),
-        roots["verifier"]: (10003, 10001),
-        roots["agent_publication"]: (10001, 10001),
-        roots["agent_publication"] / "metadata": (10001, 10001),
-        roots["agent_publication"] / "targets": (10001, 10001),
         roots["workload_publication"]: (10001, 10001),
         roots["workload_publication"] / "metadata": (10003, 10001),
         roots["workload_publication"] / "targets": (10003, 10001),
@@ -92,10 +86,6 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         "routes": 0o750,
         "routes/generations": 0o750,
         "supervisor": 0o750,
-        "verifier": 0o700,
-        "agent-publication": 0o750,
-        "agent-publication/metadata": 0o750,
-        "agent-publication/targets": 0o750,
         "workload-publication": 0o750,
         "workload-publication/metadata": 0o750,
         "workload-publication/targets": 0o750,
@@ -110,8 +100,6 @@ def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -
     paths = SharedRuntimePaths(
         routes=routes,
         supervisor=tmp_path / "supervisor",
-        verifier=tmp_path / "verifier",
-        agent_publication=tmp_path / "agent-publication",
         workload_publication=tmp_path / "workload-publication",
     )
 

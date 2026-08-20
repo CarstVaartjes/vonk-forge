@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from runtime_identity_support import claim_agent
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation, AgentProtocolError
@@ -19,7 +20,7 @@ from vonk_control.models import AgentCertificate, AgentNode, Base, Job
 ROOT = Path(__file__).resolve().parents[3]
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-COMMIT = "a"  * 64
+COMMIT = "a" * 64
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -56,13 +57,15 @@ def service(tmp_path):
     with sessions.begin() as session:
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
             session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
-            session.add(AgentCertificate(
-                serial=serial,
-                node_id=node_id,
-                not_before=clock.now - timedelta(seconds=1),
-                not_after=clock.now + timedelta(hours=1),
-                fingerprint=f"fingerprint-{serial}",
-            ))
+            session.add(
+                AgentCertificate(
+                    serial=serial,
+                    node_id=node_id,
+                    not_before=clock.now - timedelta(seconds=1),
+                    not_after=clock.now + timedelta(hours=1),
+                    fingerprint=f"fingerprint-{serial}",
+                )
+            )
     return AgentJobService(sessions, clock=clock), sessions, clock
 
 
@@ -89,13 +92,13 @@ def test_cross_node_claim_is_denied(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
 
-    assert jobs.claim(NODE_B, "serial-b", 30) is None
+    assert claim_agent(jobs, NODE_B, "serial-b", 30) is None
 
 
 def test_revoked_certificate_cannot_publish_result(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
-    claim = jobs.claim(NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -109,10 +112,17 @@ def test_revoked_certificate_cannot_publish_result(service) -> None:
 def test_secret_bearing_payload_is_rejected(service) -> None:
     jobs, sessions, clock = service
     parent = Job(
-        request_id=str(uuid.uuid4()), kind="agent.operations", state="queued",
-        actor="operator", authority_revision=COMMIT, targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(), payload={},
-        current_attempt=0, created_at=clock.now, updated_at=clock.now,
+        request_id=str(uuid.uuid4()),
+        kind="agent.operations",
+        state="queued",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_A],
+        payload_digest=hashlib.sha256(b"{}").hexdigest(),
+        payload={},
+        current_attempt=0,
+        created_at=clock.now,
+        updated_at=clock.now,
     )
     with sessions.begin() as session:
         session.add(parent)
@@ -124,10 +134,17 @@ def test_secret_bearing_payload_is_rejected(service) -> None:
 def test_payload_and_result_documents_are_size_limited(service) -> None:
     jobs, sessions, clock = service
     parent = Job(
-        request_id=str(uuid.uuid4()), kind="agent.operations", state="queued",
-        actor="operator", authority_revision=COMMIT, targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(), payload={},
-        current_attempt=0, created_at=clock.now, updated_at=clock.now,
+        request_id=str(uuid.uuid4()),
+        kind="agent.operations",
+        state="queued",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_A],
+        payload_digest=hashlib.sha256(b"{}").hexdigest(),
+        payload={},
+        current_attempt=0,
+        created_at=clock.now,
+        updated_at=clock.now,
     )
     with sessions.begin() as session:
         session.add(parent)
@@ -136,7 +153,7 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
         jobs.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {"value": "x" * 65_536})
 
     jobs.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {})
-    claim = jobs.claim(NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
     with pytest.raises(AgentProtocolError, match="large"):
         jobs.succeed(claim, {"value": "x" * 65_536})
@@ -145,10 +162,10 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
 def test_stale_fence_cannot_publish_success(service) -> None:
     jobs, sessions, clock = service
     enqueue(jobs, sessions, clock)
-    first = jobs.claim(NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
     clock.advance(31)
-    assert jobs.claim(NODE_A, "serial-a", 30) is not None
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
 
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(first, PROBE_RESULT)
@@ -180,28 +197,64 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     ]
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
-    assert "COPY inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl /wheels/" in dockerfile
+    assert (
+        "COPY inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl /wheels/"
+        in dockerfile
+    )
     assert "/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" in dockerfile
     dockerignore = set(dockerignore_path.read_text().splitlines())
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
-    last_include = max(index for index, line in enumerate(lines) if line.startswith("!"))
-    assert {"!control/src/**", "!control/web/**", "control/.venv", "!inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"} <= dockerignore
+    last_include = max(
+        index for index, line in enumerate(lines) if line.startswith("!")
+    )
     assert {
-        "**/__pycache__/**", "**/*.py[cod]", "**/.env", "**/.env.*", "**/*.pem",
-        "**/*.key", "**/*.p12", "**/*.pfx", "**/.pytest_cache/**", "**/.coverage*",
-        "**/coverage/**", "**/htmlcov/**", "**/build/**", "**/dist/**",
-        "**/.npmrc", "**/.netrc", "**/.pypirc", "**/.git-credentials", "**/.ssh/**",
-        "**/credentials.json", "**/credentials.yaml", "**/credentials.yml", "**/credentials.toml",
-        "**/secrets.json", "**/secrets.yaml", "**/secrets.yml", "**/secrets.toml",
-    } <= set(lines[last_include + 1:])
-    assert all(not line.startswith("!") for line in lines[last_include + 1:])
+        "!control/src/**",
+        "!control/web/**",
+        "control/.venv",
+        "!inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl",
+    } <= dockerignore
+    assert {
+        "**/__pycache__/**",
+        "**/*.py[cod]",
+        "**/.env",
+        "**/.env.*",
+        "**/*.pem",
+        "**/*.key",
+        "**/*.p12",
+        "**/*.pfx",
+        "**/.pytest_cache/**",
+        "**/.coverage*",
+        "**/coverage/**",
+        "**/htmlcov/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/.npmrc",
+        "**/.netrc",
+        "**/.pypirc",
+        "**/.git-credentials",
+        "**/.ssh/**",
+        "**/credentials.json",
+        "**/credentials.yaml",
+        "**/credentials.yml",
+        "**/credentials.toml",
+        "**/secrets.json",
+        "**/secrets.yaml",
+        "**/secrets.yml",
+        "**/secrets.toml",
+    } <= set(lines[last_include + 1 :])
+    assert all(not line.startswith("!") for line in lines[last_include + 1 :])
 
 
 def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     result = subprocess.run(
         [
-            "uv", "run", "--project", "control", "python", "-c",
+            "uv",
+            "run",
+            "--project",
+            "control",
+            "python",
+            "-c",
             "import importlib.metadata, json; d = importlib.metadata.distribution('vonk-agent-protocol'); print((d._path / 'direct_url.json').read_text())",
         ],
         cwd=ROOT,
@@ -211,10 +264,21 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     )
     direct_url = json.loads(result.stdout)
     control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
-    package = next(package for package in control_lock["package"] if package["name"] == "vonk-agent-protocol")
+    package = next(
+        package
+        for package in control_lock["package"]
+        if package["name"] == "vonk-agent-protocol"
+    )
 
-    assert direct_url["url"].endswith("/inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl")
-    assert package["wheels"] == [{"filename": "vonk_agent_protocol-2.1.0-py3-none-any.whl", "hash": f"sha256:{PROTOCOL_WHEEL_HASH}"}]
+    assert direct_url["url"].endswith(
+        "/inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+    )
+    assert package["wheels"] == [
+        {
+            "filename": "vonk_agent_protocol-2.1.0-py3-none-any.whl",
+            "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
+        }
+    ]
 
 
 def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
@@ -228,10 +292,17 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
     image = "vonk-control:test-protocol-wheel"
     build = subprocess.run(
         [
-            "docker", "build", "--file", "control/Dockerfile",
-            "--build-arg", "NODE_IMAGE=node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7",
-            "--build-arg", "PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b",
-            "--tag", image, ".",
+            "docker",
+            "build",
+            "--file",
+            "control/Dockerfile",
+            "--build-arg",
+            "NODE_IMAGE=node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7",
+            "--build-arg",
+            "PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b",
+            "--tag",
+            image,
+            ".",
         ],
         cwd=ROOT,
         capture_output=True,
@@ -241,7 +312,13 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
     assert build.returncode == 0, build.stderr
     result = subprocess.run(
         [
-            "docker", "run", "--rm", "--entrypoint", "python", image, "-c",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "python",
+            image,
+            "-c",
             "import importlib.metadata, json; d = importlib.metadata.distribution('vonk-agent-protocol'); print(json.dumps({'version': d.version, 'direct_url': json.loads((d._path / 'direct_url.json').read_text())}))",
         ],
         check=True,
@@ -251,21 +328,32 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
     installed = json.loads(result.stdout)
 
     assert installed["version"] == "2.1.0"
-    assert installed["direct_url"]["url"] == "file:///wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
-    assert installed["direct_url"]["archive_info"]["hash"] == f"sha256={PROTOCOL_WHEEL_HASH}"
+    assert (
+        installed["direct_url"]["url"]
+        == "file:///wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+    )
+    assert (
+        installed["direct_url"]["archive_info"]["hash"]
+        == f"sha256={PROTOCOL_WHEEL_HASH}"
+    )
 
 
-@pytest.mark.parametrize("relative_path", [
-    "control/src/.npmrc",
-    "control/src/.netrc",
-    "control/src/credentials.json",
-    "control/src/secrets.yaml",
-    "control/src/.ssh/id_ed25519",
-    "control/web/.pypirc",
-    "control/web/.git-credentials",
-    "control/web/secrets.toml",
-])
-def test_root_context_cannot_copy_reincluded_credential_artifacts(relative_path: str) -> None:
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "control/src/.npmrc",
+        "control/src/.netrc",
+        "control/src/credentials.json",
+        "control/src/secrets.yaml",
+        "control/src/.ssh/id_ed25519",
+        "control/web/.pypirc",
+        "control/web/.git-credentials",
+        "control/web/secrets.toml",
+    ],
+)
+def test_root_context_cannot_copy_reincluded_credential_artifacts(
+    relative_path: str,
+) -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
     if (

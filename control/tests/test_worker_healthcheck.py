@@ -6,10 +6,13 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.worker import WorkerHeartbeatRecorder
 from vonk_control.worker_healthcheck import verify_worker_ready
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 NONCE = "a" * 64
+INSTANCE_A = "e" * 64
+INSTANCE_B = "f" * 64
 
 
 def _sessions(tmp_path):
@@ -25,6 +28,7 @@ def _heartbeat(*, completed_at: datetime = NOW) -> ControlProcessHeartbeat:
         release_digest="sha256:" + "c" * 64,
         build_digest="sha256:" + "d" * 64,
         start_nonce=NONCE,
+        process_instance_id=INSTANCE_A,
         loop_sequence=1,
         completed_at=completed_at,
     )
@@ -43,6 +47,7 @@ def test_worker_readiness_requires_a_fresh_completed_loop_with_exact_identity(
         generation_id="gen-" + "b" * 24,
         release_digest="sha256:" + "c" * 64,
         build_digest="sha256:" + "d" * 64,
+        process_instance_id=INSTANCE_A,
         now=NOW + timedelta(seconds=5),
     )
 
@@ -69,9 +74,67 @@ def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
         "generation_id": "gen-" + "b" * 24,
         "release_digest": "sha256:" + "c" * 64,
         "build_digest": "sha256:" + "d" * 64,
+        "process_instance_id": INSTANCE_A,
         "now": NOW,
     }
     arguments.update(overrides)
 
     with pytest.raises(RuntimeError, match="worker readiness"):
         verify_worker_ready(sessions, **arguments)
+
+
+def test_worker_restart_immediately_revokes_prior_process_readiness(tmp_path) -> None:
+    sessions = _sessions(tmp_path)
+    first = WorkerHeartbeatRecorder(
+        sessions,
+        generation_id="gen-" + "b" * 24,
+        release_digest="sha256:" + "c" * 64,
+        build_digest="sha256:" + "d" * 64,
+        start_nonce=NONCE,
+        process_instance_id=INSTANCE_A,
+        clock=lambda: NOW,
+    )
+    first.completed_loop()
+    verify_worker_ready(
+        sessions,
+        start_nonce=NONCE,
+        generation_id="gen-" + "b" * 24,
+        release_digest="sha256:" + "c" * 64,
+        build_digest="sha256:" + "d" * 64,
+        process_instance_id=INSTANCE_A,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    second = WorkerHeartbeatRecorder(
+        sessions,
+        generation_id="gen-" + "b" * 24,
+        release_digest="sha256:" + "c" * 64,
+        build_digest="sha256:" + "d" * 64,
+        start_nonce=NONCE,
+        process_instance_id=INSTANCE_B,
+        clock=lambda: NOW + timedelta(seconds=2),
+    )
+
+    with pytest.raises(RuntimeError, match="worker readiness"):
+        verify_worker_ready(
+            sessions,
+            start_nonce=NONCE,
+            generation_id="gen-" + "b" * 24,
+            release_digest="sha256:" + "c" * 64,
+            build_digest="sha256:" + "d" * 64,
+            process_instance_id=INSTANCE_B,
+            now=NOW + timedelta(seconds=2),
+        )
+    with pytest.raises(RuntimeError, match="process instance"):
+        first.completed_loop()
+
+    second.completed_loop()
+    verify_worker_ready(
+        sessions,
+        start_nonce=NONCE,
+        generation_id="gen-" + "b" * 24,
+        release_digest="sha256:" + "c" * 64,
+        build_digest="sha256:" + "d" * 64,
+        process_instance_id=INSTANCE_B,
+        now=NOW + timedelta(seconds=3),
+    )

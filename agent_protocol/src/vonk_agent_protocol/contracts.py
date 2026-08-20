@@ -74,8 +74,6 @@ class AgentOperation(StrEnum):
     WORKLOAD_STOP = "workload.stop"
     WORKLOAD_HEALTH = "workload.health"
     WORKLOAD_VERIFY = "workload.verify"
-    AGENT_UPDATE = "agent.update"
-    AGENT_ROLLBACK = "agent.rollback"
     RECIPE_BUILD = "recipe.build.v1"
     RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"

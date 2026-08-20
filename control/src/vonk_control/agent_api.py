@@ -104,17 +104,6 @@ _MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
-_MAX_TUF_METADATA_BYTES = 2 * 1024 * 1024
-_MAX_TUF_TARGET_BYTES = 16 * 1024 * 1024
-_TUF_METADATA_NAME = re.compile(
-    r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|"
-    r"[a-z0-9][a-z0-9._-]{0,126})\.json\Z"
-)
-_TUF_PLATFORM_TARGET_NAME = re.compile(
-    r"platform/releases/"
-    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)/"
-    r"[0-9a-f]{64}\.json\Z"
-)
 _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|families|releases|"
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
@@ -139,15 +128,11 @@ class AgentApiServices:
     presence: AgentPresenceService
     artifact_root: Path
     source_bundles: SourceBundleStore
-    tuf_metadata_root: Path = Path("/state/agent-tuf/metadata")
-    tuf_target_root: Path = Path("/state/agent-tuf/targets")
     workload_tuf_metadata_root: Path = Path("/state/workload-tuf/metadata")
     workload_tuf_target_root: Path = Path("/state/workload-tuf/targets")
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
     max_recipe_image_bytes: int = MAX_RECIPE_IMAGE_BYTES
     max_range_bytes: int = _MAX_RANGE_BYTES
-    max_tuf_metadata_bytes: int = _MAX_TUF_METADATA_BYTES
-    max_tuf_target_bytes: int = _MAX_TUF_TARGET_BYTES
     max_workload_tuf_metadata_bytes: int = 2 * 1024 * 1024
     max_workload_tuf_target_bytes: int = 1024 * 1024
     workload_helper_authority: WorkloadHelperAuthorityService | None = None
@@ -196,6 +181,7 @@ class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
+
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     grant_token: str = Field(min_length=43, max_length=64)
@@ -231,11 +217,25 @@ class EnrollmentDecisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: Literal["pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"]
+    state: Literal[
+        "pending_review",
+        "issuing",
+        "approved",
+        "rejected",
+        "expired",
+        "certificate_issued",
+    ]
 
 
 _ENROLLMENT_API_STATES = frozenset(
-    {"pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"}
+    {
+        "pending_review",
+        "issuing",
+        "approved",
+        "rejected",
+        "expired",
+        "certificate_issued",
+    }
 )
 
 
@@ -248,6 +248,7 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
         return "issuing"
     return enrollment.state
 
+
 class EnrollmentGrantResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
@@ -257,6 +258,7 @@ class EnrollmentGrantResponse(BaseModel):
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
 
 class EnrollmentSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -284,19 +286,13 @@ class EnrollmentListResponse(BaseModel):
 
 class AgentRuntimeIdentityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    architecture: Literal["linux-arm64", "linux-x86_64"]
+    architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
     )
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     self_test_passed: Literal[True]
-
-    @model_validator(mode="after")
-    def exact_rust_identity(self) -> AgentRuntimeIdentityRequest:
-        if self.build_digest != f"sha256:{self.binary_digest}":
-            raise ValueError("runtime identity digests are inconsistent")
-        return self
 
 
 class ClaimRequest(BaseModel):
@@ -305,7 +301,7 @@ class ClaimRequest(BaseModel):
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=32)
-    runtime_identity: AgentRuntimeIdentityRequest | None = None
+    runtime_identity: AgentRuntimeIdentityRequest
     wait_seconds: int = Field(default=0, ge=0, le=60)
 
 
@@ -373,9 +369,7 @@ class RecipeRunObservationsRequest(BaseModel):
 
 class TelemetryDetailsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    accelerator_name: str | None = Field(
-        default=None, min_length=1, max_length=256
-    )
+    accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
     accelerator_performance_state: str | None = Field(
         default=None, min_length=1, max_length=32
     )
@@ -505,9 +499,6 @@ class ActivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation: int = Field(ge=1)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
-_DEFAULT_CLAIM_REQUEST = ClaimRequest()
 
 
 def _wire(value: object) -> object:
@@ -756,7 +747,9 @@ async def _bounded_enrollment_body(
         if len(chunk) > remaining:
             scan = _scan_enrollment_grants(token_prefix)
             _consume_enrollment_denial(services, scan.tokens)
-            raise HTTPException(status_code=413, detail="enrollment request is too large")
+            raise HTTPException(
+                status_code=413, detail="enrollment request is too large"
+            )
         buffered.extend(chunk)
     return buffered
 
@@ -773,13 +766,13 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
         "boot_id": enrollment.boot_id,
         "created_at": _now(enrollment.created_at).isoformat(),
         "decision_actor": enrollment.decision_actor,
-        "decided_at": _now(enrollment.decided_at).isoformat() if enrollment.decided_at else None,
+        "decided_at": _now(enrollment.decided_at).isoformat()
+        if enrollment.decided_at
+        else None,
         "rejection_reason": enrollment.rejection_reason,
         "certificate_serial": enrollment.certificate_serial,
         "certificate_fingerprint": enrollment.certificate_fingerprint,
     }
-
-
 
 
 def _references_digest(value: object, digest: str) -> bool:
@@ -1147,7 +1140,9 @@ def install_agent_routes(
                 detail="agent enrollment bootstrap is unavailable",
             )
         try:
-            grant = required.enrollment.create(None, authenticated.subject, body.ttl_seconds)
+            grant = required.enrollment.create(
+                None, authenticated.subject, body.ttl_seconds
+            )
         except (TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         audits.append(
@@ -1443,9 +1438,7 @@ def install_agent_routes(
         )
 
     @agent.post("/claim")
-    def claim(
-        request: Request, body: ClaimRequest = _DEFAULT_CLAIM_REQUEST
-    ) -> Response:
+    def claim(request: Request, body: ClaimRequest) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
@@ -1459,9 +1452,7 @@ def install_agent_routes(
                 body.wait_seconds,
                 body.protocol_version,
                 body.capabilities,
-                None
-                if body.runtime_identity is None
-                else body.runtime_identity.model_dump(),
+                runtime_identity=body.runtime_identity.model_dump(),
                 source=source,
             )
         except ValueError as error:
@@ -2036,42 +2027,6 @@ def install_agent_routes(
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",
-        )
-
-    @agent.get("/tuf/metadata/{name}")
-    def tuf_metadata(name: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _TUF_METADATA_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="TUF file not found")
-        raw = _read_tuf_file(
-            required.tuf_metadata_root,
-            name,
-            required.max_tuf_metadata_bytes,
-        )
-        return Response(
-            content=raw,
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
-        )
-
-    @agent.get("/tuf/targets/{name:path}")
-    def tuf_target(name: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _TUF_PLATFORM_TARGET_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="TUF file not found")
-        raw = _read_tuf_file(
-            required.tuf_target_root,
-            name,
-            required.max_tuf_target_bytes,
-        )
-        return Response(
-            content=raw,
-            media_type="application/octet-stream",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
         )
 
     @agent.get("/workload-tuf/metadata/{name}")
