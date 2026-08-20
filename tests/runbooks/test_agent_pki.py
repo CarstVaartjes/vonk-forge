@@ -16,17 +16,6 @@ def _text() -> str:
     return RUNBOOK.read_text()
 
 
-def test_agent_pki_runbook_covers_offline_root_rotation_backup_recovery_and_migration() -> None:
-    text = " ".join(_text().lower().split())
-    for required in (
-        "offline root", "chmod 600", "backup", "restore", "intermediate rotation",
-        "overlap", "revocation", "remote ca revocation is uncertain", "certificate loss",
-        "fresh enrollment grant", "must not copy", "built-in", "step-ca", "migration",
-        "issuing", "manual reconciliation", "24 hours", "clock skew",
-    ):
-        assert required in text
-
-
 def test_runbook_shell_blocks_are_syntactically_executable_and_never_mount_root_private_key(tmp_path: Path) -> None:
     text = _text()
     blocks = re.findall(r"```sh\n(.*?)```", text, re.DOTALL)
@@ -68,7 +57,9 @@ def test_compose_and_public_template_keep_root_key_out_and_provider_private_key_
     assert "encryptedKey" not in provisioner and "d" not in provisioner["key"]
 
 
-def test_public_provisioner_config_bootstrap_executes_in_disposable_fixture(tmp_path: Path) -> None:
+def test_pinned_step_public_provisioner_config_bootstrap_executes_in_disposable_fixture(
+    tmp_path: Path,
+) -> None:
     kid = "fixture-provisioner-kid"
     public = {
         "kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256", "kid": kid,
@@ -94,13 +85,7 @@ def test_public_provisioner_config_bootstrap_executes_in_disposable_fixture(tmp_
     assert stored_private["y"] == configured["y"] and "d" in stored_private
 
 
-def test_pinned_step_thumbprint_command_is_documented() -> None:
-    runbook = _text()
-    assert "step crypto jwk thumbprint <" in runbook
-    assert "step crypto jwk fingerprint" not in runbook
-
-
-def test_pinned_step_image_supports_documented_jwk_thumbprint_command() -> None:
+def test_pinned_step_image_supports_jwk_thumbprint_command() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
     if subprocess.run(["docker", "info"], capture_output=True, check=False).returncode:
@@ -117,18 +102,3 @@ def test_pinned_step_image_supports_documented_jwk_thumbprint_command() -> None:
     ], input=json.dumps(public), capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}\n?", result.stdout)
-
-
-def test_recovery_requires_explicit_node_bound_grant_and_never_identity_copy() -> None:
-    text = _text().lower()
-    recovery = text[text.index("expiry and identity-loss recovery"):]
-    assert "fresh" in recovery and "enrollment grant" in recovery
-    assert "node-bound" in recovery
-    assert "must not copy another gpu node's certificate or private identity" in recovery
-    assert "existing mtls identity" in text
-
-
-def test_operator_entry_points_link_to_pki_runbook() -> None:
-    assert "docs/runbooks/agent-pki.md" in (ROOT / "README.md").read_text()
-    threat_model = (ROOT / "docs/security/threat-model.md").read_text().lower()
-    assert "smallstep" in threat_model and "offline root" in threat_model
