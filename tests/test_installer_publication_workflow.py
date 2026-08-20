@@ -174,6 +174,19 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     assert report["with"]["if-no-files-found"] == "error"
 
 
+def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
+    spark = _workflow()["jobs"]["spark-acceptance"]
+    run = _steps(spark)[
+        "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
+    ]["run"]
+
+    assert "linux-amd64) gates='[\"spark_amd64\",\"spark_pairing\"]'" in run
+    assert (
+        "linux-arm64) gates='[\"spark_arm64\",\"spark_job\","
+        "\"spark_renewal\",\"spark_upgrade\"]'"
+    ) in run
+
+
 def test_complete_acceptance_is_signed_before_the_channel_can_advance() -> None:
     jobs = _workflow()["jobs"]
     acceptance = jobs["acceptance"]

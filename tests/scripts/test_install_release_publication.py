@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -37,6 +38,40 @@ ACCEPTANCE_GATES = {
     "spark_renewal",
     "spark_upgrade",
 }
+AMD64_SPARK_GATES = {"spark_amd64", "spark_pairing"}
+ARM64_SPARK_GATES = {"spark_arm64", "spark_job", "spark_renewal", "spark_upgrade"}
+AMD64_PHASES = [
+    "publication-graph-verified",
+    "controller-ready",
+    "baseline-installed",
+    "paired",
+    "direct-rust-agent-healthy",
+]
+ARM64_PHASES = [
+    "publication-graph-verified",
+    "controller-ready",
+    "baseline-installed",
+    "paired",
+    "synthetic-device-ready",
+    "canary-completed",
+    "identity-renewed",
+    "candidate-upgraded",
+    "direct-rust-agent-healthy",
+]
+CANARY_STATES = [
+    "inventory-ready",
+    "recipe-resolved",
+    "source-verified",
+    "image-built",
+    "image-distributed",
+    "installed",
+    "running",
+    "route-published",
+    "inference-ok",
+    "stopped",
+    "route-withdrawn",
+    "uninstalled",
+]
 
 
 def _canonical(path: Path, document: object) -> None:
@@ -295,17 +330,92 @@ def _spark_gate_report(
     run_id: int = 123456,
 ) -> Path:
     plan = json.loads((publication / "publication-plan.json").read_text())
-    _canonical(
-        path,
-        {
-            "channel": plan["channel"],
-            "gates": sorted(gates),
-            "generation": plan["generation"],
-            "platform": platform,
-            "run_id": run_id,
-            "schema_version": 2,
-            "source_sha": SOURCE_SHA,
-            "status": "passed",
+    baseline_version = "0.0.0~acceptance.1+g" + SOURCE_SHA[:12]
+    selected_baseline = "1" * 64 if platform == "linux-amd64" else "3" * 64
+    selected_candidate = "2" * 64 if platform == "linux-amd64" else "4" * 64
+    graph = {
+        "baseline_package_sha256": selected_baseline,
+        "baseline_version": baseline_version,
+        "candidate_package_sha256": selected_candidate,
+        "candidate_version": plan["version"],
+        "channel": plan["channel"],
+        "generation": plan["generation"],
+        "images_sha256": "c" * 64,
+        "packages": {
+            "linux-amd64": {
+                "baseline_sha256": "1" * 64,
+                "candidate_sha256": "2" * 64,
+            },
+            "linux-arm64": {
+                "baseline_sha256": "3" * 64,
+                "candidate_sha256": "4" * 64,
+            },
+        },
+        "platform": platform,
+        "schema_version": 1,
+        "source_sha": SOURCE_SHA,
+        "verified_platforms": ["linux-amd64", "linux-arm64"],
+    }
+    node_id = "spk_0123456789abcdef0123456789abcdef"
+    common_proof: dict[str, object] = {
+        "controller_generation": plan["generation"],
+        "direct_agent_health": {
+            "healthy": True,
+            "implementation": "rust",
+            "transport": "direct",
+        },
+        "pairing_grant_use_count": 1,
+        "publication_graph": graph,
+    }
+    if platform == "linux-amd64":
+        phases = AMD64_PHASES
+        proof = common_proof | {
+            "installation": {
+                "architecture": "amd64",
+                "package_sha256": graph["packages"][platform]["baseline_sha256"],
+                "version": baseline_version,
+            },
+            "node_id": node_id,
+        }
+    else:
+        phases = ARM64_PHASES
+        serial = "0123456789abcdef"
+        proof = common_proof | {
+            "canary": {
+                "completed_states": CANARY_STATES,
+                "deterministic_response_sha256": "5" * 64,
+            },
+            "config_sha256_after_upgrade": "6" * 64,
+            "config_sha256_before_upgrade": "6" * 64,
+            "installation": {
+                "architecture": "arm64",
+                "baseline": {
+                    "binary_sha256": "7" * 64,
+                    "build_sha256": "8" * 64,
+                    "package_sha256": graph["packages"][platform]["baseline_sha256"],
+                    "version": baseline_version,
+                },
+                "candidate": {
+                    "binary_sha256": "9" * 64,
+                    "build_sha256": "a" * 64,
+                    "package_sha256": graph["packages"][platform]["candidate_sha256"],
+                    "version": plan["version"],
+                },
+            },
+            "node_id_after_renewal": node_id,
+            "node_id_after_upgrade": node_id,
+            "node_id_before_renewal": node_id,
+            "private_identity_sha256_after_upgrade": "d" * 64,
+            "private_identity_sha256_before_upgrade": "d" * 64,
+            "renewal": {
+                "certificate_serial_after": "fedcba9876543210",
+                "certificate_serial_before": serial,
+                "old_certificate_rejection": {
+                    "durably_recorded": True,
+                    "rejected": True,
+                    "serial": serial,
+                },
+            },
             "synthetic_device": {
                 "architecture": platform,
                 "cdi_name": "nvidia.com/gpu=all",
@@ -314,6 +424,19 @@ def _spark_gate_report(
                 "provenance": "ci-only-synthetic-cdi",
                 "synthetic": True,
             },
+        }
+    _canonical(
+        path,
+        {
+            "channel": plan["channel"],
+            "gates": sorted(gates),
+            "generation": plan["generation"],
+            "lifecycle": {"completed_phases": phases, "proof": proof},
+            "platform": platform,
+            "run_id": run_id,
+            "schema_version": 2,
+            "source_sha": SOURCE_SHA,
+            "status": "passed",
             "version": plan["version"],
         },
     )
@@ -398,13 +521,13 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         _spark_gate_report(
             report_root / "spark-amd64.json",
             publication,
-            {"spark_amd64", "spark_pairing", "spark_job"},
+            AMD64_SPARK_GATES,
             "linux-amd64",
         ),
         _spark_gate_report(
             report_root / "spark-arm64.json",
             publication,
-            {"spark_arm64", "spark_renewal", "spark_upgrade"},
+            ARM64_SPARK_GATES,
             "linux-arm64",
         ),
     ]
@@ -443,6 +566,148 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
     assert verified.returncode == 0, verified.stderr
 
 
+def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    report_root = tmp_path / "reports"
+    report_root.mkdir()
+    nas = _gate_report(
+        report_root / "nas.json",
+        publication,
+        ACCEPTANCE_GATES
+        - AMD64_SPARK_GATES
+        - ARM64_SPARK_GATES,
+    )
+    amd64 = _spark_gate_report(
+        report_root / "amd64.json",
+        publication,
+        AMD64_SPARK_GATES,
+        "linux-amd64",
+    )
+    arm64 = _spark_gate_report(
+        report_root / "arm64.json",
+        publication,
+        ARM64_SPARK_GATES,
+        "linux-arm64",
+    )
+    complete = json.loads(arm64.read_text())
+
+    fabricated = copy.deepcopy(complete)
+    fabricated.pop("lifecycle")
+    incomplete = copy.deepcopy(complete)
+    incomplete["lifecycle"]["completed_phases"].remove("identity-renewed")
+    missing_proof = copy.deepcopy(complete)
+    missing_proof["lifecycle"]["proof"].pop("canary")
+    changed = copy.deepcopy(complete)
+    changed["lifecycle"]["proof"]["installation"]["candidate"][
+        "package_sha256"
+    ] = "f" * 64
+    reused_pairing = copy.deepcopy(complete)
+    reused_pairing["lifecycle"]["proof"]["pairing_grant_use_count"] = 2
+    unchanged_serial = copy.deepcopy(complete)
+    unchanged_serial["lifecycle"]["proof"]["renewal"][
+        "certificate_serial_after"
+    ] = "0123456789abcdef"
+    accepted_old_serial = copy.deepcopy(complete)
+    accepted_old_serial["lifecycle"]["proof"]["renewal"][
+        "old_certificate_rejection"
+    ]["rejected"] = False
+    changed_node = copy.deepcopy(complete)
+    changed_node["lifecycle"]["proof"]["node_id_after_upgrade"] = (
+        "spk_fedcba9876543210fedcba9876543210"
+    )
+    changed_state = copy.deepcopy(complete)
+    changed_state["lifecycle"]["proof"][
+        "private_identity_sha256_after_upgrade"
+    ] = "b" * 64
+    unchanged_build = copy.deepcopy(complete)
+    unchanged_build["lifecycle"]["proof"]["installation"]["candidate"][
+        "build_sha256"
+    ] = "8" * 64
+    indirect_agent = copy.deepcopy(complete)
+    indirect_agent["lifecycle"]["proof"]["direct_agent_health"][
+        "transport"
+    ] = "controller-proxy"
+    changed_graph = copy.deepcopy(complete)
+    changed_graph["lifecycle"]["proof"]["publication_graph"]["packages"].pop(
+        "linux-amd64"
+    )
+    false_cdi = copy.deepcopy(complete)
+    false_cdi["lifecycle"]["proof"]["synthetic_device"]["provenance"] = (
+        "physical-gpu"
+    )
+
+    for name, document in {
+        "accepted-old-serial": accepted_old_serial,
+        "changed-graph": changed_graph,
+        "changed-node": changed_node,
+        "changed-state": changed_state,
+        "fabricated": fabricated,
+        "false-cdi": false_cdi,
+        "indirect-agent": indirect_agent,
+        "incomplete": incomplete,
+        "missing-proof": missing_proof,
+        "reused-pairing": reused_pairing,
+        "changed": changed,
+        "unchanged-build": unchanged_build,
+        "unchanged-serial": unchanged_serial,
+    }.items():
+        bad_report = report_root / f"{name}.json"
+        _canonical(bad_report, document)
+        output = tmp_path / f"acceptance-{name}"
+        result = subprocess.run(
+            _accept_command(publication, output, [nas, amd64, bad_report]),
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert result.returncode == 2, name
+        assert "Spark gate report" in result.stderr, (name, result.stderr)
+        assert not (output / "acceptance.json").exists()
+
+
+def test_acceptance_authority_rejects_previous_spark_job_architecture_ownership(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    report_root = tmp_path / "reports"
+    report_root.mkdir()
+    nas = _gate_report(
+        report_root / "nas.json",
+        publication,
+        ACCEPTANCE_GATES
+        - AMD64_SPARK_GATES
+        - ARM64_SPARK_GATES,
+    )
+    amd64 = _spark_gate_report(
+        report_root / "amd64.json",
+        publication,
+        AMD64_SPARK_GATES | {"spark_job"},
+        "linux-amd64",
+    )
+    arm64 = _spark_gate_report(
+        report_root / "arm64.json",
+        publication,
+        ARM64_SPARK_GATES - {"spark_job"},
+        "linux-arm64",
+    )
+
+    result = subprocess.run(
+        _accept_command(publication, tmp_path / "acceptance", [nas, amd64, arm64]),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "Spark gate report" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
 def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     tmp_path: Path,
 ) -> None:
@@ -462,13 +727,13 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
         _spark_gate_report(
             tmp_path / "amd64.json",
             publication,
-            {"spark_amd64", "spark_pairing", "spark_job"},
+            AMD64_SPARK_GATES,
             "linux-amd64",
         ),
         _spark_gate_report(
             tmp_path / "arm64.json",
             publication,
-            {"spark_arm64", "spark_renewal", "spark_upgrade"},
+            ARM64_SPARK_GATES,
             "linux-arm64",
         ),
     ]

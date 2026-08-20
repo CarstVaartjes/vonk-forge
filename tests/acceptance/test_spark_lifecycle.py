@@ -8,10 +8,20 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
+
+from scripts.spark_lifecycle_contract import (
+    GATES,
+    PHASES,
+    ContractError,
+    validate_lifecycle,
+)
 
 PLATFORMS = ("linux-amd64", "linux-arm64")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -25,51 +35,6 @@ BASELINE_VERSION = re.compile(
 PINNED_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}\Z"
 )
-NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-PHASES = [
-    "publication-graph-verified",
-    "controller-ready",
-    "baseline-installed",
-    "paired",
-    "synthetic-device-ready",
-    "canary-completed",
-    "identity-renewed",
-    "candidate-upgraded",
-    "direct-rust-agent-healthy",
-]
-CANARY_STATES = [
-    "inventory-ready",
-    "recipe-resolved",
-    "source-verified",
-    "image-built",
-    "image-distributed",
-    "installed",
-    "running",
-    "route-published",
-    "inference-ok",
-    "stopped",
-    "route-withdrawn",
-    "uninstalled",
-]
-REQUIRED_PROOFS = {
-    "binary_digest_changed",
-    "build_digest_changed",
-    "canary_completed_states",
-    "certificate_serial_changed",
-    "config_preserved",
-    "controller_generation",
-    "direct_agent_healthy",
-    "node_id",
-    "node_id_preserved_after_renewal",
-    "old_certificate_recorded",
-    "old_certificate_rejected",
-    "package_digest_changed",
-    "pairing_grant_use_count",
-    "private_identity_preserved",
-    "semantic_version_changed",
-    "synthetic_device",
-    "verified_platforms",
-}
 
 
 class LifecycleError(RuntimeError):
@@ -183,16 +148,65 @@ def _verified_artifact(
         or size <= 0
     ):
         raise LifecycleError(f"{label} {key} record is invalid")
-    root = object_root.resolve()
-    path = (root / expected_path).resolve()
+    directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    root = object_root if object_root.is_absolute() else Path.cwd() / object_root
+    root_parts = root.parts
+    relative_parts = Path(expected_path).parts
+    if (
+        not root.is_absolute()
+        or not relative_parts
+        or Path(expected_path).is_absolute()
+        or any(part in {"", ".", ".."} for part in relative_parts)
+    ):
+        raise LifecycleError(f"{label} {key} object path is unsafe")
+    directory = -1
+    descriptor = -1
     try:
-        path.relative_to(root)
-        metadata = path.lstat()
-    except (OSError, ValueError) as error:
-        raise LifecycleError(f"{label} {key} object is unavailable") from error
-    if path.is_symlink() or not path.is_file() or metadata.st_nlink != 1 or metadata.st_size != size:
-        raise LifecycleError(f"{label} {key} object is unsafe or has the wrong size")
-    observed = hashlib.sha256(path.read_bytes()).hexdigest()
+        directory = os.open(os.sep, directory_flags)
+        for component in (*root_parts[1:], *relative_parts[:-1]):
+            child = os.open(component, directory_flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        descriptor = os.open(relative_parts[-1], file_flags, dir_fd=directory)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size != size
+        ):
+            raise LifecycleError(
+                f"{label} {key} object is unsafe or has the wrong size"
+            )
+        digest_builder = hashlib.sha256()
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise LifecycleError(f"{label} {key} object changed while read")
+            digest_builder.update(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+        if any(
+            getattr(before, field) != getattr(after, field)
+            for field in (
+                "st_dev",
+                "st_ino",
+                "st_nlink",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
+        ):
+            raise LifecycleError(f"{label} {key} object changed while read")
+        observed = digest_builder.hexdigest()
+    except OSError as error:
+        raise LifecycleError(f"{label} {key} object is unavailable or unsafe") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if directory >= 0:
+            os.close(directory)
     if observed != digest:
         raise LifecycleError(f"{label} {key} object digest does not match")
     return digest
@@ -243,6 +257,7 @@ def check_publication_graph(arguments: argparse.Namespace) -> dict[str, object]:
         raise LifecycleError("baseline version is not strictly lower than candidate")
 
     selected: dict[str, str] = {}
+    packages: dict[str, dict[str, str]] = {}
     for platform in PLATFORMS:
         candidate_digest = _verified_artifact(
             candidate,
@@ -266,6 +281,10 @@ def check_publication_graph(arguments: argparse.Namespace) -> dict[str, object]:
         )
         if candidate_digest == baseline_digest:
             raise LifecycleError(f"{platform} candidate and baseline package digests match")
+        packages[platform] = {
+            "baseline_sha256": baseline_digest,
+            "candidate_sha256": candidate_digest,
+        }
         if platform == arguments.platform:
             selected = {
                 "baseline_package_sha256": baseline_digest,
@@ -275,8 +294,13 @@ def check_publication_graph(arguments: argparse.Namespace) -> dict[str, object]:
         **selected,
         "baseline_version": baseline_version,
         "candidate_version": arguments.version,
+        "channel": arguments.channel,
         "generation": arguments.generation,
+        "images_sha256": hashlib.sha256(_canonical(candidate["images"])).hexdigest(),
+        "packages": packages,
         "platform": arguments.platform,
+        "schema_version": 1,
+        "source_sha": arguments.source_sha,
         "verified_platforms": list(PLATFORMS),
     }
 
@@ -312,67 +336,37 @@ def emit_report(arguments: argparse.Namespace) -> None:
             "generation": arguments.generation,
             "run_id": arguments.run_id,
             "platform": arguments.platform,
-            "completed_phases": PHASES,
+            "completed_phases": PHASES[arguments.platform],
         }.items()
     ):
         raise LifecycleError("lifecycle evidence is incomplete or belongs to another run")
-    proof = _object(evidence.get("proof"), "lifecycle proof")
-    if set(proof) != REQUIRED_PROOFS:
-        raise LifecycleError("lifecycle proof is incomplete")
-    booleans = REQUIRED_PROOFS - {
-        "canary_completed_states",
-        "controller_generation",
-        "node_id",
-        "pairing_grant_use_count",
-        "synthetic_device",
-        "verified_platforms",
+    lifecycle = {
+        "completed_phases": evidence["completed_phases"],
+        "proof": evidence["proof"],
     }
-    if (
-        any(proof.get(name) is not True for name in booleans)
-        or proof.get("verified_platforms") != list(PLATFORMS)
-        or proof.get("controller_generation") != arguments.generation
-        or not isinstance(proof.get("node_id"), str)
-        or NODE_ID.fullmatch(str(proof.get("node_id"))) is None
-        or proof.get("pairing_grant_use_count") != 1
-        or proof.get("canary_completed_states") != CANARY_STATES
-    ):
-        raise LifecycleError("lifecycle proof did not satisfy every required assertion")
-    synthetic = _object(proof.get("synthetic_device"), "synthetic device proof")
-    if (
-        set(synthetic)
-        != {
-            "architecture",
-            "cdi_name",
-            "fixture_sha256",
-            "physical_gpu",
-            "provenance",
-            "synthetic",
-        }
-        or synthetic.get("architecture") != arguments.platform
-        or synthetic.get("cdi_name") != "nvidia.com/gpu=all"
-        or not isinstance(synthetic.get("fixture_sha256"), str)
-        or SHA256.fullmatch(str(synthetic.get("fixture_sha256"))) is None
-        or synthetic.get("physical_gpu") is not False
-        or synthetic.get("provenance") != "ci-only-synthetic-cdi"
-        or synthetic.get("synthetic") is not True
-    ):
-        raise LifecycleError("synthetic device provenance is invalid")
-    gates = {
-        "linux-amd64": ["spark_amd64", "spark_job", "spark_pairing"],
-        "linux-arm64": ["spark_arm64", "spark_renewal", "spark_upgrade"],
-    }[arguments.platform]
+    try:
+        validate_lifecycle(
+            lifecycle,
+            platform=arguments.platform,
+            channel=arguments.channel,
+            version=arguments.version,
+            source_sha=arguments.source_sha,
+            generation=arguments.generation,
+        )
+    except ContractError as error:
+        raise LifecycleError(str(error)) from error
     _atomic_write(
         arguments.output,
         {
             "channel": arguments.channel,
-            "gates": gates,
+            "gates": GATES[arguments.platform],
             "generation": arguments.generation,
+            "lifecycle": lifecycle,
             "platform": arguments.platform,
             "run_id": arguments.run_id,
             "schema_version": 2,
             "source_sha": arguments.source_sha,
             "status": "passed",
-            "synthetic_device": synthetic,
             "version": arguments.version,
         },
     )

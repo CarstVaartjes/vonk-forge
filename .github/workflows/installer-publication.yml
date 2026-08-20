@@ -634,8 +634,8 @@ jobs:
           uv run python tests/acceptance/test_spark_lifecycle.py
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
           case "$VONK_ACCEPTANCE_PLATFORM" in
-            linux-amd64) gates='["spark_amd64","spark_job","spark_pairing"]' ;;
-            linux-arm64) gates='["spark_arm64","spark_renewal","spark_upgrade"]' ;;
+            linux-amd64) gates='["spark_amd64","spark_pairing"]' ;;
+            linux-arm64) gates='["spark_arm64","spark_job","spark_renewal","spark_upgrade"]' ;;
             *) exit 64 ;;
           esac
           jq -S -c -n \

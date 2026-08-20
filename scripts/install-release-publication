@@ -19,6 +19,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from spark_lifecycle_contract import GATES as SPARK_GATES
+from spark_lifecycle_contract import ContractError as SparkContractError
+from spark_lifecycle_contract import validate_lifecycle
+
 ROOT = Path(__file__).resolve().parents[1]
 NAS_PLATFORMS = (
     "linux-amd64",
@@ -820,12 +824,14 @@ def accept(arguments: argparse.Namespace) -> None:
             valid_shape = set(report) == common_fields
         elif schema_version == 2:
             valid_shape = set(report) == common_fields | {
+                "lifecycle",
                 "platform",
-                "synthetic_device",
             }
         else:
             valid_shape = False
         if not valid_shape:
+            if schema_version == 2:
+                raise PublicationError("Spark gate report is invalid")
             raise PublicationError("behavioral gate report is invalid")
         if (
             report.get("status") != "passed"
@@ -851,34 +857,23 @@ def accept(arguments: argparse.Namespace) -> None:
                 raise PublicationError("Spark gate report lacks lifecycle provenance")
         else:
             platform = report.get("platform")
-            expected_gates = {
-                "linux-amd64": ["spark_amd64", "spark_job", "spark_pairing"],
-                "linux-arm64": ["spark_arm64", "spark_renewal", "spark_upgrade"],
-            }
-            synthetic = report.get("synthetic_device")
             if (
-                platform not in expected_gates
-                or gates != expected_gates[platform]
+                platform not in SPARK_GATES
+                or gates != SPARK_GATES[platform]
                 or platform in observed_spark_platforms
-                or not isinstance(synthetic, dict)
-                or set(synthetic)
-                != {
-                    "architecture",
-                    "cdi_name",
-                    "fixture_sha256",
-                    "physical_gpu",
-                    "provenance",
-                    "synthetic",
-                }
-                or synthetic.get("architecture") != platform
-                or synthetic.get("cdi_name") != "nvidia.com/gpu=all"
-                or not isinstance(synthetic.get("fixture_sha256"), str)
-                or SHA256.fullmatch(synthetic["fixture_sha256"]) is None
-                or synthetic.get("physical_gpu") is not False
-                or synthetic.get("provenance") != "ci-only-synthetic-cdi"
-                or synthetic.get("synthetic") is not True
             ):
                 raise PublicationError("Spark gate report provenance is invalid")
+            try:
+                validate_lifecycle(
+                    report.get("lifecycle"),
+                    platform=platform,
+                    channel=arguments.channel,
+                    version=arguments.version,
+                    source_sha=arguments.source_sha,
+                    generation=arguments.generation,
+                )
+            except SparkContractError as error:
+                raise PublicationError(f"Spark gate report is invalid: {error}") from error
             observed_spark_platforms.add(platform)
         observed.update(gates)
     if observed != ACCEPTANCE_GATES or observed_spark_platforms != {

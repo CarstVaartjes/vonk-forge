@@ -100,3 +100,80 @@ mandatory:
 Until those boundaries succeed on both native CI runners, no Spark report exists
 and Task 13B2 remains BLOCKED. Physical DGX Spark evidence remains a separate
 stable-rollout requirement and is not represented by this synthetic CI seam.
+
+## Contract-seam review remediation (base `6e5eae87`)
+
+Status: DONE for the requested interface-safety review. The parent 13B2 rollout
+remains BLOCKED only on the deliberately deferred real-controller `run`
+orchestration. No lifecycle report can be signed from the current workflow's
+schema-1 shell output.
+
+The production workload-policy ruling in the updated brief supersedes the
+architecture blocker recorded above. `spark_job` is now owned by native
+`linux-arm64` everywhere: AMD64 owns `spark_amd64` and `spark_pairing`; ARM64
+owns `spark_arm64`, `spark_job`, `spark_renewal`, and `spark_upgrade`. The
+workflow contract, report emitter, and acceptance authority have exact tests
+for this assignment, including rejection of the previous assignment.
+
+### Bound lifecycle authority
+
+- Added one shared strict lifecycle contract used by both `emit-report` and
+  `install-release-publication accept`, eliminating producer/signer schema
+  drift.
+- Schema-2 reports now carry the complete canonical lifecycle object, including
+  exact platform phases and the complete proof object. The acceptance authority
+  validates that object before signing instead of trusting gate or synthetic-CDI
+  labels.
+- The bound publication graph includes channel, source SHA, generation,
+  candidate and acceptance-only baseline versions, selected native package
+  identities, all candidate/baseline package identities for both native
+  architectures, and the immutable image-graph digest.
+- AMD64 proof requires exact baseline installation architecture/package/version,
+  one-use pairing, node identity, controller generation, and direct Rust-agent
+  health.
+- ARM64 proof additionally requires the complete canary state sequence and
+  deterministic response identity, exact synthetic CDI provenance, changed
+  semantic/package/build/binary identities, due renewal with a changed serial,
+  durable rejection of the exact old serial, preserved node/config/private
+  identity, and direct Rust-agent health.
+- Exact-object validation rejects missing or extra proof fields. Negative
+  authority tests reject reports with no lifecycle, missing phases/proofs,
+  pairing reuse, unchanged renewal serial, accepted old serial, changed node or
+  private state, unchanged build identity, indirect agent health, incomplete
+  dual-native graph evidence, mismatched package identity, or false CDI
+  provenance. No rejected case creates a signed acceptance receipt.
+
+### Descriptor-safe immutable graph reads
+
+`_verified_artifact` no longer resolves and reopens pathnames. It opens every
+absolute-root and relative-artifact component with descriptor-relative
+`O_DIRECTORY|O_NOFOLLOW`, opens the final file with `O_NOFOLLOW`, requires a
+single-link regular file of the recorded size, hashes only from that descriptor,
+and compares device, inode, link count, size, mtime, and ctime before/after the
+read. Tests prove rejection of a symlinked parent, symlinked final file,
+hardlink ambiguity, and a pathname substitution during descriptor reading.
+
+### TDD and verification evidence
+
+Red evidence was recorded before implementation:
+
+- Complete structured evidence was rejected as `lifecycle proof is incomplete`.
+- The acceptance authority rejected the new schema-2 lifecycle shape as a
+  generic invalid report and could not validate its proof.
+- The former AMD64 `spark_job` assignment remained accepted by the old contract.
+- Symlinked parent and final-file artifacts both passed graph validation.
+- The old path reader never reached the descriptor-race hook.
+- The workflow architecture-assignment test observed `spark_job` on AMD64.
+
+Final green evidence:
+
+- `.venv/bin/pytest -q tests/test_spark_lifecycle_contract.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py`
+  — 48 passed in 16.72s.
+- `uvx --from ruff==0.16.1 ruff check scripts/install-release-publication scripts/spark_lifecycle_contract.py tests/acceptance/test_spark_lifecycle.py tests/test_spark_lifecycle_contract.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py`
+  — all checks passed.
+- `git diff --check` — passed.
+
+No full lifecycle orchestration, placeholder proof input, pre-generated gate
+evidence, skip, security bypass, or fabricated passing report was added. The
+workflow remains fail closed until the real controller-backed lifecycle creates
+evidence that satisfies this contract.
