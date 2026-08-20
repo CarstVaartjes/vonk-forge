@@ -251,18 +251,61 @@ fn is_safe_secret_component(component: &str) -> bool {
         })
 }
 
-pub struct PromptIo<R, W> {
-    reader: R,
-    writer: W,
+pub trait SecretInput<R: BufRead, W: Write> {
+    fn read_secret(&mut self, label: &str, reader: &mut R, writer: &mut W) -> io::Result<String>;
 }
 
-impl<R, W> PromptIo<R, W> {
-    pub fn new(reader: R, writer: W) -> Self {
-        Self { reader, writer }
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EchoedSecretInput;
+
+impl<R: BufRead, W: Write> SecretInput<R, W> for EchoedSecretInput {
+    fn read_secret(&mut self, label: &str, reader: &mut R, writer: &mut W) -> io::Result<String> {
+        write!(writer, "{label}: ")?;
+        writer.flush()?;
+        let mut value = String::new();
+        if reader.read_line(&mut value)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input ended"));
+        }
+        Ok(value.trim_end_matches(['\r', '\n']).to_owned())
     }
 }
 
-impl<R: BufRead, W: Write> PromptIo<R, W> {
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HiddenSecretInput;
+
+impl<R: BufRead, W: Write> SecretInput<R, W> for HiddenSecretInput {
+    fn read_secret(&mut self, label: &str, _reader: &mut R, _writer: &mut W) -> io::Result<String> {
+        rpassword::prompt_password(format!("{label}: "))
+    }
+}
+
+pub struct PromptIo<R, W, S = EchoedSecretInput> {
+    reader: R,
+    writer: W,
+    secret_input: S,
+}
+
+impl<R, W> PromptIo<R, W, EchoedSecretInput> {
+    pub fn new(reader: R, writer: W) -> Self {
+        Self {
+            reader,
+            writer,
+            secret_input: EchoedSecretInput,
+        }
+    }
+}
+
+impl<R, W, S> PromptIo<R, W, S> {
+    pub fn with_secret_input(reader: R, writer: W, secret_input: S) -> Self {
+        Self {
+            reader,
+            writer,
+            secret_input,
+        }
+    }
+}
+
+impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
     fn line(&mut self, label: &str) -> Result<String, SetupError> {
         write!(self.writer, "{label}: ")?;
         self.writer.flush()?;
@@ -301,7 +344,16 @@ impl<R: BufRead, W: Write> PromptIo<R, W> {
             prompt.prompt.clone()
         };
         loop {
-            let value = self.line(&label)?;
+            let value = self
+                .secret_input
+                .read_secret(&label, &mut self.reader, &mut self.writer)
+                .map_err(|error| {
+                    if error.kind() == io::ErrorKind::UnexpectedEof {
+                        SetupError::InputEnded
+                    } else {
+                        SetupError::Io(error)
+                    }
+                })?;
             if !value.is_empty() {
                 return Ok(value);
             }
@@ -358,10 +410,10 @@ pub struct SetupOutcome {
     pub hermes_enabled: Option<bool>,
 }
 
-pub fn prepare<R: BufRead, W: Write, G: SecretGenerator>(
+pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     request: SetupRequest,
-    prompt: &mut PromptIo<R, W>,
+    prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
     ensure_safe_output_root(&request.output_root)?;
@@ -372,10 +424,10 @@ pub fn prepare<R: BufRead, W: Write, G: SecretGenerator>(
     }
 }
 
-fn install<R: BufRead, W: Write, G: SecretGenerator>(
+fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     bundle: &Path,
-    prompt: &mut PromptIo<R, W>,
+    prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
     if fs::symlink_metadata(bundle).is_ok() {

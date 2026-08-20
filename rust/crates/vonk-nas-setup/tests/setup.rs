@@ -3,11 +3,24 @@ use std::path::Path;
 
 use tempfile::tempdir;
 use vonk_nas_setup::{
-    CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SetupRequest,
-    prepare,
+    CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SecretInput,
+    SetupRequest, prepare,
 };
 
 struct FixedSecretGenerator;
+
+struct FixedHiddenInput;
+
+impl<R: std::io::BufRead, W: std::io::Write> SecretInput<R, W> for FixedHiddenInput {
+    fn read_secret(
+        &mut self,
+        _label: &str,
+        _reader: &mut R,
+        _writer: &mut W,
+    ) -> std::io::Result<String> {
+        Ok("hidden-secret-answer".to_owned())
+    }
+}
 
 impl SecretGenerator for FixedSecretGenerator {
     fn generate(&self, bytes: usize) -> Result<String, SecretGenerationError> {
@@ -251,6 +264,32 @@ fn manually_entered_secret_is_never_written_to_prompt_output() {
         !String::from_utf8(output)
             .expect("UTF-8 prompts")
             .contains("super-secret-answer")
+    );
+}
+
+#[test]
+fn hidden_secret_input_bypasses_echoing_prompt_streams() {
+    let temporary = tempdir().expect("temporary directory");
+    let input = Cursor::new(b"forge.example.test\nno\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::with_secret_input(input, &mut output, FixedHiddenInput);
+
+    let result = prepare(
+        &payload(),
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle prepared with hidden input");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join("secrets/database-password")).expect("secret"),
+        "hidden-secret-answer\n"
+    );
+    assert!(
+        !String::from_utf8(output)
+            .expect("UTF-8 prompts")
+            .contains("hidden-secret-answer")
     );
 }
 

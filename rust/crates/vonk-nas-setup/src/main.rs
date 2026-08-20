@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use vonk_nas_setup::{
-    CanonicalTemplatePayload, OsSecretGenerator, PromptIo, SetupRequest, prepare,
+    CanonicalTemplatePayload, HiddenSecretInput, OsSecretGenerator, PromptIo, SetupRequest, prepare,
 };
 
 const MAX_TEMPLATE_BYTES: u64 = 16 * 1024 * 1024;
@@ -42,7 +42,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
     let reader = BufReader::new(tty.try_clone()?);
-    let mut prompt = PromptIo::new(reader, &mut tty);
+    let mut prompt = PromptIo::with_secret_input(reader, &mut tty, HiddenSecretInput);
     let request = if cli.upgrade {
         SetupRequest::upgrade(&cli.output)
     } else {

@@ -21,6 +21,7 @@ hex = "0.4.3"
 rcgen = { version = "0.14.8", features = ["pem", "x509-parser"] }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls", "stream"] }
 ring = "0.17.14"
+rpassword = "7.5.4"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustls-pemfile = "2.2.0"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
