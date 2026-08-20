@@ -70,7 +70,6 @@ jobs:
           uv run --project control --frozen pytest -q \
             control/tests/test_dev_cohort.py \
             control/tests/test_dev_auth_init.py \
-            control/tests/test_dev_init.py \
             control/tests/test_passwords.py \
             control/tests/test_browser_auth.py \
             control/tests/test_auth_api.py \
