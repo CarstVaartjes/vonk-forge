@@ -88,6 +88,15 @@ def test_database_initializer_rejects_an_invalid_password(tmp_path: Path) -> Non
 def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None:
     if shutil.which("docker") is None:
         _docker_unavailable("Docker is required for the fresh PostgreSQL test")
+    docker_info = subprocess.run(
+        ["docker", "info"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if docker_info.returncode != 0:
+        _docker_unavailable("Docker is unavailable for the fresh PostgreSQL test")
     password_file = tmp_path / "litellm-password"
     password_file.write_text("b" * 64 + "\n", encoding="ascii")
     password_file.chmod(0o600)
@@ -114,7 +123,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
             timeout=60,
         ).strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        _docker_unavailable(f"disposable PostgreSQL is unavailable: {error}")
+        raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
     try:
         for _ in range(120):
             probe = subprocess.run(
@@ -145,7 +154,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 timeout=10,
             )
             raise AssertionError(f"PostgreSQL did not become ready:\n{logs.stderr}")
-        owner = subprocess.check_output(
+        rows = subprocess.check_output(
             [
                 "docker",
                 "exec",
@@ -157,15 +166,36 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 "control",
                 "-tAc",
                 (
-                    "SELECT pg_get_userbyid(datdba) FROM pg_database "
-                    "WHERE datname = 'litellm'"
+                    "SELECT datname || ':' || pg_get_userbyid(datdba) "
+                    "FROM pg_database WHERE datname IN ('control', 'litellm') "
+                    "ORDER BY datname"
                 ),
             ],
             text=True,
             timeout=10,
-        ).strip()
+        ).splitlines()
 
-        assert owner == "litellm"
+        assert rows == ["control:control", "litellm:litellm"]
+        roles = subprocess.check_output(
+            [
+                "docker",
+                "exec",
+                container,
+                "psql",
+                "-U",
+                "control",
+                "-d",
+                "control",
+                "-tAc",
+                (
+                    "SELECT rolname FROM pg_roles "
+                    "WHERE rolname IN ('control', 'litellm') ORDER BY rolname"
+                ),
+            ],
+            text=True,
+            timeout=10,
+        ).splitlines()
+        assert roles == ["control", "litellm"]
     finally:
         subprocess.run(
             ["docker", "stop", container],

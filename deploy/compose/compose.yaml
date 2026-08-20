@@ -58,38 +58,6 @@ x-worker-environment: &worker-environment
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
-  control-bootstrap:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: unless-stopped
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    cap_drop: [ALL]
-    # The fresh Docker volume is root-owned and not writable by other users.
-    # DAC_OVERRIDE lets this root bootstrap process initialize its directories
-    # before assigning ownership to the runtime identities.
-    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
-    security_opt: [no-new-privileges:true]
-    command: [python, -m, vonk_control.compose_bootstrap]
-    depends_on:
-      postgres: {condition: service_healthy}
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
-    volumes:
-      - route-publications:/routes
-      - litellm-supervisor-state:/supervisor
-      - update-signer-socket:/update-socket
-      - signer-tuf-verifier:/verifier
-      - agent-tuf-publication:/agent-publication
-      - workload-tuf-publication:/workload-publication
-      - api-admin-grant-runtime:/api-runtime
-      - normalized-private-keys:/normalized
-    tmpfs: [/tmp]
-    networks: [data]
-    healthcheck:
-      test: [CMD, test, -f, /tmp/bootstrap-ready]
-      interval: 5s
-      timeout: 3s
-      retries: 12
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db}
     restart: unless-stopped
@@ -117,8 +85,9 @@ services:
     logging: *bounded-logging
     command: [python, -m, vonk_control.api]
     read_only: true
-    user: "10001:10001"
+    user: "0:0"
     cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
@@ -135,13 +104,18 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: []
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
       - agent-tuf-publication:/agent-tuf
-      - workload-tuf-publication:/workload-tuf:ro
+      - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
+      - litellm-supervisor-state:/supervisor
+      - update-signer-socket:/update-socket
+      - signer-tuf-verifier:/verifier
+      - api-admin-grant-runtime:/api-runtime
       - api-admin-grant-runtime:/run/vonk-api-secrets:ro
+      - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
@@ -158,8 +132,6 @@ services:
     networks: [application, data, agent-proxy, worker-authority, ca]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
-      step-ca: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -194,7 +166,7 @@ services:
     networks: [data, worker-authority]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
       control-signer: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://control-api:8000/internal/v1/generation/readiness', timeout=3)"]
@@ -240,7 +212,7 @@ services:
           create_host_path: false
     tmpfs: [/tmp]
     depends_on:
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-signer/signer.sock').st_mode)"]
       interval: 5s
@@ -261,7 +233,7 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     depends_on:
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
     networks: [ca]
     healthcheck:
       test: [CMD, step, ca, health, --ca-url, https://step-ca:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
@@ -298,7 +270,7 @@ services:
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
-      control-bootstrap: {condition: service_healthy}
+      control-api: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
       interval: 15s

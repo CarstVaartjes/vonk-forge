@@ -1,7 +1,6 @@
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -182,11 +181,14 @@ def test_litellm_runs_the_bind_mounted_entrypoint_through_shell() -> None:
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
     services = _rendered()["services"]
-    for service in ("control-api", "control-worker", "litellm", "prometheus", "grafana"):
+    for service in ("control-worker", "litellm", "prometheus", "grafana"):
         assert "normalized-private-keys" in {
             item["source"] for item in services[service]["volumes"]
         }
         assert services[service].get("secrets", []) == []
+    assert "normalized-private-keys" in {
+        item["source"] for item in services["control-api"]["volumes"]
+    }
     assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/litellm-master-key"
     )
@@ -204,7 +206,6 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     assert api["image"].startswith("example/control-api:")
     assert worker["image"].startswith("example/control-worker:")
     assert worker.get("secrets", []) == []
-    assert api.get("secrets", []) == []
     for service in ("control-api", "control-worker"):
         assert "normalized-private-keys" in {
             item["source"] for item in services[service]["volumes"]
@@ -250,12 +251,11 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/run/vonk-normalized-secrets",
         "/verifier",
     }
-    bootstrap = services["control-bootstrap"]
-    assert set(bootstrap["networks"]) == {"data"}
+    initializer = services["control-api"]
     assert any(
         item.get("source") == "update-signer-socket"
         and item.get("target") == "/update-socket"
-        for item in bootstrap["volumes"]
+        for item in initializer["volumes"]
     )
 
 
@@ -334,26 +334,36 @@ def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity()
     assert worker["environment"]["VONK_CONTROL_PROCESS_IMAGE"] == worker["image"]
 
 
-def test_bootstrap_prepares_signer_directories() -> None:
-    bootstrap = _rendered()["services"]["control-bootstrap"]
-    assert "DAC_OVERRIDE" in bootstrap["cap_add"]
-    assert bootstrap["command"] == ["python", "-m", "vonk_control.compose_bootstrap"]
-    assert bootstrap["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/bootstrap-ready"]
+def test_control_api_has_only_the_capabilities_required_by_its_preexec() -> None:
+    api = _rendered()["services"]["control-api"]
+
+    assert api["user"] == "0:0"
+    assert api["cap_drop"] == ["ALL"]
+    assert set(api["cap_add"]) == {
+        "CHOWN",
+        "FOWNER",
+        "DAC_OVERRIDE",
+        "SETUID",
+        "SETGID",
+    }
+    assert api["security_opt"] == ["no-new-privileges:true"]
+    assert "SYS_ADMIN" not in api["cap_add"]
+    assert api["command"] == ["python", "-m", "vonk_control.api"]
 
 
-def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
+def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> None:
     services = _rendered()["services"]
     api = services["control-api"]
     worker = services["control-worker"]
-    bootstrap = services["control-bootstrap"]
 
     assert "control-secret-init" not in services
-    assert bootstrap["depends_on"]["postgres"] == {
+    assert "control-bootstrap" not in services
+    assert api["depends_on"]["postgres"] == {
         "condition": "service_healthy",
         "required": True,
     }
-    assert set(bootstrap["networks"]) == {"data"}
-    bootstrap_secrets = {secret["source"] for secret in bootstrap["secrets"]}
+    assert "step-ca" not in api["depends_on"]
+    api_secrets = {secret["source"] for secret in api["secrets"]}
     assert {
         "admin-grant-private-key",
         "package-helper-grant-private-key",
@@ -363,9 +373,10 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
         "admin-grant-public-key",
         "agent-tuf-bootstrap-root",
         "database-url",
-    } <= bootstrap_secrets
-    normalized = {volume["target"]: volume for volume in bootstrap["volumes"]}
+    } <= api_secrets
+    normalized = {volume["target"]: volume for volume in api["volumes"]}
     assert normalized["/normalized"].get("read_only") is not True
+    assert normalized["/run/vonk-normalized-secrets"]["read_only"] is True
     assert api["environment"]["VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/package-helper-grant-private-key"
     )
@@ -388,18 +399,25 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
     )
 
 
-def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
+def test_admin_grant_source_is_available_only_during_api_preexec() -> None:
     services = _rendered()["services"]
     secret_sources = {
         name: {secret["source"] for secret in services[name].get("secrets", [])}
         for name in ("control-api", "control-worker", "control-signer")
     }
-    assert "admin-grant-private-key" not in secret_sources["control-api"]
+    assert "admin-grant-private-key" in secret_sources["control-api"]
     assert "admin-grant-private-key" not in secret_sources["control-worker"]
     assert "admin-grant-private-key" not in secret_sources["control-signer"]
-    assert "admin-grant-private-key" in {
-        secret["source"] for secret in services["control-bootstrap"]["secrets"]
-    }
+
+
+def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
+    services = _rendered()["services"]
+
+    for name in ("control-worker", "control-signer", "litellm", "step-ca"):
+        assert services[name]["depends_on"]["control-api"] == {
+            "condition": "service_healthy",
+            "required": True,
+        }
 
 
 

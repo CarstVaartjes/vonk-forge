@@ -238,7 +238,7 @@ def render(
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
     document = _compose_document(template)
-    if _count_template_token(template, TOKENS["api"]) != 2 or _count_template_token(template, TOKENS["worker"]) != 5:
+    if _count_template_token(template, TOKENS["api"]) != 2 or _count_template_token(template, TOKENS["worker"]) != 4:
         raise ValueError("template control image inputs changed")
     document = _replace_image_tokens(
         document,

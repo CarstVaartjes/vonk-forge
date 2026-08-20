@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -13,6 +14,16 @@ def _document(name: str) -> dict[str, object]:
     content = yaml.safe_load((COMPOSE_ROOT / name).read_text(encoding="utf-8"))
     assert isinstance(content, dict)
     return content
+
+
+def _final_stage(name: str) -> str:
+    dockerfile = CONTROL_DOCKERFILE.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?ms)^FROM [^\n]+ AS {re.escape(name)}\n(?P<body>.*?)(?=^FROM |\Z)",
+        dockerfile,
+    )
+    assert match is not None
+    return match.group("body")
 
 
 def test_fresh_postgres_initializes_the_litellm_database() -> None:
@@ -66,3 +77,16 @@ def test_control_images_do_not_install_git_or_ssh() -> None:
     assert "apt-get install" not in dockerfile
     assert "openssh" not in dockerfile
     assert " git" not in dockerfile
+
+
+def test_api_image_bounds_root_to_preexec_and_seals_source_secret_directory() -> None:
+    worker = _final_stage("worker")
+    api = _final_stage("api")
+
+    assert "USER 10001:10001" in worker
+    assert "api_preexec" not in worker
+    assert "CMD" not in worker
+    assert "USER 0:0" in api
+    assert 'ENTRYPOINT ["python", "-m", "vonk_control.api_preexec"]' in api
+    assert 'CMD ["python", "-m", "vonk_control.api"]' in api
+    assert "install -d -o 0 -g 0 -m 0700 /run/secrets" in _final_stage("api-root")

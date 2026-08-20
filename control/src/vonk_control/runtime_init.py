@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
@@ -13,6 +14,18 @@ _DESTINATION_NAME = "admin-grant-private-key.pem"
 
 class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
+
+
+@dataclass(frozen=True)
+class SharedRuntimePaths:
+    """Shared named-volume roots initialized by the control API pre-exec."""
+
+    routes: Path = Path("/routes")
+    supervisor: Path = Path("/supervisor")
+    update_socket: Path = Path("/update-socket")
+    verifier: Path = Path("/verifier")
+    agent_publication: Path = Path("/agent-tuf")
+    workload_publication: Path = Path("/workload-tuf")
 
 
 def stage_private_key(
@@ -91,11 +104,16 @@ def stage_private_key(
         raise RuntimeSecretError("runtime secret staging failed") from error
 
 
-def stage_compose_secrets() -> None:
+def stage_compose_secrets(
+    source_root: Path = Path("/run/secrets"),
+    destination_root: Path = Path("/normalized"),
+) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
+    source_root = Path(source_root)
+    destination_root = Path(destination_root)
     stage_private_key(
-        Path("/run/secrets/admin-grant-private-key"),
-        Path("/normalized/admin-grant-private-key"),
+        source_root / "admin-grant-private-key",
+        destination_root / "admin-grant-private-key",
     )
     for name in (
         "package-helper-grant-private-key",
@@ -103,8 +121,8 @@ def stage_compose_secrets() -> None:
         "host-runtime-grant-private-key",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10001,
             owner_gid=10001,
             mode=0o400,
@@ -115,8 +133,8 @@ def stage_compose_secrets() -> None:
         "agent-tuf-bootstrap-root",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10003,
             owner_gid=10001,
             mode=0o400,
@@ -132,8 +150,8 @@ def stage_compose_secrets() -> None:
         "worker-api-token",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10001,
             owner_gid=10001,
             mode=0o400,
@@ -144,22 +162,22 @@ def stage_compose_secrets() -> None:
         "litellm-database-url",
     ):
         stage_private_key(
-            Path(f"/run/secrets/{name}"),
-            Path(f"/normalized/{name}"),
+            source_root / name,
+            destination_root / name,
             owner_uid=10002,
             owner_gid=10001,
             mode=0o400,
         )
     stage_private_key(
-        Path("/run/secrets/metrics-token"),
-        Path("/normalized/prometheus-metrics-token"),
+        source_root / "metrics-token",
+        destination_root / "prometheus-metrics-token",
         owner_uid=65534,
         owner_gid=65534,
         mode=0o400,
     )
     stage_private_key(
-        Path("/run/secrets/grafana-admin-password"),
-        Path("/normalized/grafana-admin-password"),
+        source_root / "grafana-admin-password",
+        destination_root / "grafana-admin-password",
         owner_uid=472,
         owner_gid=472,
         mode=0o400,
@@ -170,11 +188,11 @@ def stage_compose_secrets() -> None:
         "step-ca-root-certificate",
         "agent-intermediate-key",
     ):
-        source = Path(f"/run/secrets/{name}")
+        source = source_root / name
         if source.exists():
             stage_private_key(
                 source,
-                Path(f"/normalized/{name}"),
+                destination_root / name,
                 owner_uid=10001,
                 owner_gid=10001,
                 mode=0o400,
@@ -185,7 +203,7 @@ def stage_compose_secrets() -> None:
         "step-ca-intermediate-key",
         "step-ca-password",
     ):
-        source = Path(f"/run/secrets/{name}")
+        source = source_root / name
         if source.exists():
             destination_name = {
                 "step-ca-root-certificate": "root-certificate",
@@ -195,11 +213,37 @@ def stage_compose_secrets() -> None:
             }[name]
             stage_private_key(
                 source,
-                Path(f"/normalized/step-ca/{destination_name}"),
+                destination_root / "step-ca" / destination_name,
                 owner_uid=1000,
                 owner_gid=1000,
                 mode=0o400,
             )
+
+
+def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
+    target = Path(path)
+    target.mkdir(mode=mode, parents=True, exist_ok=True)
+    os.chown(target, uid, gid)
+    os.chmod(target, mode)
+    return target
+
+
+def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
+    """Apply the existing per-consumer ownership contract to shared volumes."""
+    paths = SharedRuntimePaths() if paths is None else paths
+    routes = _directory(paths.routes, 10001, 10001, 0o750)
+    _directory(routes / "generations", 10001, 10001, 0o750)
+    _directory(paths.supervisor, 10002, 10001, 0o750)
+    _directory(paths.update_socket, 10003, 10001, 0o710)
+    _directory(paths.verifier, 10003, 10001, 0o700)
+
+    agent = _directory(paths.agent_publication, 10001, 10001, 0o750)
+    for name in ("metadata", "targets"):
+        _directory(agent / name, 10001, 10001, 0o750)
+
+    workload = _directory(paths.workload_publication, 10001, 10001, 0o750)
+    for name in ("metadata", "targets"):
+        _directory(workload / name, 10003, 10001, 0o750)
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:

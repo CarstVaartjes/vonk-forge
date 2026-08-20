@@ -24,14 +24,14 @@ GitHub Actions. Use `scripts/dev-compose` with `VONK_DEV_API_IMAGE` and
 `VONK_DEV_WORKER_IMAGE` set to those GHCR references; it does not build images,
 clone source, create synthetic credentials, or select alternate ports/volumes.
 
-The production graph uses one persistent, network-isolated `control-bootstrap`
-service for privileged shared-volume preparation. It remains healthy after
-creating the signer sockets, TUF publication directories, route state, and
-API-only admin-grant runtime key. This intentionally replaces several stopped
-one-shot init services because some NAS Docker UIs incorrectly mark successful
-`Exited (0)` init containers as a failed project. The long-running API, worker,
-signers, and LiteLLM services retain their restricted users and depend on the
-bootstrap health check; the helper does not serve application traffic.
+The real `control-api` container performs one bounded privileged pre-exec phase.
+It normalizes secrets, prepares shared-volume ownership, upgrades the maintained
+Alembic head under a PostgreSQL advisory lock, and creates the initial authority
+head before serving. It then clears supplementary groups, sets its real,
+effective, and saved GID/UID to `10001`, verifies that `/run/secrets` is no
+longer traversable, and execs the API so Uvicorn remains PID 1. Services that
+consume this initialized state depend on `control-api` health; no sleeping or
+exited helper container is part of the project.
 
 The complete NAS project contains only:
 
@@ -299,17 +299,18 @@ their Compose defaults unless the host is deliberately sized differently.
 ## Secret files
 
 Create regular files under `/srv/vonk-forge/secrets` and parent directories mode
-`0700`. The long-running `control-bootstrap` service reads these host-backed
-Compose secrets as root and copies them into the Docker-managed
+`0700`. The `control-api` pre-exec reads these host-backed Compose secrets as
+root and copies them into the Docker-managed
 `normalized-private-keys` volume with the exact owner needed by each non-root
-consumer. It also applies the Alembic database migrations before reporting
-healthy. This is required for standalone Compose on NAS platforms: file-backed
-Compose secrets are bind mounts, so Compose cannot reliably remap their
-UID/GID/mode at container start.
+consumer. The API image pre-creates `/run/secrets` as `root:root 0700`; after
+the irreversible identity drop, the API process cannot traverse the source
+secret directory. This is required for standalone Compose on NAS platforms:
+file-backed Compose secrets are bind mounts, so Compose cannot reliably remap
+their UID/GID/mode at container start.
 Keep the source files `root:root 0400`; do not add host ACLs just to make a
 non-root service read a bind-mounted secret.
 
-The Compose service users are `10001:10001` for control-api and control-worker,
+The steady-state service users are `10001:10001` for control-api and control-worker,
 `10003:10001` for the networkless control-signer,
 `10002:10001` for LiteLLM, `65534:65534` for Prometheus, and `472:472` for
 Grafana. The pinned step-ca image runs as `1000:1000` (`step`); Hermes' managed

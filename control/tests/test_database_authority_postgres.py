@@ -4,7 +4,9 @@ import os
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -16,6 +18,7 @@ from vonk_control.database_authority import (
     DatabaseAuthorityService,
     DatabaseProposalService,
 )
+from vonk_control.db import initialize_database
 from vonk_control.models import (
     Base,
     ControlAuthorityHead,
@@ -34,6 +37,15 @@ def _postgres_unavailable(message: str) -> None:
 def postgres_engine() -> Engine:
     if shutil.which("docker") is None:
         _postgres_unavailable("Docker is required for PostgreSQL authority tests")
+    docker_info = subprocess.run(
+        ["docker", "info"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if docker_info.returncode != 0:
+        _postgres_unavailable("Docker is unavailable for PostgreSQL authority tests")
     try:
         container = subprocess.check_output(
             [
@@ -45,13 +57,13 @@ def postgres_engine() -> Engine:
                 "POSTGRES_PASSWORD=postgres",
                 "-p",
                 "127.0.0.1::5432",
-                "postgres:16",
+                "postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db",
             ],
             text=True,
             timeout=30,
         ).strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        _postgres_unavailable(f"disposable PostgreSQL is unavailable: {error}")
+        raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
     try:
         port = subprocess.check_output(
             [
@@ -74,7 +86,7 @@ def postgres_engine() -> Engine:
             except (OSError, SQLAlchemyError):
                 time.sleep(0.1)
         else:
-            _postgres_unavailable("disposable PostgreSQL did not become ready")
+            raise AssertionError("disposable PostgreSQL did not become ready")
         yield engine
         engine.dispose()
     finally:
@@ -133,3 +145,44 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
         assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == revision
+
+
+def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
+    postgres_engine: Engine,
+) -> None:
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("DROP SCHEMA public CASCADE")
+        connection.exec_driver_sql("CREATE SCHEMA public")
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        revisions = list(
+            pool.map(
+                lambda _: initialize_database(
+                    database_url,
+                    config_path=config_path,
+                ),
+                range(2),
+            )
+        )
+
+    assert revisions[0] == revisions[1]
+    with postgres_engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == "0001_fleet_library_baseline"
+        assert connection.exec_driver_sql(
+            "SELECT count(*) FROM control_authority_revisions"
+        ).scalar_one() == 1
+        assert connection.exec_driver_sql(
+            "SELECT count(*) FROM control_authority_heads"
+        ).scalar_one() == 1
+        assert connection.exec_driver_sql(
+            """
+            SELECT count(*)
+            FROM control_authority_heads AS head
+            JOIN control_authority_revisions AS revision
+              ON revision.revision_id = head.revision_id
+            """
+        ).scalar_one() == 1

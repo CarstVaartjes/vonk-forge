@@ -58,10 +58,9 @@ def test_compose_and_public_template_keep_root_key_out_and_provider_private_key_
     assert "ports" not in rendered["services"]["step-ca"]
     assert set(rendered["services"]["step-ca"]["networks"]) == {"ca"}
     assert "ca" in rendered["services"]["control-api"]["networks"]
-    assert rendered["services"]["control-api"].get("secrets", []) == []
     assert "agent-ca-credential" in {
         value["source"]
-        for value in rendered["services"]["control-bootstrap"]["secrets"]
+        for value in rendered["services"]["control-api"]["secrets"]
     }
     assert "agent-ca-credential" not in json.dumps(rendered["services"]["step-ca"])
     provisioner = json.loads((ROOT / "deploy/compose/step-ca/ca.json").read_text())["authority"]["provisioners"][0]

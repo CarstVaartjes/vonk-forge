@@ -98,7 +98,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     assert document["services"]["control-api"]["image"] == API_IMAGE
     assert {
         document["services"][name]["image"]
-        for name in ("control-bootstrap", "control-worker", "control-signer")
+        for name in ("control-worker", "control-signer")
     } == {WORKER_IMAGE}
     assert document["services"]["hermes-agent"]["image"] == HERMES_IMAGE
     assert all(
@@ -112,7 +112,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     assert "CONTROL_WORKER_IMAGE" not in text
     assert "${NAS_LAN_IP:?set reserved NAS LAN IP}" in text
     assert "VONK_DEPLOYMENT_MODE: production" in text
-    assert set(path.name for path in tmp_path.iterdir()) == {
+    assert {path.name for path in tmp_path.iterdir()} == {
         "docker-compose.production.yml"
     }
 

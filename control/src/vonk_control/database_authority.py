@@ -106,9 +106,13 @@ class DatabaseAuthorityService:
         self._sessions = sessions
         self._clock = clock
 
-    def ensure_initialized(self) -> str:
+    def ensure_initialized(self, *, acquire_advisory_lock: bool = True) -> str:
         with self._sessions.begin() as session:
-            if session.bind is not None and session.bind.dialect.name == "postgresql":
+            if (
+                acquire_advisory_lock
+                and session.bind is not None
+                and session.bind.dialect.name == "postgresql"
+            ):
                 # Serialize first-use initialization without relying on a row that
                 # does not exist yet. This keeps concurrent API replicas safe.
                 session.execute(

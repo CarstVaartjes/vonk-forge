@@ -69,6 +69,7 @@ PY
 
 FROM runtime-root AS api-root
 ARG VONK_DEV_SOURCE_COMMIT
+RUN install -d -o 0 -g 0 -m 0700 /run/secrets
 RUN python - "$VONK_DEV_SOURCE_COMMIT" "api" <<'PY'
 import os
 import sys
@@ -116,4 +117,6 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-USER 10001:10001
+USER 0:0
+ENTRYPOINT ["python", "-m", "vonk_control.api_preexec"]
+CMD ["python", "-m", "vonk_control.api"]

@@ -44,8 +44,8 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     assert "hermes-agent" in document["services"]
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert text.count(API_IMAGE) >= 2
-    assert text.count(WORKER_IMAGE) >= 5
-    assert set(path.name for path in tmp_path.iterdir()) == {"docker-compose.yaml"}
+    assert text.count(WORKER_IMAGE) >= 4
+    assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     assert document["services"]["caddy"]["configs"]
     assert "configs:" in text
     assert all(
@@ -130,9 +130,9 @@ def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path)
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert document["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "step-ca"
     assert "step-ca" in document["services"]
-    bootstrap_secrets = document["services"]["control-bootstrap"]["secrets"]
-    assert "admin-grant-private-key" in bootstrap_secrets
-    assert "step-ca-password" in bootstrap_secrets
+    api_secrets = document["services"]["control-api"]["secrets"]
+    assert "admin-grant-private-key" in api_secrets
+    assert "step-ca-password" in api_secrets
 
 
 def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> None:

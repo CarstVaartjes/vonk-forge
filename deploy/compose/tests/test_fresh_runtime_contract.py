@@ -5,7 +5,6 @@ import importlib.util
 import re
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -13,7 +12,6 @@ COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
     "caddy",
     "control-api",
-    "control-bootstrap",
     "control-signer",
     "control-worker",
     "grafana",
@@ -138,12 +136,8 @@ def test_site_path_inputs_are_relative_to_the_uploaded_directory() -> None:
             assert value.startswith("./secrets/"), name
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 3 removes the privileged control-bootstrap service and its dependencies",
-)
 def test_canonical_model_has_no_bootstrap_runtime_dependency() -> None:
-    """Tracks the intentionally deferred bootstrap-removal task."""
+    """Catches a helper container being restored to the runtime graph."""
     model = _canonical_model()
     services = model["services"]
     assert isinstance(services, dict)

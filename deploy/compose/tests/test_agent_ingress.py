@@ -402,7 +402,7 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
     }
 
 
-def test_agent_bootstrap_uses_distinct_https_origins_and_public_ca_only() -> None:
+def test_agent_bootstrap_uses_distinct_https_origins_and_normalized_public_ca() -> None:
     rendered = _rendered()
     api = rendered["services"]["control-api"]
     environment = api["environment"]
@@ -417,7 +417,7 @@ def test_agent_bootstrap_uses_distinct_https_origins_and_public_ca_only() -> Non
     assert environment["VONK_CONTROLLER_CA_FILE"] == (
         "/run/vonk-normalized-secrets/controller-ca"
     )
-    assert api_secrets == set()
+    assert "controller-ca" in api_secrets
     assert any(
         volume["target"] == "/run/vonk-normalized-secrets"
         for volume in api["volumes"]
@@ -924,7 +924,9 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert "step-ca" in services
     assert not services["step-ca"].get("ports")
     assert {secret["source"] for secret in services["caddy"]["secrets"]} >= {"agent-client-ca", "agent-proxy-auth"}
-    assert services["control-api"].get("secrets", []) == []
+    assert "agent-ca-credential" in {
+        secret["source"] for secret in services["control-api"]["secrets"]
+    }
     assert services["control-api"]["environment"]["VONK_AGENT_CLIENT_CA_FILE"] == (
         "/run/vonk-normalized-secrets/agent-client-ca"
     )
@@ -941,13 +943,14 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert "root-private" not in json.dumps(services["step-ca"], sort_keys=True).lower()
 
 
-def test_step_ca_waits_for_bootstrap_staged_secrets() -> None:
+def test_step_ca_waits_for_api_staged_secrets_without_a_dependency_cycle() -> None:
     rendered = _rendered()
     service = rendered["services"]["step-ca"]
-    assert service.get("depends_on", {}).get("control-bootstrap") == {
+    assert service.get("depends_on", {}).get("control-api") == {
         "condition": "service_healthy",
         "required": True,
     }
+    assert "step-ca" not in rendered["services"]["control-api"].get("depends_on", {})
     targets = {volume["target"]: volume for volume in service["volumes"]}
     assert targets["/home/step"]["source"] == "step-ca-data"
     assert "/home/step/db" not in targets
