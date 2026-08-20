@@ -132,4 +132,4 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
     with sessions() as session:
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
-        assert session.get(ControlAuthorityProposal, preview.proposal_id).applied_revision == revision
+        assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == revision
