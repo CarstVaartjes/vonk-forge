@@ -1,17 +1,11 @@
 import json
-import shutil
-import socket
-import subprocess
 import threading
-import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
@@ -175,52 +169,6 @@ def setup(
         )
     )
     return sessions, now, node, installation.id
-
-
-@pytest.fixture(scope="module")
-def postgres_engine():
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL run admission tests")
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        port = reservation.getsockname()[1]
-    name = f"vonk-run-admission-{uuid.uuid4().hex[:12]}"
-    try:
-        subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "--name",
-                name,
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                f"127.0.0.1:{port}:5432",
-                "postgres:18.0-bookworm",
-            ],
-            check=True,
-            capture_output=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    engine = create_engine(
-        f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-    )
-    try:
-        for _ in range(50):
-            try:
-                with engine.connect():
-                    break
-            except OperationalError:
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-    finally:
-        engine.dispose()
-        subprocess.run(["docker", "stop", name], check=False, capture_output=True)
 
 
 def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -> None:

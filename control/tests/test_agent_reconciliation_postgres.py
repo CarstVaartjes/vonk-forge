@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import subprocess
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -13,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -105,56 +102,6 @@ def _verify_result() -> dict[str, object]:
             "evidence_digest": "e" * 64,
         },
     }
-
-
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL races")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:16",
-            ],
-            text=True,
-            stderr=subprocess.STDOUT,
-        ).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"Docker daemon is unavailable: {error.output.strip()}")
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            pytest.fail("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
 
 
 def test_postgres_node_lease_race_has_one_database_owner(
