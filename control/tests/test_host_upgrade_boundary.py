@@ -46,7 +46,7 @@ def _selected(tmp_path: Path) -> SelectedGeneration:
         deployment_bundle_digest=f"sha256:{SHA_C}",
         api_image=f"registry.example/control-api@sha256:{SHA_A}",
         worker_image=f"registry.example/control-worker@sha256:{SHA_B}",
-        database_revision="0011_update_rollouts",
+        database_revision="0001_fleet_library_baseline",
         previous_generation=None,
         generation_receipt_sha256=SHA_D,
         selection_receipt_sha256=SHA_E,
@@ -81,7 +81,7 @@ def _plan() -> ControlGenerationPlan:
         "api_image": f"registry.example/control-api@sha256:{SHA_B}",
         "worker_image": f"registry.example/control-worker@sha256:{SHA_C}",
         "database_revision": "0012_control_process_heartbeats",
-        "current_database_revision": "0011_update_rollouts",
+        "current_database_revision": "0001_fleet_library_baseline",
         "current_generation_receipt_sha256": SHA_D,
         "current_selection_receipt_sha256": SHA_E,
         "current_projection_sequence": 3,
@@ -251,7 +251,7 @@ def test_snapshot_probes_use_only_active_generation_compose_and_redacted_site_di
 ) -> None:
     boundary, runner, site = _boundary(tmp_path)
 
-    assert boundary.database_revision() == "0011_update_rollouts"
+    assert boundary.database_revision() == "0001_fleet_library_baseline"
     assert boundary.site_configuration_digest() == (
         "sha256:" + hashlib.sha256(site.read_bytes()).hexdigest()
     )
@@ -341,7 +341,7 @@ def test_predecessor_verified_is_an_exact_generation_receipt_probe(
         deployment_bundle_digest=f"sha256:{SHA_C}",
         api_image=f"registry.example/control-api@sha256:{SHA_A}",
         worker_image=f"registry.example/control-worker@sha256:{SHA_B}",
-        database_revision="0011_update_rollouts",
+        database_revision="0001_fleet_library_baseline",
     )
 
     observation = boundary.probe_phase(UpgradePhase.PREDECESSOR_VERIFIED, rollback)

@@ -40,7 +40,7 @@ def _plan(
         deployment_bundle_digest=f"sha256:{SHA_D}",
         api_image=f"ghcr.io/example/api@sha256:{SHA_A}",
         worker_image=f"ghcr.io/example/worker@sha256:{SHA_B}",
-        database_revision="0011_update_rollouts",
+        database_revision="0001_fleet_library_baseline",
     )
 
 

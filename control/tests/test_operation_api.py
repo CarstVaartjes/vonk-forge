@@ -145,6 +145,7 @@ def test_openapi_exposes_only_current_document_contract() -> None:
     assert not any(
         path.startswith("/api/v1/reconciliations/") for path in paths
     )
+    assert not any(path.startswith("/api/v1/updates") for path in paths)
     assert "/api/v1/documents" not in paths
 
 
@@ -480,11 +481,9 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             "last_seen_at": now.isoformat(),
             "node_id": NODE_ID,
             "protocol_version": 3,
-            "platform_version": None,
+            "semantic_version": None,
             "build_digest": None,
-            "active_slot": None,
-            "agent_sha256": None,
-            "supervisor_generation": None,
+            "binary_digest": None,
             "stale": False,
             "state": "active",
         }

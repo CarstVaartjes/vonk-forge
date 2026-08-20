@@ -48,12 +48,9 @@ def upgrade() -> None:
     sa.Column('state', sa.String(length=24), nullable=False),
     sa.Column('protocol_version', sa.Integer(), nullable=True),
     sa.Column('architecture', sa.String(length=16), nullable=True),
-    sa.Column('platform_version', sa.String(length=32), nullable=True),
+    sa.Column('semantic_version', sa.String(length=32), nullable=True),
     sa.Column('build_digest', sa.String(length=71), nullable=True),
-    sa.Column('active_slot', sa.String(length=1), nullable=True),
-    sa.Column('agent_sha256', sa.String(length=64), nullable=True),
-    sa.Column('supervisor_generation', sa.Integer(), nullable=True),
-    sa.Column('supervisor_ready_generation', sa.Integer(), nullable=True),
+    sa.Column('binary_digest', sa.String(length=64), nullable=True),
     sa.Column('self_test_passed', sa.Boolean(), server_default='0', nullable=False),
     sa.Column('contact_certificate_serial', sa.String(length=128), nullable=True),
     sa.Column('contact_observation_digest', sa.String(length=64), nullable=True),
@@ -526,7 +523,7 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint("length(fence) = 36 AND substr(fence, 9, 1) = '-' AND substr(fence, 14, 1) = '-' AND substr(fence, 19, 1) = '-' AND substr(fence, 24, 1) = '-' AND (length(replace(fence, '-', '')) = 32 AND replace(fence, '-', '') = lower(replace(fence, '-', '')) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(fence, '-', ''), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_node_mutation_leases_fence_shape'),
     sa.CheckConstraint("length(owner_id) = 36 AND substr(owner_id, 9, 1) = '-' AND substr(owner_id, 14, 1) = '-' AND substr(owner_id, 19, 1) = '-' AND substr(owner_id, 24, 1) = '-' AND (length(replace(owner_id, '-', '')) = 32 AND replace(owner_id, '-', '') = lower(replace(owner_id, '-', '')) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(owner_id, '-', ''), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_node_mutation_leases_owner_id_shape'),
-    sa.CheckConstraint("owner_kind IN ('update-rollout', 'reconciliation')", name='ck_node_mutation_leases_owner_kind'),
+    sa.CheckConstraint("owner_kind = 'reconciliation'", name='ck_node_mutation_leases_owner_kind'),
     sa.CheckConstraint("state IN ('held', 'releasing')", name='ck_node_mutation_leases_state'),
     sa.CheckConstraint('updated_at >= acquired_at', name='ck_node_mutation_leases_timestamp_order'),
     sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ondelete='CASCADE'),
@@ -865,57 +862,6 @@ def upgrade() -> None:
     sa.UniqueConstraint('recipe_revision_id', 'report_sha256', name='uq_recipe_test_report_digest')
     )
     op.create_index(op.f('ix_recipe_test_reports_recipe_revision_id'), 'recipe_test_reports', ['recipe_revision_id'], unique=False)
-    op.create_table('update_rollouts',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('job_id', sa.String(length=36), nullable=True),
-    sa.Column('state', sa.String(length=32), nullable=False),
-    sa.Column('plan_digest', sa.String(length=64), nullable=False),
-    sa.Column('release_digest', sa.String(length=64), nullable=False),
-    sa.Column('authority_revision', sa.String(length=128), nullable=False),
-    sa.Column('fleet_digest', sa.String(length=64), nullable=False),
-    sa.Column('topology_digest', sa.String(length=64), nullable=False),
-    sa.Column('agent_input_digest', sa.String(length=64), nullable=False),
-    sa.Column('target_platform_version', sa.String(length=32), nullable=False),
-    sa.Column('target_build_digest', sa.String(length=71), nullable=False),
-    sa.Column('tuf_targets_version', sa.Integer(), server_default='1', nullable=False),
-    sa.Column('update_admin_grant', sa.JSON(), nullable=True),
-    sa.Column('rollback_admin_grant', sa.JSON(), nullable=True),
-    sa.Column('plan', sa.JSON(), nullable=False),
-    sa.Column('current_batch', sa.Integer(), server_default='0', nullable=False),
-    sa.Column('soak_until', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('failure_reason', sa.Text(), nullable=True),
-    sa.Column('failure_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('rollback_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('approval_actor', sa.String(length=200), nullable=True),
-    sa.Column('approval_request_id', sa.String(length=36), nullable=True),
-    sa.Column('approval_reason', sa.Text(), nullable=True),
-    sa.Column('approval_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('approval_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("(state IN ('completed', 'partial') AND completed_at IS NOT NULL) OR (state NOT IN ('completed', 'partial') AND completed_at IS NULL)", name='ck_update_rollouts_completion_state'),
-    sa.CheckConstraint("approval_evidence_digest IS NULL OR (length(approval_evidence_digest) = 64 AND approval_evidence_digest = lower(approval_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(approval_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollouts_approval_evidence_digest_length'),
-    sa.CheckConstraint("failure_evidence_digest IS NULL OR (length(failure_evidence_digest) = 64 AND failure_evidence_digest = lower(failure_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(failure_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollouts_failure_evidence_digest_length'),
-    sa.CheckConstraint("length(agent_input_digest) = 64 AND agent_input_digest = lower(agent_input_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(agent_input_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollouts_agent_input_digest_length'),
-    sa.CheckConstraint("length(fleet_digest) = 64 AND fleet_digest = lower(fleet_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(fleet_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollouts_fleet_digest_length'),
-    sa.CheckConstraint("length(plan_digest) = 64 AND plan_digest = lower(plan_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(plan_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollouts_plan_digest_length'),
-    sa.CheckConstraint("length(release_digest) = 64 AND release_digest = lower(release_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(release_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollouts_release_digest_length'),
-    sa.CheckConstraint("length(target_build_digest) = 71 AND substr(target_build_digest, 1, 7) = 'sha256:' AND (length(substr(target_build_digest, 8, 64)) = 64 AND substr(target_build_digest, 8, 64) = lower(substr(target_build_digest, 8, 64)) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(substr(target_build_digest, 8, 64), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollouts_target_build_digest'),
-    sa.CheckConstraint("length(topology_digest) = 64 AND topology_digest = lower(topology_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(topology_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollouts_topology_digest_length'),
-    sa.CheckConstraint("rollback_evidence_digest IS NULL OR (length(rollback_evidence_digest) = 64 AND rollback_evidence_digest = lower(rollback_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(rollback_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollouts_rollback_evidence_digest_length'),
-    sa.CheckConstraint("state IN ('planned', 'withdrawing', 'updating', 'soaking', 'publishing', 'failure-publishing', 'compensating-withdrawal', 'paused', 'rolling-back', 'rollback-publishing', 'waiting-for-approval', 'completed', 'partial', 'failed')", name='ck_update_rollouts_state'),
-    sa.CheckConstraint('(approval_at IS NULL AND approval_actor IS NULL AND approval_request_id IS NULL AND approval_reason IS NULL AND approval_evidence_digest IS NULL) OR (approval_at IS NOT NULL AND approval_actor IS NOT NULL AND approval_request_id IS NOT NULL AND approval_reason IS NOT NULL AND approval_evidence_digest IS NOT NULL)', name='ck_update_rollouts_approval_complete'),
-    sa.CheckConstraint('current_batch >= 0', name='ck_update_rollouts_current_batch'),
-    sa.CheckConstraint('tuf_targets_version >= 1', name='ck_update_rollouts_tuf_targets_version'),
-    sa.ForeignKeyConstraint(['job_id'], ['jobs.id'], ondelete='SET NULL'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('approval_request_id'),
-    sa.UniqueConstraint('job_id'),
-    sa.UniqueConstraint('plan_digest')
-    )
-    op.create_index(op.f('ix_update_rollouts_created_at'), 'update_rollouts', ['created_at'], unique=False)
-    op.create_index(op.f('ix_update_rollouts_state'), 'update_rollouts', ['state'], unique=False)
     op.create_table('agent_operation_attempts',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('operation_id', sa.String(length=36), nullable=False),
@@ -1004,59 +950,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_reconciliation_operations_agent_operation_id'), 'reconciliation_operations', ['agent_operation_id'], unique=True)
     op.create_index(op.f('ix_reconciliation_operations_reconciliation_id'), 'reconciliation_operations', ['reconciliation_id'], unique=False)
     op.create_index(op.f('ix_reconciliation_operations_state'), 'reconciliation_operations', ['state'], unique=False)
-    op.create_table('update_rollout_nodes',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('rollout_id', sa.String(length=36), nullable=False),
-    sa.Column('node_id', sa.String(length=36), nullable=False),
-    sa.Column('batch_index', sa.Integer(), nullable=False),
-    sa.Column('node_order', sa.Integer(), nullable=False),
-    sa.Column('is_canary', sa.Boolean(), server_default='0', nullable=False),
-    sa.Column('state', sa.String(length=32), nullable=False),
-    sa.Column('operation_id', sa.String(length=36), nullable=True),
-    sa.Column('rollback_operation_id', sa.String(length=36), nullable=True),
-    sa.Column('operation_history', sa.JSON(), server_default='[]', nullable=False),
-    sa.Column('source_identity_digest', sa.String(length=64), nullable=False),
-    sa.Column('target_artifact_digest', sa.String(length=64), nullable=False),
-    sa.Column('observed_platform_version', sa.String(length=32), nullable=True),
-    sa.Column('observed_build_digest', sa.String(length=71), nullable=True),
-    sa.Column('observed_protocol_version', sa.Integer(), nullable=True),
-    sa.Column('observed_active_slot', sa.String(length=1), nullable=True),
-    sa.Column('route_withdrawal_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('acceptance_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('failure_reason', sa.Text(), nullable=True),
-    sa.Column('failure_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('rollback_evidence_digest', sa.String(length=64), nullable=True),
-    sa.Column('soak_until', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('dispatch_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('activation_deadline', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("(state IN ('offline-pending', 'pending', 'routes-withdrawn') AND dispatch_at IS NULL AND activation_deadline IS NULL) OR (state IN ('updating', 'soaking', 'accepted', 'failed', 'rolling-back', 'rolled-back') AND dispatch_at IS NOT NULL AND activation_deadline IS NOT NULL AND activation_deadline > dispatch_at)", name='ck_update_rollout_nodes_dispatch_window'),
-    sa.CheckConstraint("acceptance_evidence_digest IS NULL OR (length(acceptance_evidence_digest) = 64 AND acceptance_evidence_digest = lower(acceptance_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(acceptance_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollout_nodes_acceptance_evidence_digest_length'),
-    sa.CheckConstraint("failure_evidence_digest IS NULL OR (length(failure_evidence_digest) = 64 AND failure_evidence_digest = lower(failure_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(failure_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollout_nodes_failure_evidence_digest_length'),
-    sa.CheckConstraint("length(source_identity_digest) = 64 AND source_identity_digest = lower(source_identity_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(source_identity_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollout_nodes_source_identity_digest_length'),
-    sa.CheckConstraint("length(target_artifact_digest) = 64 AND target_artifact_digest = lower(target_artifact_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(target_artifact_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_rollout_nodes_target_artifact_digest_length'),
-    sa.CheckConstraint("observed_active_slot IS NULL OR observed_active_slot IN ('A', 'B')", name='ck_update_rollout_nodes_observed_active_slot'),
-    sa.CheckConstraint("observed_build_digest IS NULL OR (length(observed_build_digest) = 71 AND substr(observed_build_digest, 1, 7) = 'sha256:' AND (length(substr(observed_build_digest, 8, 64)) = 64 AND substr(observed_build_digest, 8, 64) = lower(substr(observed_build_digest, 8, 64)) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(substr(observed_build_digest, 8, 64), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0))", name='ck_update_rollout_nodes_observed_build_digest'),
-    sa.CheckConstraint("rollback_evidence_digest IS NULL OR (length(rollback_evidence_digest) = 64 AND rollback_evidence_digest = lower(rollback_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(rollback_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollout_nodes_rollback_evidence_digest_length'),
-    sa.CheckConstraint("route_withdrawal_evidence_digest IS NULL OR (length(route_withdrawal_evidence_digest) = 64 AND route_withdrawal_evidence_digest = lower(route_withdrawal_evidence_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(route_withdrawal_evidence_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_rollout_nodes_route_evidence_digest_length'),
-    sa.CheckConstraint("state IN ('offline-pending', 'pending', 'routes-withdrawn', 'updating', 'soaking', 'accepted', 'failed', 'rolling-back', 'rolled-back')", name='ck_update_rollout_nodes_state'),
-    sa.CheckConstraint('batch_index >= -1 AND node_order >= 0', name='ck_update_rollout_nodes_order'),
-    sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ),
-    sa.ForeignKeyConstraint(['operation_id'], ['agent_operations.id'], ),
-    sa.ForeignKeyConstraint(['rollback_operation_id'], ['agent_operations.id'], ),
-    sa.ForeignKeyConstraint(['rollout_id'], ['update_rollouts.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('operation_id'),
-    sa.UniqueConstraint('rollback_operation_id'),
-    sa.UniqueConstraint('rollout_id', 'batch_index', 'node_order', name='uq_update_rollout_nodes_batch_order'),
-    sa.UniqueConstraint('rollout_id', 'node_id', name='uq_update_rollout_nodes_rollout_node')
-    )
-    op.create_index(op.f('ix_update_rollout_nodes_created_at'), 'update_rollout_nodes', ['created_at'], unique=False)
-    op.create_index(op.f('ix_update_rollout_nodes_node_id'), 'update_rollout_nodes', ['node_id'], unique=False)
-    op.create_index(op.f('ix_update_rollout_nodes_rollout_id'), 'update_rollout_nodes', ['rollout_id'], unique=False)
-    op.create_index(op.f('ix_update_rollout_nodes_state'), 'update_rollout_nodes', ['state'], unique=False)
     op.create_table('installation_nodes',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('installation_id', sa.String(length=36), nullable=False),
@@ -1105,59 +998,6 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_recipe_runs_installation_id'), 'recipe_runs', ['installation_id'], unique=False)
     op.create_index(op.f('ix_recipe_runs_mapping_id'), 'recipe_runs', ['mapping_id'], unique=False)
-    op.create_table('update_authorization_intents',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('rollout_id', sa.String(length=36), nullable=False),
-    sa.Column('rollout_node_id', sa.String(length=36), nullable=False),
-    sa.Column('parent_job_id', sa.String(length=36), nullable=False),
-    sa.Column('node_id', sa.String(length=36), nullable=False),
-    sa.Column('operation_id', sa.String(length=36), nullable=False),
-    sa.Column('fence', sa.String(length=36), nullable=False),
-    sa.Column('action', sa.String(length=32), nullable=False),
-    sa.Column('state', sa.String(length=16), nullable=False),
-    sa.Column('unsigned_payload', sa.JSON(), nullable=False),
-    sa.Column('payload_digest', sa.String(length=64), nullable=False),
-    sa.Column('source_slot', sa.String(length=1), nullable=False),
-    sa.Column('source_sha256', sa.String(length=64), nullable=False),
-    sa.Column('source_generation', sa.Integer(), nullable=False),
-    sa.Column('target_release_digest', sa.String(length=71), nullable=True),
-    sa.Column('expected_tuf_target_sha256', sa.String(length=64), nullable=True),
-    sa.Column('expected_tuf_targets_version', sa.Integer(), nullable=True),
-    sa.Column('admin_grant', sa.JSON(), nullable=False),
-    sa.Column('admin_grant_digest', sa.String(length=64), nullable=False),
-    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('request', sa.JSON(), nullable=False),
-    sa.Column('request_digest', sa.String(length=64), nullable=False),
-    sa.Column('signed_response', sa.JSON(), nullable=True),
-    sa.Column('response_digest', sa.String(length=64), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('queued_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("(action = 'agent.update' AND target_release_digest IS NOT NULL AND expected_tuf_target_sha256 IS NOT NULL AND expected_tuf_targets_version IS NOT NULL AND expected_tuf_targets_version >= 1) OR (action = 'agent.rollback' AND target_release_digest IS NULL AND expected_tuf_target_sha256 IS NULL AND expected_tuf_targets_version IS NULL)", name='ck_update_authorization_intents_tuf_binding'),
-    sa.CheckConstraint("(state = 'reserved' AND signed_response IS NULL AND response_digest IS NULL AND queued_at IS NULL) OR (state = 'signed' AND signed_response IS NOT NULL AND response_digest IS NOT NULL AND queued_at IS NULL) OR (state = 'queued' AND signed_response IS NOT NULL AND response_digest IS NOT NULL AND queued_at IS NOT NULL) OR state = 'stale'", name='ck_update_authorization_intents_state_payload'),
-    sa.CheckConstraint("action IN ('agent.update', 'agent.rollback')", name='ck_update_authorization_intents_action'),
-    sa.CheckConstraint("expected_tuf_target_sha256 IS NULL OR (length(expected_tuf_target_sha256) = 64 AND expected_tuf_target_sha256 = lower(expected_tuf_target_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(expected_tuf_target_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_authorization_intents_tuf_target_sha256'),
-    sa.CheckConstraint("length(admin_grant_digest) = 64 AND admin_grant_digest = lower(admin_grant_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(admin_grant_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_authorization_intents_admin_grant_digest'),
-    sa.CheckConstraint("length(payload_digest) = 64 AND payload_digest = lower(payload_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(payload_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_authorization_intents_payload_digest'),
-    sa.CheckConstraint("length(request_digest) = 64 AND request_digest = lower(request_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(request_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_authorization_intents_request_digest'),
-    sa.CheckConstraint("length(source_sha256) = 64 AND source_sha256 = lower(source_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(source_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_update_authorization_intents_source_sha256'),
-    sa.CheckConstraint("response_digest IS NULL OR (length(response_digest) = 64 AND response_digest = lower(response_digest) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(response_digest, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_update_authorization_intents_response_digest'),
-    sa.CheckConstraint("source_slot IN ('A', 'B')", name='ck_update_authorization_intents_source_slot'),
-    sa.CheckConstraint("state IN ('reserved', 'signed', 'queued', 'stale')", name='ck_update_authorization_intents_state'),
-    sa.CheckConstraint("target_release_digest IS NULL OR (length(target_release_digest) = 71 AND substr(target_release_digest, 1, 7) = 'sha256:' AND (length(substr(target_release_digest, 8, 64)) = 64 AND substr(target_release_digest, 8, 64) = lower(substr(target_release_digest, 8, 64)) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(substr(target_release_digest, 8, 64), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0))", name='ck_update_authorization_intents_target_release_digest'),
-    sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ),
-    sa.ForeignKeyConstraint(['parent_job_id'], ['jobs.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['rollout_id'], ['update_rollouts.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['rollout_node_id'], ['update_rollout_nodes.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('fence'),
-    sa.UniqueConstraint('operation_id')
-    )
-    op.create_index(op.f('ix_update_authorization_intents_node_id'), 'update_authorization_intents', ['node_id'], unique=False)
-    op.create_index(op.f('ix_update_authorization_intents_parent_job_id'), 'update_authorization_intents', ['parent_job_id'], unique=False)
-    op.create_index(op.f('ix_update_authorization_intents_rollout_id'), 'update_authorization_intents', ['rollout_id'], unique=False)
-    op.create_index(op.f('ix_update_authorization_intents_rollout_node_id'), 'update_authorization_intents', ['rollout_node_id'], unique=False)
-    op.create_index(op.f('ix_update_authorization_intents_state'), 'update_authorization_intents', ['state'], unique=False)
     op.create_table('run_nodes',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('run_id', sa.String(length=36), nullable=False),
@@ -1188,23 +1028,12 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_run_nodes_run_id'), table_name='run_nodes')
     op.drop_index(op.f('ix_run_nodes_node_id'), table_name='run_nodes')
     op.drop_table('run_nodes')
-    op.drop_index(op.f('ix_update_authorization_intents_state'), table_name='update_authorization_intents')
-    op.drop_index(op.f('ix_update_authorization_intents_rollout_node_id'), table_name='update_authorization_intents')
-    op.drop_index(op.f('ix_update_authorization_intents_rollout_id'), table_name='update_authorization_intents')
-    op.drop_index(op.f('ix_update_authorization_intents_parent_job_id'), table_name='update_authorization_intents')
-    op.drop_index(op.f('ix_update_authorization_intents_node_id'), table_name='update_authorization_intents')
-    op.drop_table('update_authorization_intents')
     op.drop_index(op.f('ix_recipe_runs_mapping_id'), table_name='recipe_runs')
     op.drop_index(op.f('ix_recipe_runs_installation_id'), table_name='recipe_runs')
     op.drop_table('recipe_runs')
     op.drop_index(op.f('ix_installation_nodes_node_id'), table_name='installation_nodes')
     op.drop_index(op.f('ix_installation_nodes_installation_id'), table_name='installation_nodes')
     op.drop_table('installation_nodes')
-    op.drop_index(op.f('ix_update_rollout_nodes_state'), table_name='update_rollout_nodes')
-    op.drop_index(op.f('ix_update_rollout_nodes_rollout_id'), table_name='update_rollout_nodes')
-    op.drop_index(op.f('ix_update_rollout_nodes_node_id'), table_name='update_rollout_nodes')
-    op.drop_index(op.f('ix_update_rollout_nodes_created_at'), table_name='update_rollout_nodes')
-    op.drop_table('update_rollout_nodes')
     op.drop_index(op.f('ix_reconciliation_operations_state'), table_name='reconciliation_operations')
     op.drop_index(op.f('ix_reconciliation_operations_reconciliation_id'), table_name='reconciliation_operations')
     op.drop_index(op.f('ix_reconciliation_operations_agent_operation_id'), table_name='reconciliation_operations')
@@ -1220,9 +1049,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_agent_operation_attempts_lease_deadline'), table_name='agent_operation_attempts')
     op.drop_index(op.f('ix_agent_operation_attempts_agent_certificate_serial'), table_name='agent_operation_attempts')
     op.drop_table('agent_operation_attempts')
-    op.drop_index(op.f('ix_update_rollouts_state'), table_name='update_rollouts')
-    op.drop_index(op.f('ix_update_rollouts_created_at'), table_name='update_rollouts')
-    op.drop_table('update_rollouts')
     op.drop_index(op.f('ix_recipe_test_reports_recipe_revision_id'), table_name='recipe_test_reports')
     op.drop_table('recipe_test_reports')
     op.drop_index(op.f('ix_recipe_import_items_import_id'), table_name='recipe_import_items')

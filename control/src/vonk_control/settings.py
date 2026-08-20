@@ -288,7 +288,6 @@ class Settings:
     deployment_mode: str
     token_signing_key: bytes
     metrics_token: str
-    admin_grant_private_key_path: Path | None
     agent_runtime: str
     agent_controller_origin: str
     agent_enrollment_origin: str
@@ -475,12 +474,6 @@ class Settings:
             raise SettingsError(
                 "agent artifact and TUF roots must be distinct and nonoverlapping"
             )
-        admin_grant_private_key_path = (
-            _secret_path("VONK_ADMIN_GRANT_PRIVATE_KEY_FILE")
-            if mode == "production"
-            or os.environ.get("VONK_ADMIN_GRANT_PRIVATE_KEY_FILE")
-            else None
-        )
         package_helper_grant_private_key_path = (
             _secret_path("VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE")
             if os.environ.get("VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE")
@@ -521,7 +514,6 @@ class Settings:
             deployment_mode=mode,
             token_signing_key=signing_key,
             metrics_token=metrics_token,
-            admin_grant_private_key_path=admin_grant_private_key_path,
             agent_runtime=agent_runtime,
             agent_controller_origin=agent_controller_origin,
             agent_enrollment_origin=agent_enrollment_origin,
@@ -564,7 +556,6 @@ class WorkerSettings:
     internal_api_timeout_seconds: float
     management_cidrs: str
     direct_fabric_cidrs: str
-    update_signer_socket_path: Path
 
     @classmethod
     def from_env_and_secrets(cls) -> WorkerSettings:
@@ -636,78 +627,4 @@ class WorkerSettings:
             internal_api_timeout_seconds=timeout,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
-            update_signer_socket_path=_absolute_root(
-                "VONK_UPDATE_SIGNER_SOCKET", "/run/vonk-signer/signer.sock"
-            ),
-        )
-
-
-@dataclass(frozen=True)
-class SignerSettings:
-    """Filesystem-only settings for the networkless update signer."""
-
-    socket_path: Path
-    update_authority_key_path: Path
-    admin_grant_public_key_path: Path
-    tuf_bootstrap_root_path: Path
-    tuf_metadata_root: Path
-    tuf_target_root: Path
-    tuf_verified_metadata_root: Path
-    tuf_verified_target_root: Path
-    control_identity_root: Path
-    platform_version: str
-    platform_release_digest: str
-    platform_build_digest: str
-    process_image: str
-
-    @classmethod
-    def from_env_and_secrets(cls) -> SignerSettings:
-        version = os.environ.get("VONK_PLATFORM_VERSION", "")
-        release = os.environ.get("VONK_PLATFORM_RELEASE_DIGEST", "")
-        build = os.environ.get("VONK_PLATFORM_BUILD_DIGEST", "")
-        image = os.environ.get("VONK_CONTROL_PROCESS_IMAGE", "")
-        if re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version) is None:
-            raise SettingsError("VONK_PLATFORM_VERSION is invalid")
-        for name, value in (
-            ("VONK_PLATFORM_RELEASE_DIGEST", release),
-            ("VONK_PLATFORM_BUILD_DIGEST", build),
-        ):
-            if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
-                raise SettingsError(f"{name} is invalid")
-        if re.fullmatch(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}", image) is None:
-            raise SettingsError("VONK_CONTROL_PROCESS_IMAGE is invalid")
-        return cls(
-            socket_path=_absolute_root(
-                "VONK_UPDATE_SIGNER_SOCKET", "/run/vonk-signer/signer.sock"
-            ),
-            update_authority_key_path=_secret_path(
-                "VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE"
-            ),
-            admin_grant_public_key_path=_secret_path(
-                "VONK_ADMIN_GRANT_PUBLIC_KEY_FILE"
-            ),
-            tuf_bootstrap_root_path=_secret_path(
-                "VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE"
-            ),
-            tuf_metadata_root=_absolute_root(
-                "VONK_AGENT_TUF_METADATA_ROOT", "/state/agent-tuf/metadata"
-            ),
-            tuf_target_root=_absolute_root(
-                "VONK_AGENT_TUF_TARGET_ROOT", "/state/agent-tuf/targets"
-            ),
-            tuf_verified_metadata_root=_absolute_root(
-                "VONK_AGENT_TUF_VERIFIED_METADATA_ROOT",
-                "/state/agent-tuf-verifier/metadata",
-            ),
-            tuf_verified_target_root=_absolute_root(
-                "VONK_AGENT_TUF_VERIFIED_TARGET_ROOT",
-                "/state/agent-tuf-verifier/targets",
-            ),
-            control_identity_root=_absolute_root(
-                "VONK_CONTROL_IDENTITY_ROOT", "/control-identity"
-            ),
-            platform_version=version,
-            platform_release_digest=release,
-            platform_build_digest=build,
-            process_image=image,
         )

@@ -1218,12 +1218,11 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
             "node_id": NODE_A,
             "protocol_version": 3,
             "runtime_identity": {
-                "active_slot": "B",
                 "architecture": "linux-arm64",
-                "agent_sha256": "c" * 64,
-                "build_digest": "sha256:" + "b" * 64,
-                "platform_version": "1.2.3",
-                "supervisor_generation": 7,
+                "binary_digest": "c" * 64,
+                "build_digest": "sha256:" + "c" * 64,
+                "semantic_version": "1.2.3",
+                "self_test_passed": True,
             },
             "wait_seconds": 0,
         },
@@ -1236,14 +1235,11 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
         assert node.protocol_version == 3
         assert node.capabilities == CAPABILITIES
-        assert node.platform_version == "1.2.3"
-        assert node.build_digest == "sha256:" + "b" * 64
-        assert node.active_slot == "B"
+        assert node.semantic_version == "1.2.3"
+        assert node.build_digest == "sha256:" + "c" * 64
         assert node.architecture == "linux-arm64"
-        assert node.agent_sha256 == "c" * 64
-        assert node.supervisor_generation == 7
-        assert node.supervisor_ready_generation is None
-        assert node.self_test_passed is False
+        assert node.binary_digest == "c" * 64
+        assert node.self_test_passed is True
         assert node.contact_certificate_serial == "serial-a"
         assert node.contact_observation_digest is not None
     metrics = MetricsRegistry()
@@ -1256,36 +1252,85 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
     )
 
 
-def test_authenticated_claim_records_generation_bound_self_test_readiness(
-    agent_system,
+@pytest.mark.parametrize(
+    ("removed_field", "removed_value"),
+    (
+        ("active_slot", "B"),
+        ("agent_sha256", "c" * 64),
+        ("platform_version", "1.2.3"),
+        ("supervisor_generation", 7),
+        ("supervisor_ready_generation", 7),
+        ("activation_deadline", "2026-08-20T12:00:00Z"),
+    ),
+)
+def test_claim_rejects_retired_supervisor_identity_fields(
+    agent_system, removed_field: str, removed_value: object
 ) -> None:
     client, services, _, _clock = agent_system
+    runtime_identity: dict[str, object] = {
+        "architecture": "linux-arm64",
+        "binary_digest": "c" * 64,
+        "build_digest": "sha256:" + "c" * 64,
+        "semantic_version": "1.2.3",
+        "self_test_passed": True,
+        removed_field: removed_value,
+    }
+
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={"node_id": NODE_A, "runtime_identity": runtime_identity},
+    )
+
+    assert response.status_code == 422
+    with services.sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        assert node.semantic_version is None
+
+
+def test_claim_rejects_runtime_identity_not_emitted_by_the_rust_binary(
+    agent_system,
+) -> None:
+    client, _services, _, _clock = agent_system
+
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "node_id": NODE_A,
             "runtime_identity": {
-                "active_slot": "B",
                 "architecture": "linux-arm64",
-                "agent_sha256": "c" * 64,
+                "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "b" * 64,
-                "platform_version": "1.2.3",
+                "semantic_version": "1.2.3",
                 "self_test_passed": True,
-                "supervisor_generation": 7,
-                "supervisor_ready_generation": 7,
             },
         },
     )
 
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.self_test_passed is True
-        assert node.supervisor_ready_generation == 7
-        assert node.contact_certificate_serial == "serial-a"
-        assert node.contact_observation_digest is not None
+    assert response.status_code == 422
+
+
+def test_claim_rejects_failed_runtime_self_test(agent_system) -> None:
+    client, _services, _, _clock = agent_system
+
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "node_id": NODE_A,
+            "runtime_identity": {
+                "architecture": "linux-arm64",
+                "binary_digest": "c" * 64,
+                "build_digest": "sha256:" + "c" * 64,
+                "semantic_version": "1.2.3",
+                "self_test_passed": False,
+            },
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize("architecture", ("linux-riscv64", True, 7))
@@ -1300,12 +1345,11 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
         json={
             "node_id": NODE_A,
             "runtime_identity": {
-                "active_slot": "B",
                 "architecture": architecture,
-                "agent_sha256": "c" * 64,
-                "build_digest": "sha256:" + "b" * 64,
-                "platform_version": "1.2.3",
-                "supervisor_generation": 7,
+                "binary_digest": "c" * 64,
+                "build_digest": "sha256:" + "c" * 64,
+                "semantic_version": "1.2.3",
+                "self_test_passed": True,
             },
         },
     )
@@ -1325,12 +1369,11 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
         json={
             "node_id": NODE_A,
             "runtime_identity": {
-                "active_slot": "B",
                 "architecture": "linux-arm64",
-                "agent_sha256": "c" * 64,
+                "binary_digest": "c" * 64,
                 "build_digest": "sha256:" + "b" * 64,
-                "platform_version": "1.2.3",
-                "supervisor_generation": 7,
+                "semantic_version": "1.2.3",
+                "self_test_passed": True,
             },
         },
     )
@@ -1367,29 +1410,6 @@ def test_unknown_claim_capability_is_rejected_without_contact(agent_system) -> N
         assert session.get(AgentPresence, NODE_A) is None
 
 
-def test_control_accepts_next_agent_update_capabilities_during_rollout(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    capabilities = CAPABILITIES + ["agent.rollback", "agent.update"]
-
-    response = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": capabilities,
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.capabilities == sorted(capabilities)
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(

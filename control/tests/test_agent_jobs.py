@@ -11,7 +11,6 @@ from threading import Event
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
     AgentCertificate,
@@ -29,7 +28,6 @@ from vonk_control.recipe_operations import RecipeOperationService
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a"  * 64
-PLATFORM_TARGET = "platform/releases/1.2.3/" + "c" * 64 + ".json"
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -109,98 +107,8 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
-class UpdateAuthority:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls: list[dict[str, object]] = []
-
-    def refresh_and_validate(self, payload, *, target_name):
-        if self.fail:
-            raise RuntimeError("signing unavailable")
-        assert target_name == PLATFORM_TARGET
-        return {"payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest()}
-
-    def authorize(self, payload, **bindings):
-        if self.fail:
-            raise RuntimeError("signing unavailable")
-        self.calls.append({"payload": payload, **bindings})
-        artifact = payload["artifact"]
-        release = payload["release"]
-        receipt = {
-            "architecture": artifact["architecture"],
-            "attempt": bindings["attempt"],
-            "build_digest": release["build_digest"],
-            "claim_deadline": bindings["claim_deadline"],
-            "expires_at": bindings["expires_at"],
-            "fence": bindings["fence"],
-            "node_id": bindings["node_id"],
-            "oci_manifest_digest": artifact["oci_manifest_digest"],
-            "operation_id": bindings["operation_id"],
-            "payload_name": artifact["payload_name"],
-            "platform_target_name": PLATFORM_TARGET,
-            "platform_target_sha256": "c" * 64,
-            "platform_version": release["platform_version"],
-            "previous_sha256": bindings["previous_sha256"],
-            "previous_generation": bindings["previous_generation"],
-            "previous_slot": bindings["previous_slot"],
-            "sha256": artifact["payload_sha256"],
-            "size": artifact["payload_size"],
-            "target_slot": "B" if bindings["previous_slot"] == "A" else "A",
-            "tuf_targets_version": 7,
-        }
-        return {
-            "artifact": artifact,
-            "receipt": receipt,
-            "release": release,
-            "signature": {
-                "algorithm": "ed25519",
-                "key_id": "d" * 64,
-                "value": "e" * 128,
-            },
-        }
-
-    def authorize_rollback(self, **bindings):
-        if self.fail:
-            raise RuntimeError("signing unavailable")
-        self.calls.append({"rollback": True, **bindings})
-        receipt = {
-            "action": "operator-rollback",
-            "attempt": bindings["attempt"],
-            "claim_deadline": bindings["claim_deadline"],
-            "current_generation": bindings["current_generation"],
-            "current_sha256": bindings["current_sha256"],
-            "current_slot": bindings["current_slot"],
-            "expires_at": bindings["expires_at"],
-            "fence": bindings["fence"],
-            "node_id": bindings["node_id"],
-            "operation_id": bindings["operation_id"],
-        }
-        return {
-            "receipt": receipt,
-            "signature": {
-                "algorithm": "ed25519",
-                "key_id": "d" * 64,
-                "value": "e" * 128,
-            },
-        }
 
 
-def update_payload() -> dict[str, object]:
-    return {
-        "artifact": {
-            "architecture": "linux-arm64",
-            "oci_manifest_digest": "sha256:" + "a" * 64,
-            "payload_name": "vonk-agent",
-            "payload_sha256": "b" * 64,
-            "payload_size": 4096,
-        },
-        "release": {
-            "build_digest": "sha256:" + "c" * 64,
-            "platform_version": "1.2.3",
-            "protocol_maximum": 2,
-            "protocol_minimum": 1,
-        },
-    }
 
 
 @pytest.fixture
@@ -218,9 +126,11 @@ def service(tmp_path):
                 node_id=node_id,
                 state="active",
                 capabilities=[],
-                active_slot="A",
-                agent_sha256="f" * 64,
-                supervisor_generation=1,
+                architecture="linux-arm64",
+                semantic_version="1.0.0",
+                build_digest="sha256:" + "f" * 64,
+                binary_digest="f" * 64,
+                self_test_passed=True,
             ))
             session.add(AgentCertificate(
                 serial=serial,
@@ -293,7 +203,7 @@ def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None
 
 
 def test_rust_claim_updates_current_contact(service) -> None:
-    jobs, sessions, _clock = service
+    jobs, _sessions, _clock = service
     assert jobs.claim(
         NODE_A,
         "serial-a",
@@ -420,7 +330,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
                 state="building",
                 policy_report={
                     "passed": True,
-                    "builder_agent_sha256": "f" * 64,
+                    "builder_binary_digest": "f" * 64,
                     "artifact_format": "docker-archive-v1",
                 },
                 plan=payload,
@@ -472,14 +382,11 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         protocol_version=3,
         capabilities=["agent.runtime.rust.v1", "recipe.build.v1"],
         runtime_identity={
-            "active_slot": "B",
             "architecture": "linux-arm64",
-            "agent_sha256": "e" * 64,
-            "build_digest": "sha256:" + "d" * 64,
-            "platform_version": "1.2.3",
+            "build_digest": "sha256:" + "e" * 64,
+            "binary_digest": "e" * 64,
+            "semantic_version": "1.2.3",
             "self_test_passed": True,
-            "supervisor_generation": 2,
-            "supervisor_ready_generation": 2,
         },
     )
 
@@ -496,7 +403,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         )
         assert stored is not None and stored.state == "failed"
         assert parent_row is not None and parent_row.state == "failed"
-        assert node is not None and node.agent_sha256 == "e" * 64
+        assert node is not None and node.binary_digest == "e" * 64
         assert build is not None and build.state == "failed"
         assert reservation is not None and reservation.state == "released"
 
@@ -544,7 +451,7 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
                 state="building",
                 policy_report={
                     "passed": True,
-                    "builder_agent_sha256": "f" * 64,
+                    "builder_binary_digest": "f" * 64,
                     "artifact_format": "docker-archive-v1",
                 },
                 plan=payload,
@@ -575,336 +482,20 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
         assert stored is not None and stored.state == "failed"
 
 
-def test_update_enqueue_persists_one_signed_payload_and_claims_its_reserved_fence(
-    service,
-) -> None:
-    _, sessions, clock = service
-    authority = UpdateAuthority()
-    jobs = AgentJobService(sessions, clock=clock, update_authorizer=authority)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-    claim = jobs.claim(NODE_A, "serial-a", 30)
-
-    assert claim is not None
-    assert claim.fence == claim.payload["receipt"]["fence"]
-    assert claim.operation_id == claim.payload["receipt"]["operation_id"]
-    assert claim.payload_digest == hashlib.sha256(
-        canonical_message(claim.payload)
-    ).hexdigest()
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        assert stored is not None
-        assert stored.payload == claim.payload
-        assert stored.payload_digest == claim.payload_digest
-        assert session.scalars(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id
-            )
-        ).one().fence == claim.fence
-    assert authority.calls[0]["previous_slot"] == "A"
-    assert authority.calls[0]["previous_sha256"] == "f" * 64
 
 
-@pytest.mark.parametrize("fault", ("operation", "fence", "expired", "source"))
-def test_stale_or_mismatched_update_receipt_never_reaches_an_agent_claim(
-    service, fault: str
-) -> None:
-    _, sessions, clock = service
-    jobs = AgentJobService(
-        sessions, clock=clock, update_authorizer=UpdateAuthority()
-    )
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-    if fault == "expired":
-        clock.advance(seconds=601)
-    else:
-        with sessions.begin() as session:
-            stored = session.get(AgentOperation, operation.id)
-            node = session.get(AgentNode, NODE_A)
-            assert stored is not None and node is not None
-            if fault == "source":
-                node.agent_sha256 = "0" * 64
-            else:
-                receipt = stored.payload["receipt"]
-                receipt[fault + "_id" if fault == "operation" else "fence"] = str(
-                    uuid.uuid4()
-                )
-                stored.payload_digest = hashlib.sha256(
-                    canonical_message(stored.payload)
-                ).hexdigest()
-
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
-        assert session.scalars(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id
-            )
-        ).all() == []
 
 
-def test_update_receipt_is_one_use_even_after_manual_retry_disposition(service) -> None:
-    _, sessions, clock = service
-    jobs = AgentJobService(
-        sessions, clock=clock, update_authorizer=UpdateAuthority()
-    )
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-    first = jobs.claim(NODE_A, "serial-a", 1)
-    assert first is not None
-    clock.advance(seconds=2)
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
-    with sessions.begin() as session:
-        stored = session.get(AgentOperation, operation.id)
-        assert stored is not None
-        stored.retry_disposition = "retry"
-        stored.retry_disposition_attempt = 1
-
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
-    with sessions() as session:
-        attempts = session.scalars(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id
-            )
-        ).all()
-        assert len(attempts) == 1
-        assert attempts[0].fence == first.fence
 
 
-def test_update_signing_failure_rolls_back_enqueue_and_non_updates_are_not_signed(
-    service,
-) -> None:
-    _, sessions, clock = service
-    authority = UpdateAuthority(fail=True)
-    jobs = AgentJobService(sessions, clock=clock, update_authorizer=authority)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-    parent_job = parent(sessions, clock)
-
-    with pytest.raises(RuntimeError, match="signing unavailable"):
-        jobs.enqueue(
-            parent_job.id,
-            NODE_A,
-            "agent.update",
-            COMMIT,
-            update_payload(),
-            platform_target_name=PLATFORM_TARGET,
-        )
-    probe = jobs.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
-
-    with sessions() as session:
-        assert session.get(AgentOperation, probe.id) is not None
-        assert session.scalar(
-            select(AgentOperation.id).where(
-                AgentOperation.kind == "agent.update"
-            )
-        ) is None
-    assert authority.calls == []
 
 
-def test_node_cannot_claim_overlapping_platform_mutations(service) -> None:
-    _, sessions, clock = service
-    jobs = AgentJobService(
-        sessions, clock=clock, update_authorizer=UpdateAuthority()
-    )
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-    parent_job = parent(sessions, clock)
-    update = jobs.enqueue(
-        parent_job.id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-    rollback_parent = parent(sessions, clock)
-    with sessions.begin() as session:
-        stored_parent = session.get(Job, rollback_parent.id)
-        assert stored_parent is not None
-        stored_parent.kind = "platform.update"
-        stored_parent.state = "waiting-for-operator"
-    rollback = jobs.enqueue(
-        rollback_parent.id, NODE_A, "agent.rollback", COMMIT, {}
-    )
-
-    first = jobs.claim(NODE_A, "serial-a", 30)
-
-    assert first is not None
-    assert first.operation_id in {update.id, rollback.id}
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
 
 
-def test_signed_rollback_can_enqueue_beneath_waiting_platform_update_only(
-    service,
-) -> None:
-    _, sessions, clock = service
-    jobs = AgentJobService(
-        sessions, clock=clock, update_authorizer=UpdateAuthority()
-    )
-    platform = parent(sessions, clock)
-    unrelated = parent(sessions, clock)
-    running = parent(sessions, clock)
-    with sessions.begin() as session:
-        platform_job = session.get(Job, platform.id)
-        unrelated_job = session.get(Job, unrelated.id)
-        running_job = session.get(Job, running.id)
-        assert platform_job is not None and unrelated_job is not None
-        assert running_job is not None
-        platform_job.kind = "platform.update"
-        platform_job.state = "waiting-for-operator"
-        unrelated_job.state = "waiting-for-operator"
-
-    rollback = jobs.enqueue(
-        platform.id, NODE_A, "agent.rollback", COMMIT, {}
-    )
-
-    assert rollback.payload["receipt"]["action"] == "operator-rollback"
-    with pytest.raises(ValueError, match="platform update"):
-        jobs.enqueue(unrelated.id, NODE_B, "agent.rollback", COMMIT, {})
-    with pytest.raises(ValueError, match="platform update"):
-        jobs.enqueue(running.id, NODE_B, "agent.rollback", COMMIT, {})
 
 
-def test_running_unrelated_parent_cannot_claim_injected_signed_rollback(
-    service,
-) -> None:
-    _, sessions, clock = service
-    authority = UpdateAuthority()
-    jobs = AgentJobService(sessions, clock=clock, update_authorizer=authority)
-    running = parent(sessions, clock)
-    operation_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    deadline = int(clock.now.timestamp()) + 600
-    payload = authority.authorize_rollback(
-        operation_id=operation_id,
-        fence=fence,
-        expires_at=deadline,
-        current_slot="A",
-        current_sha256="f" * 64,
-        current_generation=1,
-        node_id=NODE_A,
-        attempt=1,
-        claim_deadline=deadline,
-        now=clock.now,
-    )
-    with sessions.begin() as session:
-        session.add(
-            AgentOperation(
-                id=operation_id,
-                parent_job_id=running.id,
-                node_id=NODE_A,
-                kind="agent.rollback",
-                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-                payload=payload,
-                authority_revision=COMMIT,
-                state="queued",
-                current_attempt=0,
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-
-    assert jobs.claim(NODE_A, "serial-a", 30) is None
-    with sessions() as session:
-        operation = session.get(AgentOperation, operation_id)
-        assert operation is not None
-        assert operation.state == "waiting-for-operator"
-        assert operation.current_attempt == 0
 
 
-def test_invalid_rollback_is_quarantined_without_starving_valid_work(service) -> None:
-    _, sessions, clock = service
-    authority = UpdateAuthority()
-    jobs = AgentJobService(sessions, clock=clock, update_authorizer=authority)
-    invalid_parent = parent(sessions, clock)
-    invalid_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    deadline = int(clock.now.timestamp()) + 600
-    payload = authority.authorize_rollback(
-        operation_id=invalid_id,
-        fence=fence,
-        expires_at=deadline,
-        current_slot="A",
-        current_sha256="f" * 64,
-        current_generation=1,
-        node_id=NODE_A,
-        attempt=1,
-        claim_deadline=deadline,
-        now=clock.now,
-    )
-    with sessions.begin() as session:
-        session.add(
-            AgentOperation(
-                id=invalid_id,
-                parent_job_id=invalid_parent.id,
-                node_id=NODE_A,
-                kind="agent.rollback",
-                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-                payload=payload,
-                authority_revision=COMMIT,
-                state="queued",
-                current_attempt=0,
-                created_at=clock.now - timedelta(seconds=1),
-                updated_at=clock.now,
-            )
-        )
-    valid = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-
-    claim = jobs.claim(NODE_A, "serial-a", 30)
-
-    assert claim is not None and claim.operation_id == valid.id
-    with sessions() as session:
-        invalid = session.get(AgentOperation, invalid_id)
-        assert invalid is not None and invalid.state == "waiting-for-operator"
 
 
 @pytest.mark.parametrize("count", (2, None))
@@ -1101,56 +692,17 @@ def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
     assert progress.deadline >= claim.deadline
 
 
-def test_update_heartbeat_is_capped_by_signed_receipt_expiry(service) -> None:
-    _, sessions, clock = service
-    jobs = AgentJobService(
-        sessions, clock=clock, update_authorizer=UpdateAuthority()
-    )
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "agent.update",
-        COMMIT,
-        update_payload(),
-        platform_target_name=PLATFORM_TARGET,
-    )
-    claim = jobs.claim(NODE_A, "serial-a", 30)
-    assert claim is not None
-    receipt_deadline = datetime.fromtimestamp(
-        operation.payload["receipt"]["claim_deadline"], tz=UTC
-    )
-    assert claim.deadline == receipt_deadline
-    clock.advance(seconds=500)
-
-    progress = jobs.heartbeat(claim, {"phase": "activating"}, 300)
-
-    assert progress.deadline == receipt_deadline
-    with sessions() as session:
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == 1,
-            )
-        )
-        assert attempt is not None
-        persisted = attempt.lease_deadline
-        if persisted.tzinfo is None:
-            persisted = persisted.replace(tzinfo=UTC)
-        assert persisted == receipt_deadline
 
 
 def test_claim_persists_authenticated_running_release_identity(service) -> None:
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
     runtime_identity = {
-        "active_slot": "B",
         "architecture": "linux-arm64",
-        "agent_sha256": "c" * 64,
-        "build_digest": "sha256:" + "b" * 64,
-        "platform_version": "1.2.3",
+        "binary_digest": "c" * 64,
+        "build_digest": "sha256:" + "c" * 64,
+        "semantic_version": "1.2.3",
         "self_test_passed": True,
-        "supervisor_generation": 7,
-        "supervisor_ready_generation": 7,
     }
 
     assert jobs.claim(
@@ -1165,14 +717,11 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert {
-            "active_slot": node.active_slot,
             "architecture": node.architecture,
-            "agent_sha256": node.agent_sha256,
+            "binary_digest": node.binary_digest,
             "build_digest": node.build_digest,
-            "platform_version": node.platform_version,
+            "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
-            "supervisor_generation": node.supervisor_generation,
-            "supervisor_ready_generation": node.supervisor_ready_generation,
         } == runtime_identity
 
 
@@ -1183,14 +732,11 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
     runtime_identity = {
-        "active_slot": "B",
         "architecture": architecture,
-        "agent_sha256": "c" * 64,
-        "build_digest": "sha256:" + "b" * 64,
-        "platform_version": "1.2.3",
+        "binary_digest": "c" * 64,
+        "build_digest": "sha256:" + "c" * 64,
+        "semantic_version": "1.2.3",
         "self_test_passed": True,
-        "supervisor_generation": 7,
-        "supervisor_ready_generation": 7,
     }
 
     with pytest.raises(ValueError, match="runtime identity"):
@@ -1205,7 +751,11 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.architecture is None
+        assert node.architecture == "linux-arm64"
+        assert node.semantic_version == "1.0.0"
+        assert node.build_digest == "sha256:" + "f" * 64
+        assert node.binary_digest == "f" * 64
+        assert node.self_test_passed is True
 
 
 @pytest.mark.parametrize("agent_action", ("heartbeat", "result"))

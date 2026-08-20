@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
-_DESTINATION_NAME = "admin-grant-private-key.pem"
 
 
 class RuntimeSecretError(RuntimeError):
@@ -22,7 +21,6 @@ class SharedRuntimePaths:
 
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
-    update_socket: Path = Path("/update-socket")
     verifier: Path = Path("/verifier")
     agent_publication: Path = Path("/agent-tuf")
     workload_publication: Path = Path("/workload-tuf")
@@ -111,10 +109,6 @@ def stage_compose_secrets(
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    stage_private_key(
-        source_root / "admin-grant-private-key",
-        destination_root / "admin-grant-private-key",
-    )
     for name in (
         "package-helper-grant-private-key",
         "package-helper-receipt-private-key",
@@ -124,18 +118,6 @@ def stage_compose_secrets(
             source_root / name,
             destination_root / name,
             owner_uid=10001,
-            owner_gid=10001,
-            mode=0o400,
-        )
-    for name in (
-        "agent-update-authority-key",
-        "admin-grant-public-key",
-        "agent-tuf-bootstrap-root",
-    ):
-        stage_private_key(
-            source_root / name,
-            destination_root / name,
-            owner_uid=10003,
             owner_gid=10001,
             mode=0o400,
         )
@@ -256,7 +238,6 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)
-    _directory(paths.update_socket, 10003, 10001, 0o710)
     _directory(paths.verifier, 10003, 10001, 0o700)
 
     agent = _directory(paths.agent_publication, 10001, 10001, 0o750)
@@ -280,160 +261,3 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
-
-
-def _snapshot_source(path: Path, *, source_uid: int) -> bytes:
-    try:
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
-        )
-    except OSError as error:
-        raise RuntimeSecretError("admin grant private key source is unsafe") from error
-    try:
-        before = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_uid != source_uid
-            or before.st_nlink != 1
-            or stat.S_IMODE(before.st_mode) != 0o444
-            or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
-        ):
-            raise RuntimeSecretError("admin grant private key source is unsafe")
-        content = bytearray()
-        while len(content) <= _MAX_PRIVATE_KEY_BYTES:
-            chunk = os.read(
-                descriptor,
-                min(4096, _MAX_PRIVATE_KEY_BYTES + 1 - len(content)),
-            )
-            if not chunk:
-                break
-            content.extend(chunk)
-        after = os.fstat(descriptor)
-        if len(content) != before.st_size or _identity(before) != _identity(after):
-            raise RuntimeSecretError("admin grant private key changed while read")
-        return bytes(content)
-    except OSError as error:
-        raise RuntimeSecretError("admin grant private key cannot be read") from error
-    finally:
-        os.close(descriptor)
-
-
-def _validate_existing(parent: int, *, api_uid: int, api_gid: int) -> None:
-    try:
-        descriptor = os.open(
-            _DESTINATION_NAME,
-            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
-            dir_fd=parent,
-        )
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime key is unsafe") from error
-    try:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or metadata.st_uid != api_uid
-            or metadata.st_gid != api_gid
-            or stat.S_IMODE(metadata.st_mode) != 0o400
-            or not 0 < metadata.st_size <= _MAX_PRIVATE_KEY_BYTES
-        ):
-            raise RuntimeSecretError("admin grant runtime key is unsafe")
-    finally:
-        os.close(descriptor)
-
-
-def install_admin_grant_key(
-    source: Path,
-    runtime_root: Path,
-    *,
-    source_uid: int = 0,
-    api_uid: int = 10001,
-    api_gid: int = 10001,
-) -> Path:
-    """Atomically project one root-owned 0444 key as API-only 0400 state."""
-    source = Path(source)
-    runtime_root = Path(runtime_root)
-    if (
-        not source.is_absolute()
-        or not runtime_root.is_absolute()
-        or any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in (source_uid, api_uid, api_gid)
-        )
-    ):
-        raise RuntimeSecretError("admin grant runtime projection is invalid")
-    content = _snapshot_source(source, source_uid=source_uid)
-    try:
-        parent = os.open(
-            runtime_root,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-        )
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime directory is unsafe") from error
-    temporary = f".{_DESTINATION_NAME}.{secrets.token_hex(12)}.new"
-    descriptor = -1
-    try:
-        directory = os.fstat(parent)
-        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid not in {
-            0,
-            os.geteuid(),
-        }:
-            raise RuntimeSecretError("admin grant runtime directory is unsafe")
-        os.fchown(parent, 0 if os.geteuid() == 0 else os.geteuid(), api_gid)
-        os.fchmod(parent, 0o710)
-        _validate_existing(parent, api_uid=api_uid, api_gid=api_gid)
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
-            0o600,
-            dir_fd=parent,
-        )
-        offset = 0
-        while offset < len(content):
-            written = os.write(descriptor, content[offset:])
-            if written <= 0:
-                raise RuntimeSecretError("admin grant runtime key write was incomplete")
-            offset += written
-        os.fchown(descriptor, api_uid, api_gid)
-        os.fchmod(descriptor, 0o400)
-        os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = -1
-        os.replace(
-            temporary,
-            _DESTINATION_NAME,
-            src_dir_fd=parent,
-            dst_dir_fd=parent,
-        )
-        os.fsync(parent)
-    except RuntimeSecretError:
-        raise
-    except OSError as error:
-        raise RuntimeSecretError("admin grant runtime key cannot be installed") from error
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        try:
-            os.unlink(temporary, dir_fd=parent)
-        except FileNotFoundError:
-            pass
-        os.close(parent)
-    return runtime_root / _DESTINATION_NAME
-
-
-def main() -> None:
-    install_admin_grant_key(
-        Path("/run/secrets/admin-grant-private-key"),
-        Path("/runtime"),
-    )
-
-
-if __name__ == "__main__":
-    main()

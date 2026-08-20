@@ -183,7 +183,6 @@ class Worker:
         logs=None,
         housekeeping: Callable[[], object] | None = None,
         reconciliations=None,
-        updates=None,
         recipes=None,
         loop_heartbeat: Callable[[], object] | None = None,
     ) -> None:
@@ -193,7 +192,6 @@ class Worker:
         self._logs = logs
         self._housekeeping = housekeeping
         self._reconciliations = reconciliations
-        self._updates = updates
         self._recipes = recipes
         self._loop_heartbeat = loop_heartbeat
         self._source_cursor = 0
@@ -204,8 +202,6 @@ class Worker:
         sources: list[Callable[[], bool]] = []
         if self._reconciliations is not None:
             sources.append(self._reconciliations.tick)
-        if self._updates is not None:
-            sources.append(self._updates.tick)
         if self._recipes is not None:
             sources.append(self._recipes.tick)
         sources.append(self._run_generic)
@@ -264,7 +260,7 @@ def assemble_production_worker(
     worker_id: str,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
-    """Compose the one worker-owned reconciliation and platform-update runtime."""
+    """Compose the worker-owned reconciliation runtime."""
 
     from .agent_reconciliation import AgentReconciliationService
     from .distributed_recovery import DistributedRecoveryCoordinator
@@ -273,39 +269,6 @@ def assemble_production_worker(
     from .telemetry_maintenance import (
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
-    )
-    from .update_routes import (
-        ProductionUpdateRouteBoundary,
-        load_authoritative_route_request,
-    )
-    from .update_worker import UpdateRolloutWorker
-    from .updates import UpdateOrchestrator
-
-    routes = ProductionUpdateRouteBoundary(
-        sessions,
-        publisher,
-        route_root=route_root,
-        request_loader=lambda session, reconciliation_id: (
-            load_authoritative_route_request(
-                session,
-                reconciliation_id,
-                endpoint_resolver=endpoint_resolver,
-                clock=clock,
-            )
-        ),
-        clock=clock,
-    )
-    update_orchestrator = UpdateOrchestrator(
-        sessions,
-        agent_jobs,
-        routes,
-        clock=clock,
-    )
-    updates = UpdateRolloutWorker(
-        sessions,
-        update_orchestrator,
-        routes,
-        authority,
     )
     reconciliations = AgentReconciliationService(
         sessions,
@@ -345,7 +308,6 @@ def assemble_production_worker(
             clock=clock,
         ),
         reconciliations=reconciliations,
-        updates=updates,
         recipes=recipe_operations,
         loop_heartbeat=loop_heartbeat,
     )
@@ -366,7 +328,6 @@ if __name__ == "__main__":
         FileSupervisorAcknowledger,
     )
     from .settings import GenerationStartupSettings, StartupMode, WorkerSettings
-    from .update_signer import UnixUpdateSignerClient
     from .worker_authority import HttpWorkerAuthority
 
     settings = WorkerSettings.from_env_and_secrets()
@@ -405,9 +366,6 @@ if __name__ == "__main__":
     agent_jobs = AgentJobService(
         sessions,
         clock=clock,
-        update_signer=UnixUpdateSignerClient(
-            settings.update_signer_socket_path
-        ),
     )
     route_root = Path("/routes")
     publisher = AtomicRouteBundlePublisher(

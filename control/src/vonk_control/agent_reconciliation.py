@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentOperation, AgentResult, canonical_message
+from vonk_agent_protocol import AgentResult, canonical_message
 
 from .logging import redact_text
 from .models import (
@@ -59,8 +59,6 @@ _WORKLOAD_ACTIONS = {
 }
 _MUTATIONS = frozenset(
     {
-        "agent.rollback",
-        "agent.update",
         "release.install",
         "workload.prepare",
         "workload.start",
@@ -80,8 +78,6 @@ _REQUIRED_AGENT_CAPABILITIES = frozenset(
 )
 _NEXT_AGENT_CAPABILITIES = _REQUIRED_AGENT_CAPABILITIES | frozenset(
     {
-        "agent.rollback",
-        "agent.update",
         "agent.runtime.rust.v1",
         "recipe.build.v1",
         "recipe.image.import.v1",

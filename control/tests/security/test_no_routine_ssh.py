@@ -91,9 +91,7 @@ def test_production_images_have_no_git_or_ssh_transport_tools() -> None:
 
 def test_production_worker_has_no_cluster_egress_network() -> None:
     compose = (ROOT / "deploy/compose/compose.yaml").read_text()
-    worker = compose.split("\n  control-worker:\n", 1)[1].split(
-        "\n  control-signer:\n", 1
-    )[0]
+    worker = compose.split("\n  control-worker:\n", 1)[1].split("\n  ", 1)[0]
     for forbidden in (
         "/repository",
         "git-signing-key",

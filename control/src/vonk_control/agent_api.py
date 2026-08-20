@@ -46,9 +46,9 @@ from .auth import (
     agent_source_from_scope,
 )
 from .enrollment import (
+    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
     EnrollmentService,
-    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     PendingEnrollment,
     RemoteRevocationUncertain,
     RenewalInProgress,
@@ -72,10 +72,6 @@ from .models import (
     RecipeSourceBundle,
 )
 from .operation_api import bounded_error_responses
-from .workload_helper_authority import (
-    WorkloadHelperAuthorityError,
-    WorkloadHelperAuthorityService,
-)
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
@@ -90,6 +86,10 @@ from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
+)
+from .workload_helper_authority import (
+    WorkloadHelperAuthorityError,
+    WorkloadHelperAuthorityService,
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -285,17 +285,18 @@ class EnrollmentListResponse(BaseModel):
 class AgentRuntimeIdentityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     architecture: Literal["linux-arm64", "linux-x86_64"]
-    platform_version: str = Field(
+    semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
     )
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    active_slot: str = Field(pattern=r"^[AB]$")
-    agent_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    supervisor_generation: int = Field(ge=1, le=999_999_999, strict=True)
-    supervisor_ready_generation: int | None = Field(
-        default=None, ge=1, le=999_999_999, strict=True
-    )
-    self_test_passed: bool = Field(default=False, strict=True)
+    binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    self_test_passed: Literal[True]
+
+    @model_validator(mode="after")
+    def exact_rust_identity(self) -> AgentRuntimeIdentityRequest:
+        if self.build_digest != f"sha256:{self.binary_digest}":
+            raise ValueError("runtime identity digests are inconsistent")
+        return self
 
 
 class ClaimRequest(BaseModel):

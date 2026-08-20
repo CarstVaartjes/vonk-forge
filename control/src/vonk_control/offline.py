@@ -71,7 +71,6 @@ _MAINTENANCE_LOG_SERVICES = frozenset(
     {
         "caddy",
         "control-api",
-        "control-signer",
         "control-worker",
         "grafana",
         "hermes-agent",

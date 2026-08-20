@@ -198,11 +198,10 @@ test("renders a complete shell-quoted Spark bootstrap command", async () => {
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
   expect(command.textContent).toBe([
-    "sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap " + "\\",
-    "  --token 'secret-token' " + "\\",
-    "  --controller-endpoint 'https://controller.example.test:9443' " + "\\",
-    "  --enrollment-endpoint 'https://enrollment.example.test:9444' " + "\\",
-    "  --ca-fingerprint 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+    "sudo /usr/lib/vonk-forge/vonk-agent pair " + "\\",
+    "  --enrollment 'https://enrollment.example.test:9444' " + "\\",
+    "  --ca-sha256 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' " + "\\",
+    "  --token-stdin",
   ].join("\n"));
   expect(command).not.toHaveTextContent("--config");
   expect(command).not.toHaveTextContent("--state-root");

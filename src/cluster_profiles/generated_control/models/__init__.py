@@ -2,9 +2,7 @@
 
 from .agent_summary import AgentSummary
 from .agents_response import AgentsResponse
-from .apply_platform_update_response_apply_update_api_v1_updates_post import ApplyPlatformUpdateResponseApplyUpdateApiV1UpdatesPost
 from .apply_request import ApplyRequest
-from .approve_platform_update_recovery_response_approve_update_resume_api_v1_updates_rollout_id_approve_resume_post import ApprovePlatformUpdateRecoveryResponseApproveUpdateResumeApiV1UpdatesRolloutIdApproveResumePost
 from .bounded_error_response import BoundedErrorResponse
 from .build_plan_response import BuildPlanResponse
 from .build_preview_request import BuildPreviewRequest
@@ -35,8 +33,6 @@ from .fork_recipe_request import ForkRecipeRequest
 from .freshness_policy import FreshnessPolicy
 from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
-from .get_platform_update_response_update_status_api_v1_updates_rollout_id_get import GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet
-from .get_platform_update_skew_response_update_skew_api_v1_updates_skew_get import GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet
 from .global_import_preview_request import GlobalImportPreviewRequest
 from .global_import_request import GlobalImportRequest
 from .global_revision_response import GlobalRevisionResponse
@@ -117,7 +113,6 @@ from .placement_recommendation import PlacementRecommendation
 from .placement_recommendation_install_state import PlacementRecommendationInstallState
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
-from .plan_platform_update_response_update_plan_api_v1_updates_plan_post import PlanPlatformUpdateResponseUpdatePlanApiV1UpdatesPlanPost
 from .plan_reason import PlanReason
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
@@ -209,9 +204,6 @@ from .uninstall_plan_response import UninstallPlanResponse
 from .uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
 from .uninstall_preview_request import UninstallPreviewRequest
 from .uninstall_request import UninstallRequest
-from .update_apply_request import UpdateApplyRequest
-from .update_approve_resume_request import UpdateApproveResumeRequest
-from .update_plan_request import UpdatePlanRequest
 from .update_recipe_draft_request import UpdateRecipeDraftRequest
 from .update_recipe_draft_request_document import UpdateRecipeDraftRequestDocument
 from .validation_error import ValidationError
@@ -233,9 +225,7 @@ from .visual_validation import VisualValidation
 __all__ = (
     "AgentsResponse",
     "AgentSummary",
-    "ApplyPlatformUpdateResponseApplyUpdateApiV1UpdatesPost",
     "ApplyRequest",
-    "ApprovePlatformUpdateRecoveryResponseApproveUpdateResumeApiV1UpdatesRolloutIdApproveResumePost",
     "BoundedErrorResponse",
     "BuildPlanResponse",
     "BuildPreviewRequest",
@@ -266,8 +256,6 @@ __all__ = (
     "FreshnessPolicy",
     "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
-    "GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet",
-    "GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet",
     "GlobalImportPreviewRequest",
     "GlobalImportRequest",
     "GlobalRevisionResponse",
@@ -348,7 +336,6 @@ __all__ = (
     "PlacementRecommendationInstallState",
     "PlacementRecommendationLoadState",
     "PlacementScore",
-    "PlanPlatformUpdateResponseUpdatePlanApiV1UpdatesPlanPost",
     "PlanReason",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
@@ -440,9 +427,6 @@ __all__ = (
     "UninstallPlanResponseRecipeContent",
     "UninstallPreviewRequest",
     "UninstallRequest",
-    "UpdateApplyRequest",
-    "UpdateApproveResumeRequest",
-    "UpdatePlanRequest",
     "UpdateRecipeDraftRequest",
     "UpdateRecipeDraftRequestDocument",
     "ValidationError",

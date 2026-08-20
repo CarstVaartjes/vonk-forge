@@ -9,9 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -30,14 +28,10 @@ from .models import (
     AgentNode,
     AgentOperationAttempt,
     Job,
-    NodeMutationLease,
     Observation,
     RecipeBuild,
     Reconciliation,
     ReconciliationOperation,
-    UpdateAuthorizationIntent,
-    UpdateRollout,
-    UpdateRolloutNode,
 )
 from .models import AgentOperation as StoredOperation
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
@@ -49,66 +43,14 @@ ResultConsumer = Callable[
 ContactConsumer = Callable[[Session, AgentSource], None]
 
 
-class UpdateAuthorizer(Protocol):
-    def refresh_and_validate(
-        self, payload: Mapping[str, object], *, target_name: str
-    ) -> object: ...
-
-    def authorize(
-        self,
-        payload: Mapping[str, object],
-        *,
-        operation_id: str,
-        fence: str,
-        expires_at: int,
-        previous_slot: str,
-        previous_sha256: str,
-        previous_generation: int,
-        node_id: str,
-        attempt: int,
-        claim_deadline: int,
-        prepared: object,
-        now: datetime,
-    ) -> dict[str, object]: ...
-
-    def authorize_rollback(
-        self,
-        *,
-        operation_id: str,
-        fence: str,
-        expires_at: int,
-        current_slot: str,
-        current_sha256: str,
-        current_generation: int,
-        node_id: str,
-        attempt: int,
-        claim_deadline: int,
-        now: datetime,
-    ) -> dict[str, object]: ...
 
 
-class UpdateSigner(Protocol):
-    def authorize(self, request: Mapping[str, object]) -> dict[str, object]: ...
 
 
-@dataclass(frozen=True)
-class ReservedUpdateAuthorization:
-    """Immutable signer request committed before the signer is called."""
-
-    intent_id: str
-    request: dict[str, object]
 
 
-@dataclass(frozen=True)
-class AuthorizationFinalization:
-    """Typed CAS result; stale responses are never queueable operations."""
-
-    operation: StoredOperation | None
-    stale: bool
 
 
-class StaleUpdateAuthorization(ValueError):
-    """A signer response lost its rollout authority before publication."""
 
 
 _SAFE_AUTOMATIC_RECLAIM = frozenset(
@@ -130,8 +72,6 @@ _RECIPE_CAPABILITIES = frozenset(
 )
 _MUTATING_OPERATIONS = frozenset(
     {
-        AgentOperation.AGENT_ROLLBACK.value,
-        AgentOperation.AGENT_UPDATE.value,
         AgentOperation.RELEASE_INSTALL.value,
         AgentOperation.WORKLOAD_PREPARE.value,
         AgentOperation.WORKLOAD_START.value,
@@ -162,13 +102,7 @@ _REQUIRED_CAPABILITIES = frozenset(
 )
 _NEXT_CAPABILITIES = (
     _REQUIRED_CAPABILITIES
-    | frozenset(
-        {
-            AgentOperation.AGENT_ROLLBACK.value,
-            AgentOperation.AGENT_UPDATE.value,
-            "agent.runtime.rust.v1",
-        }
-    )
+    | frozenset({"agent.runtime.rust.v1"})
     | _RECIPE_CAPABILITIES
 )
 _CONTROL_OPERATIONS = _NEXT_CAPABILITIES - frozenset({"agent.runtime.rust.v1"})
@@ -202,8 +136,6 @@ class AgentJobService:
         contact_consumer: ContactConsumer | None = None,
         revision_eligible: Callable[[str], bool] | None = None,
         current_revision: Callable[[], str] | None = None,
-        update_authorizer: UpdateAuthorizer | None = None,
-        update_signer: UpdateSigner | None = None,
     ) -> None:
         if result_consumer is not None and not callable(result_consumer):
             raise TypeError("agent result consumer must be callable")
@@ -217,8 +149,6 @@ class AgentJobService:
         self._contact_consumer = contact_consumer
         self._revision_eligible = revision_eligible
         self._current_revision = current_revision
-        self._update_authorizer = update_authorizer
-        self._update_signer = update_signer
         self._configuration_lock = threading.Lock()
         self._started = False
         # SQLite ignores row locks. This only prevents same-service test races;
@@ -233,14 +163,7 @@ class AgentJobService:
         operation: str,
         authority_revision: str,
         payload: Mapping[str, object],
-        *,
-        platform_target_name: str | None = None,
     ) -> StoredOperation:
-        prepared_update = (
-            self.prepare_update(payload, target_name=platform_target_name)
-            if operation == AgentOperation.AGENT_UPDATE.value
-            else None
-        )
         with self._sessions.begin() as session:
             stored = self.enqueue_in_session(
                 session,
@@ -250,7 +173,6 @@ class AgentJobService:
                 authority_revision,
                 payload,
                 operation_id=str(uuid.uuid4()),
-                prepared_update=prepared_update,
             )
         self.notify_available()
         return stored
@@ -265,7 +187,6 @@ class AgentJobService:
         payload: Mapping[str, object],
         *,
         operation_id: str,
-        prepared_update: object | None = None,
     ) -> StoredOperation:
         """Attach a caller-identified operation to the caller's transaction."""
         self._mark_started()
@@ -296,17 +217,7 @@ class AgentJobService:
         )
         if parent is None:
             raise KeyError(parent_job_id)
-        authorized_platform_rollback = (
-            parent.kind == "platform.update"
-            and parent.state == "waiting-for-operator"
-            and protocol_operation is AgentOperation.AGENT_ROLLBACK
-        )
-        if (
-            protocol_operation is AgentOperation.AGENT_ROLLBACK
-            and not authorized_platform_rollback
-        ):
-            raise ValueError("agent rollback requires a waiting platform update parent")
-        if parent.state in _TERMINAL_PARENT_STATES and not authorized_platform_rollback:
+        if parent.state in _TERMINAL_PARENT_STATES:
             raise ValueError(
                 "cannot enqueue an agent operation beneath a terminal parent"
             )
@@ -316,60 +227,6 @@ class AgentJobService:
             raise ValueError("agent operation node must be a parent target")
         reserved_fence = str(uuid.uuid4())
         final_payload: Mapping[str, object] = payload
-        if protocol_operation is AgentOperation.AGENT_UPDATE:
-            if self._update_authorizer is None or prepared_update is None:
-                raise RuntimeError("agent update authorization is unavailable")
-            if (
-                node.active_slot not in {"A", "B"}
-                or not isinstance(node.agent_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", node.agent_sha256) is None
-                or isinstance(node.supervisor_generation, bool)
-                or not isinstance(node.supervisor_generation, int)
-                or not 1 <= node.supervisor_generation <= 999_999_999
-            ):
-                raise ValueError("agent update source identity is unavailable")
-            deadline = int(_aware(now).timestamp()) + 600
-            final_payload = self._update_authorizer.authorize(
-                payload,
-                operation_id=operation_id,
-                fence=reserved_fence,
-                expires_at=deadline,
-                previous_slot=node.active_slot,
-                previous_sha256=node.agent_sha256,
-                previous_generation=node.supervisor_generation,
-                node_id=node.node_id,
-                attempt=1,
-                claim_deadline=deadline,
-                prepared=prepared_update,
-                now=_aware(now),
-            )
-        elif protocol_operation is AgentOperation.AGENT_ROLLBACK:
-            if self._update_authorizer is None:
-                raise RuntimeError("agent rollback authorization is unavailable")
-            if (
-                node.active_slot not in {"A", "B"}
-                or not isinstance(node.agent_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", node.agent_sha256) is None
-                or isinstance(node.supervisor_generation, bool)
-                or not isinstance(node.supervisor_generation, int)
-                or not 1 <= node.supervisor_generation <= 999_999_999
-            ):
-                raise ValueError("agent rollback source identity is unavailable")
-            if payload:
-                raise ValueError("unsigned agent rollback payload must be empty")
-            deadline = int(_aware(now).timestamp()) + 600
-            final_payload = self._update_authorizer.authorize_rollback(
-                operation_id=operation_id,
-                fence=reserved_fence,
-                expires_at=deadline,
-                current_slot=node.active_slot,
-                current_sha256=node.agent_sha256,
-                current_generation=node.supervisor_generation,
-                node_id=node.node_id,
-                attempt=1,
-                claim_deadline=deadline,
-                now=_aware(now),
-            )
         validated = AgentClaim(
             schema_version=1,
             job_id=parent_job_id,
@@ -400,464 +257,10 @@ class AgentJobService:
         session.flush()
         return stored
 
-    def prepare_update(
-        self, payload: Mapping[str, object], *, target_name: str | None
-    ) -> object:
-        """Verify TUF and return an immutable exact-payload signing handle."""
-        if self._update_authorizer is None:
-            raise RuntimeError("agent update authorization is unavailable")
-        if not isinstance(target_name, str):
-            raise TypeError("versioned platform target name is required")
-        return self._update_authorizer.refresh_and_validate(
-            payload, target_name=target_name
-        )
 
-    def reserve_update_authorization_in_session(
-        self,
-        session: Session,
-        *,
-        rollout_id: str,
-        rollout_node_id: str,
-        operation: str,
-        payload: Mapping[str, object],
-        target_release_digest: str | None,
-    ) -> ReservedUpdateAuthorization:
-        """Persist exact signer input while rollout authority is locked."""
-        if self._update_signer is None:
-            raise RuntimeError("dedicated update signer is unavailable")
-        now = _aware(self._clock())
-        protocol_operation = AgentOperation(operation)
-        if protocol_operation not in {
-            AgentOperation.AGENT_UPDATE,
-            AgentOperation.AGENT_ROLLBACK,
-        }:
-            raise ValueError("update authorization operation is invalid")
-        rollout = session.scalar(
-            select(UpdateRollout)
-            .where(UpdateRollout.id == rollout_id)
-            .with_for_update(of=UpdateRollout)
-        )
-        rollout_node = session.scalar(
-            select(UpdateRolloutNode)
-            .where(UpdateRolloutNode.id == rollout_node_id)
-            .with_for_update(of=UpdateRolloutNode)
-        )
-        if (
-            rollout is None
-            or rollout_node is None
-            or rollout_node.rollout_id != rollout.id
-        ):
-            raise ValueError("update authorization rollout binding is absent")
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == rollout_node.node_id)
-            .with_for_update(of=AgentNode)
-        )
-        lease = session.scalar(
-            select(NodeMutationLease)
-            .where(NodeMutationLease.node_id == rollout_node.node_id)
-            .with_for_update(of=NodeMutationLease)
-        )
-        parent = session.scalar(
-            select(Job).where(Job.id == rollout.job_id).with_for_update(of=Job)
-        )
-        if node is None or parent is None:
-            raise ValueError("update authorization identity is absent")
-        if (
-            node.state != "active"
-            or node.revoked_at is not None
-            or node.active_slot not in {"A", "B"}
-            or not isinstance(node.agent_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", node.agent_sha256) is None
-            or isinstance(node.supervisor_generation, bool)
-            or not isinstance(node.supervisor_generation, int)
-            or not 1 <= node.supervisor_generation <= 999_999_999
-        ):
-            raise ValueError("agent update source identity is unavailable")
-        observations = rollout.plan.get("source_observations")
-        planned_source = (
-            observations.get(node.node_id) if isinstance(observations, dict) else None
-        )
-        source_fields = (
-            "platform_version",
-            "build_digest",
-            "protocol_version",
-            "active_slot",
-            "agent_sha256",
-            "supervisor_generation",
-        )
-        if protocol_operation is AgentOperation.AGENT_UPDATE and (
-            not isinstance(planned_source, dict)
-            or hashlib.sha256(_signer_message(planned_source)).hexdigest()
-            != rollout_node.source_identity_digest
-            or any(
-                getattr(node, field) != planned_source.get(field)
-                for field in source_fields
-            )
-        ):
-            raise ValueError("planned update source identity changed")
-        if (
-            parent.kind != "platform.update"
-            or parent.id != rollout.job_id
-            or parent.authority_revision != rollout.authority_revision
-            or rollout_node.node_id not in parent.targets
-            or lease is None
-            or lease.owner_kind != "update-rollout"
-            or lease.owner_id != rollout.id
-            or lease.state != "held"
-        ):
-            raise ValueError("update authorization rollout authority is unavailable")
-        if protocol_operation is AgentOperation.AGENT_UPDATE:
-            if (
-                rollout.state != "withdrawing"
-                or rollout_node.state != "routes-withdrawn"
-                or not isinstance(target_release_digest, str)
-                or target_release_digest != "sha256:" + rollout.release_digest
-            ):
-                raise ValueError("agent update authorization state is stale")
-        elif (
-            rollout.state != "paused"
-            or rollout_node.state != "failed"
-            or payload
-            or target_release_digest is not None
-            or parent.state != "waiting-for-operator"
-        ):
-            raise ValueError("agent rollback authorization state is stale")
-        admin_grant = (
-            rollout.update_admin_grant
-            if protocol_operation is AgentOperation.AGENT_UPDATE
-            else rollout.rollback_admin_grant
-        )
-        if not isinstance(admin_grant, dict):
-            raise TypeError("API-issued update authorization grant is unavailable")
 
-        existing = session.scalar(
-            select(UpdateAuthorizationIntent)
-            .where(
-                UpdateAuthorizationIntent.rollout_node_id == rollout_node.id,
-                UpdateAuthorizationIntent.action == protocol_operation.value,
-                UpdateAuthorizationIntent.state.in_(("reserved", "signed", "queued")),
-            )
-            .order_by(UpdateAuthorizationIntent.created_at.desc())
-            .with_for_update(of=UpdateAuthorizationIntent)
-            .limit(1)
-        )
-        if existing is not None:
-            if existing.state == "queued":
-                operation = session.scalar(
-                    select(StoredOperation)
-                    .where(StoredOperation.id == existing.operation_id)
-                    .with_for_update(of=StoredOperation)
-                )
-                if operation is not None and operation.state in {"queued", "running"}:
-                    return ReservedUpdateAuthorization(
-                        existing.id, dict(existing.request)
-                    )
-                existing.state = "stale"
-                existing.updated_at = now
-            elif _aware(existing.expires_at) <= now:
-                existing.state = "stale"
-                existing.updated_at = now
-            else:
-                return ReservedUpdateAuthorization(existing.id, dict(existing.request))
 
-        intent_id = str(uuid.uuid4())
-        operation_id = str(uuid.uuid4())
-        fence = str(uuid.uuid4())
-        expires_at = now + timedelta(seconds=600)
-        request: dict[str, object] = {
-            "action": protocol_operation.value,
-            "attempt": 1,
-            "claim_deadline": int(expires_at.timestamp()),
-            "expires_at": int(expires_at.timestamp()),
-            "fence": fence,
-            "intent_id": intent_id,
-            "node_id": node.node_id,
-            "operation_id": operation_id,
-            "parent_job_id": parent.id,
-            "rollout_id": rollout.id,
-            "schema_version": 1,
-            "source": {
-                "generation": node.supervisor_generation,
-                "sha256": node.agent_sha256,
-                "slot": node.active_slot,
-            },
-        }
-        request["admin_grant"] = _document(admin_grant)
-        unsigned_payload = _document(payload)
-        if protocol_operation is AgentOperation.AGENT_UPDATE:
-            platform_target_name = (
-                f"platform/releases/{rollout.target_platform_version}/"
-                f"{rollout.release_digest}.json"
-            )
-            request["payload"] = unsigned_payload
-            request["platform_target_name"] = platform_target_name
-            request["target_release_digest"] = target_release_digest
-            request["expected_tuf_target_sha256"] = rollout.release_digest
-            request["expected_tuf_targets_version"] = rollout.tuf_targets_version
-        wire = _signer_message(request)
-        intent = UpdateAuthorizationIntent(
-            id=intent_id,
-            rollout_id=rollout.id,
-            rollout_node_id=rollout_node.id,
-            parent_job_id=parent.id,
-            node_id=node.node_id,
-            operation_id=operation_id,
-            fence=fence,
-            action=protocol_operation.value,
-            state="reserved",
-            unsigned_payload=unsigned_payload,
-            payload_digest=hashlib.sha256(
-                canonical_message(unsigned_payload)
-            ).hexdigest(),
-            source_slot=node.active_slot,
-            source_sha256=node.agent_sha256,
-            source_generation=node.supervisor_generation,
-            target_release_digest=target_release_digest,
-            expected_tuf_target_sha256=(
-                rollout.release_digest
-                if protocol_operation is AgentOperation.AGENT_UPDATE
-                else None
-            ),
-            expected_tuf_targets_version=(
-                rollout.tuf_targets_version
-                if protocol_operation is AgentOperation.AGENT_UPDATE
-                else None
-            ),
-            admin_grant=_document(admin_grant),
-            admin_grant_digest=hashlib.sha256(
-                canonical_message(admin_grant)
-            ).hexdigest(),
-            expires_at=expires_at,
-            request=_document(request),
-            request_digest=hashlib.sha256(wire).hexdigest(),
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(intent)
-        session.flush()
-        return ReservedUpdateAuthorization(intent.id, dict(intent.request))
 
-    def sign_update_authorization(
-        self, reserved: ReservedUpdateAuthorization
-    ) -> dict[str, object]:
-        """Call the networkless signer; callers must not hold a DB transaction."""
-        if self._update_signer is None:
-            raise RuntimeError("dedicated update signer is unavailable")
-        return self._update_signer.authorize(reserved.request)
-
-    def mark_update_authorizations_stale(
-        self, reserved: Sequence[ReservedUpdateAuthorization]
-    ) -> None:
-        """Durably quarantine a failed CAS after its caller transaction rolls back."""
-        now = _aware(self._clock())
-        intent_ids = [item.intent_id for item in reserved]
-        with self._sessions.begin() as session:
-            intents = session.scalars(
-                select(UpdateAuthorizationIntent)
-                .where(UpdateAuthorizationIntent.id.in_(intent_ids))
-                .with_for_update(of=UpdateAuthorizationIntent)
-            ).all()
-            for intent in intents:
-                if intent.state in {"reserved", "signed"}:
-                    intent.state = "stale"
-                    intent.updated_at = now
-
-    def finalize_update_authorization_in_session(
-        self,
-        session: Session,
-        reserved: ReservedUpdateAuthorization,
-        response: Mapping[str, object],
-    ) -> AuthorizationFinalization:
-        """CAS a signed response into the queue under fresh rollout locks."""
-        now = _aware(self._clock())
-        discovered = session.get(UpdateAuthorizationIntent, reserved.intent_id)
-        if discovered is None:
-            raise ValueError("update authorization intent is absent")
-        rollout = session.scalar(
-            select(UpdateRollout)
-            .where(UpdateRollout.id == discovered.rollout_id)
-            .with_for_update(of=UpdateRollout)
-        )
-        rollout_node = session.scalar(
-            select(UpdateRolloutNode)
-            .where(UpdateRolloutNode.id == discovered.rollout_node_id)
-            .with_for_update(of=UpdateRolloutNode)
-        )
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == discovered.node_id)
-            .with_for_update(of=AgentNode)
-        )
-        lease = session.scalar(
-            select(NodeMutationLease)
-            .where(NodeMutationLease.node_id == discovered.node_id)
-            .with_for_update(of=NodeMutationLease)
-        )
-        parent = session.scalar(
-            select(Job)
-            .where(Job.id == discovered.parent_job_id)
-            .with_for_update(of=Job)
-        )
-        intent = session.scalar(
-            select(UpdateAuthorizationIntent)
-            .where(UpdateAuthorizationIntent.id == reserved.intent_id)
-            .with_for_update(of=UpdateAuthorizationIntent)
-            .execution_options(populate_existing=True)
-        )
-        if intent is None:
-            raise ValueError("update authorization intent is absent")
-        if intent.state == "queued":
-            operation = session.get(StoredOperation, intent.operation_id)
-            if operation is None:
-                raise ValueError("queued update authorization lost its operation")
-            return AuthorizationFinalization(operation, False)
-        signed = dict(response)
-        response_digest = hashlib.sha256(_signer_message(signed)).hexdigest()
-        valid_response = (
-            set(signed)
-            == {"intent_id", "request_digest", "schema_version", "signed_payload"}
-            and signed.get("schema_version") == 1
-            and signed.get("intent_id") == intent.id
-            and signed.get("request_digest") == intent.request_digest
-            and isinstance(signed.get("signed_payload"), dict)
-        )
-        final_payload = signed.get("signed_payload")
-        receipt = (
-            final_payload.get("receipt") if isinstance(final_payload, dict) else None
-        )
-        exact_receipt = (
-            isinstance(receipt, dict)
-            and receipt.get("operation_id") == intent.operation_id
-            and receipt.get("fence") == intent.fence
-            and receipt.get("node_id") == intent.node_id
-            and receipt.get("attempt") == 1
-            and receipt.get("claim_deadline")
-            == int(_aware(intent.expires_at).timestamp())
-            and receipt.get("expires_at") == int(_aware(intent.expires_at).timestamp())
-        )
-        if intent.action == AgentOperation.AGENT_UPDATE.value:
-            exact_receipt = bool(
-                exact_receipt
-                and isinstance(final_payload, dict)
-                and final_payload.get("artifact")
-                == intent.unsigned_payload.get("artifact")
-                and final_payload.get("release")
-                == intent.unsigned_payload.get("release")
-                and receipt.get("previous_slot") == intent.source_slot
-                and receipt.get("previous_sha256") == intent.source_sha256
-                and receipt.get("previous_generation") == intent.source_generation
-                and receipt.get("platform_target_name")
-                == intent.request.get("platform_target_name")
-                and receipt.get("platform_target_sha256")
-                == intent.expected_tuf_target_sha256
-                and receipt.get("tuf_targets_version")
-                == intent.expected_tuf_targets_version
-            )
-        else:
-            exact_receipt = bool(
-                exact_receipt
-                and receipt.get("action") == "operator-rollback"
-                and receipt.get("current_slot") == intent.source_slot
-                and receipt.get("current_sha256") == intent.source_sha256
-                and receipt.get("current_generation") == intent.source_generation
-            )
-        unchanged_source = (
-            node is not None
-            and node.active_slot == intent.source_slot
-            and node.agent_sha256 == intent.source_sha256
-            and node.supervisor_generation == intent.source_generation
-        )
-        exact_rows = (
-            rollout is not None
-            and rollout.id == intent.rollout_id
-            and rollout_node is not None
-            and rollout_node.id == intent.rollout_node_id
-            and rollout_node.rollout_id == rollout.id
-            and rollout_node.node_id == intent.node_id
-            and node is not None
-            and node.node_id == intent.node_id
-            and parent is not None
-            and parent.id == intent.parent_job_id
-            and rollout.job_id == parent.id
-        )
-        held_authority = (
-            lease is not None
-            and rollout is not None
-            and lease.owner_kind == "update-rollout"
-            and lease.owner_id == rollout.id
-            and lease.state == "held"
-        )
-        update_state = (
-            intent.action == AgentOperation.AGENT_UPDATE.value
-            and rollout is not None
-            and rollout.state == "withdrawing"
-            and rollout_node is not None
-            and rollout_node.state == "routes-withdrawn"
-            and parent is not None
-            and parent.state == "running"
-            and intent.target_release_digest == "sha256:" + rollout.release_digest
-        )
-        rollback_state = (
-            intent.action == AgentOperation.AGENT_ROLLBACK.value
-            and rollout is not None
-            and rollout.state == "paused"
-            and rollout_node is not None
-            and rollout_node.state == "failed"
-            and parent is not None
-            and parent.state == "waiting-for-operator"
-        )
-        if (
-            intent.state not in {"reserved", "signed"}
-            or _aware(intent.expires_at) <= now
-            or dict(intent.request) != reserved.request
-            or not valid_response
-            or not exact_receipt
-            or not exact_rows
-            or not unchanged_source
-            or not held_authority
-            or not (update_state or rollback_state)
-        ):
-            intent.state = "stale"
-            intent.updated_at = now
-            session.flush()
-            return AuthorizationFinalization(None, True)
-        final_payload = signed["signed_payload"]
-        assert isinstance(final_payload, dict)
-        validated = AgentClaim(
-            schema_version=1,
-            job_id=intent.parent_job_id,
-            operation_id=intent.operation_id,
-            attempt=1,
-            fence=intent.fence,
-            node_id=intent.node_id,
-            operation=AgentOperation(intent.action),
-            authority_revision=rollout.authority_revision,
-            payload_digest=hashlib.sha256(canonical_message(final_payload)).hexdigest(),
-            payload=final_payload,
-            deadline=now,
-        )
-        stored = StoredOperation(
-            id=validated.operation_id,
-            parent_job_id=validated.job_id,
-            node_id=validated.node_id,
-            kind=validated.operation.value,
-            payload_digest=validated.payload_digest,
-            payload=_document(validated.payload),
-            authority_revision=validated.authority_revision,
-            state="queued",
-            current_attempt=0,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(stored)
-        intent.state = "queued"
-        intent.signed_response = _document(signed)
-        intent.response_digest = response_digest
-        intent.updated_at = now
-        intent.queued_at = now
-        session.flush()
-        return AuthorizationFinalization(stored, False)
 
     def notify_available(self) -> None:
         """Wake long polls after a caller-managed enqueue transaction commits."""
@@ -967,26 +370,6 @@ class AgentJobService:
             )
             if reconciliation_hint is not None:
                 self._lock_reconciliation_targets(session, reconciliation_hint)
-            update_hint = session.scalar(
-                select(StoredOperation.id)
-                .join(Job, Job.id == StoredOperation.parent_job_id)
-                .where(
-                    StoredOperation.node_id == node_id,
-                    StoredOperation.kind.in_(
-                        {
-                            AgentOperation.AGENT_UPDATE.value,
-                            AgentOperation.AGENT_ROLLBACK.value,
-                        }
-                    ),
-                    StoredOperation.state == "queued",
-                    StoredOperation.current_attempt == 0,
-                    Job.kind == "platform.update",
-                )
-                .order_by(StoredOperation.created_at, StoredOperation.id)
-                .limit(1)
-            )
-            if update_hint is not None:
-                self._lock_platform_update_claim(session, update_hint)
             identity = self._lock_identity(session, node_id, certificate_serial)
             now = self._clock()
             if identity is None or not self._identity_is_active(*identity, now):
@@ -1012,13 +395,11 @@ class AgentJobService:
                 )
                 .exists()
             )
-            excluded: list[str] = []
             while True:
                 statement = (
                     select(StoredOperation)
                     .where(
                         StoredOperation.node_id == node_id,
-                        StoredOperation.id.not_in(excluded),
                         or_(
                             and_(
                                 StoredOperation.state == "queued",
@@ -1046,16 +427,7 @@ class AgentJobService:
                     return None
                 if self._claim_has_authority(session, operation, now):
                     break
-                if operation.kind not in {
-                    AgentOperation.AGENT_UPDATE.value,
-                    AgentOperation.AGENT_ROLLBACK.value,
-                }:
-                    return None
-                operation.state = "waiting-for-operator"
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.updated_at = now
-                excluded.append(operation.id)
+                return None
             if capabilities is not None and operation.kind not in capabilities:
                 return None
             if operation.kind in _RECIPE_CAPABILITIES and (
@@ -1107,29 +479,11 @@ class AgentJobService:
                 if not self._project_unsafe_expiry(session, operation, now):
                     self._aggregate_parent(session, operation.parent_job_id)
                 return None
-            update_binding = self._update_claim_binding(operation, node, now)
-            if (
-                operation.kind
-                in {
-                    AgentOperation.AGENT_UPDATE.value,
-                    AgentOperation.AGENT_ROLLBACK.value,
-                }
-                and update_binding is None
-            ):
-                operation.state = "waiting-for-operator"
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.updated_at = now
-                self._aggregate_parent(session, operation.parent_job_id)
-                return None
             operation.current_attempt += 1
             operation.state = "running"
             operation.updated_at = now
-            if update_binding is None:
-                fence = str(uuid.uuid4())
-                deadline = now + timedelta(seconds=lease_seconds)
-            else:
-                fence, deadline = update_binding
+            fence = str(uuid.uuid4())
+            deadline = now + timedelta(seconds=lease_seconds)
             attempt = AgentOperationAttempt(
                 operation_id=operation.id,
                 attempt=operation.current_attempt,
@@ -1169,8 +523,8 @@ class AgentJobService:
             and build.builder_node_id == operation.node_id
             and isinstance(report, dict)
             and runtime_identity is not None
-            and report.get("builder_agent_sha256")
-            == runtime_identity.get("agent_sha256")
+            and report.get("builder_binary_digest")
+            == runtime_identity.get("binary_digest")
             and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
         )
 
@@ -1218,103 +572,7 @@ class AgentJobService:
             )
         self._aggregate_parent(session, operation.parent_job_id)
 
-    @staticmethod
-    def _lock_platform_update_claim(session: Session, operation_id: str) -> None:
-        """Acquire rollout authority before the operation using the global order."""
-        discovered = session.get(StoredOperation, operation_id)
-        if discovered is None:
-            return
-        parent = session.get(Job, discovered.parent_job_id)
-        if parent is None or parent.kind != "platform.update":
-            return
-        rollout = session.scalar(
-            select(UpdateRollout)
-            .where(UpdateRollout.job_id == parent.id)
-            .with_for_update(of=UpdateRollout)
-            .execution_options(populate_existing=True)
-        )
-        if rollout is None:
-            return
-        session.scalar(
-            select(UpdateRolloutNode)
-            .where(
-                UpdateRolloutNode.rollout_id == rollout.id,
-                UpdateRolloutNode.node_id == discovered.node_id,
-            )
-            .with_for_update(of=UpdateRolloutNode)
-            .execution_options(populate_existing=True)
-        )
-        session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == discovered.node_id)
-            .with_for_update(of=AgentNode)
-            .execution_options(populate_existing=True)
-        )
-        session.scalar(
-            select(NodeMutationLease)
-            .where(NodeMutationLease.node_id == discovered.node_id)
-            .with_for_update(of=NodeMutationLease)
-            .execution_options(populate_existing=True)
-        )
-        session.scalar(
-            select(Job)
-            .where(Job.id == parent.id)
-            .with_for_update(of=Job)
-            .execution_options(populate_existing=True)
-        )
-        session.scalar(
-            select(StoredOperation)
-            .where(StoredOperation.id == operation_id)
-            .with_for_update(of=StoredOperation)
-            .execution_options(populate_existing=True)
-        )
 
-    @staticmethod
-    def _update_claim_binding(
-        operation: StoredOperation,
-        node: AgentNode,
-        now: datetime,
-    ) -> tuple[str, datetime] | None:
-        if operation.kind not in {
-            AgentOperation.AGENT_UPDATE.value,
-            AgentOperation.AGENT_ROLLBACK.value,
-        }:
-            return None
-        payload = operation.payload
-        receipt = payload.get("receipt") if isinstance(payload, Mapping) else None
-        if not isinstance(receipt, Mapping):
-            return None
-        fence = receipt.get("fence")
-        deadline_value = receipt.get("claim_deadline")
-        try:
-            parsed_fence = uuid.UUID(str(fence))
-            deadline = datetime.fromtimestamp(int(deadline_value), tz=UTC)
-        except (AttributeError, OSError, OverflowError, TypeError, ValueError):
-            return None
-        source_binding = (
-            receipt.get("previous_slot") == node.active_slot
-            and receipt.get("previous_sha256") == node.agent_sha256
-            and receipt.get("previous_generation") == node.supervisor_generation
-            if operation.kind == AgentOperation.AGENT_UPDATE.value
-            else receipt.get("action") == "operator-rollback"
-            and receipt.get("current_slot") == node.active_slot
-            and receipt.get("current_sha256") == node.agent_sha256
-            and receipt.get("current_generation") == node.supervisor_generation
-        )
-        valid = (
-            operation.current_attempt == 0
-            and parsed_fence.version == 4
-            and str(parsed_fence) == fence
-            and receipt.get("operation_id") == operation.id
-            and receipt.get("attempt") == 1
-            and receipt.get("node_id") == node.node_id
-            and receipt.get("expires_at") == deadline_value
-            and deadline > _aware(now) + timedelta(seconds=30)
-            and source_binding
-            and operation.payload_digest
-            == hashlib.sha256(canonical_message(payload)).hexdigest()
-        )
-        return (str(parsed_fence), deadline) if valid else None
 
     def _claim_has_authority(
         self,
@@ -1328,63 +586,6 @@ class AgentJobService:
         if job is None:
             raise ValueError("agent operation lacks its parent job")
         if job.reconciliation_id is None:
-            # Non-reconciliation recipe jobs may request agent updates; platform
-            # updates are authorized only by the rollout below.
-            if (
-                operation.kind == AgentOperation.AGENT_UPDATE.value
-                and job.kind != "platform.update"
-            ):
-                return job.state not in _TERMINAL_PARENT_STATES
-            if operation.kind in {
-                AgentOperation.AGENT_UPDATE.value,
-                AgentOperation.AGENT_ROLLBACK.value,
-            }:
-                if job.kind != "platform.update" or operation.current_attempt != 0:
-                    return False
-                rollout = session.scalar(
-                    select(UpdateRollout)
-                    .where(UpdateRollout.job_id == job.id)
-                    .with_for_update(of=UpdateRollout)
-                )
-                if rollout is None:
-                    return False
-                rollout_node = session.scalar(
-                    select(UpdateRolloutNode)
-                    .where(
-                        UpdateRolloutNode.rollout_id == rollout.id,
-                        UpdateRolloutNode.node_id == operation.node_id,
-                    )
-                    .with_for_update(of=UpdateRolloutNode)
-                    .limit(1)
-                )
-                lease = session.scalar(
-                    select(NodeMutationLease)
-                    .where(NodeMutationLease.node_id == operation.node_id)
-                    .with_for_update(of=NodeMutationLease)
-                )
-                held = (
-                    lease is not None
-                    and lease.owner_kind == "update-rollout"
-                    and lease.owner_id == rollout.id
-                    and lease.state == "held"
-                )
-                if operation.kind == AgentOperation.AGENT_UPDATE.value:
-                    return bool(
-                        job.state == "running"
-                        and rollout.state == "updating"
-                        and rollout_node is not None
-                        and rollout_node.state == "updating"
-                        and rollout_node.operation_id == operation.id
-                        and held
-                    )
-                return bool(
-                    job.state == "running"
-                    and rollout.state == "rolling-back"
-                    and rollout_node is not None
-                    and rollout_node.state == "rolling-back"
-                    and rollout_node.rollback_operation_id == operation.id
-                    and held
-                )
             if (
                 job.state == "waiting-for-operator"
                 and operation.state == "waiting-for-operator"
@@ -1572,34 +773,6 @@ class AgentJobService:
                 _aware(attempt.lease_deadline),
                 _aware(now) + timedelta(seconds=lease_seconds),
             )
-            if operation.kind in {
-                AgentOperation.AGENT_UPDATE.value,
-                AgentOperation.AGENT_ROLLBACK.value,
-            }:
-                receipt = (
-                    operation.payload.get("receipt")
-                    if isinstance(operation.payload, Mapping)
-                    else None
-                )
-                signed_deadline = (
-                    receipt.get("claim_deadline")
-                    if isinstance(receipt, Mapping)
-                    else None
-                )
-                if (
-                    isinstance(signed_deadline, bool)
-                    or not isinstance(signed_deadline, int)
-                    or receipt.get("expires_at") != signed_deadline
-                ):
-                    raise StaleAgentAttempt(
-                        "signed update lease deadline is unavailable"
-                    )
-                receipt_deadline = datetime.fromtimestamp(signed_deadline, tz=UTC)
-                if _aware(attempt.lease_deadline) > receipt_deadline:
-                    raise StaleAgentAttempt(
-                        "signed update lease deadline has been exceeded"
-                    )
-                deadline = min(deadline, receipt_deadline)
             message = AgentProgress(
                 schema_version=1,
                 job_id=operation.parent_job_id,
@@ -1881,15 +1054,9 @@ class AgentJobService:
             node.capabilities = list(capabilities)
         if runtime_identity is not None:
             node.architecture = str(runtime_identity["architecture"])
-            node.platform_version = str(runtime_identity["platform_version"])
+            node.semantic_version = str(runtime_identity["semantic_version"])
             node.build_digest = str(runtime_identity["build_digest"])
-            node.active_slot = str(runtime_identity["active_slot"])
-            node.agent_sha256 = str(runtime_identity["agent_sha256"])
-            node.supervisor_generation = int(runtime_identity["supervisor_generation"])
-            ready_generation = runtime_identity["supervisor_ready_generation"]
-            node.supervisor_ready_generation = (
-                None if ready_generation is None else int(ready_generation)
-            )
+            node.binary_digest = str(runtime_identity["binary_digest"])
             node.self_test_passed = bool(runtime_identity["self_test_passed"])
             node.contact_certificate_serial = certificate.serial
             node.contact_observation_digest = hashlib.sha256(
@@ -1916,45 +1083,26 @@ class AgentJobService:
         if (
             set(document)
             != {
-                "active_slot",
                 "architecture",
-                "agent_sha256",
+                "binary_digest",
                 "build_digest",
-                "platform_version",
+                "semantic_version",
                 "self_test_passed",
-                "supervisor_generation",
-                "supervisor_ready_generation",
             }
             or document["architecture"] not in {"linux-arm64", "linux-x86_64"}
             or not isinstance(document["architecture"], str)
-            or document["active_slot"] not in {"A", "B"}
-            or not isinstance(document["agent_sha256"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", document["agent_sha256"]) is None
+            or not isinstance(document["binary_digest"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", document["binary_digest"]) is None
             or not isinstance(document["build_digest"], str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
-            or not isinstance(document["platform_version"], str)
+            or document["build_digest"] != f"sha256:{document['binary_digest']}"
+            or not isinstance(document["semantic_version"], str)
             or re.fullmatch(
                 r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-                document["platform_version"],
+                document["semantic_version"],
             )
             is None
-            or isinstance(document["supervisor_generation"], bool)
-            or not isinstance(document["supervisor_generation"], int)
-            or not 1 <= document["supervisor_generation"] <= 999_999_999
-            or not isinstance(document["self_test_passed"], bool)
-            or (
-                document["supervisor_ready_generation"] is not None
-                and (
-                    isinstance(document["supervisor_ready_generation"], bool)
-                    or not isinstance(document["supervisor_ready_generation"], int)
-                    or document["supervisor_ready_generation"]
-                    != document["supervisor_generation"]
-                )
-            )
-            or (
-                document["self_test_passed"]
-                and document["supervisor_ready_generation"] is None
-            )
+            or document["self_test_passed"] is not True
         ):
             raise ValueError("agent runtime identity is invalid")
         return document
@@ -2228,8 +1376,6 @@ class AgentJobService:
         )
         if job is None:
             raise KeyError(parent_job_id)
-        if job.kind == "platform.update":
-            return
         if job.reconciliation_id is not None:
             return
         operations = list(

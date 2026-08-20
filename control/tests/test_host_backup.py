@@ -46,7 +46,7 @@ class RecordingRunner:
         self.age_input = b""
         self.restore_input = b""
         self.fail_age = False
-        self.database_revision = "0011_update_rollouts"
+        self.database_revision = "0001_fleet_library_baseline"
 
     def run(
         self,
@@ -88,7 +88,7 @@ class RecordingRunner:
             while chunk := os.read(source_fd, 64 * 1024):
                 chunks.append(chunk)
             self.restore_input = b"".join(chunks)
-            self.database_revision = "0011_update_rollouts"
+            self.database_revision = "0001_fleet_library_baseline"
             content = b""
         elif "--decrypt" in argv:
             assert source_fd is not None
@@ -138,7 +138,7 @@ def _selected(generation_json: bytes) -> SelectedGeneration:
         deployment_bundle_digest=f"sha256:{SHA_D}",
         api_image=f"ghcr.io/example/api@sha256:{SHA_A}",
         worker_image=f"ghcr.io/example/worker@sha256:{SHA_B}",
-        database_revision="0011_update_rollouts",
+        database_revision="0001_fleet_library_baseline",
         previous_generation=None,
         generation_receipt_sha256=hashlib.sha256(generation_json).hexdigest(),
         selection_receipt_sha256=SHA_A,

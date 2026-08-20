@@ -9,7 +9,6 @@ from pathlib import Path
 
 from .db import initialize_database
 from .runtime_init import (
-    install_admin_grant_key,
     prepare_shared_volumes,
     stage_compose_secrets,
 )
@@ -26,10 +25,6 @@ def prepare_owned_state() -> None:
         raise RuntimeError("control API pre-exec must start as root")
     stage_compose_secrets(_SOURCE_SECRETS, _NORMALIZED_SECRETS)
     prepare_shared_volumes()
-    install_admin_grant_key(
-        _NORMALIZED_SECRETS / "admin-grant-private-key",
-        Path("/api-runtime"),
-    )
     database_url = (_NORMALIZED_SECRETS / "database-url").read_text(
         encoding="utf-8"
     ).strip()

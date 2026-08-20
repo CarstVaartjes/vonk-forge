@@ -907,32 +907,6 @@ class ChangeRequest(BaseModel):
     proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class UpdatePlanRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    release: str = Field(
-        pattern=(
-            r"^platform/releases/"
-            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)/"
-            r"[0-9a-f]{64}\.json$"
-        ),
-        max_length=256,
-    )
-
-
-class UpdateApplyRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    plan_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-
-
-class UpdateApproveResumeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reason: str = Field(
-        default="administrator approved update recovery",
-        min_length=1,
-        max_length=1024,
-    )
-
-
 def create_app(
     *,
     jobs: JobQueue,
@@ -955,7 +929,6 @@ def create_app(
     worker_api_token: bytes = b"",
     generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
-    updates: Any | None = None,
     catalog: CatalogService | None = None,
     global_catalog: Any | None = None,
     recipe_library: Any | None = None,
@@ -1166,7 +1139,6 @@ def create_app(
             app,
             worker_authority,
             token=worker_api_token,
-            update_grants=updates,
         )
     authenticated_actor = Depends(actor)
     authenticated_browser_actor = Depends(browser_session_actor)
@@ -1645,168 +1617,6 @@ def create_app(
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job log not found") from None
 
-    def update_services() -> Any:
-        if updates is None:
-            raise HTTPException(
-                status_code=503,
-                detail="platform update administration unavailable",
-            )
-        return updates
-
-    def require_update_operator(authenticated: Actor) -> None:
-        if authenticated.role not in {"operator", "administrator"}:
-            raise HTTPException(status_code=403, detail="insufficient role")
-
-    def update_targets(result: Mapping[str, object]) -> tuple[str, ...]:
-        nodes = result.get("nodes")
-        if not isinstance(nodes, Sequence):
-            return ()
-        return tuple(
-            str(node["node_id"])
-            for node in nodes
-            if isinstance(node, Mapping) and isinstance(node.get("node_id"), str)
-        )
-
-    @app.get("/api/v1/updates/skew")
-    def update_skew(_actor: Actor = authenticated_actor) -> dict[str, object]:
-        try:
-            return dict(update_services().skew())
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503,
-                detail="platform update evidence unavailable",
-            ) from None
-
-    @app.post("/api/v1/updates/plan")
-    def update_plan(
-        body: UpdatePlanRequest,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        require_update_operator(authenticated)
-        try:
-            return dict(
-                update_services().plan(
-                    release=body.release,
-                )
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503,
-                detail="platform update planning unavailable",
-            ) from None
-
-    @app.post(
-        "/api/v1/updates",
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    def apply_update(
-        body: UpdateApplyRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        require_update_operator(authenticated)
-        try:
-            result = dict(
-                update_services().apply(
-                    body.plan_digest,
-                    authenticated.subject,
-                    request.state.request_id,
-                )
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=409,
-                detail="platform update plan digest is stale",
-            ) from None
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503,
-                detail="platform update dispatch unavailable",
-            ) from None
-        if authenticated.role != "administrator":
-            result["can_approve_resume"] = False
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "platform.update.apply",
-                None,
-                update_targets(result),
-            )
-        )
-        return result
-
-    @app.get("/api/v1/updates/{rollout_id}")
-    def update_status(
-        rollout_id: str,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        try:
-            result = dict(update_services().status(rollout_id))
-            if authenticated.role != "administrator":
-                result["can_approve_resume"] = False
-            return result
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="update rollout not found"
-            ) from None
-        except ValueError:
-            raise HTTPException(
-                status_code=422, detail="update rollout ID is invalid"
-            ) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503,
-                detail="platform update status unavailable",
-            ) from None
-
-    @app.post(
-        "/api/v1/updates/{rollout_id}/approve-resume",
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    def approve_update_resume(
-        rollout_id: str,
-        body: UpdateApproveResumeRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        if authenticated.role != "administrator":
-            raise HTTPException(status_code=403, detail="insufficient role")
-        try:
-            result = dict(
-                update_services().approve_resume(
-                    rollout_id,
-                    authenticated.subject,
-                    request.state.request_id,
-                    body.reason,
-                )
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="update rollout not found"
-            ) from None
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503,
-                detail="platform update approval unavailable",
-            ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "platform.update.approve-resume",
-                None,
-                update_targets(result),
-            )
-        )
-        return result
-
     return app
 
 
@@ -1830,7 +1640,6 @@ def production_app() -> FastAPI:
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
-    from .host_state import HostGenerationStore
     from .install_admission import InstallAdmissionService
     from .jobs import JobService
     from .library_projection import LibraryProjection
@@ -1844,18 +1653,6 @@ def production_app() -> FastAPI:
     from .run_admission import RunAdmissionService
     from .settings import GenerationStartupSettings, Settings
     from .telemetry import TelemetryRepository
-    from .update_admin import (
-        DurableUpdateGrantRefresher,
-        PlatformUpdateAdminService,
-        durable_agent_observations,
-        durable_distributed_workloads,
-        durable_route_impacts,
-        durable_update_status,
-        selected_platform_target,
-        topology_exclusions_from_document,
-    )
-    from .update_grants import AdminActionGrantIssuer
-    from .updates import UpdateOrchestrator
     from .worker_authority import WorkerAuthorityService
 
     generation = GenerationStartupSettings.from_env_and_secrets()
@@ -1955,56 +1752,6 @@ def production_app() -> FastAPI:
         clock,
         revision_eligible=revision_eligible,
         current_revision=current_revision,
-    )
-    if settings.admin_grant_private_key_path is None:
-        raise RuntimeError("production admin grant private key is unavailable")
-    admin_grant_issuer = AdminActionGrantIssuer.from_private_key_file(
-        settings.admin_grant_private_key_path,
-        clock=clock,
-    )
-    # API methods on this instance are deliberately limited to database-only
-    # create/authorize/approve paths. Only the worker owns signer IPC and route
-    # side effects, so these sentinels must never be consumed in this process.
-    api_update_orchestrator = UpdateOrchestrator(
-        sessions,
-        object(),
-        object(),
-        clock=clock,
-    )
-    selected_generations = HostGenerationStore(
-        settings.state_path,
-        generation.identity_root,
-    )
-
-    def active_update_target():
-        return selected_platform_target(
-            projections=selected_generations,
-            running_generation_id=generation.generation_id,
-            running_platform_version=generation.platform_version,
-            running_release_digest=generation.release_digest,
-            running_build_digest=generation.build_digest,
-            metadata_root=settings.agent_tuf_metadata_root,
-            target_root=settings.agent_tuf_target_root,
-            authority_revision=current_revision(),
-        )
-
-    update_admin = PlatformUpdateAdminService(
-        target_source=active_update_target,
-        observation_source=lambda: durable_agent_observations(sessions, clock),
-        workload_source=lambda: durable_distributed_workloads(sessions, clock),
-        orchestrator=api_update_orchestrator,
-        grant_issuer=admin_grant_issuer,
-        status_source=lambda identifier: durable_update_status(sessions, identifier),
-        clock=clock,
-        grant_refresher=DurableUpdateGrantRefresher(
-            sessions,
-            admin_grant_issuer,
-            clock=clock,
-        ),
-        topology_source=lambda: topology_exclusions_from_document(
-            authority.read_document(current_revision(), "inventory/topology.json").parsed
-        ),
-        route_source=lambda: durable_route_impacts(sessions),
     )
 
     def reconciliation_authority_input(
@@ -2150,7 +1897,6 @@ def production_app() -> FastAPI:
             clock=clock,
             cursors=cursor_codec,
         ),
-        updates=update_admin,
         catalog=catalog_service,
         global_catalog=global_catalog,
         recipe_library=recipe_library,

@@ -30,13 +30,11 @@ class AgentSummary:
             node_id (str):
             stale (bool):
             state (str):
-            active_slot (Union[None, Unset, str]):
-            agent_sha256 (Union[None, Unset, str]):
+            binary_digest (Union[None, Unset, str]):
             build_digest (Union[None, Unset, str]):
             last_seen_age_seconds (Union[None, Unset, float]):
-            platform_version (Union[None, Unset, str]):
             protocol_version (Union[None, Unset, int]):
-            supervisor_generation (Union[None, Unset, int]):
+            semantic_version (Union[None, Unset, str]):
      """
 
     capabilities: list[str]
@@ -45,13 +43,11 @@ class AgentSummary:
     node_id: str
     stale: bool
     state: str
-    active_slot: Union[None, Unset, str] = UNSET
-    agent_sha256: Union[None, Unset, str] = UNSET
+    binary_digest: Union[None, Unset, str] = UNSET
     build_digest: Union[None, Unset, str] = UNSET
     last_seen_age_seconds: Union[None, Unset, float] = UNSET
-    platform_version: Union[None, Unset, str] = UNSET
     protocol_version: Union[None, Unset, int] = UNSET
-    supervisor_generation: Union[None, Unset, int] = UNSET
+    semantic_version: Union[None, Unset, str] = UNSET
 
 
 
@@ -74,17 +70,11 @@ class AgentSummary:
 
         state = self.state
 
-        active_slot: Union[None, Unset, str]
-        if isinstance(self.active_slot, Unset):
-            active_slot = UNSET
+        binary_digest: Union[None, Unset, str]
+        if isinstance(self.binary_digest, Unset):
+            binary_digest = UNSET
         else:
-            active_slot = self.active_slot
-
-        agent_sha256: Union[None, Unset, str]
-        if isinstance(self.agent_sha256, Unset):
-            agent_sha256 = UNSET
-        else:
-            agent_sha256 = self.agent_sha256
+            binary_digest = self.binary_digest
 
         build_digest: Union[None, Unset, str]
         if isinstance(self.build_digest, Unset):
@@ -98,23 +88,17 @@ class AgentSummary:
         else:
             last_seen_age_seconds = self.last_seen_age_seconds
 
-        platform_version: Union[None, Unset, str]
-        if isinstance(self.platform_version, Unset):
-            platform_version = UNSET
-        else:
-            platform_version = self.platform_version
-
         protocol_version: Union[None, Unset, int]
         if isinstance(self.protocol_version, Unset):
             protocol_version = UNSET
         else:
             protocol_version = self.protocol_version
 
-        supervisor_generation: Union[None, Unset, int]
-        if isinstance(self.supervisor_generation, Unset):
-            supervisor_generation = UNSET
+        semantic_version: Union[None, Unset, str]
+        if isinstance(self.semantic_version, Unset):
+            semantic_version = UNSET
         else:
-            supervisor_generation = self.supervisor_generation
+            semantic_version = self.semantic_version
 
 
         field_dict: dict[str, Any] = {}
@@ -127,20 +111,16 @@ class AgentSummary:
             "stale": stale,
             "state": state,
         })
-        if active_slot is not UNSET:
-            field_dict["active_slot"] = active_slot
-        if agent_sha256 is not UNSET:
-            field_dict["agent_sha256"] = agent_sha256
+        if binary_digest is not UNSET:
+            field_dict["binary_digest"] = binary_digest
         if build_digest is not UNSET:
             field_dict["build_digest"] = build_digest
         if last_seen_age_seconds is not UNSET:
             field_dict["last_seen_age_seconds"] = last_seen_age_seconds
-        if platform_version is not UNSET:
-            field_dict["platform_version"] = platform_version
         if protocol_version is not UNSET:
             field_dict["protocol_version"] = protocol_version
-        if supervisor_generation is not UNSET:
-            field_dict["supervisor_generation"] = supervisor_generation
+        if semantic_version is not UNSET:
+            field_dict["semantic_version"] = semantic_version
 
         return field_dict
 
@@ -174,24 +154,14 @@ class AgentSummary:
 
         state = d.pop("state")
 
-        def _parse_active_slot(data: object) -> Union[None, Unset, str]:
+        def _parse_binary_digest(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(Union[None, Unset, str], data)
 
-        active_slot = _parse_active_slot(d.pop("active_slot", UNSET))
-
-
-        def _parse_agent_sha256(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        agent_sha256 = _parse_agent_sha256(d.pop("agent_sha256", UNSET))
+        binary_digest = _parse_binary_digest(d.pop("binary_digest", UNSET))
 
 
         def _parse_build_digest(data: object) -> Union[None, Unset, str]:
@@ -214,16 +184,6 @@ class AgentSummary:
         last_seen_age_seconds = _parse_last_seen_age_seconds(d.pop("last_seen_age_seconds", UNSET))
 
 
-        def _parse_platform_version(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        platform_version = _parse_platform_version(d.pop("platform_version", UNSET))
-
-
         def _parse_protocol_version(data: object) -> Union[None, Unset, int]:
             if data is None:
                 return data
@@ -234,14 +194,14 @@ class AgentSummary:
         protocol_version = _parse_protocol_version(d.pop("protocol_version", UNSET))
 
 
-        def _parse_supervisor_generation(data: object) -> Union[None, Unset, int]:
+        def _parse_semantic_version(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(Union[None, Unset, str], data)
 
-        supervisor_generation = _parse_supervisor_generation(d.pop("supervisor_generation", UNSET))
+        semantic_version = _parse_semantic_version(d.pop("semantic_version", UNSET))
 
 
         agent_summary = cls(
@@ -251,13 +211,11 @@ class AgentSummary:
             node_id=node_id,
             stale=stale,
             state=state,
-            active_slot=active_slot,
-            agent_sha256=agent_sha256,
+            binary_digest=binary_digest,
             build_digest=build_digest,
             last_seen_age_seconds=last_seen_age_seconds,
-            platform_version=platform_version,
             protocol_version=protocol_version,
-            supervisor_generation=supervisor_generation,
+            semantic_version=semantic_version,
         )
 
         return agent_summary

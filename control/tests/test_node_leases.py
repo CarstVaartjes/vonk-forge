@@ -41,7 +41,7 @@ def test_group_acquisition_is_durable_ordered_and_restart_idempotent(tmp_path) -
         grant = service.acquire_in_session(
             session,
             (NODE_B, NODE_A),
-            owner_kind="update-rollout",
+            owner_kind="reconciliation",
             owner_id=owner_id,
         )
 
@@ -50,7 +50,7 @@ def test_group_acquisition_is_durable_ordered_and_restart_idempotent(tmp_path) -
         restarted = service.acquire_in_session(
             session,
             (NODE_A, NODE_B),
-            owner_kind="update-rollout",
+            owner_kind="reconciliation",
             owner_id=owner_id,
         )
         rows = list(
@@ -82,7 +82,7 @@ def test_group_conflict_does_not_leave_a_partial_lease(tmp_path) -> None:
             service.acquire_in_session(
                 session,
                 (NODE_A, NODE_B),
-                owner_kind="update-rollout",
+                owner_kind="reconciliation",
                 owner_id=str(uuid.uuid4()),
             )
         assert caught.value.node_ids == (NODE_A,)
@@ -99,7 +99,7 @@ def test_release_requires_exact_fence_and_two_phase_release(tmp_path) -> None:
         grant = service.acquire_in_session(
             session,
             (NODE_A,),
-            owner_kind="update-rollout",
+            owner_kind="reconciliation",
             owner_id=str(uuid.uuid4()),
         )
 
@@ -146,7 +146,7 @@ def test_sqlite_concurrent_acquire_has_exactly_one_owner(tmp_path) -> None:
                 service.acquire_in_session(
                     session,
                     (NODE_A,),
-                    owner_kind="update-rollout",
+                    owner_kind="reconciliation",
                     owner_id=owner_id,
                 )
             return owner_id

@@ -14,7 +14,6 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -25,9 +24,6 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
-    NodeMutationLease,
-    UpdateRollout,
-    UpdateRolloutNode,
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
@@ -233,216 +229,6 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     assert claimed[0].operation_id == operation.id
 
 
-def test_postgres_platform_update_failure_serializes_before_claim_without_deadlock(
-    service, postgres_engine
-) -> None:
-    sessions, clock = service
-    operation_id = str(uuid.uuid4())
-    rollout_id = str(uuid.uuid4())
-    job_id = str(uuid.uuid4())
-    rollout_node_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    lease_fence = str(uuid.uuid4())
-    deadline = int(clock.now.timestamp()) + 600
-    payload = {
-        "artifact": {},
-        "receipt": {
-            "attempt": 1,
-            "claim_deadline": deadline,
-            "expires_at": deadline,
-            "fence": fence,
-            "node_id": NODE_A,
-            "operation_id": operation_id,
-            "previous_generation": 1,
-            "previous_sha256": "f" * 64,
-            "previous_slot": "A",
-        },
-        "release": {},
-        "signature": {},
-    }
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.protocol_version = 3
-        node.platform_version = "1.0.0"
-        node.build_digest = "sha256:" + "1" * 64
-        node.active_slot = "A"
-        node.agent_sha256 = "f" * 64
-        node.supervisor_generation = 1
-        objects = [
-                Job(
-                    id=job_id,
-                    request_id=str(uuid.uuid4()),
-                    kind="platform.update",
-                    state="running",
-                    actor="admin",
-                    authority_revision=COMMIT,
-                    targets=[NODE_A],
-                    payload_digest="2" * 64,
-                    payload={},
-                    current_attempt=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                UpdateRollout(
-                    id=rollout_id,
-                    job_id=job_id,
-                    state="updating",
-                    plan_digest="3" * 64,
-                    release_digest="4" * 64,
-                    authority_revision=COMMIT,
-                    fleet_digest="5" * 64,
-                    topology_digest="6" * 64,
-                    agent_input_digest="7" * 64,
-                    target_platform_version="2.0.0",
-                    target_build_digest="sha256:" + "8" * 64,
-                    tuf_targets_version=7,
-                    plan={},
-                    current_batch=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                AgentOperation(
-                    id=operation_id,
-                    parent_job_id=job_id,
-                    node_id=NODE_A,
-                    kind="agent.update",
-                    payload_digest=hashlib.sha256(
-                        canonical_message(payload)
-                    ).hexdigest(),
-                    payload=payload,
-                    authority_revision=COMMIT,
-                    state="queued",
-                    current_attempt=0,
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                NodeMutationLease(
-                    node_id=NODE_A,
-                    owner_kind="update-rollout",
-                    owner_id=rollout_id,
-                    fence=lease_fence,
-                    state="held",
-                    acquired_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                UpdateRolloutNode(
-                    id=rollout_node_id,
-                    rollout_id=rollout_id,
-                    node_id=NODE_A,
-                    batch_index=0,
-                    node_order=0,
-                    is_canary=True,
-                    state="updating",
-                    operation_id=operation_id,
-                    operation_history=[],
-                    source_identity_digest="9" * 64,
-                    target_artifact_digest="a" * 64,
-                    dispatch_at=clock.now,
-                    activation_deadline=clock.now + timedelta(minutes=10),
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-        ]
-        for model in (
-            Job,
-            UpdateRollout,
-            AgentOperation,
-            NodeMutationLease,
-            UpdateRolloutNode,
-        ):
-            session.add_all(item for item in objects if isinstance(item, model))
-            session.flush()
-
-    refreshed_at = clock.now + timedelta(seconds=1)
-    with sessions() as stale_session:
-        cached_operation = stale_session.get(AgentOperation, operation_id)
-        cached_parent = stale_session.get(Job, job_id)
-        assert cached_operation is not None and cached_parent is not None
-        with sessions.begin() as writer:
-            durable_operation = writer.get(AgentOperation, operation_id)
-            durable_parent = writer.get(Job, job_id)
-            assert durable_operation is not None and durable_parent is not None
-            durable_operation.updated_at = refreshed_at
-            durable_parent.updated_at = refreshed_at
-        AgentJobService._lock_platform_update_claim(stale_session, operation_id)
-        assert cached_operation.updated_at == refreshed_at
-        assert cached_parent.updated_at == refreshed_at
-        stale_session.rollback()
-
-    failure_holds_rollout = threading.Event()
-    claim_waits_on_rollout = threading.Event()
-    claim_thread_id: list[int] = []
-
-    def observe_claim_lock(_conn, _cursor, statement, *_args) -> None:
-        if (
-            claim_thread_id
-            and threading.get_ident() == claim_thread_id[0]
-            and "update_rollouts" in statement
-            and "FOR UPDATE" in statement
-        ):
-            claim_waits_on_rollout.set()
-
-    event.listen(postgres_engine, "before_cursor_execute", observe_claim_lock)
-    jobs = AgentJobService(sessions, clock=clock)
-
-    def fail_rollout() -> None:
-        with sessions.begin() as session:
-            rollout = session.scalar(
-                select(UpdateRollout)
-                .where(UpdateRollout.id == rollout_id)
-                .with_for_update(of=UpdateRollout)
-            )
-            assert rollout is not None
-            failure_holds_rollout.set()
-            assert claim_waits_on_rollout.wait(5)
-            rollout_node = session.scalar(
-                select(UpdateRolloutNode)
-                .where(UpdateRolloutNode.id == rollout_node_id)
-                .with_for_update(of=UpdateRolloutNode)
-            )
-            assert rollout_node is not None
-            session.scalar(
-                select(AgentNode)
-                .where(AgentNode.node_id == NODE_A)
-                .with_for_update(of=AgentNode)
-            )
-            session.scalar(
-                select(NodeMutationLease)
-                .where(NodeMutationLease.node_id == NODE_A)
-                .with_for_update(of=NodeMutationLease)
-            )
-            parent_job = session.scalar(
-                select(Job).where(Job.id == job_id).with_for_update(of=Job)
-            )
-            operation = session.scalar(
-                select(AgentOperation)
-                .where(AgentOperation.id == operation_id)
-                .with_for_update(of=AgentOperation)
-            )
-            assert parent_job is not None and operation is not None
-            rollout.state = "paused"
-            rollout_node.state = "failed"
-            parent_job.state = "waiting-for-operator"
-
-    def claim_update():
-        claim_thread_id.append(threading.get_ident())
-        assert failure_holds_rollout.wait(5)
-        return jobs.claim(NODE_A, "serial-a", 1)
-
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            failure = pool.submit(fail_rollout)
-            claim = pool.submit(claim_update)
-            failure.result(timeout=10)
-            result = claim.result(timeout=10)
-    finally:
-        event.remove(postgres_engine, "before_cursor_execute", observe_claim_lock)
-
-    assert result is None
-    with sessions() as session:
-        operation = session.get(AgentOperation, operation_id)
-        assert operation is not None and operation.state == "waiting-for-operator"
 
 
 @pytest.mark.parametrize("agent_action", ("claim", "heartbeat", "result"))
@@ -560,10 +346,6 @@ def test_postgres_expired_safe_operation_is_automatically_reclaimed(service, ope
     assert second.attempt == 2
 
 
-# ``agent.update`` requires a separately constructed signed-update authority;
-# its PostgreSQL expiry path is covered by the dedicated update tests.  This
-# persistence test intentionally exercises only operations whose payload can
-# be enqueued through the generic service fixture.
 @pytest.mark.parametrize("operation_kind", ("release.install", "workload.start"))
 def test_postgres_expired_mutating_operation_requires_persisted_retry_disposition(
     service, operation_kind: str

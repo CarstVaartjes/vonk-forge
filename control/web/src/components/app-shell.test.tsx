@@ -9,24 +9,6 @@ import {FleetIcon} from "./icons";
 
 const apiFixture = {
   visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
-  updateSkew: async () => ({
-    affected_nodes: [],
-    digest: `sha256:${"b".repeat(64)}`,
-    incompatible_nodes: [],
-    nodes: [],
-    offline_pending: [],
-    prompt_required: false,
-    target: {
-      build_digest: `sha256:${"c".repeat(64)}`,
-      platform_version: "1.0.0",
-      protocol_maximum: 1,
-      protocol_minimum: 1,
-      release: `platform/releases/1.0.0/${"d".repeat(64)}.json`,
-      release_digest: `sha256:${"d".repeat(64)}`,
-      target_sha256: "d".repeat(64),
-      tuf_targets_version: 1,
-    },
-  }),
   librarySnapshot: async () => ({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}),
 } as unknown as ControlApi;
 

@@ -82,7 +82,7 @@ def _release(tmp_path: Path) -> PlatformRelease:
             "assets": [_artifact("web", SHA_C)],
         },
         "database": {
-            "expand_revision": "0010_update_rollouts",
+            "expand_revision": "0001_fleet_library_baseline",
             "contract_revision": None,
             "predecessor_compatible": True,
         },
@@ -345,7 +345,7 @@ class FakeUpgradeBoundary:
         self.online = False
         self.free_bytes = 10 * 1024 * 1024
         self.failure: str | None = None
-        self.current_database_revision = "0011_update_rollouts"
+        self.current_database_revision = "0001_fleet_library_baseline"
         self.site_digest = f"sha256:{SHA_E}"
         self.running = {
             "control-api": {
@@ -868,7 +868,7 @@ def test_exact_plan_resolves_caller_selected_versioned_target_and_bundle(
     assert plan.api_image == release.control.api_image.reference
     assert plan.worker_image == release.control.worker_image.reference
     assert plan.database_revision == release.database.expand_revision
-    assert plan.current_database_revision == "0011_update_rollouts"
+    assert plan.current_database_revision == "0001_fleet_library_baseline"
     assert plan.previous_generation is None
     assert plan.current_generation_receipt_sha256 is None
     assert plan.current_selection_receipt_sha256 is None
@@ -1486,10 +1486,10 @@ def test_upgrade_applies_backup_migration_readiness_and_commit_in_order(
         "backup",
     ]
     assert backend.events.index("backup") < backend.events.index(
-        "migrate:0010_update_rollouts"
+        "migrate:0001_fleet_library_baseline"
     )
     assert backend.events.index("stop-worker") < backend.events.index(
-        "migrate:0010_update_rollouts"
+        "migrate:0001_fleet_library_baseline"
     )
     assert backend.events.index("readiness") < backend.events.index("start-worker")
     assert (
@@ -1833,7 +1833,7 @@ def test_host_upgrade_boundary_uses_only_fixed_argv_and_exact_image_digests(
     boundary.pull((api, worker))
     assert boundary.render_compose(environment) == b"services: {}\n"
     boundary.stop_worker()
-    boundary.migrate("0010_update_rollouts")
+    boundary.migrate("0001_fleet_library_baseline")
     boundary.start_api(generation)
     boundary.start_worker()
     boundary.stop_api()
@@ -1851,7 +1851,7 @@ def test_host_upgrade_boundary_uses_only_fixed_argv_and_exact_image_digests(
             "-m",
             "alembic",
             "upgrade",
-            "0010_update_rollouts",
+            "0001_fleet_library_baseline",
         )
         for argv in calls
     )
@@ -1891,4 +1891,4 @@ def test_host_migration_command_failure_is_always_ambiguous(
     )
 
     with pytest.raises(AmbiguousMigrationError, match="outcome is unknown"):
-        boundary.migrate("0010_update_rollouts")
+        boundary.migrate("0001_fleet_library_baseline")

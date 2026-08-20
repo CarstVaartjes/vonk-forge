@@ -34,7 +34,6 @@ from vonk_control.models import (
     RoutePublication,
     RoutePublicationOwner,
 )
-from vonk_control.node_leases import NodeLeaseService
 from vonk_control.orchestration import OperationNode
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
@@ -561,33 +560,6 @@ def test_prefetched_authority_is_fetched_before_locked_identity_check(tmp_path) 
     assert events == ["clear", "prefetch", "locked-context", "locked-check"]
 
 
-def test_platform_update_lease_blocks_reconciliation_before_withdrawal_intent(
-    tmp_path,
-) -> None:
-    service, sessions, _queue, publisher, reconciliation_id, _job_id = (
-        _execution_fixture(tmp_path)
-    )
-    update_rollout_id = str(uuid.uuid4())
-    leases = NodeLeaseService(
-        clock=lambda: datetime(2026, 8, 5, tzinfo=UTC)
-    )
-    with sessions.begin() as session:
-        leases.acquire_in_session(
-            session,
-            [NODE_A],
-            owner_kind="update-rollout",
-            owner_id=update_rollout_id,
-        )
-
-    assert service.tick(reconciliation_id) is False
-
-    with sessions() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        publication = session.get(RoutePublication, reconciliation_id)
-        assert reconciliation is not None
-        assert reconciliation.current_phase == "planned"
-        assert publication is None
-    assert publisher.withdrawals == 0
 
 
 def test_restart_recovers_same_reconciliation_lease_before_route_withdrawal(
@@ -626,108 +598,8 @@ def test_restart_recovers_same_reconciliation_lease_before_route_withdrawal(
     assert publisher.withdrawals == 1
 
 
-def test_platform_update_lease_blocks_completed_route_renewal(tmp_path) -> None:
-    service, sessions, _queue, publisher, reconciliation_id, _job_id = (
-        _execution_fixture(tmp_path)
-    )
-    now = datetime(2026, 8, 5, tzinfo=UTC)
-    leases = NodeLeaseService(clock=lambda: now)
-
-    assert service.tick(reconciliation_id) is True
-    with sessions.begin() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        publication = session.get(RoutePublication, reconciliation_id)
-        assert reconciliation is not None and publication is not None
-        reconciliation.current_phase = "completed"
-        reconciliation.status = "succeeded"
-        reconciliation.completion_generation = 1
-        publication.state = "completed"
-        publication.lease_issued_at = now
-        publication.lease_expires_at = now + timedelta(minutes=5)
-        grant = leases.owned_grant_in_session(
-            session,
-            [NODE_A],
-            owner_kind="reconciliation",
-            owner_id=reconciliation_id,
-        )
-        assert grant is not None
-        leases.mark_releasing_in_session(session, grant)
-
-    assert service.tick() is True
-    update_rollout_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        leases.acquire_in_session(
-            session,
-            [NODE_A],
-            owner_kind="update-rollout",
-            owner_id=update_rollout_id,
-        )
-
-    assert service.tick(reconciliation_id) is False
-
-    with sessions() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        assert reconciliation is not None
-        assert reconciliation.current_phase == "completed"
-    assert publisher.withdrawals == 0
 
 
-def test_platform_update_lease_blocks_completed_cancellation_withdrawal(
-    tmp_path,
-) -> None:
-    service, sessions, _queue, publisher, reconciliation_id, _job_id = (
-        _execution_fixture(tmp_path)
-    )
-    now = datetime(2026, 8, 5, tzinfo=UTC)
-    leases = NodeLeaseService(clock=lambda: now)
-
-    assert service.tick(reconciliation_id) is True
-    with sessions.begin() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        publication = session.get(RoutePublication, reconciliation_id)
-        assert reconciliation is not None and publication is not None
-        reconciliation.current_phase = "completed"
-        reconciliation.status = "succeeded"
-        reconciliation.completion_generation = 1
-        publication.state = "completed"
-        publication.lease_issued_at = now
-        publication.lease_expires_at = now + timedelta(minutes=5)
-        grant = leases.owned_grant_in_session(
-            session,
-            [NODE_A],
-            owner_kind="reconciliation",
-            owner_id=reconciliation_id,
-        )
-        assert grant is not None
-        leases.mark_releasing_in_session(session, grant)
-        releasing = leases.owned_grant_in_session(
-            session,
-            [NODE_A],
-            owner_kind="reconciliation",
-            owner_id=reconciliation_id,
-        )
-        assert releasing is not None
-        leases.release_in_session(session, releasing)
-        session.flush()
-        leases.acquire_in_session(
-            session,
-            [NODE_A],
-            owner_kind="update-rollout",
-            owner_id=str(uuid.uuid4()),
-        )
-    service.enqueue_cancel(
-        reconciliation_id,
-        "operator cancelled",
-        actor="operator",
-        request_id="11111111-1111-4111-8111-111111111111",
-    )
-
-    assert service.tick(reconciliation_id) is False
-
-    with sessions() as session:
-        cancellation = session.get(ReconciliationCancellation, reconciliation_id)
-        assert cancellation is not None and cancellation.state == "requested"
-    assert publisher.withdrawals == 0
 
 
 def test_route_presence_drift_after_prefetch_fails_before_publication(tmp_path) -> None:
@@ -1472,7 +1344,7 @@ def test_claim_rejects_non_current_agent_contract(
     value: object,
 ) -> None:
     authority = _continuous_authority()
-    service, sessions, queue, reconciliation_id, job_id = _compensation_fixture(
+    service, sessions, queue, reconciliation_id, _job_id = _compensation_fixture(
         tmp_path, authority=authority
     )
     for _ in range(4):

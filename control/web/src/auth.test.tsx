@@ -23,7 +23,6 @@ type TestApi = ControlApi & BrowserAuthApi;
 function controlApi(overrides: Partial<TestApi> = {}): TestApi {
   return {
     visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
-    updateSkew: async () => ({affected_nodes: [], digest: "sha256:" + "b".repeat(64), incompatible_nodes: [], nodes: [], offline_pending: [], prompt_required: false, target: {build_digest: "sha256:" + "c".repeat(64), platform_version: "1.0.0", protocol_maximum: 1, protocol_minimum: 1, release: "platform/releases/1.0.0/" + "d".repeat(64) + ".json", release_digest: "sha256:" + "d".repeat(64), target_sha256: "d".repeat(64), tuf_targets_version: 1}}),
     session: async () => { throw new AuthenticationRequired(); },
     login: async () => session,
     logout: async () => undefined,

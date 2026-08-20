@@ -174,7 +174,7 @@ def test_postgres_node_lease_race_has_one_database_owner(
                 NodeLeaseService(clock=lambda: NOW).acquire_in_session(
                     session,
                     (NODE_A,),
-                    owner_kind="update-rollout",
+                    owner_kind="reconciliation",
                     owner_id=owner_id,
                 )
             return owner_id

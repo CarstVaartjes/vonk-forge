@@ -244,11 +244,9 @@ class DashboardService:
                 "last_seen_age_seconds": None if agent_age is None else max(0.0, agent_age),
                 "agent_last_seen_at": None if agent_last_seen_at is None else agent_last_seen_at.isoformat(),
                 "agent_online": agent_online,
-                "agent_platform_version": None if agent_node is None else agent_node.platform_version,
+                "agent_semantic_version": None if agent_node is None else agent_node.semantic_version,
                 "agent_build_digest": None if agent_node is None else agent_node.build_digest,
-                "agent_active_slot": None if agent_node is None else agent_node.active_slot,
-                "agent_sha256": None if agent_node is None else agent_node.agent_sha256,
-                "agent_supervisor_generation": None if agent_node is None else agent_node.supervisor_generation,
+                "agent_binary_digest": None if agent_node is None else agent_node.binary_digest,
                 "certificate_expires_at": None if certificate_expires_at is None else certificate_expires_at.isoformat(),
                 "certificate_expiry_seconds": None if certificate_expires_at is None else max(0.0, (certificate_expires_at - current).total_seconds()),
                 "compatibility": protocol_version_bucket(

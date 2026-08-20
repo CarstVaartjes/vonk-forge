@@ -10,9 +10,7 @@ from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
-from vonk_control.settings import Settings, SettingsError, WorkerSettings
-from vonk_control.update_routes import ProductionUpdateRouteBoundary
-from vonk_control.update_worker import UpdateRolloutWorker
+from vonk_control.settings import SettingsError, WorkerSettings
 from vonk_control.worker import Worker, assemble_production_worker
 
 
@@ -43,7 +41,7 @@ def test_production_worker_fails_unknown_generic_work(
     assert persisted.current_attempt == 1
 
 
-def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
+def test_production_builder_wires_reconciliation_and_housekeeping(
     tmp_path,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
@@ -66,9 +64,6 @@ def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
             return None
 
     class Authority:
-        def refresh_update_grant(self, *_args):
-            return {"claims": {}, "signature": "test"}
-
         def prefetch(self, *_args):
             return None
 
@@ -93,12 +88,9 @@ def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
         worker_id="control-worker-test",
     )
 
-    assert isinstance(worker._updates, UpdateRolloutWorker)
+    assert not hasattr(worker, "_updates")
     assert not hasattr(worker, "_packages")
     assert not hasattr(worker, "_validation")
-    assert worker._updates._orchestrator._agent_jobs is agent_jobs
-    assert isinstance(worker._updates._routes, ProductionUpdateRouteBoundary)
-    assert worker._updates._routes is worker._updates._orchestrator._routes
     assert worker._reconciliations._agent_jobs is agent_jobs
     assert worker._reconciliations._publisher is publisher
     assert isinstance(

@@ -109,18 +109,7 @@ async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
   const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
   libraryFixtures.set(page, libraryState);
-  const platformVersion = `6.0.0-${"release".repeat(24)}`;
-  const targetSha256 = "f".repeat(64);
   await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
-  await page.route("**/api/v1/updates/skew", route => route.fulfill({json: {
-    affected_nodes: [nodeId, borealisId],
-    digest: `sha256:${"d".repeat(64)}`,
-    incompatible_nodes: [],
-    nodes: [{active_routes: ["chat"], active_slot: "A", active_workloads: ["run-chat"], build_digest: `sha256:${"a".repeat(64)}`, compatible: true, display_name: `Aurora-${"A".repeat(120)}`, node_id: nodeId, platform_version: "6.0.0", protocol_version: 1, reasons: ["build digest differs"], rollback_slot: "B", status: "online", update_required: true}, {active_routes: [], active_slot: "B", active_workloads: [], build_digest: `sha256:${"b".repeat(64)}`, compatible: true, display_name: `Borealis-${"B".repeat(120)}`, node_id: borealisId, platform_version: "5.9.0", protocol_version: 1, reasons: ["offline pending"], rollback_slot: "A", status: "offline", update_required: true}],
-    offline_pending: [borealisId],
-    prompt_required: true,
-    target: {build_digest: `sha256:${"c".repeat(64)}`, platform_version: platformVersion, protocol_maximum: 1, protocol_minimum: 1, release: `platform/releases/${platformVersion}/${targetSha256}.json`, release_digest: `sha256:${targetSha256}`, target_sha256: targetSha256, tuf_targets_version: 9},
-  }}));
   await page.route("**/api/v1/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
@@ -257,10 +246,6 @@ test("Node history chooses honest rollups on desktop and mobile", async ({page})
 
 test("Fleet has no document overflow from phone through large desktop", async ({page}) => {
   await page.goto("/fleet");
-  const updateNotice = page.getByRole("region", {name: "GPU node update available"});
-  await expect(updateNotice).toBeVisible();
-  await expect(updateNotice).toContainText(`sha256:${"c".repeat(64)}`);
-  await expect(updateNotice).toContainText(nodeId);
   await page.getByRole("button", {name: "View Aurora details"}).click();
 
   for (const width of [360, 768, 1280, 1920]) {
@@ -268,12 +253,8 @@ test("Fleet has no document overflow from phone through large desktop", async ({
     await expect.poll(() => page.evaluate(() => ({
       body: document.body.scrollWidth,
       document: document.documentElement.scrollWidth,
-      noticeFits: (() => {
-        const notice = document.querySelector<HTMLElement>(".update-notice");
-        return notice ? notice.scrollWidth <= notice.clientWidth : false;
-      })(),
       viewport: window.innerWidth,
-    }))).toEqual({body: width, document: width, noticeFits: true, viewport: width});
+    }))).toEqual({body: width, document: width, viewport: width});
   }
 
   await page.setViewportSize({width: 360, height: 800});

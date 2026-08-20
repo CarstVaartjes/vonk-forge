@@ -507,7 +507,6 @@ def _configure_agent_authority(
         "VONK_DATABASE_URL_FILE": "postgresql://db/control\n",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "admin-grant-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
         "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
@@ -538,7 +537,6 @@ def _configure_agent_authority(
             "VONK_DATABASE_URL_FILE",
             "VONK_TOKEN_SIGNING_KEY_FILE",
             "VONK_METRICS_TOKEN_FILE",
-            "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE",
         ):
             monkeypatch.setenv(name, str(paths[name]))
     else:
@@ -698,8 +696,6 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: P
         "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
         "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32 + "\r\n",
         "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
-        "VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE": "fixture-update-authority-key",
-        "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "fixture-admin-grant-key",
     }
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
@@ -715,9 +711,6 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: P
     settings = Settings.from_env_and_secrets()
 
     assert settings.agent_proxy_auth == ("p" * 32).encode()
-    assert settings.admin_grant_private_key_path == (
-        tmp_path / "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE"
-    )
 
 
 @pytest.mark.parametrize(
@@ -788,6 +781,3 @@ def test_production_worker_settings_can_explicitly_disable_agent_runtime(tmp_pat
 
     assert settings.internal_api_token == b"w" * 32
     assert settings.management_cidrs == "10.0.0.0/24"
-    assert settings.update_signer_socket_path == Path(
-        "/run/vonk-signer/signer.sock"
-    )

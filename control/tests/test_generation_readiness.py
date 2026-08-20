@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import runpy
-import subprocess
 import warnings
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,8 +24,8 @@ from vonk_control.api import (
     production_app,
 )
 from vonk_control.dev_cohort import build_identity, verify_cohort
-from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.host_state import HostOperationPlan, SelectionReceipt
+from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.settings import (
     GenerationStartupSettings,
     SettingsError,
@@ -307,7 +306,6 @@ def test_production_entrypoint_selects_inert_preselection_before_registration(
 ) -> None:
     from vonk_control import api as api_module
     from vonk_control import jobs as jobs_module
-    from vonk_control import update_admin as update_admin_module
 
     constructed: list[str] = []
 
@@ -327,11 +325,6 @@ def test_production_entrypoint_selects_inert_preselection_before_registration(
         api_module,
         "build_agent_services",
         forbidden_constructor("agent service"),
-    )
-    monkeypatch.setattr(
-        update_admin_module,
-        "PlatformUpdateAdminService",
-        forbidden_constructor("update service"),
     )
     monkeypatch.setattr(
         api_module,
@@ -411,7 +404,7 @@ def test_generation_readiness_rejects_wrong_call_identity_and_database_revision(
         tmp_path,
         identity=identity,
         projections=Projections(candidate=_projection()),
-        database_revision=lambda: "0011_update_rollouts",
+        database_revision=lambda: "0001_fleet_library_baseline",
     )
     with pytest.raises(GenerationReadinessError, match="database revision"):
         wrong_database.candidate(identity.generation_id, identity.start_nonce)

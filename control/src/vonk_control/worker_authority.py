@@ -68,30 +68,6 @@ class AuthorityRequest(BaseModel):
     routes: list[AuthorityRoute] = Field(max_length=64)
 
 
-class UpdateGrantRefreshRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: int = Field(ge=1, le=1)
-    rollout_id: str = Field(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    )
-    batch_index: int = Field(ge=0)
-    node_ids: list[str] = Field(min_length=1, max_length=1024)
-    nonce: str = Field(pattern=r"^[0-9a-f]{32,64}$")
-
-
-class UpdateGrantRefresher(Protocol):
-    def refresh_update_grant(
-        self,
-        rollout_id: str,
-        batch_index: int,
-        node_ids: tuple[str, ...],
-        *,
-        actor: str,
-        request_id: str,
-    ) -> dict[str, object]: ...
-
-
 class WorkerAuthorityService:
     """Evaluate the PostgreSQL authority and policy inside the API."""
 
@@ -213,7 +189,6 @@ def install_worker_authority_routes(
     service: WorkerAuthorityService,
     *,
     token: bytes,
-    update_grants: UpdateGrantRefresher | None = None,
 ) -> None:
     """Install worker-only routes guarded by an independent service token."""
 
@@ -256,44 +231,6 @@ def install_worker_authority_routes(
             }
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(status_code=503, detail="authority unavailable") from None
-
-    if update_grants is not None:
-
-        @app.post("/internal/v1/updates/grant", include_in_schema=False)
-        def update_grant_refresh(
-            body: UpdateGrantRefreshRequest,
-            request: Request,
-        ) -> Mapping[str, object]:
-            request_document = body.model_dump()
-            authenticate(request, request_document)
-            request_id = getattr(request.state, "request_id", None)
-            if request_id is None:
-                request_id = request.headers.get("x-request-id", "")
-            try:
-                grant = update_grants.refresh_update_grant(
-                    body.rollout_id,
-                    body.batch_index,
-                    tuple(body.node_ids),
-                    actor="control-worker",
-                    request_id=request_id,
-                )
-                if not isinstance(grant, dict):
-                    raise TypeError("update grant is invalid")
-                response = {**request_document, "grant": grant}
-                return {
-                    **response,
-                    "signature": worker_document_signature(
-                        token,
-                        response,
-                        purpose="response",
-                    ),
-                }
-            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
-                raise HTTPException(
-                    status_code=503,
-                    detail="update grant authority unavailable",
-                ) from None
-
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
@@ -379,58 +316,6 @@ class HttpWorkerAuthority:
         if not isinstance(parsed, Mapping):
             raise WorkerAuthorityError("worker authority response is invalid")
         return parsed
-
-    def refresh_update_grant(
-        self,
-        rollout_id: str,
-        batch_index: int,
-        node_ids: tuple[str, ...],
-    ) -> dict[str, object]:
-        """Obtain a fresh API-issued grant bound to one persisted rollout batch."""
-
-        nonce = secrets.token_hex(16)
-        request_document = {
-            "schema_version": 1,
-            "rollout_id": rollout_id,
-            "batch_index": batch_index,
-            "node_ids": list(node_ids),
-            "nonce": nonce,
-        }
-        document = self._request(
-            "/internal/v1/updates/grant",
-            document=request_document,
-        )
-        if set(document) != {
-            "schema_version",
-            "rollout_id",
-            "batch_index",
-            "node_ids",
-            "nonce",
-            "grant",
-            "signature",
-        }:
-            raise WorkerAuthorityError("worker authority response is invalid")
-        unsigned = dict(document)
-        signature = unsigned.pop("signature")
-        grant = document.get("grant")
-        expected_signature = worker_document_signature(
-            self._token,
-            unsigned,
-            purpose="response",
-        )
-        if (
-            document.get("schema_version") != 1
-            or document.get("rollout_id") != rollout_id
-            or document.get("batch_index") != batch_index
-            or document.get("node_ids") != list(node_ids)
-            or document.get("nonce") != nonce
-            or not isinstance(grant, Mapping)
-            or set(grant) != {"claims", "signature"}
-            or not isinstance(signature, str)
-            or not secrets.compare_digest(signature, expected_signature)
-        ):
-            raise WorkerAuthorityError("worker authority response is invalid")
-        return dict(grant)
 
     def current_revision(self) -> str:
         cached = self._require_cached()
