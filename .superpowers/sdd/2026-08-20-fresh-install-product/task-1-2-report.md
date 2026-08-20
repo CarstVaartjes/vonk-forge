@@ -73,3 +73,54 @@ included in this commit.
   PyYAML C extension while parsing Compose YAML. Isolated renderer and
   Compose-v5.1.3 checks completed successfully; no source change was made for
   that interpreter-level flake in this round.
+
+## Fix round 2
+
+- Embedded runtime config mounts use a fail-safe program rule: every `.sh`
+  runtime asset and every other source-executable file renders with mode
+  `0555`; remaining data/config files render with mode `0444`. Source ownership
+  and writable permission bits are never projected into the deployment.
+- Exact rendered mount coverage checks the Caddyfile (`0444`) and Caddy shell
+  entrypoint (`0555`), the LiteLLM bootstrap config (`0444`) and executable
+  entrypoint/supervisor (`0555`), Tailscale's shell configurator (`0555`), and
+  PostgreSQL's executable initializer (`0555`). Caddy and Tailscale currently
+  invoke these files through `/bin/sh`; making every `.sh` independently
+  executable keeps the rendered artifact robust if invocation changes.
+- A real container start probe was not feasible because `docker info` reported
+  no available daemon. Compose-model validation was performed with the exact
+  requested Compose release instead.
+
+### Verification
+
+- RED: `uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q
+  scripts/tests/test_render_dev_compose.py::test_render_preserves_runtime_asset_executability_with_safe_config_modes`
+  first reported missing mode metadata, then reported `1 failed` when the
+  source-mode-only implementation rendered the Caddy shell entrypoint as
+  `0444` instead of the fail-safe `0555`.
+- GREEN: the same command reported `1 passed in 0.13s` after applying the
+  `.sh` program rule.
+- Focused renderers were run in isolated processes because of the known PyYAML
+  native-extension flake. `uv run --python 3.12 --frozen --with pytest==9.1.1
+  pytest -q scripts/tests/test_render_dev_compose.py` reported `4 passed in
+  0.57s`; the equivalent command for
+  `scripts/tests/test_render_production_compose.py` reported `6 passed in
+  0.33s`.
+- `/tmp/vonk-compose-verify.PH64q5/docker-config/cli-plugins/docker-compose
+  version` reported `Docker Compose version v5.1.3`.
+- That v5.1.3 binary ran `--env-file deploy/compose/tests/test.env -f
+  "$round2_final_root/docker-compose.yaml" config -q` and the identical command with
+  `--profile hermes`; both exited 0. `find` reported only
+  `docker-compose.yaml` in the rendered deployment root.
+
+### PostgreSQL addendum evidence
+
+- `git ls-files --stage deploy/compose/postgres/init-databases.sh
+  deploy/compose/tests/test_postgres_init_databases.py` reported both paths as
+  tracked at HEAD: executable script blob
+  `66adaf0b4d3cd74a9e955e347df42d22a491f0b1` and test blob
+  `f9c5f52a3b0d6f78c999c9d7b5d3eca3bd49c6a3`.
+- `git log -1 -- deploy/compose/postgres/init-databases.sh` identified
+  `661d67ac4d14a76a4f823677942ce158b4df1b94` (`Unify canonical Compose
+  runtime`). The equivalent command for the behavior test identified
+  `5ac43b6a2412233085ffafbf545c38b5b55b3185` (`fix: make rendered compose
+  portable`). No duplicate initializer script is part of this fix round.

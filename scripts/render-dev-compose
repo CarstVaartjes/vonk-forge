@@ -116,6 +116,14 @@ def _config_content(source: Path) -> str:
     return content.replace("$", "$$")
 
 
+def _config_mode(source: Path) -> str:
+    # Shell programs are executable in the rendered artifact even when the
+    # source graph currently invokes them through /bin/sh. Preserve execute
+    # bits for other program types, but never project writable permissions.
+    executable = source.suffix == ".sh" or bool(source.stat().st_mode & 0o111)
+    return "0555" if executable else "0444"
+
+
 def _config_mounts(source_root: Path, source: str, target: str) -> tuple[dict[str, dict[str, str]], list[dict[str, str]]]:
     if not source.startswith("./"):
         return {}, []
@@ -137,7 +145,9 @@ def _config_mounts(source_root: Path, source: str, target: str) -> tuple[dict[st
         destination = target if not relative else posixpath.join(target, relative)
         name = _runtime_config_name(file.relative_to(source_root))
         configs[name] = {"content": _config_content(file)}
-        mounts.append({"source": name, "target": destination})
+        mounts.append(
+            {"source": name, "target": destination, "mode": _config_mode(file)}
+        )
     return configs, mounts
 
 
