@@ -216,15 +216,17 @@ jobs:
             "setup_run_id=$setup_run_id" \
             >> "$GITHUB_OUTPUT"
 
-  publish:
-    name: Publish complete ${{ needs.authority.outputs.channel }} installer generation
+  candidate:
+    name: Publish immutable ${{ needs.authority.outputs.channel }} installer candidate
     needs: [authority]
     if: >-
       needs.authority.result == 'success' &&
       needs.authority.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: installer-${{ needs.authority.outputs.channel }}
+    environment: installer-candidate-${{ needs.authority.outputs.channel }}
+    outputs:
+      generation: ${{ steps.assemble.outputs.generation }}
     concurrency:
       group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
       cancel-in-progress: false
@@ -330,21 +332,12 @@ jobs:
             [[ "$image" != *:latest@* && "$image" != *:dev@* && "$image" != *:main@* && "$image" != *:edge@* ]]
           done
 
-          evidence=$RUNNER_TEMP/accepted-installer-evidence.json
-          jq -S -c -n \
-            --arg channel "$CHANNEL" \
-            --arg source_sha "$SOURCE_SHA" \
-            --arg version "$VERSION" \
-            '{channel:$channel,gates:{agent_packages:true,compose:true,nas_payload:true,setup_binaries:true,source_authority:true},schema_version:1,source_sha:$source_sha,status:"accepted",version:$version}' \
-            > "$evidence"
-
           output=$RUNNER_TEMP/installer-publication
           assemble=(
             scripts/install-release-publication assemble
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
-            --accepted-evidence "$evidence"
             --origin "$INSTALLER_PUBLIC_ORIGIN"
             --expires-at "$expires_at"
             --signing-key "$signing_key"
@@ -403,7 +396,7 @@ jobs:
             *) exit 64 ;;
           esac
 
-      - name: Publish immutable generation and advance pointer last
+      - name: Publish immutable candidate objects only
         shell: bash
         env:
           RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -416,21 +409,364 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          scripts/install-release-publication publish \
+          scripts/install-release-publication publish-candidate \
             --bundle "$RUNNER_TEMP/installer-publication" \
             --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
-            | tee "$RUNNER_TEMP/publication-receipt.jsonl"
-          test "$(tail -n 1 "$RUNNER_TEMP/publication-receipt.jsonl" | jq -r .phase)" = pointer
+            | tee "$RUNNER_TEMP/candidate-receipt.jsonl"
+          test -s "$RUNNER_TEMP/candidate-receipt.jsonl"
+          test "$(jq -r .phase "$RUNNER_TEMP/candidate-receipt.jsonl" | sort -u)" = immutable
 
-      - name: Upload publication receipt
+      - name: Upload immutable publication bundle and candidate receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-publication-${{ needs.authority.outputs.channel }}-${{ steps.assemble.outputs.generation }}
+          name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ steps.assemble.outputs.generation }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/installer-publication
+
+  nas-acceptance:
+    name: Exercise clean NAS candidate
+    needs: [authority, candidate]
+    if: >-
+      needs.authority.result == 'success' &&
+      needs.candidate.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: installer-canary-${{ needs.authority.outputs.channel }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact candidate acceptance suite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Download verified Compose parser fixtures
+        shell: bash
+        env:
+          COMPOSE_LOWER_SHA256: eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310
+          COMPOSE_UGREEN_SHA256: a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/compose-fixtures"
+          mkdir -p "$fixture_dir"
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v5.1.3/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v5.1.3"
+          printf '%s  %s\n' "$COMPOSE_UGREEN_SHA256" \
+            "$fixture_dir/docker-compose-v5.1.3" | sha256sum --check --status
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v2.24.6"
+          printf '%s  %s\n' "$COMPOSE_LOWER_SHA256" \
+            "$fixture_dir/docker-compose-v2.24.6" | sha256sum --check --status
+          chmod 0755 "$fixture_dir/docker-compose-v5.1.3" \
+            "$fixture_dir/docker-compose-v2.24.6"
+
+      - name: Run literal clean NAS and Compose acceptance
+        shell: bash
+        env:
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
+          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
+          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
+          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          uv run python tests/acceptance/test_fresh_nas_install.py
+          mkdir -p "$RUNNER_TEMP/nas-acceptance"
+          jq -S -c -n \
+            --arg channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --arg generation "$VONK_ACCEPTANCE_GENERATION" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --arg version "$VONK_ACCEPTANCE_VERSION" \
+            '{channel:$channel,gates:["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"],generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
+            > "$RUNNER_TEMP/nas-acceptance/report.json"
+
+      - name: Upload NAS behavioral gate report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-nas-acceptance-${{ needs.candidate.outputs.generation }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/nas-acceptance/report.json
+
+  spark-acceptance:
+    name: Exercise clean Spark candidate (${{ matrix.platform }})
+    needs: [authority, candidate]
+    if: >-
+      needs.authority.result == 'success' &&
+      needs.candidate.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    environment: installer-canary-${{ needs.authority.outputs.channel }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact candidate acceptance suite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Run packaged Spark pairing, job, renewal, and upgrade acceptance
+        shell: bash
+        env:
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
+          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/spark"
+          uv run python tests/acceptance/test_spark_lifecycle.py
+          mkdir -p "$RUNNER_TEMP/spark-acceptance"
+          case "$VONK_ACCEPTANCE_PLATFORM" in
+            linux-amd64) gates='["spark_amd64","spark_job","spark_pairing"]' ;;
+            linux-arm64) gates='["spark_arm64","spark_renewal","spark_upgrade"]' ;;
+            *) exit 64 ;;
+          esac
+          jq -S -c -n \
+            --arg channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --argjson gates "$gates" \
+            --arg generation "$VONK_ACCEPTANCE_GENERATION" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --arg version "$VONK_ACCEPTANCE_VERSION" \
+            '{channel:$channel,gates:$gates,generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
+            > "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"
+
+      - name: Upload Spark behavioral gate report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-acceptance-${{ needs.candidate.outputs.generation }}-${{ matrix.platform }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/spark-acceptance/report-${{ matrix.platform }}.json
+
+  acceptance:
+    name: Sign complete candidate acceptance
+    needs: [authority, candidate, nas-acceptance, spark-acceptance]
+    if: >-
+      always() &&
+      needs.authority.result == 'success' &&
+      needs.candidate.result == 'success' &&
+      needs['nas-acceptance'].result == 'success' &&
+      needs['spark-acceptance'].result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: installer-acceptance-${{ needs.authority.outputs.channel }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Download exact behavioral gate reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-*-acceptance-${{ needs.candidate.outputs.generation }}*
+          path: ${{ runner.temp }}/gate-reports
+          merge-multiple: true
+
+      - name: Bind and sign complete acceptance
+        shell: bash
+        env:
+          CHANNEL: ${{ needs.authority.outputs.channel }}
+          GENERATION: ${{ needs.candidate.outputs.generation }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VERSION: ${{ needs.authority.outputs.version }}
+          VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT }}
+          VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/acceptance"
+          signing_key=$RUNNER_TEMP/installer-acceptance-private.pem
+          public_key=$RUNNER_TEMP/acceptance/installer-acceptance-public.pem
+          public_der=$RUNNER_TEMP/installer-acceptance-public.der
+          trap 'rm -f "$signing_key" "$public_der"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          printf '%s' "$VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY" > "$signing_key"
+          openssl pkey -in "$signing_key" -pubout -out "$public_key"
+          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
+          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+            "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
+          openssl pkey -pubin -in "$public_key" -text -noout \
+            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
+          mapfile -t reports < <(find "$RUNNER_TEMP/gate-reports" -type f -name '*.json' | sort)
+          test "${#reports[@]}" = 3
+          command=(
+            scripts/install-release-publication accept
+            --channel "$CHANNEL"
+            --version "$VERSION"
+            --source-sha "$SOURCE_SHA"
+            --generation "$GENERATION"
+            --run-id "$GITHUB_RUN_ID"
+            --signing-key "$signing_key"
+            --signing-public-key "$public_key"
+            --output "$RUNNER_TEMP/acceptance/receipt.json"
+            --signature-output "$RUNNER_TEMP/acceptance/receipt.sig"
+          )
+          for report in "${reports[@]}"; do
+            command+=(--gate-report "$report")
+          done
+          "${command[@]}"
+
+      - name: Upload signed acceptance receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ runner.temp }}/acceptance
+
+  promote:
+    name: Promote accepted ${{ needs.authority.outputs.channel }} installer generation
+    needs: [authority, candidate, acceptance]
+    if: >-
+      needs.authority.result == 'success' &&
+      needs.candidate.result == 'success' &&
+      needs.acceptance.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: installer-promotion-${{ needs.authority.outputs.channel }}
+    concurrency:
+      group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact promotion tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Download immutable candidate publication bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          path: ${{ runner.temp }}/installer-publication
+
+      - name: Download signed acceptance receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          path: ${{ runner.temp }}/acceptance
+
+      - name: Install R2 publication client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes rclone
+
+      - name: Revalidate source authority before promotion
+        shell: bash
+        env:
+          AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
+          CHANNEL: ${{ needs.authority.outputs.channel }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          TAG_OID: ${{ needs.authority.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          case "$CHANNEL" in
+            dev)
+              test "$AUTHORITY_REF" = refs/heads/main
+              test "$SOURCE_SHA" = \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+              ;;
+            stable)
+              git fetch --force --tags origin
+              tag=${AUTHORITY_REF#refs/tags/}
+              scripts/verify-release-tag-authority \
+                "$tag" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *) exit 64 ;;
+          esac
+
+      - name: Publish acceptance evidence and advance pointer last
+        shell: bash
+        env:
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
+          VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          scripts/install-release-publication promote \
+            --bundle "$RUNNER_TEMP/installer-publication" \
+            --accepted-evidence "$RUNNER_TEMP/acceptance/receipt.json" \
+            --accepted-evidence-signature "$RUNNER_TEMP/acceptance/receipt.sig" \
+            --acceptance-public-key "$RUNNER_TEMP/acceptance/installer-acceptance-public.pem" \
+            --acceptance-public-key-sha256 "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \
+            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
+            | tee "$RUNNER_TEMP/promotion-receipt.jsonl"
+          test "$(tail -n 1 "$RUNNER_TEMP/promotion-receipt.jsonl" | jq -r .phase)" = pointer
+
+      - name: Upload promotion receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-promotion-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           retention-days: 30
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/installer-publication/publication-plan.json
-            ${{ runner.temp }}/publication-receipt.jsonl
+            ${{ runner.temp }}/promotion-receipt.jsonl
 
   refresh:
     name: Refresh signed ${{ matrix.channel }} installer manifest
@@ -443,7 +779,7 @@ jobs:
           - channel: stable
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: installer-${{ matrix.channel }}
+    environment: installer-promotion-${{ matrix.channel }}
     concurrency:
       group: vonk-forge-installer-r2-${{ matrix.channel }}
       cancel-in-progress: false

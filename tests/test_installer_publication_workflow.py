@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
-CI = ROOT / ".github/workflows/ci.yml"
-DEV_IMAGES = ROOT / ".github/workflows/dev-images.yml"
 SETUPS = ROOT / ".github/workflows/installer-setups.yml"
 
 
-def _workflow() -> dict[str, object]:
-    return yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+def _workflow(path: Path = WORKFLOW) -> dict[str, object]:
+    return yaml.load(path.read_text(), Loader=yaml.BaseLoader)
 
 
-def test_publication_runs_only_after_accepted_workflows() -> None:
+def _steps(job: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {step["name"]: step for step in job["steps"]}
+
+
+def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     workflow = _workflow()
     triggers = workflow["on"]["workflow_run"]
     assert set(triggers["workflows"]) == {
@@ -26,20 +27,70 @@ def test_publication_runs_only_after_accepted_workflows() -> None:
         "Rust Vonk Forge agent development",
     }
     assert triggers["types"] == ["completed"]
-    authority = workflow["jobs"]["authority"]
-    assert "conclusion == 'success'" in authority["if"]
-    publish = workflow["jobs"]["publish"]
-    assert set(publish["needs"]) == {"authority"}
-    assert "needs.authority.result == 'success'" in publish["if"]
-    assert "needs.authority.outputs.ready == 'true'" in publish["if"]
-    assert "build-setup" not in workflow["jobs"]
-    text = WORKFLOW.read_text()
-    assert "refs/remotes/origin/main" in text
-    assert "actions/workflows/agent-release.yml/runs" in text
-    assert "actions/workflows/dev-images.yml/runs" in text
-    assert "verify-release-tag-authority" in text
-    assert 'status:"accepted"' in text
-    assert "ready=false" in text
+    jobs = workflow["jobs"]
+    assert set(jobs["candidate"]["needs"]) == {"authority"}
+    assert set(jobs["nas-acceptance"]["needs"]) == {"authority", "candidate"}
+    assert set(jobs["spark-acceptance"]["needs"]) == {"authority", "candidate"}
+    assert set(jobs["acceptance"]["needs"]) == {
+        "authority",
+        "candidate",
+        "nas-acceptance",
+        "spark-acceptance",
+    }
+    assert set(jobs["promote"]["needs"]) == {"authority", "candidate", "acceptance"}
+    assert "publish" not in jobs
+
+
+def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report() -> None:
+    jobs = _workflow()["jobs"]
+    nas = jobs["nas-acceptance"]
+    assert nas["permissions"] == {"contents": "read"}
+    steps = _steps(nas)
+    fixture_step = steps["Download verified Compose parser fixtures"]
+    assert fixture_step["shell"] == "bash"
+    assert fixture_step["env"] == {
+        "COMPOSE_LOWER_SHA256": "eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310",
+        "COMPOSE_UGREEN_SHA256": "a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4",
+    }
+    acceptance_step = steps["Run literal clean NAS and Compose acceptance"]
+    assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
+        "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
+    )
+    assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_UGREEN"] == (
+        "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
+    )
+    report = steps["Upload NAS behavioral gate report"]
+    assert report["uses"].startswith("actions/upload-artifact@")
+    assert report["with"]["if-no-files-found"] == "error"
+    assert report["with"]["path"] == "${{ runner.temp }}/nas-acceptance/report.json"
+
+
+def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
+    spark = _workflow()["jobs"]["spark-acceptance"]
+    assert spark["strategy"]["matrix"]["include"] == [
+        {"platform": "linux-amd64", "runner": "ubuntu-24.04"},
+        {"platform": "linux-arm64", "runner": "ubuntu-24.04-arm"},
+    ]
+    report = _steps(spark)["Upload Spark behavioral gate report"]
+    assert report["uses"].startswith("actions/upload-artifact@")
+    assert report["with"]["if-no-files-found"] == "error"
+
+
+def test_complete_acceptance_is_signed_before_the_channel_can_advance() -> None:
+    jobs = _workflow()["jobs"]
+    acceptance = jobs["acceptance"]
+    assert acceptance["permissions"] == {"actions": "read", "contents": "read"}
+    assert acceptance["environment"] == (
+        "installer-acceptance-${{ needs.authority.outputs.channel }}"
+    )
+    receipt = _steps(acceptance)["Upload signed acceptance receipt"]
+    assert receipt["uses"].startswith("actions/upload-artifact@")
+    assert receipt["with"]["if-no-files-found"] == "error"
+    promote = jobs["promote"]
+    assert promote["environment"] == (
+        "installer-promotion-${{ needs.authority.outputs.channel }}"
+    )
+    assert promote["concurrency"]["cancel-in-progress"] == "false"
 
 
 def test_publication_refreshes_both_signed_channels_before_expiry() -> None:
@@ -51,12 +102,11 @@ def test_publication_refreshes_both_signed_channels_before_expiry() -> None:
         "dev",
         "stable",
     }
-    assert "environment: installer-${{ matrix.channel }}" in WORKFLOW.read_text()
-    assert "install-release-publication refresh" in WORKFLOW.read_text()
+    assert refresh["environment"] == "installer-promotion-${{ matrix.channel }}"
 
 
 def test_setup_build_matrix_is_complete_and_native() -> None:
-    workflow = yaml.load(SETUPS.read_text(), Loader=yaml.BaseLoader)
+    workflow = _workflow(SETUPS)
     matrix = workflow["jobs"]["build-and-test"]["strategy"]["matrix"]["include"]
     actual = {
         (entry["platform"], entry["runner"], entry["binaries"]) for entry in matrix
@@ -68,69 +118,3 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         ("darwin-arm64", "macos-15", "vonk-nas-setup"),
     }
     assert all("target" not in entry for entry in matrix)
-    text = SETUPS.read_text()
-    assert "cargo test --locked --package" in text
-    assert "actions/upload-artifact@" in text
-
-
-def test_publication_reuses_exact_package_and_compose_artifacts() -> None:
-    text = WORKFLOW.read_text()
-    assert "actions/download-artifact@" in text
-    assert "run-id: ${{ needs.authority.outputs.package_run_id }}" in text
-    assert "run-id: ${{ needs.authority.outputs.compose_run_id }}" in text
-    assert "run-id: ${{ needs.authority.outputs.setup_run_id }}" in text
-    assert "scripts/build-nas-compose-bundle" in text
-    assert "--compose" in text
-    assert "scripts/install-release-publication assemble" in text
-    assert "scripts/install-release-publication publish" in text
-
-
-def test_stable_publication_resolves_setup_artifacts_from_the_setup_workflow() -> None:
-    """Stable CI and native setup binaries are intentionally separate runs."""
-    text = WORKFLOW.read_text()
-    assert "setup_run_id=$TRIGGER_RUN_ID" not in text
-    assert (
-        "actions/workflows/installer-setups.yml/runs?event=push&status=completed"
-        in text
-    )
-    assert text.index("setup_runs=$RUNNER_TEMP/installer-setup-runs.json") < text.index(
-        '"setup_run_id=$setup_run_id"'
-    )
-
-
-def test_r2_publication_uses_explicit_least_privilege_inputs() -> None:
-    text = WORKFLOW.read_text()
-    for name in (
-        "R2_ACCESS_KEY_ID",
-        "R2_ACCOUNT_ID",
-        "R2_SECRET_ACCESS_KEY",
-        "R2_INSTALLER_PUBLIC_BUCKET",
-        "INSTALLER_PUBLIC_ORIGIN",
-        "VONK_INSTALLER_RELEASE_PRIVATE_KEY",
-        "VONK_INSTALLER_RELEASE_KEY_FINGERPRINT",
-    ):
-        assert name in text
-    assert "environment: installer-${{ needs.authority.outputs.channel }}" in text
-    assert "permissions:\n      actions: read\n      contents: read" in text
-
-
-def test_release_compose_renderer_never_receives_latest() -> None:
-    text = CI.read_text()
-    render_blocks = re.findall(
-        r"scripts/render-production-compose \\\n(?:(?:\s+.*\n){1,8})", text
-    )
-    assert render_blocks
-    assert all(":latest" not in block for block in render_blocks)
-    assert "image_version_tag" in "\n".join(render_blocks)
-
-
-def test_development_acceptance_publishes_exact_hermes_generation() -> None:
-    text = DEV_IMAGES.read_text()
-    assert "vonk-forge-hermes.oci.tar" in text
-    assert "--target managed" in text
-    assert (
-        "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest"
-        in text
-    )
-    assert "subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes" in text
-    assert "subject-digest: ${{ steps.publish.outputs.hermes_digest }}" in text

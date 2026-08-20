@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and publish one accepted installer generation."""
+"""Assemble, accept, and atomically promote one installer generation."""
 
 from __future__ import annotations
 
@@ -41,11 +41,15 @@ KEY = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 ACCEPTANCE_GATES = {
-    "agent_packages",
-    "compose",
-    "nas_payload",
-    "setup_binaries",
-    "source_authority",
+    "compose_default",
+    "compose_hermes",
+    "nas_workstation",
+    "spark_amd64",
+    "spark_arm64",
+    "spark_job",
+    "spark_pairing",
+    "spark_renewal",
+    "spark_upgrade",
 }
 
 
@@ -153,13 +157,20 @@ def _validate_image(
 
 
 def _validate_evidence(
-    document: dict[str, Any], channel: str, version: str, source_sha: str
+    document: dict[str, Any],
+    channel: str,
+    version: str,
+    source_sha: str,
+    generation: str,
 ) -> None:
     if document.get("status") != "accepted":
         raise PublicationError("evidence is not accepted")
     if set(document) != {
         "channel",
         "gates",
+        "generation",
+        "issued_at",
+        "run_id",
         "schema_version",
         "source_sha",
         "status",
@@ -167,12 +178,25 @@ def _validate_evidence(
     }:
         raise PublicationError("accepted evidence is invalid")
     if (
-        document.get("schema_version") != 1
+        document.get("schema_version") != 2
         or document.get("channel") != channel
         or document.get("version") != version
         or document.get("source_sha") != source_sha
+        or document.get("generation") != generation
     ):
-        raise PublicationError("accepted evidence does not match the release")
+        raise PublicationError(
+            "accepted evidence does not match the candidate generation"
+        )
+    issued_at = document.get("issued_at")
+    run_id = document.get("run_id")
+    now = int(time.time())
+    if (
+        not isinstance(issued_at, int)
+        or not now - 24 * 60 * 60 <= issued_at <= now + 5 * 60
+        or not isinstance(run_id, int)
+        or run_id <= 0
+    ):
+        raise PublicationError("accepted evidence authority is invalid")
     gates = document.get("gates")
     if (
         not isinstance(gates, dict)
@@ -180,6 +204,68 @@ def _validate_evidence(
         or not all(value is True for value in gates.values())
     ):
         raise PublicationError("accepted evidence gates are incomplete")
+
+
+def _acceptance_public_key(path: Path, expected_fingerprint: str) -> bytes:
+    if SHA256.fullmatch(expected_fingerprint) is None:
+        raise PublicationError("acceptance public key fingerprint is invalid")
+    public_key = _safe_bytes(path, "acceptance public key", 16 * 1024)
+    description = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", path, "-text", "-noout"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    encoded = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", path, "-outform", "DER"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if (
+        description.returncode != 0
+        or not re.search(r"Public-Key: \((?:2048|3072|4096) bit\)", description.stdout)
+        or encoded.returncode != 0
+        or hashlib.sha256(encoded.stdout).hexdigest() != expected_fingerprint
+    ):
+        raise PublicationError("acceptance public key is invalid")
+    return public_key
+
+
+def _validate_signed_evidence(
+    arguments: argparse.Namespace, plan: dict[str, Any]
+) -> tuple[bytes, bytes, bytes]:
+    evidence_raw = _safe_bytes(
+        arguments.accepted_evidence, "accepted evidence", MAX_EVIDENCE_BYTES
+    )
+    evidence = _safe_json(arguments.accepted_evidence, "accepted evidence")
+    _validate_evidence(
+        evidence,
+        plan["channel"],
+        plan["version"],
+        plan["source_sha"],
+        plan["generation"],
+    )
+    signature_raw = _safe_bytes(
+        arguments.accepted_evidence_signature,
+        "accepted evidence signature",
+        16 * 1024,
+    )
+    if not signature_raw.endswith(b"\n") or signature_raw.count(b"\n") != 1:
+        raise PublicationError("accepted evidence signature is invalid")
+    try:
+        signature = base64.b64decode(signature_raw.strip(), validate=True)
+    except ValueError as error:
+        raise PublicationError("accepted evidence signature is invalid") from error
+    if not signature:
+        raise PublicationError("accepted evidence signature is invalid")
+    public_key = _acceptance_public_key(
+        arguments.acceptance_public_key,
+        arguments.acceptance_public_key_sha256,
+    )
+    _verify_signature(public_key, evidence_raw, signature, "accepted evidence")
+    return evidence_raw, signature_raw, public_key
 
 
 def _validate_agent_package(path: Path, version: str, architecture: str) -> None:
@@ -418,12 +504,6 @@ def assemble(arguments: argparse.Namespace) -> str:
     _validate_platforms(nas, NAS_PLATFORMS, "NAS setup")
     _validate_platforms(spark, SPARK_PLATFORMS, "Spark setup")
     _validate_platforms(packages, SPARK_PLATFORMS, "agent package")
-    evidence_raw = _safe_bytes(
-        arguments.accepted_evidence, "accepted evidence", MAX_EVIDENCE_BYTES
-    )
-    evidence = _safe_json(arguments.accepted_evidence, "accepted evidence")
-    _validate_evidence(evidence, channel, version, source_sha)
-
     source_contents: dict[str, bytes] = {}
     for platform, path in nas.items():
         source_contents[f"nas:{platform}"] = _safe_bytes(path, f"NAS setup {platform}")
@@ -441,7 +521,6 @@ def assemble(arguments: argparse.Namespace) -> str:
         )
     payload_content = _safe_bytes(arguments.nas_payload, "NAS payload")
     identity = {
-        "accepted_evidence_sha256": hashlib.sha256(evidence_raw).hexdigest(),
         "artifacts": {
             name: _record(content) for name, content in sorted(source_contents.items())
         },
@@ -523,7 +602,6 @@ def assemble(arguments: argparse.Namespace) -> str:
         add_immutable(immutable_nas, nas_bootstrap, 0o755)
         add_immutable(immutable_spark, spark_bootstrap, 0o755)
         release = {
-            "accepted_evidence_sha256": identity["accepted_evidence_sha256"],
             "artifacts": release_artifacts,
             "bootstraps": {
                 "nas": {"path": immutable_nas, **_record(nas_bootstrap)},
@@ -587,6 +665,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             "objects": entries,
             "public_key_sha256": hashlib.sha256(signing_public_key).hexdigest(),
             "schema_version": 1,
+            "source_sha": source_sha,
             "version": version,
         }
         _write(temporary / "publication-plan.json", _canonical(plan))
@@ -596,6 +675,90 @@ def assemble(arguments: argparse.Namespace) -> str:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
     return generation
+
+
+def accept(arguments: argparse.Namespace) -> None:
+    if (
+        VERSION.fullmatch(arguments.version) is None
+        or SOURCE_SHA.fullmatch(arguments.source_sha) is None
+        or SHA256.fullmatch(arguments.generation) is None
+        or arguments.run_id <= 0
+        or (arguments.channel == "stable" and SEMVER.fullmatch(arguments.version) is None)
+    ):
+        raise PublicationError("acceptance identity is invalid")
+    _signing_public_key(arguments.signing_key, arguments.signing_public_key)
+    if not arguments.gate_report:
+        raise PublicationError("behavioral acceptance gates are incomplete")
+
+    observed: set[str] = set()
+    for path in arguments.gate_report:
+        report = _safe_json(path, "behavioral gate report")
+        if set(report) != {
+            "channel",
+            "gates",
+            "generation",
+            "run_id",
+            "schema_version",
+            "source_sha",
+            "status",
+            "version",
+        }:
+            raise PublicationError("behavioral gate report is invalid")
+        if (
+            report.get("schema_version") != 1
+            or report.get("status") != "passed"
+            or report.get("channel") != arguments.channel
+            or report.get("version") != arguments.version
+            or report.get("source_sha") != arguments.source_sha
+            or report.get("generation") != arguments.generation
+            or report.get("run_id") != arguments.run_id
+        ):
+            raise PublicationError("behavioral gate report does not match the candidate")
+        gates = report.get("gates")
+        if (
+            not isinstance(gates, list)
+            or not gates
+            or gates != sorted(gates)
+            or any(not isinstance(gate, str) or gate not in ACCEPTANCE_GATES for gate in gates)
+            or len(gates) != len(set(gates))
+            or observed.intersection(gates)
+        ):
+            raise PublicationError("behavioral gate report is invalid")
+        observed.update(gates)
+    if observed != ACCEPTANCE_GATES:
+        raise PublicationError("behavioral acceptance gates are incomplete")
+
+    receipt = {
+        "channel": arguments.channel,
+        "gates": {gate: True for gate in sorted(observed)},
+        "generation": arguments.generation,
+        "issued_at": int(time.time()),
+        "run_id": arguments.run_id,
+        "schema_version": 2,
+        "source_sha": arguments.source_sha,
+        "status": "accepted",
+        "version": arguments.version,
+    }
+    receipt_raw = _canonical(receipt)
+    signature_raw = _sign(arguments.signing_key, receipt_raw).encode("ascii")
+    for path in (arguments.output, arguments.signature_output):
+        if path.exists() or path.is_symlink() or not path.parent.is_dir():
+            raise PublicationError("acceptance output is unsafe")
+    with tempfile.TemporaryDirectory(
+        prefix=".installer-acceptance-", dir=arguments.output.parent
+    ) as directory:
+        temporary = Path(directory)
+        receipt_path = temporary / "acceptance.json"
+        signature_path = temporary / "acceptance.sig"
+        _write(receipt_path, receipt_raw)
+        _write(signature_path, signature_raw)
+        os.link(receipt_path, arguments.output)
+        try:
+            os.link(signature_path, arguments.signature_output)
+        except BaseException:
+            arguments.output.unlink(missing_ok=True)
+            raise
+    print(f"sha256:{hashlib.sha256(receipt_raw).hexdigest()}")
 
 
 def _load_plan(
@@ -610,6 +773,7 @@ def _load_plan(
             "objects",
             "public_key_sha256",
             "schema_version",
+            "source_sha",
             "version",
         }
         or plan.get("schema_version") != 1
@@ -619,6 +783,7 @@ def _load_plan(
         plan.get("channel") not in {"dev", "stable"}
         or SHA256.fullmatch(str(plan.get("generation", ""))) is None
         or SHA256.fullmatch(str(plan.get("public_key_sha256", ""))) is None
+        or SOURCE_SHA.fullmatch(str(plan.get("source_sha", ""))) is None
         or VERSION.fullmatch(str(plan.get("version", ""))) is None
     ):
         raise PublicationError("publication plan is invalid")
@@ -824,8 +989,7 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
         raise PublicationError(f"R2 verification failed for {key}")
 
 
-def publish(arguments: argparse.Namespace) -> None:
-    plan, entries, public_key = _load_plan(arguments.bundle)
+def _destination(arguments: argparse.Namespace) -> tuple[Path | None, str | None]:
     if (arguments.filesystem is None) == (arguments.rclone_remote is None):
         raise PublicationError("select exactly one publication destination")
     if arguments.filesystem is not None:
@@ -833,19 +997,47 @@ def publish(arguments: argparse.Namespace) -> None:
         if destination.is_symlink():
             raise PublicationError("filesystem destination is unsafe")
         destination.mkdir(parents=True, exist_ok=True, mode=0o755)
+        return destination, None
+    remote = arguments.rclone_remote.rstrip("/")
+    if not remote or any(character in remote for character in "\r\n\0"):
+        raise PublicationError("R2 remote is invalid")
+    return None, remote
+
+
+def _copy_publication_entry(
+    filesystem: Path | None,
+    remote: str | None,
+    entry: dict[str, Any],
+    source: Path,
+) -> None:
+    if filesystem is not None:
+        _atomic_local_copy(
+            source,
+            filesystem / entry["key"],
+            entry["phase"] != "pointer",
+        )
     else:
-        remote = arguments.rclone_remote.rstrip("/")
-        if not remote or any(character in remote for character in "\r\n\0"):
-            raise PublicationError("R2 remote is invalid")
+        assert remote is not None
+        _rclone_copy(source, remote, entry)
+    print(json.dumps({"key": entry["key"], "phase": entry["phase"]}, sort_keys=True))
+
+
+def _validate_existing_pointer(
+    plan: dict[str, Any],
+    public_key: bytes,
+    filesystem: Path | None,
+    remote: str | None,
+) -> None:
     pointer_key = f"artifacts/{plan['channel']}/current.manifest"
-    if arguments.filesystem is not None:
-        current_path = arguments.filesystem / pointer_key
+    if filesystem is not None:
+        current_path = filesystem / pointer_key
         current_raw = (
             _safe_bytes(current_path, "published channel manifest", 64 * 1024)
             if current_path.exists()
             else None
         )
     else:
+        assert remote is not None
         current_raw = _rclone_bytes(remote, pointer_key, 64 * 1024)
     if current_raw is not None:
         current = _parse_channel_manifest(current_raw, public_key)
@@ -861,18 +1053,69 @@ def publish(arguments: argparse.Namespace) -> None:
                 raise PublicationError(
                     "refusing to regress or replace a stable release"
                 )
+
+
+def publish_candidate(arguments: argparse.Namespace) -> None:
+    _, entries, _ = _load_plan(arguments.bundle)
+    filesystem, remote = _destination(arguments)
     for entry, source in entries:
-        if arguments.filesystem is not None:
-            _atomic_local_copy(
-                source,
-                arguments.filesystem / entry["key"],
-                entry["phase"] != "pointer",
-            )
-        else:
-            _rclone_copy(source, remote, entry)
-        print(
-            json.dumps({"key": entry["key"], "phase": entry["phase"]}, sort_keys=True)
+        if entry["phase"] == "immutable":
+            _copy_publication_entry(filesystem, remote, entry, source)
+
+
+def _verify_candidate_objects(
+    entries: list[tuple[dict[str, Any], Path]],
+    filesystem: Path | None,
+    remote: str | None,
+) -> None:
+    for entry, _ in entries:
+        if entry["phase"] != "immutable":
+            continue
+        content = _published_bytes(
+            filesystem,
+            remote,
+            entry["key"],
+            MAX_ARTIFACT_BYTES,
+            f"published candidate object {entry['key']}",
         )
+        if (
+            len(content) != entry["size"]
+            or hashlib.sha256(content).hexdigest() != entry["sha256"]
+        ):
+            raise PublicationError("published candidate generation is inconsistent")
+
+
+def promote(arguments: argparse.Namespace) -> None:
+    plan, entries, release_public_key = _load_plan(arguments.bundle)
+    evidence_raw, signature_raw, acceptance_public_key = _validate_signed_evidence(
+        arguments, plan
+    )
+    filesystem, remote = _destination(arguments)
+    _verify_candidate_objects(entries, filesystem, remote)
+    _validate_existing_pointer(plan, release_public_key, filesystem, remote)
+
+    prefix = f"artifacts/{plan['channel']}/releases/{plan['generation']}/acceptance"
+    acceptance_objects = (
+        (
+            _object_entry(f"{prefix}/receipt.json", evidence_raw, "acceptance"),
+            arguments.accepted_evidence,
+        ),
+        (
+            _object_entry(f"{prefix}/receipt.sig", signature_raw, "acceptance"),
+            arguments.accepted_evidence_signature,
+        ),
+        (
+            _object_entry(
+                f"{prefix}/public-key.pem", acceptance_public_key, "acceptance"
+            ),
+            arguments.acceptance_public_key,
+        ),
+    )
+    for entry, source in acceptance_objects:
+        _copy_publication_entry(filesystem, remote, entry, source)
+    for entry, source in entries:
+        if entry["phase"] in {"endpoint", "pointer"}:
+            _copy_publication_entry(filesystem, remote, entry, source)
 
 
 def _published_bytes(
@@ -1006,7 +1249,6 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--channel", choices=("dev", "stable"), required=True)
     build.add_argument("--version", required=True)
     build.add_argument("--source-sha", required=True)
-    build.add_argument("--accepted-evidence", type=Path, required=True)
     build.add_argument("--origin", required=True)
     build.add_argument("--expires-at", required=True, type=int)
     build.add_argument("--signing-key", required=True, type=Path)
@@ -1019,11 +1261,33 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--agent-package", action="append", default=[])
     build.add_argument("--nas-payload", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
-    upload = commands.add_parser("publish")
-    upload.add_argument("--bundle", type=Path, required=True)
-    destinations = upload.add_mutually_exclusive_group(required=True)
-    destinations.add_argument("--filesystem", type=Path)
-    destinations.add_argument("--rclone-remote")
+    approval = commands.add_parser("accept")
+    approval.add_argument("--channel", choices=("dev", "stable"), required=True)
+    approval.add_argument("--version", required=True)
+    approval.add_argument("--source-sha", required=True)
+    approval.add_argument("--generation", required=True)
+    approval.add_argument("--run-id", required=True, type=int)
+    approval.add_argument("--gate-report", action="append", default=[], type=Path)
+    approval.add_argument("--signing-key", type=Path, required=True)
+    approval.add_argument("--signing-public-key", type=Path, required=True)
+    approval.add_argument("--output", type=Path, required=True)
+    approval.add_argument("--signature-output", type=Path, required=True)
+    candidate = commands.add_parser("publish-candidate")
+    candidate.add_argument("--bundle", type=Path, required=True)
+    candidate_destinations = candidate.add_mutually_exclusive_group(required=True)
+    candidate_destinations.add_argument("--filesystem", type=Path)
+    candidate_destinations.add_argument("--rclone-remote")
+    promotion = commands.add_parser("promote")
+    promotion.add_argument("--bundle", type=Path, required=True)
+    promotion.add_argument("--accepted-evidence", type=Path, required=True)
+    promotion.add_argument(
+        "--accepted-evidence-signature", type=Path, required=True
+    )
+    promotion.add_argument("--acceptance-public-key", type=Path, required=True)
+    promotion.add_argument("--acceptance-public-key-sha256", required=True)
+    promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
+    promotion_destinations.add_argument("--filesystem", type=Path)
+    promotion_destinations.add_argument("--rclone-remote")
     renewal = commands.add_parser("refresh")
     renewal.add_argument("--channel", choices=("dev", "stable"), required=True)
     renewal.add_argument("--expires-at", required=True, type=int)
@@ -1041,8 +1305,12 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.command == "assemble":
             generation = assemble(arguments)
             print(f"generation={generation}")
-        elif arguments.command == "publish":
-            publish(arguments)
+        elif arguments.command == "accept":
+            accept(arguments)
+        elif arguments.command == "publish-candidate":
+            publish_candidate(arguments)
+        elif arguments.command == "promote":
+            promote(arguments)
         else:
             refresh(arguments)
     except (OSError, PublicationError) as error:

@@ -22,6 +22,17 @@ NAS_PLATFORMS = (
     "darwin-arm64",
 )
 SPARK_PLATFORMS = ("linux-amd64", "linux-arm64")
+ACCEPTANCE_GATES = {
+    "compose_default",
+    "compose_hermes",
+    "nas_workstation",
+    "spark_amd64",
+    "spark_arm64",
+    "spark_job",
+    "spark_pairing",
+    "spark_renewal",
+    "spark_upgrade",
+}
 
 
 def _canonical(path: Path, document: object) -> None:
@@ -52,7 +63,6 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
 def _inputs(
     tmp_path: Path,
     *,
-    status: str = "accepted",
     version: str = "1.2.3",
     channel: str = "stable",
 ) -> dict[str, object]:
@@ -79,24 +89,6 @@ def _inputs(
         check=True,
         capture_output=True,
     )
-    accepted = tmp_path / "accepted.json"
-    _canonical(
-        accepted,
-        {
-            "channel": channel,
-            "gates": {
-                "agent_packages": True,
-                "compose": True,
-                "nas_payload": True,
-                "setup_binaries": True,
-                "source_authority": True,
-            },
-            "schema_version": 1,
-            "source_sha": SOURCE_SHA,
-            "status": status,
-            "version": version,
-        },
-    )
     nas: dict[str, Path] = {}
     for platform in NAS_PLATFORMS:
         path = tmp_path / f"vonk-nas-setup-{platform}"
@@ -112,7 +104,6 @@ def _inputs(
     payload = tmp_path / "payload.json"
     _canonical(payload, {"compose": "pinned", "schema_version": 1})
     return {
-        "accepted": accepted,
         "nas": nas,
         "spark": spark,
         "packages": packages,
@@ -139,8 +130,6 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         version,
         "--source-sha",
         SOURCE_SHA,
-        "--accepted-evidence",
-        str(inputs["accepted"]),
         "--origin",
         "https://install.vonkforge.ai",
         "--expires-at",
@@ -179,6 +168,341 @@ def _assemble(tmp_path: Path, inputs: dict[str, object]) -> Path:
     )
     assert result.returncode == 0, result.stderr
     return tmp_path / "publication"
+
+
+def _acceptance_receipt(
+    tmp_path: Path,
+    publication: Path,
+    *,
+    generation: str | None = None,
+    status: str = "accepted",
+) -> tuple[Path, Path, Path]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    private_key = tmp_path / "acceptance-private.pem"
+    public_key = tmp_path / "acceptance-public.pem"
+    receipt = tmp_path / "acceptance.json"
+    signature = tmp_path / "acceptance.sig"
+    subprocess.run(
+        [
+            "openssl",
+            "genpkey",
+            "-algorithm",
+            "RSA",
+            "-pkeyopt",
+            "rsa_keygen_bits:2048",
+            "-out",
+            private_key,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["openssl", "pkey", "-in", private_key, "-pubout", "-out", public_key],
+        check=True,
+        capture_output=True,
+    )
+    _canonical(
+        receipt,
+        {
+            "channel": plan["channel"],
+            "gates": {name: True for name in sorted(ACCEPTANCE_GATES)},
+            "generation": generation or plan["generation"],
+            "issued_at": int(time.time()),
+            "run_id": 123456,
+            "schema_version": 2,
+            "source_sha": SOURCE_SHA,
+            "status": status,
+            "version": plan["version"],
+        },
+    )
+    raw_signature = tmp_path / "acceptance.raw.sig"
+    subprocess.run(
+        [
+            "openssl",
+            "dgst",
+            "-sha256",
+            "-sign",
+            private_key,
+            "-out",
+            raw_signature,
+            receipt,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    signature.write_bytes(base64.b64encode(raw_signature.read_bytes()) + b"\n")
+    return receipt, signature, public_key
+
+
+def _publish_candidate(publication: Path, destination: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--filesystem",
+            str(destination),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _gate_report(
+    path: Path, publication: Path, gates: set[str], *, run_id: int = 123456
+) -> Path:
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    _canonical(
+        path,
+        {
+            "channel": plan["channel"],
+            "gates": sorted(gates),
+            "generation": plan["generation"],
+            "run_id": run_id,
+            "schema_version": 1,
+            "source_sha": SOURCE_SHA,
+            "status": "passed",
+            "version": plan["version"],
+        },
+    )
+    return path
+
+
+def _accept_command(
+    publication: Path,
+    output_root: Path,
+    reports: list[Path],
+) -> list[str]:
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    inputs = _inputs(output_root / "keys")
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "accept",
+        "--channel",
+        plan["channel"],
+        "--version",
+        plan["version"],
+        "--source-sha",
+        SOURCE_SHA,
+        "--generation",
+        plan["generation"],
+        "--run-id",
+        "123456",
+        "--signing-key",
+        str(inputs["signing_key"]),
+        "--signing-public-key",
+        str(inputs["signing_public_key"]),
+        "--output",
+        str(output_root / "acceptance.json"),
+        "--signature-output",
+        str(output_root / "acceptance.sig"),
+    ]
+    for report in reports:
+        command.extend(("--gate-report", str(report)))
+    return command
+
+
+def test_acceptance_authority_refuses_incomplete_behavioral_gate_reports(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    report = _gate_report(
+        tmp_path / "nas-report.json", publication, {"nas_workstation"}
+    )
+
+    result = subprocess.run(
+        _accept_command(publication, tmp_path / "acceptance", [report]),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "behavioral acceptance gates are incomplete" in result.stderr
+    assert not (tmp_path / "acceptance/acceptance.json").exists()
+
+
+def test_acceptance_authority_signs_only_the_complete_exact_generation(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    report_root = tmp_path / "reports"
+    report_root.mkdir()
+    reports = [
+        _gate_report(
+            report_root / "nas.json",
+            publication,
+            {"nas_workstation", "compose_default", "compose_hermes"},
+        ),
+        _gate_report(
+            report_root / "spark-amd64.json",
+            publication,
+            {"spark_amd64", "spark_pairing", "spark_job"},
+        ),
+        _gate_report(
+            report_root / "spark-arm64.json",
+            publication,
+            {"spark_arm64", "spark_renewal", "spark_upgrade"},
+        ),
+    ]
+
+    result = subprocess.run(
+        _accept_command(publication, tmp_path / "acceptance", reports),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    receipt = tmp_path / "acceptance/acceptance.json"
+    signature = tmp_path / "acceptance/acceptance.sig"
+    document = json.loads(receipt.read_text())
+    assert set(document["gates"]) == ACCEPTANCE_GATES
+    assert all(document["gates"].values())
+    (tmp_path / "acceptance/raw.sig").write_bytes(
+        base64.b64decode(signature.read_bytes(), validate=True)
+    )
+    verified = subprocess.run(
+        [
+            "openssl",
+            "dgst",
+            "-sha256",
+            "-verify",
+            tmp_path / "acceptance/keys/installer-signing-public.pem",
+            "-signature",
+            tmp_path / "acceptance/raw.sig",
+            receipt,
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+
+def _promote(
+    publication: Path,
+    destination: Path,
+    receipt: Path,
+    signature: Path,
+    public_key: Path,
+) -> subprocess.CompletedProcess[str]:
+    encoded = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "promote",
+            "--bundle",
+            str(publication),
+            "--accepted-evidence",
+            str(receipt),
+            "--accepted-evidence-signature",
+            str(signature),
+            "--acceptance-public-key",
+            str(public_key),
+            "--acceptance-public-key-sha256",
+            hashlib.sha256(encoded).hexdigest(),
+            "--filesystem",
+            str(destination),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _publish_accepted(
+    publication: Path, destination: Path, acceptance_root: Path
+) -> subprocess.CompletedProcess[str]:
+    candidate = _publish_candidate(publication, destination)
+    assert candidate.returncode == 0, candidate.stderr
+    receipt, signature, public_key = _acceptance_receipt(
+        acceptance_root, publication
+    )
+    return _promote(publication, destination, receipt, signature, public_key)
+
+
+def test_assembly_has_no_prepublication_acceptance_input(tmp_path: Path) -> None:
+    command = _assemble_command(tmp_path, _inputs(tmp_path))
+
+    assert "--accepted-evidence" not in command
+
+
+def test_candidate_publication_writes_only_immutable_generation_objects(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    destination = tmp_path / "public"
+
+    result = _publish_candidate(publication, destination)
+
+    assert result.returncode == 0, result.stderr
+    operations = [json.loads(line) for line in result.stdout.splitlines()]
+    assert operations
+    assert {operation["phase"] for operation in operations} == {"immutable"}
+    assert not (destination / "nas").exists()
+    assert not (destination / "spark").exists()
+    assert not (destination / "artifacts/stable/current.manifest").exists()
+
+
+def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    destination = tmp_path / "public"
+    assert _publish_candidate(publication, destination).returncode == 0
+    receipt, signature, public_key = _acceptance_receipt(
+        tmp_path, publication, generation="f" * 64
+    )
+
+    result = _promote(publication, destination, receipt, signature, public_key)
+
+    assert result.returncode == 2
+    assert "does not match the candidate generation" in result.stderr
+    assert not (destination / "artifacts/stable/current.manifest").exists()
+
+
+def test_promotion_publishes_signed_acceptance_receipt_before_channel_pointer(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    destination = tmp_path / "public"
+    candidate = _publish_candidate(publication, destination)
+    assert candidate.returncode == 0, candidate.stderr
+    receipt, signature, public_key = _acceptance_receipt(tmp_path, publication)
+
+    result = _promote(publication, destination, receipt, signature, public_key)
+
+    assert result.returncode == 0, result.stderr
+    operations = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [operation["phase"] for operation in operations[-3:]] == [
+        "endpoint",
+        "endpoint",
+        "pointer",
+    ]
+    assert operations[0]["phase"] == "acceptance"
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    acceptance = (
+        destination
+        / f"artifacts/stable/releases/{plan['generation']}/acceptance/receipt.json"
+    )
+    assert acceptance.read_bytes() == receipt.read_bytes()
+    assert (destination / "nas").is_file()
+    assert (destination / "spark").is_file()
+    assert (destination / "artifacts/stable/current.manifest").is_file()
 
 
 def test_assemble_builds_complete_immutable_generation_and_final_pointer(
@@ -344,20 +668,19 @@ def test_assemble_rejects_incomplete_platform_matrix(
     assert not (tmp_path / "publication").exists()
 
 
-def test_assemble_refuses_unaccepted_evidence(tmp_path: Path) -> None:
-    inputs = _inputs(tmp_path, status="rejected")
-
-    result = subprocess.run(
-        _assemble_command(tmp_path, inputs),
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+def test_promotion_refuses_rejected_acceptance_evidence(tmp_path: Path) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    destination = tmp_path / "public"
+    assert _publish_candidate(publication, destination).returncode == 0
+    receipt, signature, public_key = _acceptance_receipt(
+        tmp_path / "acceptance", publication, status="rejected"
     )
+
+    result = _promote(publication, destination, receipt, signature, public_key)
 
     assert result.returncode == 2
     assert "evidence is not accepted" in result.stderr
-    assert not (tmp_path / "publication").exists()
+    assert not (destination / "artifacts/stable/current.manifest").exists()
 
 
 def test_assemble_refuses_an_expired_channel_manifest(tmp_path: Path) -> None:
@@ -409,26 +732,14 @@ def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) ->
     assert "image reference is mutable" in result.stderr
 
 
-def test_publish_writes_signed_atomic_manifest_after_immutable_objects_and_static_endpoints(
+def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_endpoints(
     tmp_path: Path,
 ) -> None:
     publication = _assemble(tmp_path, _inputs(tmp_path))
     destination = tmp_path / "public"
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(publication),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    result = _publish_accepted(
+        publication, destination, tmp_path / "acceptance"
     )
 
     assert result.returncode == 0, result.stderr
@@ -437,7 +748,7 @@ def test_publish_writes_signed_atomic_manifest_after_immutable_objects_and_stati
         "key": "artifacts/stable/current.manifest",
         "phase": "pointer",
     }
-    assert all(item["phase"] == "immutable" for item in operations[:-3])
+    assert all(item["phase"] == "acceptance" for item in operations[:-3])
     assert [item["phase"] for item in operations[-3:]] == [
         "endpoint",
         "endpoint",
@@ -503,20 +814,8 @@ def test_stable_publication_refuses_version_rollback_before_writing(
     newest_inputs = _inputs(tmp_path / "newest", version="1.2.4")
     newest = _assemble(tmp_path / "newest", newest_inputs)
     destination = tmp_path / "public"
-    first = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(newest),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    first = _publish_accepted(
+        newest, destination, tmp_path / "newest-acceptance"
     )
     assert first.returncode == 0, first.stderr
 
@@ -524,22 +823,13 @@ def test_stable_publication_refuses_version_rollback_before_writing(
     older_inputs["signing_key"] = newest_inputs["signing_key"]
     older_inputs["signing_public_key"] = newest_inputs["signing_public_key"]
     older = _assemble(tmp_path / "older", older_inputs)
-    before = (destination / "artifacts/stable/current.manifest").read_bytes()
-    rollback = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(older),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    candidate = _publish_candidate(older, destination)
+    assert candidate.returncode == 0, candidate.stderr
+    receipt, signature, public_key = _acceptance_receipt(
+        tmp_path / "older-acceptance", older
     )
+    before = (destination / "artifacts/stable/current.manifest").read_bytes()
+    rollback = _promote(older, destination, receipt, signature, public_key)
 
     assert rollback.returncode == 2
     assert "refusing to regress" in rollback.stderr
@@ -552,20 +842,8 @@ def test_refresh_extends_signed_manifest_after_verifying_all_release_objects(
     inputs = _inputs(tmp_path / "inputs")
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(publication),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    published = _publish_accepted(
+        publication, destination, tmp_path / "acceptance"
     )
     assert published.returncode == 0, published.stderr
     manifest = destination / "artifacts/stable/current.manifest"
@@ -613,20 +891,8 @@ def test_refresh_refuses_to_extend_manifest_with_missing_release_object(
     inputs = _inputs(tmp_path / "inputs")
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(publication),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    published = _publish_accepted(
+        publication, destination, tmp_path / "acceptance"
     )
     assert published.returncode == 0, published.stderr
     manifest = destination / "artifacts/stable/current.manifest"
@@ -677,20 +943,8 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
         setup.chmod(0o755)
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "publish",
-            "--bundle",
-            str(publication),
-            "--filesystem",
-            str(destination),
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    published = _publish_accepted(
+        publication, destination, tmp_path / "acceptance"
     )
     assert published.returncode == 0, published.stderr
     commands = tmp_path / "commands"

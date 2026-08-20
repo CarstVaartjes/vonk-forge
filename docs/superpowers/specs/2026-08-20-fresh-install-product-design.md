@@ -81,8 +81,10 @@ POSIX permissions. Existing values are never silently overwritten.
 
 The command does not contact, mount, or administer the NAS. The operator drags
 the directory onto the NAS and starts `docker-compose.yaml` in the NAS Docker
-runner. Running the command later against an existing local directory preserves
-site identity and secrets while replacing only release-controlled values.
+runner. Docker Engine and Compose are host-owned NAS capabilities: Vonk Forge
+does not install, pin, configure, or make either version an installer input.
+Running the command later against an existing local directory preserves site
+identity and secrets while replacing only release-controlled values.
 
 ### Spark installation and upgrade
 
@@ -190,6 +192,16 @@ manifest is assembled from their accepted receipts, the manifest is verified,
 and only then is the channel pointer advanced atomically. Branch protection
 requires one fail-closed aggregate covering all behavioral suites.
 
+1Password is the canonical recoverable copy for every private release-signing
+key, while protected GitHub Actions environments may retain controlled
+execution copies. A separately encrypted offline escrow must have a derived
+public fingerprint matching the tracked verification key; escrow never reaches
+CI. The current GitHub-only key remains untouched until a replacement exists in
+both 1Password and escrow and succeeds in end-to-end sign/verify testing.
+Public verification keys and fingerprints remain tracked, non-secret release
+inputs. CI does not add a 1Password/OIDC runtime dependency merely to avoid
+those protected execution copies.
+
 ## Testing and acceptance
 
 Tests assert behavior and rendered models, not wording in documentation or
@@ -200,9 +212,12 @@ workflow source. Required acceptance includes:
 2. The canonical Compose model contains the same topology for development and
    production and has no legacy service, overlay, mutable image, absolute path,
    one-shot container, Docker socket, SSH exposure, or repository dependency.
-3. A fresh Docker Engine 29.4.3 / Compose 5.1.3 deployment starts from empty
-   volumes with no warnings, every default service becomes healthy, and no
-   service is exited.
+3. Generated default and Hermes YAML passes an officially downloaded,
+   checksum-verified UGREEN compatibility fixture (Docker 29.4.3 / Compose
+   5.1.3) and a declared lower Compose fixture. Those fixture versions are CI
+   compatibility inputs only. One clean reference-runner rollout starts from
+   empty volumes with no warnings, every selected service becomes healthy, and
+   no service is exited.
 4. LiteLLM has a distinct initialized role and database.
 5. Caddy serves the configured controller certificate and Tailscale browser
    access works at the advertised `.ts.net` URL.

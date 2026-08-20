@@ -182,7 +182,8 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert required_compose_environment <= installer_environment
     assert set(compose["services"]) == SERVICES
     assert "include" not in compose
-    assert "name" not in compose
+    assert compose["name"] == "vonk-forge"
+    assert compose["version"] == "3.9"
     assert all("build" not in service for service in compose["services"].values())
     assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert compose["services"]["caddy"]["ports"] == [

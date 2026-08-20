@@ -313,8 +313,13 @@ published-command experience on clean, production-shaped systems.
       any flow that needs a second setup command or unpublished input.
 - [ ] Generate the NAS directory from the published curl path in an ordinary
       non-root workstation environment without Docker, Git, SSH, or NAS access.
-- [ ] Start an empty Docker 29.4.3 / Compose 5.1.3 project and require every
-      service healthy with no warnings or exited containers.
+- [ ] Validate generated default and Hermes YAML with checksum-verified,
+      officially downloaded Compose parser fixtures: UGREEN Docker 29.4.3 /
+      Compose 5.1.3 and one declared lower Compose version. These are CI
+      compatibility fixtures only, never NAS installer requirements or inputs.
+- [ ] Run one clean reference-runner default/Hermes rollout from empty volumes
+      and require every selected service healthy with no warnings or exited
+      containers; do not repeat that expensive rollout for every parser fixture.
 - [ ] Verify PostgreSQL, LiteLLM, controller TLS, Tailscale browser URL,
       observability, registry, and optional Hermes.
 - [ ] Install and pair real amd64 and arm64 Rust packages.
