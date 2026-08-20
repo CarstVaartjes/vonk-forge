@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import ipaddress
 import json
 import os
@@ -8,8 +9,15 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests.acceptance.runtime import (
     AcceptanceError,
@@ -335,17 +343,306 @@ def verify_postgres_databases(bundle: Path) -> None:
     )
     if result.stdout.split() != ["control", "litellm"]:
         raise AcceptanceError("control and LiteLLM do not have distinct databases")
-
-
-def verify_authenticated_service_routes(bundle: Path) -> None:
-    checks = (
-        ("litellm", "python -c 'import urllib.request; assert urllib.request.urlopen(\"http://127.0.0.1:4000/health/readiness\").status == 200'"),
-        ("prometheus", "wget -qO- --header=\"Authorization: Bearer $(cat /run/vonk-normalized-secrets/prometheus-metrics-token)\" http://control-api:8000/metrics | grep -q \"^# TYPE\""),
-        ("grafana", "wget -qO- --user=admin --password=\"$(cat /run/vonk-normalized-secrets/grafana-admin-password)\" http://127.0.0.1:3000/api/user | grep -q \"\\\"login\\\":\\\"admin\\\"\""),
-        ("registry", "wget -qO- http://127.0.0.1:5000/v2/ | grep -qx \"{}\""),
+    tables = run(
+        [
+            *reference_compose(),
+            "exec",
+            "-T",
+            "postgres",
+            "psql",
+            "-U",
+            "litellm",
+            "-d",
+            "litellm",
+            "-Atc",
+            "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = 'public'",
+        ],
+        cwd=bundle,
     )
-    for service, command in checks:
-        run([*reference_compose(), "exec", "-T", service, "sh", "-ec", command], cwd=bundle)
+    try:
+        initialized_tables = int(tables.stdout.strip())
+    except ValueError as error:
+        raise AcceptanceError("LiteLLM database schema count is invalid") from error
+    if initialized_tables < 1:
+        raise AcceptanceError("LiteLLM database schema is not initialized")
+
+
+def _bundle_secret(bundle: Path, relative: str) -> str:
+    path = bundle / "secrets" / relative
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise AcceptanceError(f"acceptance secret {relative} is unavailable") from error
+    if not value:
+        raise AcceptanceError(f"acceptance secret {relative} is empty")
+    return value
+
+
+def _http_json(response: bytes, *, label: str) -> object:
+    _, marker, body = response.partition(b"\r\n\r\n")
+    if not marker:
+        raise AcceptanceError(f"{label} response has no HTTP body")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as error:
+        raise AcceptanceError(f"{label} response is not JSON") from error
+
+
+def _tailnet_tunnel(hostname: str) -> list[str]:
+    return [
+        *reference_compose(),
+        "exec",
+        "-T",
+        "tailscale-gateway",
+        "tailscale",
+        "--socket=/var/run/tailscale/tailscaled.sock",
+        "nc",
+        hostname,
+        "443",
+    ]
+
+
+def _tcp_tunnel(host: str, port: int) -> list[str]:
+    return [
+        sys.executable,
+        "-c",
+        (
+            "import os,select,socket,sys\n"
+            "peer=socket.create_connection((sys.argv[1],int(sys.argv[2])))\n"
+            "while True:\n"
+            "    readable,_,_=select.select([0,peer],[],[])\n"
+            "    if 0 in readable:\n"
+            "        data=os.read(0,65536)\n"
+            "        if not data: break\n"
+            "        peer.sendall(data)\n"
+            "    if peer in readable:\n"
+            "        data=peer.recv(65536)\n"
+            "        if not data: break\n"
+            "        os.write(1,data)\n"
+        ),
+        host,
+        str(port),
+    ]
+
+
+def _tailnet_request(
+    bundle: Path,
+    *,
+    hostname: str,
+    path: str,
+    headers: dict[str, str],
+    accepted_statuses: set[int],
+) -> bytes:
+    return https_over_command(
+        _tailnet_tunnel(hostname),
+        server_hostname=hostname,
+        path=path,
+        cwd=bundle,
+        environment=host_command_environment(),
+        headers=headers,
+        accepted_statuses=accepted_statuses,
+        timeout=30,
+    )
+
+
+def issue_registry_client_certificate(bundle: Path, directory: Path) -> tuple[Path, Path]:
+    secret_root = bundle / "secrets"
+    try:
+        password = (secret_root / "step-ca-password").read_bytes().strip()
+        intermediate_key = serialization.load_pem_private_key(
+            (secret_root / "step-ca/intermediate-key").read_bytes(), password=password
+        )
+        intermediate = x509.load_pem_x509_certificate(
+            (secret_root / "step-ca/intermediate-certificate").read_bytes()
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise AcceptanceError("registry client certificate authority is unavailable") from error
+    if not isinstance(intermediate_key, ed25519.Ed25519PrivateKey):
+        raise AcceptanceError("registry client certificate authority is invalid")
+    node_id = "spk_" + "a" * 32
+    client_key = ed25519.Ed25519PrivateKey.generate()
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
+        .issuer_name(intermediate.subject)
+        .public_key(client_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(minutes=10))
+        .add_extension(
+            x509.KeyUsage(True, False, False, False, False, False, False, False, False),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")]
+            ),
+            critical=False,
+        )
+        .sign(intermediate_key, algorithm=None)
+    )
+    certificate_path = directory / "registry-client-certificate.pem"
+    key_path = directory / "registry-client-key.pem"
+    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        client_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    certificate_path.chmod(0o600)
+    key_path.chmod(0o600)
+    return certificate_path, key_path
+
+
+def verify_routed_service_behavior(
+    bundle: Path,
+    *,
+    nas_ip: str,
+    control_hostname: str,
+    registry_hostname: str,
+) -> None:
+    litellm_key = _bundle_secret(bundle, "litellm-master-key")
+    grafana_password = _bundle_secret(bundle, "grafana-admin-password")
+    grafana_authorization = "Basic " + base64.b64encode(
+        f"admin:{grafana_password}".encode()
+    ).decode("ascii")
+
+    for headers in ({}, {"Authorization": "Bearer acceptance-wrong-key"}):
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/v1/models",
+            headers=headers,
+            accepted_statuses={401, 403},
+        )
+    models = _http_json(
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/v1/models",
+            headers={"Authorization": f"Bearer {litellm_key}"},
+            accepted_statuses={200},
+        ),
+        label="LiteLLM models",
+    )
+    if not isinstance(models, dict) or not isinstance(models.get("data"), list):
+        raise AcceptanceError("LiteLLM models response is invalid")
+
+    for authorization in ("", "Basic YWRtaW46d3Jvbmc="):
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/grafana/api/user",
+            headers={} if not authorization else {"Authorization": authorization},
+            accepted_statuses={401, 403},
+        )
+    user = _http_json(
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/grafana/api/user",
+            headers={"Authorization": grafana_authorization},
+            accepted_statuses={200},
+        ),
+        label="Grafana user",
+    )
+    if not isinstance(user, dict) or user.get("login") != "admin":
+        raise AcceptanceError("Grafana administrator authentication failed")
+    datasource = _http_json(
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/grafana/api/datasources/uid/vonk-prometheus",
+            headers={"Authorization": grafana_authorization},
+            accepted_statuses={200},
+        ),
+        label="Grafana datasource",
+    )
+    if not isinstance(datasource, dict) or datasource.get("type") != "prometheus":
+        raise AcceptanceError("Grafana Prometheus datasource is unavailable")
+    dashboards = _http_json(
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path="/grafana/api/search?query=Vonk%20Forge",
+            headers={"Authorization": grafana_authorization},
+            accepted_statuses={200},
+        ),
+        label="Grafana dashboards",
+    )
+    if not isinstance(dashboards, list) or not {"vonk-fleet", "vonk-jobs"} <= {
+        item.get("uid") for item in dashboards if isinstance(item, dict)
+    }:
+        raise AcceptanceError("Grafana provisioned dashboards are unavailable")
+    query = _http_json(
+        _tailnet_request(
+            bundle,
+            hostname=control_hostname,
+            path=(
+                "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
+                "query=up%7Bjob%3D%22vonk-control%22%7D"
+            ),
+            headers={"Authorization": grafana_authorization},
+            accepted_statuses={200},
+        ),
+        label="Prometheus query",
+    )
+    result = (
+        query.get("data", {}).get("result")
+        if isinstance(query, dict) and isinstance(query.get("data"), dict)
+        else None
+    )
+    if (
+        not isinstance(query, dict)
+        or query.get("status") != "success"
+        or not isinstance(result, list)
+        or not any(
+            isinstance(item, dict)
+            and isinstance(item.get("metric"), dict)
+            and item["metric"].get("job") == "vonk-control"
+            for item in result
+        )
+    ):
+        raise AcceptanceError("Prometheus did not ingest the control scrape")
+
+    root = bundle / "secrets/step-ca/root-certificate"
+    try:
+        https_over_command(
+            _tcp_tunnel(nas_ip, 8443),
+            server_hostname=registry_hostname,
+            path="/v2/",
+            cwd=bundle,
+            environment=host_command_environment(),
+            ca_file=root,
+            timeout=30,
+        )
+    except AcceptanceError:
+        pass
+    else:
+        raise AcceptanceError("registry accepted a request without client authentication")
+    with tempfile.TemporaryDirectory(prefix="vonk-registry-client-", dir=bundle.parent) as directory:
+        certificate, key = issue_registry_client_certificate(bundle, Path(directory))
+        registry = _http_json(
+            https_over_command(
+                _tcp_tunnel(nas_ip, 8443),
+                server_hostname=registry_hostname,
+                path="/v2/",
+                cwd=bundle,
+                environment=host_command_environment(),
+                ca_file=root,
+                client_certificate=certificate,
+                client_key=key,
+                accepted_statuses={200},
+                timeout=30,
+            ),
+            label="registry",
+        )
+    if registry != {}:
+        raise AcceptanceError("registry route returned an unexpected API response")
 
 
 def verify_tailscale_services(
@@ -418,7 +715,9 @@ def exercise_compose(
     bundle: Path,
     *,
     nas_ip: str,
+    control_hostname: str,
     enrollment_hostname: str,
+    registry_hostname: str,
     tailnet_suffix: str,
     hermes: bool,
 ) -> None:
@@ -456,7 +755,12 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
-        verify_authenticated_service_routes(bundle)
+        verify_routed_service_behavior(
+            bundle,
+            nas_ip=nas_ip,
+            control_hostname=control_hostname,
+            registry_hostname=registry_hostname,
+        )
         verify_tailscale_services(bundle, hermes=hermes, tailnet_suffix=tailnet_suffix)
     finally:
         run(
@@ -497,11 +801,16 @@ def main() -> None:
     upstream_key = required_environment(
         "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
     )
+    workspace = Path(required_environment("VONK_ACCEPTANCE_WORKSPACE"))
+    if not workspace.is_absolute() or workspace.is_symlink() or not workspace.is_dir():
+        raise AcceptanceError("acceptance workspace is unavailable")
     nas_ip = host_ipv4()
     enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
     fixtures = compose_compatibility_fixtures()
 
-    with tempfile.TemporaryDirectory(prefix="vonk-nas-acceptance-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="vonk-nas-acceptance-", dir=workspace
+    ) as directory:
         root = Path(directory)
         child_environment = command_environment(root / "workstation")
         common = {
@@ -549,7 +858,9 @@ def main() -> None:
             exercise_compose(
                 bundle,
                 nas_ip=nas_ip,
+                control_hostname=f"vonk-forge.{tailnet_suffix}",
                 enrollment_hostname=enrollment_hostname,
+                registry_hostname=f"registry.acceptance.{tailnet_suffix}",
                 tailnet_suffix=tailnet_suffix,
                 hermes=True,
             )

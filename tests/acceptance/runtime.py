@@ -246,7 +246,15 @@ def https_over_command(
     environment: Mapping[str, str],
     timeout: float,
     ca_file: Path | None = None,
+    client_certificate: Path | None = None,
+    client_key: Path | None = None,
+    headers: Mapping[str, str] | None = None,
+    accepted_statuses: set[int] | None = None,
 ) -> bytes:
+    request_headers = {} if headers is None else dict(headers)
+    allowed_statuses = set(range(200, 300)) if accepted_statuses is None else set(
+        accepted_statuses
+    )
     if (
         not command
         or timeout <= 0
@@ -254,6 +262,23 @@ def https_over_command(
         or any(character in server_hostname for character in "\0\r\n /")
         or not path.startswith("/")
         or any(character in path for character in "\0\r\n")
+        or (client_certificate is None) != (client_key is None)
+        or not allowed_statuses
+        or any(
+            not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599
+            for status in allowed_statuses
+        )
+        or any(
+            not name
+            or any(character in name for character in "\0\r\n:")
+            or any(character in value for character in "\0\r\n")
+            for name, value in request_headers.items()
+            if isinstance(name, str) and isinstance(value, str)
+        )
+        or any(
+            not isinstance(name, str) or not isinstance(value, str)
+            for name, value in request_headers.items()
+        )
     ):
         raise AcceptanceError("HTTPS tunnel request is invalid")
     process = subprocess.Popen(
@@ -269,6 +294,8 @@ def https_over_command(
     incoming = ssl.MemoryBIO()
     outgoing = ssl.MemoryBIO()
     context = ssl.create_default_context(cafile=os.fspath(ca_file) if ca_file else None)
+    if client_certificate is not None and client_key is not None:
+        context.load_cert_chain(client_certificate, client_key)
     tls = context.wrap_bio(incoming, outgoing, server_hostname=server_hostname)
     deadline = time.monotonic() + timeout
 
@@ -306,7 +333,9 @@ def https_over_command(
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {server_hostname}\r\n"
             "Connection: close\r\n"
-            "User-Agent: vonk-forge-acceptance\r\n\r\n"
+            "User-Agent: vonk-forge-acceptance\r\n"
+            + "".join(f"{name}: {value}\r\n" for name, value in request_headers.items())
+            + "\r\n"
         ).encode("ascii")
         offset = 0
         while offset < len(request):
@@ -337,17 +366,31 @@ def https_over_command(
             except ssl.SSLZeroReturnError:
                 break
         status_line = bytes(response).partition(b"\r\n")[0]
-        if not re.fullmatch(rb"HTTP/1\.[01] 2[0-9][0-9](?: .*)?", status_line):
+        status_match = re.fullmatch(rb"HTTP/1\.[01] ([0-9]{3})(?: .*)?", status_line)
+        if status_match is None or int(status_match.group(1)) not in allowed_statuses:
             raise AcceptanceError(
                 f"tailnet HTTPS endpoint returned {status_line[:200]!r}"
             )
+        try:
+            process.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceError("HTTPS tunnel timed out waiting for child exit")
+        try:
+            exit_code = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise AcceptanceError("HTTPS tunnel did not exit after response") from error
+        if exit_code != 0:
+            raise AcceptanceError(f"HTTPS tunnel exited with {exit_code}")
         return bytes(response)
     except (BrokenPipeError, ConnectionError, OSError, ssl.SSLError) as error:
         raise AcceptanceError("tailnet HTTPS endpoint is unavailable") from error
     finally:
         try:
             process.stdin.close()
-        except (BrokenPipeError, OSError):
+        except (BrokenPipeError, OSError, ValueError):
             pass
         if process.poll() is None:
             try:

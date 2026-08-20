@@ -250,3 +250,77 @@ def test_https_tunnel_performs_hostname_verified_tls_over_a_command(
 
     assert not server.is_alive()
     assert response.endswith(b"\r\n\r\nok")
+
+
+def test_https_tunnel_rejects_a_successful_response_from_a_failing_child(
+    tmp_path: Path,
+) -> None:
+    key = tmp_path / "key.pem"
+    certificate = tmp_path / "certificate.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            key,
+            "-out",
+            certificate,
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
+            "-days",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def serve() -> None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certificate, key)
+        connection, _ = listener.accept()
+        with context.wrap_socket(connection, server_side=True) as tls:
+            assert tls.recv(4096).startswith(b"GET /ready HTTP/1.1\r\n")
+            tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        listener.close()
+
+    server = threading.Thread(target=serve)
+    server.start()
+    tunnel = tmp_path / "failing-tunnel.py"
+    tunnel.write_text(
+        "import os,select,socket,sys\n"
+        "peer=socket.create_connection(('127.0.0.1',int(sys.argv[1])))\n"
+        "while True:\n"
+        "    readable,_,_=select.select([0,peer],[],[])\n"
+        "    if 0 in readable:\n"
+        "        data=os.read(0,65536)\n"
+        "        if not data: break\n"
+        "        peer.sendall(data)\n"
+        "    if peer in readable:\n"
+        "        data=peer.recv(65536)\n"
+        "        if not data: break\n"
+        "        os.write(1,data)\n"
+        "sys.exit(9)\n"
+    )
+
+    with pytest.raises(AcceptanceError, match="exited with 9"):
+        https_over_command(
+            [sys.executable, tunnel, str(port)],
+            server_hostname="localhost",
+            path="/ready",
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            timeout=5,
+            ca_file=certificate,
+        )
+    server.join(timeout=5)
+    assert not server.is_alive()

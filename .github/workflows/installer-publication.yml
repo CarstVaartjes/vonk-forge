@@ -422,7 +422,9 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ steps.assemble.outputs.generation }}
           retention-days: 7
           if-no-files-found: error
-          path: ${{ runner.temp }}/installer-publication
+          path: |
+            ${{ runner.temp }}/installer-publication
+            ${{ runner.temp }}/candidate-receipt.jsonl
 
   nas-acceptance:
     name: Exercise clean NAS candidate
@@ -435,12 +437,6 @@ jobs:
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
       contents: read
-    services:
-      docker-engine:
-        image: docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
-        env:
-          DOCKER_TLS_CERTDIR: ""
-        options: --privileged
     steps:
       - name: Check out exact candidate acceptance suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -454,6 +450,39 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+
+      - name: Start Docker 29.4.3 compatibility daemon
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          set -euo pipefail
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+          docker run --detach --privileged \
+            --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
+            --publish 127.0.0.1:2375:2375 \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --env DOCKER_TLS_CERTDIR= \
+            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
+          daemon_ready=false
+          for _ in $(seq 1 60); do
+            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
+              test "$server_version" = 29.4.3
+              daemon_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$daemon_ready" != true ]; then
+            docker logs "$VONK_ACCEPTANCE_DIND_CONTAINER" >&2 || true
+            exit 1
+          fi
+          dind_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$VONK_ACCEPTANCE_DIND_CONTAINER")
+          case "$dind_ip" in
+            [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "DIND IPv4 address is unavailable" >&2; exit 1 ;;
+          esac
+          printf 'VONK_ACCEPTANCE_NAS_IP=%s\n' "$dind_ip" >> "$GITHUB_ENV"
 
       - name: Download verified Compose parser fixtures
         shell: bash
@@ -480,7 +509,7 @@ jobs:
       - name: Run literal clean NAS and Compose acceptance
         shell: bash
         env:
-          DOCKER_HOST: tcp://docker-engine:2375
+          DOCKER_HOST: tcp://127.0.0.1:2375
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
@@ -491,6 +520,7 @@ jobs:
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
@@ -507,8 +537,16 @@ jobs:
             --argjson run_id "$GITHUB_RUN_ID" \
             --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
             --arg version "$VONK_ACCEPTANCE_VERSION" \
-            '{channel:$channel,gates:$gates,generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
+          '{channel:$channel,gates:$gates,generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
             > "$RUNNER_TEMP/nas-acceptance/report.json"
+
+      - name: Remove Docker 29.4.3 compatibility daemon
+        if: always()
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
 
       - name: Upload NAS behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
