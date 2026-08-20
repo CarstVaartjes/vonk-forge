@@ -131,7 +131,16 @@ fn write_existing_bundle(root: &Path) {
     std::fs::create_dir(&bundle).expect("bundle directory");
     std::fs::create_dir(bundle.join("secrets")).expect("secret directory");
     std::fs::write(bundle.join("docker-compose.yaml"), "old compose\n").expect("compose");
-    std::fs::write(bundle.join(".env"), "SITE_LOCAL=kept\n").expect("environment");
+    std::fs::write(
+        bundle.join(".env"),
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\n",
+    )
+    .expect("environment");
+    std::fs::write(
+        bundle.join("secrets/database-password"),
+        "kept-database-password\n",
+    )
+    .expect("database password");
     std::fs::write(bundle.join("secrets/site-secret"), "kept-secret\n").expect("secret");
 }
 
@@ -164,7 +173,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join(".env")).expect("environment"),
-        "SITE_LOCAL=kept\n"
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\n"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join("secrets/site-secret")).expect("secret"),
@@ -185,6 +194,61 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
             "compose replacement must use rename, not in-place truncation"
         );
     }
+}
+
+#[test]
+fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 1,
+          "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:new\n",
+          "required_values": [
+            {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"},
+            {"env": "NEW_RELEASE_VALUE", "prompt": "New release value"}
+          ],
+          "secrets": [
+            {"file": "database-password", "prompt": "Database password", "generate_bytes": 16},
+            {"file": "new-release-secret", "prompt": "New release secret", "generate_bytes": 16}
+          ],
+          "hermes": {
+            "env": "VONK_HERMES_ENABLED",
+            "prompt": "Enable Hermes?",
+            "required_values": [],
+            "secrets": []
+          }
+        }"#,
+    )
+    .expect("valid upgraded payload");
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let input = Cursor::new(b"new-value\n\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle upgraded with new inputs");
+
+    assert_eq!(result.hermes_enabled, Some(false));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\nNEW_RELEASE_VALUE=new-value\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("secrets/database-password"))
+            .expect("database password"),
+        "kept-database-password\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("secrets/new-release-secret"))
+            .expect("new release secret"),
+        "generated-secret\n"
+    );
 }
 
 #[cfg(unix)]

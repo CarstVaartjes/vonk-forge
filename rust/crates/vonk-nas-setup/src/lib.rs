@@ -420,7 +420,7 @@ pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     let bundle = request.output_root.join("vonk-forge");
     match request.mode {
         SetupMode::Install => install(payload, &bundle, prompt, generator),
-        SetupMode::Upgrade => upgrade(payload, &bundle),
+        SetupMode::Upgrade => upgrade(payload, &bundle, prompt, generator),
     }
 }
 
@@ -490,8 +490,70 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     result
 }
 
-fn upgrade(payload: &CanonicalTemplatePayload, bundle: &Path) -> Result<SetupOutcome, SetupError> {
+fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
+    payload: &CanonicalTemplatePayload,
+    bundle: &Path,
+    prompt: &mut PromptIo<R, W, S>,
+    generator: &G,
+) -> Result<SetupOutcome, SetupError> {
     validate_existing_bundle(bundle)?;
+    let mut environment = parse_environment(&bundle.join(".env"))?;
+    let mut new_secrets = Vec::new();
+    for required in &payload.required_values {
+        if environment_value(&environment, &required.env).is_none() {
+            environment.push((required.env.clone(), prompt.required(required)?));
+        }
+    }
+    collect_missing_secrets(
+        &bundle.join("secrets"),
+        &payload.secrets,
+        prompt,
+        generator,
+        &mut new_secrets,
+    )?;
+
+    let hermes_enabled = if let Some(hermes) = &payload.hermes {
+        let enabled = match environment_value(&environment, &hermes.env) {
+            Some("true") => true,
+            Some("false") => false,
+            Some(_) => {
+                return Err(SetupError::InvalidPayload(format!(
+                    "existing {} value is not true or false",
+                    hermes.env
+                )));
+            }
+            None => {
+                let enabled = prompt.confirm(&hermes.prompt)?;
+                environment.push((hermes.env.clone(), enabled.to_string()));
+                enabled
+            }
+        };
+        if enabled {
+            for required in &hermes.required_values {
+                if environment_value(&environment, &required.env).is_none() {
+                    environment.push((required.env.clone(), prompt.required(required)?));
+                }
+            }
+            collect_missing_secrets(
+                &bundle.join("secrets"),
+                &hermes.secrets,
+                prompt,
+                generator,
+                &mut new_secrets,
+            )?;
+        }
+        Some(enabled)
+    } else {
+        None
+    };
+
+    let environment_document = render_owned_environment(&environment)?;
+    for (name, value) in new_secrets {
+        let mut content = value.into_bytes();
+        content.push(b'\n');
+        write_secret_file(&bundle.join("secrets"), &name, &content)?;
+    }
+    atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
     atomic_replace(
         &bundle.join("docker-compose.yaml"),
         payload.docker_compose_yaml.as_bytes(),
@@ -499,8 +561,81 @@ fn upgrade(payload: &CanonicalTemplatePayload, bundle: &Path) -> Result<SetupOut
     )?;
     Ok(SetupOutcome {
         root: bundle.to_path_buf(),
-        hermes_enabled: None,
+        hermes_enabled,
     })
+}
+
+fn collect_missing_secrets<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
+    secret_root: &Path,
+    required: &[SecretPrompt],
+    prompt: &mut PromptIo<R, W, S>,
+    generator: &G,
+    new_secrets: &mut Vec<(String, String)>,
+) -> Result<(), SetupError> {
+    for secret in required {
+        let path = secret_root.join(&secret.file);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => {
+                return Err(SetupError::UnsafeDestination(format!(
+                    "{} is not a regular secret file",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                new_secrets.push((secret.file.clone(), prompt.secret(secret, generator)?));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn parse_environment(path: &Path) -> Result<Vec<(String, String)>, SetupError> {
+    let document = fs::read_to_string(path)?;
+    if document.len() > 256 * 1024 || document.contains('\0') {
+        return Err(SetupError::UnsafeDestination(
+            "existing .env is too large or malformed".to_owned(),
+        ));
+    }
+    let mut values = Vec::new();
+    let mut names = HashSet::new();
+    for line in document.lines() {
+        let (name, raw_value) = line.split_once('=').ok_or_else(|| {
+            SetupError::UnsafeDestination("existing .env has an invalid line".to_owned())
+        })?;
+        validate_env_name(name)?;
+        if !names.insert(name.to_owned()) {
+            return Err(SetupError::UnsafeDestination(format!(
+                "existing .env repeats {name}"
+            )));
+        }
+        let value = if raw_value.starts_with('"') {
+            serde_json::from_str::<String>(raw_value).map_err(|_| {
+                SetupError::UnsafeDestination(format!(
+                    "existing .env value for {name} is malformed"
+                ))
+            })?
+        } else {
+            raw_value.to_owned()
+        };
+        values.push((name.to_owned(), value));
+    }
+    Ok(values)
+}
+
+fn environment_value<'a>(values: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    values
+        .iter()
+        .find_map(|(key, value)| (key == name).then_some(value.as_str()))
+}
+
+fn render_owned_environment(values: &[(String, String)]) -> Result<String, SetupError> {
+    let borrowed = values
+        .iter()
+        .map(|(key, value)| (key, value.clone()))
+        .collect::<Vec<_>>();
+    render_environment(&borrowed)
 }
 
 fn render_environment(values: &[(&String, String)]) -> Result<String, SetupError> {
@@ -712,8 +847,12 @@ fn write_new_file(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
 fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
     require_regular_file(path)?;
     let parent = path.parent().expect("file has parent");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| SetupError::UnsafeDestination("replacement path is invalid".to_owned()))?;
     let temporary = parent.join(format!(
-        ".docker-compose.yaml.tmp-{}-{}",
+        ".{file_name}.tmp-{}-{}",
         std::process::id(),
         STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
