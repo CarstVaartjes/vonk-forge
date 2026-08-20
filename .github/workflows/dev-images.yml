@@ -61,18 +61,15 @@ jobs:
           set -euo pipefail
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
             deploy/compose/tests/test_production_shaped_development.py \
-            scripts/tests/test_dev_admin_token.py \
             scripts/tests/test_render_production_compose.py
           npm ci --prefix control/web
           npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
           npm run build --prefix control/web
           uv run --project control --frozen pytest -q \
-            control/tests/test_dev_auth_init.py \
             control/tests/test_passwords.py \
             control/tests/test_browser_auth.py \
             control/tests/test_auth_api.py \
             control/tests/test_api.py \
-            control/tests/test_dev_runtime_assets.py \
             control/tests/test_settings.py
           scripts/verify-public-image-inputs
 
@@ -192,14 +189,14 @@ jobs:
           hermes_digest=$(skopeo manifest-digest "$hermes_manifest")
           hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest"
           scripts/render-dev-compose \
-            --template deploy/compose/compose.dev.images.yaml \
+            --template deploy/compose/compose.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
             --hermes-image "$hermes_image" \
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
-            --template deploy/compose/compose.dev.images.yaml \
+            --template deploy/compose/compose.yaml \
             --output "$publication_root/docker-compose.dev.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \

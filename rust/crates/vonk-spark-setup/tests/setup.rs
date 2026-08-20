@@ -189,7 +189,6 @@ fn paths(root: &std::path::Path) -> InstallPaths {
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
         credentials: root.join("var/lib/vonk-forge-agent/credentials"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
-        upgrade: root.join("usr/bin/vonk-agent-upgrade"),
         service: "vonk-forge-agent.service".to_owned(),
         required_owner: None,
     }

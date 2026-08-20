@@ -94,11 +94,12 @@ persisted in PostgreSQL with their authority revision, targets, operation graph,
 payload digests, routes, protocol range, and plan digest. Catalog plans use a
 recipe revision digest as their own content identity.
 
-The worker deliberately has no repository mount, Git key, Git/OpenSSH executable,
-or GPU node-facing network. It advances durable reconciliations and publishes
-atomic, leased route bundles. It obtains current-head and policy decisions from
-the API over a dedicated two-party internal network. Those bounded exchanges are
-nonce-bound, short-lived, HMAC authenticated, and never exposed by Caddy.
+The worker deliberately has no source checkout, Git credentials, Git/OpenSSH
+executable, or GPU node-facing network. It advances durable reconciliations and
+publishes atomic, leased route bundles. It obtains current-head and policy
+decisions from the API over a dedicated two-party internal network. Those
+bounded exchanges are nonce-bound, short-lived, HMAC authenticated, and never
+exposed by Caddy.
 
 Routine GPU node work is pull-based. Each GPU node agent opens an outbound mTLS request,
 claims only operations for its certificate-bound node identity and compatible
@@ -201,10 +202,10 @@ authoritative for installation, placement, admission, and execution.
 
 ## Reconciliation and route publication
 
-For a new platform commit or recipe revision, the control plane follows a durable,
+For a new authority or recipe revision, the control plane follows a durable,
 restart-safe sequence:
 
-1. Verify the platform commit or recipe revision is current and eligible, resolve the exact run plan, and
+1. Verify the authority or recipe revision is current and eligible, resolve the exact run plan, and
    persist the immutable plan before mutation.
 2. Withdraw the prior route into acknowledged maintenance.
 3. Execute stop operations in authority-declared order, then prove every
@@ -214,8 +215,8 @@ restart-safe sequence:
 5. Compensate or enter `waiting-for-operator` when mutation outcome is uncertain.
 6. Publish routes only after every required result and endpoint-evidence digest
    is accepted, then require an exact LiteLLM supervisor acknowledgement.
-7. Renew only while the applicable authority (catalog revision or Git/TUF
-   release), agent compatibility, certificate state, authenticated presence,
+7. Renew only while the applicable PostgreSQL authority and catalog revisions,
+   agent compatibility, certificate state, authenticated presence,
    and publication lease remain valid. Otherwise withdraw fail closed.
 
 Route generations are staged under immutable digest-named directories and become
@@ -226,7 +227,7 @@ expired, or withdrawn state.
 ## Scaling and networking
 
 Adding a GPU node repeats the same install/enroll operation and adds a stable node
-record to the repository fleet definition. Placement and operation ordering are
+record to the PostgreSQL fleet authority. Placement and operation ordering are
 deterministic for one, two, sixteen, or more nodes; sixteen is a tested small-
 cluster shape, not a hard product limit.
 

@@ -1,4 +1,0 @@
-# Development is a release channel of the production-shaped deployment.
-# Keep this include instead of maintaining a second service graph.
-include:
-  - compose.yaml

@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-DEV_CADDYFILE = (
-    ROOT / "control/src/vonk_control/resources/dev/Caddyfile"
-)
+DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
 DEV_CADDY_IMAGE = (
     "caddy:2.11.4@sha256:"
     "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
@@ -90,7 +88,13 @@ def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
     for file in files or ("compose.yaml",):
         command.extend(("-f", str(ROOT / "deploy/compose" / file)))
     command.extend(("config", "--format", "json"))
-    result = subprocess.run(command, check=True, capture_output=True, text=True, env=environment or _environment())
+    result = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment or _environment(),
+    )
     return json.loads(result.stdout)
 
 
@@ -98,15 +102,29 @@ def _adapted_caddy(environment: dict[str, str]) -> dict:
     _require_docker_runtime()
     result = subprocess.run(
         [
-            "docker", "run", "--rm", "-i",
-            "-e", f"VONK_CONTROL_HOSTNAME={environment['VONK_CONTROL_HOSTNAME']}",
-            "-e", f"VONK_AGENT_ENROLL_HOSTNAME={environment['VONK_AGENT_ENROLL_HOSTNAME']}",
-            "-e", f"VONK_AGENT_HOSTNAME={environment['VONK_AGENT_HOSTNAME']}",
-            "-e", f"VONK_REGISTRY_HOSTNAME={environment['VONK_REGISTRY_HOSTNAME']}",
-            "-e", f"VONK_BACKEND_PORT={environment.get('VONK_BACKEND_PORT', '8443')}",
-            "-e", "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "-e",
+            f"VONK_CONTROL_HOSTNAME={environment['VONK_CONTROL_HOSTNAME']}",
+            "-e",
+            f"VONK_AGENT_ENROLL_HOSTNAME={environment['VONK_AGENT_ENROLL_HOSTNAME']}",
+            "-e",
+            f"VONK_AGENT_HOSTNAME={environment['VONK_AGENT_HOSTNAME']}",
+            "-e",
+            f"VONK_REGISTRY_HOSTNAME={environment['VONK_REGISTRY_HOSTNAME']}",
+            "-e",
+            f"VONK_BACKEND_PORT={environment.get('VONK_BACKEND_PORT', '8443')}",
+            "-e",
+            "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
             "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
-            "caddy", "adapt", "--config", "-", "--adapter", "caddyfile",
+            "caddy",
+            "adapt",
+            "--config",
+            "-",
+            "--adapter",
+            "caddyfile",
         ],
         check=True,
         capture_output=True,
@@ -121,10 +139,7 @@ def _server_on_port(adapted: dict, port: int) -> dict:
     return next(
         server
         for server in adapted["apps"]["http"]["servers"].values()
-        if any(
-            str(listener).endswith(suffix)
-            for listener in server.get("listen", [])
-        )
+        if any(str(listener).endswith(suffix) for listener in server.get("listen", []))
     )
 
 
@@ -273,25 +288,36 @@ def _entrypoint_result(
     command = ["docker", "run", "--rm"]
     for name, value in environment.items():
         command.extend(("-e", f"{name}={value}"))
-    command.extend((
-        "-v", f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/usr/local/bin/vonk-caddy-entrypoint:ro",
-        "-v", "/etc/hostname:/run/secrets/controller-server-certificate:ro",
-        "-v", "/etc/hostname:/run/secrets/controller-server-key:ro",
-        "-v", "/etc/hostname:/run/secrets/agent-client-ca:ro",
-    ))
+    command.extend(
+        (
+            "-v",
+            f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/usr/local/bin/vonk-caddy-entrypoint:ro",
+            "-v",
+            "/etc/hostname:/run/secrets/controller-server-certificate:ro",
+            "-v",
+            "/etc/hostname:/run/secrets/controller-server-key:ro",
+            "-v",
+            "/etc/hostname:/run/secrets/agent-client-ca:ro",
+        )
+    )
     if secret_source is not None:
         command.extend(("-v", f"{secret_source}:/run/secrets/agent-proxy-auth:ro"))
-    command.extend((
-        "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
-        "/bin/sh", "/usr/local/bin/vonk-caddy-entrypoint",
-    ))
+    command.extend(
+        (
+            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+            "/bin/sh",
+            "/usr/local/bin/vonk-caddy-entrypoint",
+        )
+    )
     command.extend(entrypoint_arguments)
     return subprocess.run(
         command, capture_output=True, text=True, timeout=10, check=False
     )
 
 
-def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def _settings_result(
+    rendered: dict, tmp_path: Path
+) -> subprocess.CompletedProcess[str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     environment = {
         name: value
@@ -323,11 +349,20 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         secret.write_text(secret_values[name])
         control_environment[name] = str(secret)
     control_environment.setdefault("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
-    control_environment.setdefault("VONK_AGENT_CA_PROVISIONER_KID", "test-provisioner-kid")
-    environment.update({name: str(value) for name, value in control_environment.items()})
+    control_environment.setdefault(
+        "VONK_AGENT_CA_PROVISIONER_KID", "test-provisioner-kid"
+    )
+    environment.update(
+        {name: str(value) for name, value in control_environment.items()}
+    )
     return subprocess.run(
         [
-            "uv", "run", "--project", str(ROOT / "control"), "python", "-c",
+            "uv",
+            "run",
+            "--project",
+            str(ROOT / "control"),
+            "python",
+            "-c",
             (
                 "from vonk_control.settings import Settings; "
                 "settings = Settings.from_env_and_secrets(); "
@@ -347,7 +382,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
 def test_development_image_compose_enables_complete_step_ca_agent_settings(
     tmp_path: Path,
 ) -> None:
-    rendered = _rendered("compose.dev.images.yaml")
+    rendered = _rendered("compose.yaml")
     services = rendered["services"]
     api = services["control-api"]
     caddy = services["caddy"]
@@ -405,8 +440,7 @@ def test_agent_bootstrap_uses_distinct_https_origins_and_normalized_public_ca() 
     )
     assert "controller-ca" in api_secrets
     assert any(
-        volume["target"] == "/run/vonk-normalized-secrets"
-        for volume in api["volumes"]
+        volume["target"] == "/run/vonk-normalized-secrets" for volume in api["volumes"]
     )
     assert "controller-server-key" not in api_secrets
     assert "agent-intermediate-key" not in api_secrets
@@ -458,7 +492,9 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     assert "[::]:2019" not in listeners
 
 
-def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> None:
+def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> (
+    None
+):
     adapted = _adapted_development_caddy()
     browser = _server_on_port(adapted, 8080)
 
@@ -467,8 +503,7 @@ def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_h
     trusted = next(
         route
         for route in routes
-        if route.get("match")
-        == [{"host": ["vonk-forge.tailnet.test.ts.net"]}]
+        if route.get("match") == [{"host": ["vonk-forge.tailnet.test.ts.net"]}]
     )
     trusted_routes = trusted["handle"][0]["routes"]
     trusted_serialized = json.dumps(trusted_routes, sort_keys=True)
@@ -523,7 +558,9 @@ def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_h
     assert '"status_code": 421' in json.dumps(rejected)
 
 
-def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed() -> None:
+def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed() -> (
+    None
+):
     environment = _environment()
     source = (ROOT / "deploy/compose/Caddyfile").read_text(encoding="utf-8")
     assert "@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}" in source
@@ -623,16 +660,30 @@ def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() 
         ]
 
 
-def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> None:
+def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> (
+    None
+):
     environment = _environment()
     rendered_caddy = _rendered("compose.yaml")["services"]["caddy"]
     caddy_environment = rendered_caddy["environment"]
-    assert {name: caddy_environment[name] for name in (
-        "VONK_CONTROL_HOSTNAME", "VONK_AGENT_ENROLL_HOSTNAME", "VONK_AGENT_HOSTNAME",
-    )} == {name: environment[name] for name in (
-        "VONK_CONTROL_HOSTNAME", "VONK_AGENT_ENROLL_HOSTNAME", "VONK_AGENT_HOSTNAME",
-    )}
-    adapted = _adapted_caddy(caddy_environment | {"VONK_AGENT_PROXY_AUTH": "test-proxy-secret"})
+    assert {
+        name: caddy_environment[name]
+        for name in (
+            "VONK_CONTROL_HOSTNAME",
+            "VONK_AGENT_ENROLL_HOSTNAME",
+            "VONK_AGENT_HOSTNAME",
+        )
+    } == {
+        name: environment[name]
+        for name in (
+            "VONK_CONTROL_HOSTNAME",
+            "VONK_AGENT_ENROLL_HOSTNAME",
+            "VONK_AGENT_HOSTNAME",
+        )
+    }
+    adapted = _adapted_caddy(
+        caddy_environment | {"VONK_AGENT_PROXY_AUTH": "test-proxy-secret"}
+    )
     tailnet_server = _server_on_port(adapted, 8080)
     backend_server = _server_on_port(adapted, 8443)
 
@@ -646,15 +697,18 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     control_site = next(
         route
         for route in _routes_with_handlers(tailnet_server["routes"])
-        if route.get("match") == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
+        if route.get("match")
+        == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
     )
     control_routes = control_site["handle"][0]["routes"]
     denied = next(
-        index for index, route in enumerate(control_routes)
+        index
+        for index, route in enumerate(control_routes)
         if route.get("match") == [{"path": ["/agent/v1/*"]}]
     )
     fallback = next(
-        index for index, route in enumerate(control_routes)
+        index
+        for index, route in enumerate(control_routes)
         if "control-api:8000" in json.dumps(route, sort_keys=True)
     )
     assert denied < fallback
@@ -665,7 +719,9 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         for route in enrollment_routes
         if "control-api:8000" in json.dumps(route, sort_keys=True)
     ]
-    assert {json.dumps(route["match"], sort_keys=True) for route in enrollment_proxies} == {
+    assert {
+        json.dumps(route["match"], sort_keys=True) for route in enrollment_proxies
+    } == {
         json.dumps(
             [{"method": ["GET"], "path": ["/agent/v1/bootstrap"]}],
             sort_keys=True,
@@ -687,9 +743,16 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         if "agents.test.example" in policy.get("match", {}).get("sni", [])
     )
     assert client_auth["mode"] == "require_and_verify"
-    assert client_auth["ca"] == {"provider": "file", "pem_files": ["/run/secrets/agent-client-ca"]}
+    assert client_auth["ca"] == {
+        "provider": "file",
+        "pem_files": ["/run/secrets/agent-client-ca"],
+    }
     agent_routes = agent_site["handle"][0]["routes"]
-    agent_proxy = next(route for route in agent_routes if "control-api:8000" in json.dumps(route, sort_keys=True))
+    agent_proxy = next(
+        route
+        for route in agent_routes
+        if "control-api:8000" in json.dumps(route, sort_keys=True)
+    )
     agent_handlers = agent_proxy["handle"][0]["routes"][0]["handle"]
     sanitizer_index = next(
         index
@@ -702,9 +765,7 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         if handler.get("handler") == "reverse_proxy"
     )
     assert sanitizer_index < proxy_index
-    assert agent_handlers[sanitizer_index]["request"]["delete"] == [
-        "X-Vonk-Agent-*"
-    ]
+    assert agent_handlers[sanitizer_index]["request"]["delete"] == ["X-Vonk-Agent-*"]
     request_headers = agent_handlers[proxy_index]["headers"]["request"]
     assert "delete" not in request_headers
     replacements = {key.lower(): value for key, value in request_headers["set"].items()}
@@ -716,7 +777,11 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         "x-vonk-agent-proxy-auth": ["test-proxy-secret"],
         "x-vonk-agent-source": ["{http.request.remote.host}"],
     }
-    assert any(route.get("match") == [{"not": [{"path": ["/agent/v1/enroll"]}], "path": ["/agent/v1/*"]}] for route in agent_routes)
+    assert any(
+        route.get("match")
+        == [{"not": [{"path": ["/agent/v1/enroll"]}], "path": ["/agent/v1/*"]}]
+        for route in agent_routes
+    )
     mappings = []
 
     def collect_maps(value: object) -> None:
@@ -730,11 +795,17 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
                 collect_maps(child)
 
     collect_maps(adapted)
-    assert mappings == [{
-        "handler": "map", "source": "{http.request.tls.client.subject}",
-        "destinations": ["{vonk_agent_node}"], "defaults": [""],
-        "mappings": [{"input_regexp": "^CN=(spk_[0-9a-f]{32})$", "outputs": ["${1}"]}],
-    }]
+    assert mappings == [
+        {
+            "handler": "map",
+            "source": "{http.request.tls.client.subject}",
+            "destinations": ["{vonk_agent_node}"],
+            "defaults": [""],
+            "mappings": [
+                {"input_regexp": "^CN=(spk_[0-9a-f]{32})$", "outputs": ["${1}"]}
+            ],
+        }
+    ]
 
 
 def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
@@ -763,9 +834,7 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
 
 
 def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> None:
-    caddy_environment = _rendered("compose.yaml")["services"]["caddy"][
-        "environment"
-    ]
+    caddy_environment = _rendered("compose.yaml")["services"]["caddy"]["environment"]
     adapted = _adapted_caddy(
         caddy_environment | {"VONK_AGENT_PROXY_AUTH": "test-proxy-secret"}
     )
@@ -807,7 +876,8 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     control_site = next(
         route
         for route in _routes_with_handlers(tailnet_server["routes"])
-        if route.get("match") == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
+        if route.get("match")
+        == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
     )
     control_routes = control_site["handle"][0]["routes"]
     control_denial = next(
@@ -818,16 +888,23 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
             route.get("match", [{}])[0].get("path", [""])[0],
         )
     )
-    assert '"handler": "static_response"' in json.dumps(
-        control_denial, sort_keys=True
-    )
+    assert '"handler": "static_response"' in json.dumps(control_denial, sort_keys=True)
     assert '"status_code": 404' in json.dumps(control_denial, sort_keys=True)
 
 
-def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(tmp_path: Path) -> None:
+def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
+    tmp_path: Path,
+) -> None:
     missing = _environment()
     missing.pop("VONK_AGENT_HOSTNAME")
-    command = ["docker", "compose", "-f", str(ROOT / "deploy/compose/compose.yaml"), "config", "--quiet"]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(ROOT / "deploy/compose/compose.yaml"),
+        "config",
+        "--quiet",
+    ]
     absent = subprocess.run(
         command, capture_output=True, text=True, env=missing, check=False
     )
@@ -835,31 +912,57 @@ def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(tmp_path: 
     assert "VONK_AGENT_HOSTNAME" in absent.stderr
 
     for duplicate in (
-        {"VONK_CONTROL_HOSTNAME": "same.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example", "VONK_AGENT_HOSTNAME": "agents.test.example"},
-        {"VONK_CONTROL_HOSTNAME": "same.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example", "VONK_AGENT_HOSTNAME": "same.test.example"},
-        {"VONK_CONTROL_HOSTNAME": "control.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example", "VONK_AGENT_HOSTNAME": "same.test.example"},
+        {
+            "VONK_CONTROL_HOSTNAME": "same.test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
+            "VONK_AGENT_HOSTNAME": "agents.test.example",
+        },
+        {
+            "VONK_CONTROL_HOSTNAME": "same.test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
+            "VONK_AGENT_HOSTNAME": "same.test.example",
+        },
+        {
+            "VONK_CONTROL_HOSTNAME": "control.test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
+            "VONK_AGENT_HOSTNAME": "same.test.example",
+        },
     ):
         result = _entrypoint_result(duplicate)
         assert result.returncode != 0
         assert "must be distinct" in result.stderr
 
     for equivalent in (
-        {"VONK_CONTROL_HOSTNAME": "CONTROL.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "control.test.example.", "VONK_AGENT_HOSTNAME": "agents.test.example"},
-        {"VONK_CONTROL_HOSTNAME": "control.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "ENROLL.test.example", "VONK_AGENT_HOSTNAME": "enroll.test.example."},
+        {
+            "VONK_CONTROL_HOSTNAME": "CONTROL.test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "control.test.example.",
+            "VONK_AGENT_HOSTNAME": "agents.test.example",
+        },
+        {
+            "VONK_CONTROL_HOSTNAME": "control.test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "ENROLL.test.example",
+            "VONK_AGENT_HOSTNAME": "enroll.test.example.",
+        },
     ):
         result = _entrypoint_result(equivalent)
         assert result.returncode != 0
         assert "must be distinct" in result.stderr
 
-    malformed = _entrypoint_result({
-        "VONK_CONTROL_HOSTNAME": "control test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-    })
+    malformed = _entrypoint_result(
+        {
+            "VONK_CONTROL_HOSTNAME": "control test.example",
+            "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
+            "VONK_AGENT_HOSTNAME": "agents.test.example",
+        }
+    )
     assert malformed.returncode != 0
     assert "invalid" in malformed.stderr
 
-    valid = {"VONK_CONTROL_HOSTNAME": "control.test.example", "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example", "VONK_AGENT_HOSTNAME": "agents.test.example"}
+    valid = {
+        "VONK_CONTROL_HOSTNAME": "control.test.example",
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
+        "VONK_AGENT_HOSTNAME": "agents.test.example",
+    }
     for result in (_entrypoint_result(valid), _entrypoint_result(valid, "/dev/null")):
         assert result.returncode != 0
         assert "proxy authentication secret" in result.stderr
@@ -903,10 +1006,14 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
         assert "base64url-like" in result.stderr
 
 
-def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private() -> None:
+def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private() -> (
+    None
+):
     rendered = _rendered()
     services = rendered["services"]
-    assert {name for name, service in services.items() if service.get("ports")} == {"caddy"}
+    assert {name for name, service in services.items() if service.get("ports")} == {
+        "caddy"
+    }
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
         "hermes-inference",
@@ -925,7 +1032,10 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert rendered["networks"]["agent-proxy"]["internal"] is True
     assert "step-ca" in services
     assert not services["step-ca"].get("ports")
-    assert {secret["source"] for secret in services["caddy"]["secrets"]} >= {"agent-client-ca", "agent-proxy-auth"}
+    assert {secret["source"] for secret in services["caddy"]["secrets"]} >= {
+        "agent-client-ca",
+        "agent-proxy-auth",
+    }
     assert "agent-ca-credential" in {
         secret["source"] for secret in services["control-api"]["secrets"]
     }
@@ -939,9 +1049,10 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert services["step-ca"]["command"][-1] == (
         "/run/vonk-normalized-secrets/step-ca/password"
     )
-    assert "step-ca/intermediate-key" in (
-        ROOT / "deploy/compose/step-ca/ca.json"
-    ).read_text()
+    assert (
+        "step-ca/intermediate-key"
+        in (ROOT / "deploy/compose/step-ca/ca.json").read_text()
+    )
     assert "root-private" not in json.dumps(services["step-ca"], sort_keys=True).lower()
 
 
@@ -962,8 +1073,7 @@ def test_step_ca_waits_for_api_staged_secrets_without_a_dependency_cycle() -> No
     assert "/home/step/db" not in targets
     assert all(volume.get("type") != "bind" for volume in service["volumes"])
     assert "step-ca-config" in {
-        secret["source"]
-        for secret in rendered["services"]["control-api"]["secrets"]
+        secret["source"] for secret in rendered["services"]["control-api"]["secrets"]
     }
     assert "https://step-ca:9000" in service["healthcheck"]["test"]
     assert "https://127.0.0.1:9000" not in service["healthcheck"]["test"]
@@ -973,7 +1083,9 @@ def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
     rendered = _rendered()
     api = rendered["services"]["control-api"]
     assert "group_add" not in api
-    assert all("/repository" not in json.dumps(volume) for volume in api.get("volumes", []))
+    assert all(
+        "/repository" not in json.dumps(volume) for volume in api.get("volumes", [])
+    )
     assert "VONK_REPOSITORY_PATH" not in api.get("environment", {})
     assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
 

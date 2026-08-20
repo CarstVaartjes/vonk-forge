@@ -5,12 +5,15 @@ digest-pinned API and worker images, the rendered production Compose file, a
 content-addressed control deployment bundle, and native `arm64` and `amd64`
 Spark agent packages with checksums, SBOMs, provenance, and Sigstore bundles.
 
-The NAS runtime is upgraded through Docker Compose:
+Operators prepare a NAS upgrade by rerunning the same stable installer from the
+directory containing the existing bundle:
 
 ```sh
-docker compose pull
-docker compose up -d --wait --remove-orphans
+curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
+
+They then upload the refreshed three-entry directory and redeploy it with the
+NAS Docker UI. This is the only supported NAS upgrade entry point.
 
 Spark nodes use the architecture-specific `vonk-forge-agent` Debian package.
 There is no controller-managed host updater, platform update API, generation

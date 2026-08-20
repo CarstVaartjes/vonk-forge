@@ -284,14 +284,11 @@ runs:
           fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \
-          packaging/bin/vonk-agent-upgrade \
           scripts/test-agent-package-native-lifecycle \
           tests/scripts/test_docker_firewall.sh \
-          tests/nodes/test_agent_package_native_lifecycle.sh \
-          tests/nodes/test_upgrade_vonk_agent.sh
+          tests/nodes/test_agent_package_native_lifecycle.sh
         sudo tests/scripts/test_docker_firewall.sh
         tests/nodes/test_agent_package_native_lifecycle.sh
-        tests/nodes/test_upgrade_vonk_agent.sh
 
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)

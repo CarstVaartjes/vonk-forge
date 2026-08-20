@@ -24,7 +24,6 @@ const MAX_BOOTSTRAP_BYTES: usize = 128 * 1024;
 const CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
 const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
-const UPGRADE_PATH: &str = "/usr/bin/vonk-agent-upgrade";
 const SERVICE: &str = "vonk-forge-agent.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const FRAME_MAGIC: &[u8] = b"VONK-SPARK-CONFIG-V1\0";
@@ -180,7 +179,6 @@ pub struct InstallPaths {
     pub ca: PathBuf,
     pub credentials: PathBuf,
     pub agent: PathBuf,
-    pub upgrade: PathBuf,
     pub service: String,
     pub required_owner: Option<u32>,
 }
@@ -192,7 +190,6 @@ impl InstallPaths {
             ca: PathBuf::from(CA_PATH),
             credentials: PathBuf::from(DATA_DIR).join("credentials"),
             agent: PathBuf::from(AGENT_PATH),
-            upgrade: PathBuf::from(UPGRADE_PATH),
             service: SERVICE.to_owned(),
             required_owner: Some(0),
         }
@@ -1302,7 +1299,6 @@ mod tests {
             ca: ca.clone(),
             credentials: temporary.path().join("credentials"),
             agent: temporary.path().join("agent"),
-            upgrade: temporary.path().join("upgrade"),
             service: SERVICE.to_owned(),
             required_owner: None,
         };
@@ -1331,7 +1327,6 @@ mod tests {
                 .join("etc/vonk-forge-agent/controller-ca.pem"),
             credentials: temporary.path().join("credentials"),
             agent: temporary.path().join("agent"),
-            upgrade: temporary.path().join("upgrade"),
             service: SERVICE.to_owned(),
             required_owner: None,
         };

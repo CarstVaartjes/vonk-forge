@@ -5,8 +5,6 @@ import importlib.util
 import re
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
@@ -86,10 +84,8 @@ def test_canonical_model_has_step_ca_without_an_overlay() -> None:
     assert "step-ca" in services
     assert not (COMPOSE_ROOT / "compose.step-ca.yaml").exists()
     assert not (COMPOSE_ROOT / "compose.builtin-ca.yaml").exists()
-    development = yaml.safe_load(
-        (COMPOSE_ROOT / "compose.dev.images.yaml").read_text(encoding="utf-8")
-    )
-    assert development == {"include": ["compose.yaml"]}
+    assert not (COMPOSE_ROOT / "compose.dev.images.yaml").exists()
+    assert not (COMPOSE_ROOT / "compose.dev.yaml").exists()
 
 
 def test_canonical_model_has_no_one_shot_runtime_service() -> None:
@@ -103,7 +99,9 @@ def test_canonical_model_has_no_one_shot_runtime_service() -> None:
         assert service.get("restart") != "no", name
         assert not _is_sleep_only(service.get("command")), name
         assert not _is_sleep_only(service.get("entrypoint")), name
-        assert "service_completed_successfully" not in _dependency_conditions(service), name
+        assert "service_completed_successfully" not in _dependency_conditions(
+            service
+        ), name
 
 
 def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:

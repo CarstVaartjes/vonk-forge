@@ -159,7 +159,7 @@ def test_slot_manifest_signer_is_absent() -> None:
     assert not (ROOT / "scripts/sign-agent-release").exists()
 
 
-def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
+def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> None:
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
@@ -215,9 +215,8 @@ def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
     )
     assert extracted.returncode == 0, extracted.stderr
 
-    config = (payload / "etc/vonk-forge-agent/agent.toml").read_text()
-    assert config.count('enrollment_url = "https://enroll.vonkforge.invalid/"') == 1
-    assert config.count('controller_url = "https://controller.vonkforge.invalid/"') == 1
+    assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
+    assert b"vonkforge.invalid" not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
 
 
 def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
@@ -540,7 +539,6 @@ def test_development_publication_requires_native_amd64_lifecycle() -> None:
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
     assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
-    assert "tests/nodes/test_upgrade_vonk_agent.sh" in lifecycle
     assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
 
 

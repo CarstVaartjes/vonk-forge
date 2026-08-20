@@ -14,6 +14,9 @@ from cluster_profiles.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
 OBSOLETE_CONTROL_MODULES = (
+    "dev_litellm_database",
+    "dev_runtime_assets",
+    "development_tokens",
     "dev_cohort",
     "generation_launch",
     "host_backup",
@@ -22,6 +25,13 @@ OBSOLETE_CONTROL_MODULES = (
     "oci_bundle",
     "offline",
     "upgrade",
+)
+
+OBSOLETE_DEVELOPMENT_INSTALLERS = (
+    "scripts/dev-admin-token",
+    "scripts/dev-compose",
+    "deploy/compose/compose.dev.images.yaml",
+    "deploy/compose/compose.dev.yaml",
 )
 
 
@@ -54,6 +64,16 @@ def test_obsolete_control_host_modules_are_not_importable() -> None:
         assert not (ROOT / "control/src/vonk_control" / f"{module}.py").exists(), module
 
     assert importlib.util.find_spec("cluster_profiles.update_trust") is None
+
+
+def test_no_alternate_development_installer_or_compose_overlay_remains() -> None:
+    for relative in OBSOLETE_DEVELOPMENT_INSTALLERS:
+        assert not (ROOT / relative).exists(), relative
+    resources = ROOT / "control/src/vonk_control/resources/dev"
+    assert not resources.exists() or not any(
+        path.is_file() and "__pycache__" not in path.parts
+        for path in resources.rglob("*")
+    )
 
 
 def test_control_wheel_has_no_offline_updater_entrypoint_or_modules(
@@ -112,7 +132,10 @@ def test_compose_runtime_has_no_host_generation_identity() -> None:
     for service_name in ("control-api", "control-worker"):
         environment = services[service_name]["environment"]
         assert forbidden.isdisjoint(environment), service_name
-        assert all("control-identity" not in str(volume) for volume in services[service_name].get("volumes", []))
+        assert all(
+            "control-identity" not in str(volume)
+            for volume in services[service_name].get("volumes", [])
+        )
 
 
 def test_release_workflow_has_no_host_updater_or_platform_tuf_channel() -> None:

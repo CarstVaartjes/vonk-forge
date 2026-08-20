@@ -125,9 +125,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             acl iproute2 iptables podman shellcheck uidmap
-          shellcheck packaging/bin/vonk-agent-upgrade \
-            tests/nodes/test_upgrade_vonk_agent.sh
-          tests/nodes/test_upgrade_vonk_agent.sh
           package="accepted/$AMD64_PACKAGE"
           scripts/verify-agent-deb --json "$package"
           sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"

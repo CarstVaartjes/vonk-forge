@@ -17,7 +17,6 @@ PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
-UPGRADE_SCRIPT = ROOT / "packaging/bin/vonk-agent-upgrade"
 PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper")
 BUILD_DIGEST = "sha256:" + "b" * 64
 
@@ -26,7 +25,9 @@ def _elf_fixture(path: Path, marker: bytes, architecture: str = "linux-arm64") -
     raw = bytearray(384)
     raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
     struct.pack_into("<H", raw, 16, 2)
-    struct.pack_into("<H", raw, 18, {"linux-arm64": 183, "linux-amd64": 62}[architecture])
+    struct.pack_into(
+        "<H", raw, 18, {"linux-arm64": 183, "linux-amd64": 62}[architecture]
+    )
     raw[64 : 64 + len(marker)] = marker
     identity_marker = f"VONK_AGENT_BUILD_DIGEST={BUILD_DIGEST}".encode()
     raw[128 : 128 + len(identity_marker)] = identity_marker
@@ -216,7 +217,9 @@ def test_package_manages_the_rootless_podman_user_manager() -> None:
     assert "/usr/bin/loginctl disable-linger vonk-agent" in prerm
 
 
-def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure() -> None:
+def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure() -> (
+    None
+):
     postinst = POSTINST.read_text()
 
     assert 'if [ -n "${2:-}" ]' in postinst
@@ -296,7 +299,6 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         == f"{hashlib.sha256(first_deb.read_bytes()).hexdigest()}  {package_name}"
     )
 
-
     verified = subprocess.run(
         [VERIFY, "--json", first_deb],
         cwd=ROOT,
@@ -350,9 +352,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         payload / "lib/systemd/system/vonk-forge-agent-supervisor.service"
     ).exists()
     assert not (payload / "var/lib/vonk-forge/slots").exists()
-    upgrade_script = payload / "usr/bin/vonk-agent-upgrade"
-    assert upgrade_script.read_bytes() == UPGRADE_SCRIPT.read_bytes()
-    assert stat.S_IMODE(upgrade_script.stat().st_mode) == 0o555
+    assert not (payload / "usr/bin/vonk-agent-upgrade").exists()
     unit = (payload / "lib/systemd/system/vonk-forge-agent.service").read_text()
     assert (
         "ExecStart=/usr/lib/vonk-forge/vonk-agent "
@@ -465,12 +465,15 @@ def test_builder_and_verifier_make_each_architecture_a_real_package_output(
         check=False,
     )
     assert verified.returncode == 0, verified.stderr or verified.stdout
-    assert subprocess.run(
-        ["/usr/bin/dpkg-deb", "--field", package, "Architecture"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip() == debian_architecture
+    assert (
+        subprocess.run(
+            ["/usr/bin/dpkg-deb", "--field", package, "Architecture"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        == debian_architecture
+    )
     payload = tmp_path / f"payload-{architecture}"
     subprocess.run(["/usr/bin/dpkg-deb", "--extract", package, payload], check=True)
     raw = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()

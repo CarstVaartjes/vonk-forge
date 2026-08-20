@@ -5,11 +5,11 @@
 The platform must not publish an unhealthy model, execute untrusted recipe
 instructions, confuse a mutable address with physical node identity, disclose
 prompts or credentials, or permit an unreviewed state to reach the cluster.
-Authority is deliberately split: local PostgreSQL is authoritative for recipe
-Library entries, immutable recipe revisions, imports, installations, and runs;
-Git/TUF remains authoritative for platform source, fleet policy, and the
-existing workload-release projection. External recipe publishing is optional
-and not a runtime dependency.
+Authority is deliberately split: local PostgreSQL is authoritative for fleet
+topology, platform policy, proposals, recipe Library entries, immutable recipe
+revisions, imports, installations, and runs. Signed release metadata establishes
+the provenance of installed software but is not runtime desired state. External
+recipe publishing is optional and not a runtime dependency.
 
 For browser administration, tailnet reachability and Vonk Forge authentication
 are independent gates. Tailscale OAuth and persisted gateway state establish a
@@ -26,10 +26,9 @@ an image, Git, or a GPU node.
 | Restricted GPU node LAN ingress | Enrollment grant, agent identity, registry artifacts; hostile LAN client | One NAS-IP-bound backend port, firewall management-CIDR restriction, route-minimal SNI split, mTLS for agent/registry, no human routes | Caddy/control audit, certificate revocation, enrollment expiry, firewall review | `deploy/compose/tests/test_agent_ingress.py`, `control/tests/security/test_agent_identity.py` |
 | Admin browser | Administrator password, verifier, opaque session, proposal intent; malicious site or compromised browser | Plaintext password stays in 1Password/encrypted operator storage, API receives only the administrator verifier, PostgreSQL stores only opaque session digests, and the same-origin API uses Secure SameSite/HttpOnly session cookies, double-submit CSRF, typed forms, and explicit diff confirmation | Audit request/actor/base/targets; rotate password and verifier, revoke all sessions, and investigate the independent tailnet boundary | web unit/Playwright tests, authorization matrix |
 | CLI token | Administrator capability; local unprivileged user | HTTPS origin validation, regular non-symlink token file, bounded JSON, no token in argv/output | API audit and token rotation | `tests/cluster_profiles/test_platform_authority_client.py` |
-| Git/code host | Desired state; malicious contributor or remote | Full immutable commit IDs, protected-branch reachability, exact required checks, signed commits, one-way PR-only release policy | Proposal/commit digests and CI; revert through reviewed PR | repository/proposal/git-policy/reconcile tests |
-| Repository content | API parsers and planner; malicious committed files | Repository is mounted only by the API; allowlisted roots, object reads, no hooks/protocols, blob/size checks, canonical typed serializers, local-only endpoints, and immutable adapter executable paths | Validation results and rejected proposal audit | `control/tests/security/test_untrusted_repository.py`, `test_boundaries.py` |
-| PostgreSQL | Local Library authority, operations, sessions, audit; database attacker or accidental misuse | Private data network, file secrets, migrations, immutable revision checks, operation fences, and no external recipe authority requirement for local execution | Health alert, encrypted backup, audit/count verification; restore must preserve revision/content digests | migration, Library, operation, backup/recovery tests |
-| Control worker | Cluster mutation; forged reconciliation, stale/crashed worker, internal response spoofing | Production rejects generic job submission without executing an attempt. The worker has a distinct image with no Git/OpenSSH, repository/key mount, or GPU node network; it consumes authenticated persisted plans and nonce-bound, short-lived HMAC repository decisions over a dedicated two-party internal network. Transactional locks, leases, attempt fences, and atomic route acknowledgements fence every effect | Worker-starvation/lease alerts and durable operation evidence; fail-closed withdrawal, compensation, or operator review | production-worker, worker-authority, reconciliation, PostgreSQL race, Compose, and built-image boundary tests |
+| Git/code host | Source and release artifacts; malicious contributor or remote | Full immutable commit IDs, protected-branch reachability, exact required checks, signed release metadata, and one-way promotion of accepted artifacts | CI and publication receipts; revoke a channel manifest or publish a reviewed correction | release, provenance, publication, and supply-chain tests |
+| PostgreSQL | Fleet and policy authority, Library state, operations, sessions, and audit; database attacker or accidental misuse | Private data network, file secrets, transactional schema initialization, immutable revision checks, stale-head rejection, operation fences, and no Git or external catalog requirement for local execution | Health alert, encrypted backup, audit/count verification; restore must preserve revision and content digests | PostgreSQL integration, Library, authority, operation, and backup/recovery tests |
+| Control worker | Cluster mutation; forged reconciliation, stale/crashed worker, internal response spoofing | Production rejects generic job submission without executing an attempt. The worker has a distinct image with no Git/OpenSSH, source mount, credentials, or GPU node network; it consumes authenticated persisted plans and nonce-bound, short-lived HMAC authority decisions over a dedicated two-party internal network. Transactional locks, leases, attempt fences, and atomic route acknowledgements fence every effect | Worker-starvation/lease alerts and durable operation evidence; fail-closed withdrawal, compensation, or operator review | production-worker, worker-authority, reconciliation, PostgreSQL race, Compose, and built-image boundary tests |
 | Agent enrollment and identity | Agent impersonation, enrollment replay, stolen certificate | Caddy mTLS accepts a 24-hour client-auth-only certificate for one canonical node; enrollment grants are hashed, node-bound, single-use, and short-lived; Smallstep JWK authorization is one-use and fixed-policy | Local PostgreSQL revocation denies immediately; retry only unconfirmed Smallstep serials; certificate loss requires console-verified re-enrollment | `control/tests/test_step_ca.py`, `deploy/compose/tests/test_step_ca_contract.py` |
 | Agent CA boundary | Online issuer compromise, root theft, forged provider response | The offline root private key is never mounted; step-ca gets encrypted intermediate material and public provisioner JWK, while control-api alone gets the private JWK; fixed URL/root, bounded TLS HTTP, exact CSR/certificate/chain validation | Rotate the online intermediate/provisioner, revoke affected nodes, preserve local denial during remote uncertainty, restore CA DB and PostgreSQL from one backup generation | `control/tests/test_step_ca.py`, `deploy/compose/tests/test_agent_ingress.py` |
 | Control-to-agent operation protocol | Cross-node claim, stale fence, malicious payload | A versioned shared wheel accepts only allowlisted operations; every claim binds job, node, attempt, fence, commit, digest, and UTC deadline. Reject unknown fields, commands, arbitrary filesystem paths, credentials, and documents over 64 KiB; slash-bearing result evidence is limited to field-specific endpoint and immutable model-identity grammars | Persist bounded progress/result evidence; reject expired or superseded fences, mark the operation for retry/operator review, and retain the prior attempt for audit | `control/tests/security/test_agent_protocol.py`, `agent_protocol/tests/test_contracts.py` |
@@ -38,7 +37,7 @@ an image, Git, or a GPU node.
 | Agent credential storage | Certificate theft from an agent or control host | Store only public certificate metadata in PostgreSQL; private keys remain in protected node-local storage and are never accepted in protocol messages | Revoke the affected serial, quarantine its node, issue a replacement after console identity verification, and review all operations under the stolen serial | protocol boundary and recovery runbooks |
 | Agent presence and management address | Spoofed proxy headers, DHCP churn or address reuse, stale observations, and accidental routing over a direct fabric | Caddy deletes every incoming `X-Vonk-Agent-*` value and, only after mTLS verification, supplies the direct peer address plus a private proxy-auth token; middleware converts this to typed scope state. Control binds it to the certificate-authenticated `spk_` ID, requires a canonical address inside `VONK_MANAGEMENT_CIDRS`, excludes `VONK_DIRECT_FABRIC_CIDRS`, and expires observations after 150 seconds | Invalid or stale observations fail closed. An address change publishes maintenance before replacement validation, so the old address is withdrawn and cannot reappear after a rejected replacement | `control/tests/test_presence.py`, `control/tests/test_routes.py`, `control/tests/security/test_agent_identity.py`, `deploy/compose/tests/test_agent_ingress.py` |
 | GPU node SSH | Break-glass root policy and onboarding; hostile network/node impostor | Never used by the production API/worker. Explicit operator-only entry points retain strict host keys, no shell interpolation, staged digest checks, and recovery gates | Identity quarantine and resumable journal; console rollback | no-routine-SSH, built-worker-image, install identity/remote/steps tests |
-| LiteLLM/Caddy routes | Inference availability; shadow model/upstream; dead publisher | Routes only from an authenticated persisted plan, compatible active agents, fresh policy-bounded management evidence, catalog-revision or repository-release digest, accepted result digests, and the singleton publication owner. Hermes candidates come from exact-commit API policy. The atomic marker and LiteLLM config require one exact supervisor acknowledgement and bounded lease | Route-state and lease-expiry alert; empty bootstrap on worker death, restart, invalid replacement, lost applicable authority, or expired presence | route runtime, reconciliation races, LiteLLM supervisor, and Hermes policy tests |
+| LiteLLM/Caddy routes | Inference availability; shadow model/upstream; dead publisher | Routes only from an authenticated persisted plan, compatible active agents, fresh policy-bounded management evidence, exact PostgreSQL authority and catalog revisions, accepted result digests, and the singleton publication owner. Hermes candidates come from persisted API policy. The atomic marker and LiteLLM config require one exact supervisor acknowledgement and bounded lease | Route-state and lease-expiry alert; empty bootstrap on worker death, restart, invalid replacement, lost applicable authority, or expired presence | route runtime, reconciliation races, LiteLLM supervisor, and Hermes policy tests |
 | Metrics and logs | Operational metadata, prompts/secrets; curious viewer | Stable bounded labels, separate scrape token, centralized redaction/truncation, role-gated content-addressed logs | Secret-leak tests, rotation, checksum verification | metrics/logging/observability tests |
 | Backup storage | Database/config/Hermes state copies; backup thief or tampering | Required external authenticated encryption, canonical manifest/checksums, 0600 files, no plaintext production mode; Hermes data/workspaces included and disposable cache omitted | Restore verification before destructive action; Hermes remains stopped pending fresh presence/routes; disposable-host drill | offline and backup/restore tests |
 | Docker service host | All services; host admin, disk loss | Separate least-privilege containers, read-only roots, numeric users, private networks, digest-pinned images, bounded volumes/logs | Supply-chain verification, host-loss restore, alerts | Compose and release acceptance gates |
@@ -49,13 +48,12 @@ an image, Git, or a GPU node.
 ## Role matrix
 
 Viewer is read-only. Operator may preview proposals and plan or enqueue an
-eligible reconciliation. Administrator additionally submits repository
-changes and performs release-policy transitions. The executable
+eligible reconciliation. Administrator additionally applies PostgreSQL
+authority changes and performs release-policy transitions. The executable
 `MUTATION_ROLES` matrix is required to equal every mutating `/api/v1` route.
 
-Offline bootstrap/recovery is not an API role. It requires host access, an
-exclusive lock proving API and worker are stopped, and explicit destructive
-confirmation for restore.
+Offline recovery is not an API role. It requires host access and explicit
+destructive confirmation for restore.
 
 ## Residual risks
 
@@ -65,14 +63,6 @@ prevention. Recovery depends on independent console access, off-host encrypted
 backups, pinned image/SBOM verification, and protected code-host credentials.
 Hardware acceptance is never inferred from simulation and requires explicitly
 approved targets.
-
-The owner of the private mode-`0700` development source generation is a trusted
-offline operator boundary. Its OAuth rotation journals and hash-only receipt
-provide crash consistency and exact UUID-bound retry evidence; they are not a
-defense against that same filesystem owner. An attacker able to fabricate owned
-transaction state can already replace every plaintext source credential, so
-suspected owner compromise requires revoking the OAuth client and rebuilding a
-complete generation from independently trusted encrypted backup.
 
 Hermes intentionally has terminal and Internet tooling. Prompt injection or a
 malicious repository can therefore alter its persisted state, disclose a

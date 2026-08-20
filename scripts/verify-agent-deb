@@ -25,7 +25,6 @@ REQUIRED_ELF = {
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/bin/vonk-agent-upgrade",
 }
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
@@ -35,7 +34,6 @@ REQUIRED_PAYLOAD = {
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/bin/vonk-agent-upgrade",
     "usr/lib/vonk-forge/release/artifact.sig",
     "usr/share/doc/vonk-forge-agent/sbom.cdx.json",
     "usr/share/doc/vonk-forge-agent/sbom.spdx.json",

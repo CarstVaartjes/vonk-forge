@@ -132,12 +132,12 @@ def test_bundle_is_deterministic_and_binds_every_runtime_asset() -> None:
     assert len(verified.manifest_sha256) == 64
 
 
-def test_development_compose_is_source_only_and_absent_from_bundle() -> None:
+def test_source_and_bundle_have_only_the_canonical_compose_graph() -> None:
     module = _bundle_module()
     source = ROOT / "deploy/compose"
 
-    assert (source / "compose.dev.yaml").is_file()
-    assert (source / "compose.dev.images.yaml").is_file()
+    assert not (source / "compose.dev.yaml").exists()
+    assert not (source / "compose.dev.images.yaml").exists()
     raw = module.build_deployment_bundle(source)
     verified = module.verify_deployment_bundle(raw, _descriptor(raw))
 
@@ -280,12 +280,12 @@ def test_verified_bundle_extracts_exact_bytes_and_modes(tmp_path: Path) -> None:
         expected_mode = (
             0o755
             if relative
-                in {
-                    "bin/harden-hermes-egress",
-                    "litellm/config_supervisor.py",
-                    "litellm/entrypoint.sh",
-                    "postgres/init-databases.sh",
-                }
+            in {
+                "bin/harden-hermes-egress",
+                "litellm/config_supervisor.py",
+                "litellm/entrypoint.sh",
+                "postgres/init-databases.sh",
+            }
             else 0o644
         )
         assert extracted.stat().st_mode & 0o777 == expected_mode

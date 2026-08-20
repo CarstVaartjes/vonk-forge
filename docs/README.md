@@ -17,9 +17,9 @@ generated deployment's configurator logs the exact URL after startup.
   metadata and model-target research. It never stores image layers, model
   weights, or cluster state. Vonk Forge Web may later provide a browser-facing
   catalog, but it is not the recipe authority.
-- Git/TUF remains the authority for platform source, fleet/topology policy,
-  and the independent generic-package release projection. It is not a second
-  model or recipe authority.
+- GitHub and signed release metadata establish the provenance of immutable
+  installation artifacts. They are not runtime desired state: fleet topology,
+  platform policy, and proposals are persisted in local PostgreSQL.
 
 ## Deployment boundary
 
@@ -55,6 +55,8 @@ generated deployment's configurator logs the exact URL after startup.
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
+- [PostgreSQL authority administration](runbooks/authority-administration.md) —
+  immutable revisions, proposals, and the runtime authority boundary
 - [Model and recipe identities](operators/model-catalog.md) — model identity, recipes,
   topology, install/update, and exact-revision rollback
 - [Model target ledger](operators/model-targets.md) — current defaults,

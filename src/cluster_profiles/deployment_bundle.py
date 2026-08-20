@@ -73,8 +73,6 @@ _SOURCE_ONLY_FILES = frozenset(
         ".env.example",
         "README.md",
         "bin/publish-release",
-        "compose.dev.images.yaml",
-        "compose.dev.yaml",
         "hermes-agent/Dockerfile",
         "hermes-agent/entrypoint.sh",
         "registry/README.md",

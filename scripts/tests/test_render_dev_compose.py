@@ -10,11 +10,14 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
-DEVELOPMENT_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DIGEST = "a" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'a' * 40}@sha256:{DIGEST}"
-WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
-HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+WORKER_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+)
+HERMES_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+)
 
 
 def _renderer():
@@ -115,11 +118,11 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
         assert actual_modes == expected_modes, service_name
 
 
-def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path) -> None:
+def test_render_uses_canonical_template_and_inlines_step_ca(tmp_path: Path) -> None:
     output = tmp_path / "docker-compose.yaml"
 
     _renderer().render(
-        DEVELOPMENT_TEMPLATE,
+        TEMPLATE,
         output,
         API_IMAGE,
         WORKER_IMAGE,
@@ -140,9 +143,9 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="immutable published development image"):
         _renderer().render(
             TEMPLATE,
-                output,
-                f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
-                WORKER_IMAGE,
-                HERMES_IMAGE,
-                channel="dev",
+            output,
+            f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+            WORKER_IMAGE,
+            HERMES_IMAGE,
+            channel="dev",
         )

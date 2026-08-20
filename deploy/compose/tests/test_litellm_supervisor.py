@@ -1370,7 +1370,7 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
             "docker",
             "compose",
             "-f",
-            str(ROOT / "deploy/compose/compose.dev.images.yaml"),
+            str(ROOT / "deploy/compose/compose.yaml"),
             "config",
             "--format",
             "json",
