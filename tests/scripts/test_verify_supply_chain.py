@@ -89,6 +89,7 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/install-release-publication",
         "scripts/refuse-existing-image-version",
         "scripts/validate-container-release-digests",
+        "scripts/verify-multiarch-image-manifest",
         "scripts/verify-public-image-inputs",
         "scripts/verify-agent-deb",
         "scripts/verify-agent-systemd",
