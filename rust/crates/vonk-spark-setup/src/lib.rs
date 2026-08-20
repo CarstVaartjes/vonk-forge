@@ -887,7 +887,7 @@ impl CommandRunner for SystemCommandRunner {
             .envs(command.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::inherit());
         let mut child = process
             .spawn()
             .map_err(|_| command.program.display().to_string())?;
