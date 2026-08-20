@@ -105,12 +105,21 @@ def _csr(node_id: str = NODE_ID) -> bytes:
     )
 
 
-def _leaf(csr_pem: bytes, material: dict[str, object], *, now: datetime = NOW, serial: int = 1234) -> x509.Certificate:
+def _leaf(
+    csr_pem: bytes,
+    material: dict[str, object],
+    *,
+    now: datetime = NOW,
+    serial: int = 1234,
+    lifetime_seconds: int = 86400,
+) -> x509.Certificate:
     request = x509.load_pem_x509_csr(csr_pem)
     return (
         x509.CertificateBuilder().subject_name(request.subject)
         .issuer_name(material["intermediate"].subject).public_key(request.public_key())
-        .serial_number(serial).not_valid_before(now).not_valid_after(now + timedelta(hours=24))
+        .serial_number(serial).not_valid_before(now).not_valid_after(
+            now + timedelta(seconds=lifetime_seconds)
+        )
         .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
         .add_extension(request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value, critical=False)
@@ -118,7 +127,13 @@ def _leaf(csr_pem: bytes, material: dict[str, object], *, now: datetime = NOW, s
     )
 
 
-def _provider(tmp_path: Path, handler, *, max_response_bytes: int = 64 * 1024) -> tuple[StepCertificateAuthority, dict[str, object]]:
+def _provider(
+    tmp_path: Path,
+    handler,
+    *,
+    certificate_lifetime_seconds: int = 86400,
+    max_response_bytes: int = 64 * 1024,
+) -> tuple[StepCertificateAuthority, dict[str, object]]:
     material = _write_material(tmp_path)
     provider = StepCertificateAuthority(
         ca_url=CA_URL,
@@ -129,6 +144,7 @@ def _provider(tmp_path: Path, handler, *, max_response_bytes: int = 64 * 1024) -
         credential_path=material["credential_path"],
         provisioner_public_jwk_path=material["public_jwk_path"],
         timeout_seconds=2.0,
+        certificate_lifetime_seconds=certificate_lifetime_seconds,
         max_response_bytes=max_response_bytes,
         transport=httpx.MockTransport(handler),
     )
@@ -148,6 +164,7 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
         agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
         agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid=material["kid"],
         agent_ca_timeout_seconds=2.0, agent_ca_max_response_bytes=4096,
+        agent_ca_certificate_lifetime_seconds=86400,
         agent_artifact_root=tmp_path / "artifacts",
         management_cidrs="10.0.0.0/24", direct_fabric_cidrs=direct_fabric_cidrs,
     )
@@ -197,6 +214,57 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     certificate = x509.load_pem_x509_certificate(issued.certificate_pem)
     assert issued.serial == str(certificate.serial_number)
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
+
+
+def test_sign_uses_and_validates_configured_certificate_lifetime(tmp_path: Path) -> None:
+    seen: list[dict[str, object]] = []
+    holder: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        leaf = _leaf(
+            body["csr"].encode(),
+            holder["material"],
+            lifetime_seconds=90,
+        )
+        leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
+        intermediate_pem = holder["material"]["intermediate"].public_bytes(
+            serialization.Encoding.PEM
+        ).decode()
+        return httpx.Response(
+            201,
+            json={
+                "crt": leaf_pem,
+                "ca": intermediate_pem,
+                "certChain": [leaf_pem, intermediate_pem],
+            },
+        )
+
+    provider, material = _provider(
+        tmp_path,
+        handler,
+        certificate_lifetime_seconds=90,
+    )
+    holder["material"] = material
+
+    issued = provider.issue_node(NODE_ID, _csr(), NOW)
+
+    assert seen[0]["notAfter"] == "2026-08-04T12:01:30Z"
+    assert issued.not_after - issued.not_before == timedelta(seconds=90)
+
+
+@pytest.mark.parametrize("lifetime", (True, 89, 86401))
+def test_rejects_invalid_configured_certificate_lifetime(
+    tmp_path: Path,
+    lifetime: int,
+) -> None:
+    with pytest.raises(ValueError, match="certificate lifetime"):
+        _provider(
+            tmp_path,
+            lambda _: httpx.Response(500),
+            certificate_lifetime_seconds=lifetime,
+        )
 
 
 def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
@@ -466,6 +534,29 @@ def test_production_agent_service_builder_always_constructs_step_ca(
 
     assert len(calls) == 1
     assert calls[0]["ca_url"] == CA_URL
+
+
+def test_production_agent_service_builder_passes_configured_certificate_lifetime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class DeferredStepAuthority:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
+    )
+    settings = _builder_settings(
+        tmp_path, direct_fabric_cidrs="192.168.100.0/24"
+    )
+    settings.agent_ca_certificate_lifetime_seconds = 90
+
+    build_agent_services(settings, object(), lambda: NOW)
+
+    assert calls[0]["certificate_lifetime_seconds"] == 90
 
 
 def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation() -> None:

@@ -135,6 +135,7 @@ class Settings:
     agent_ca_provisioner_kid: str
     agent_ca_timeout_seconds: float
     agent_ca_max_response_bytes: int
+    agent_ca_certificate_lifetime_seconds: int
     agent_artifact_root: Path
     workload_tuf_metadata_root: Path
     workload_tuf_target_root: Path
@@ -264,6 +265,21 @@ class Settings:
             raise SettingsError("Smallstep timeout must be between zero and 30 seconds")
         if not 1024 <= agent_ca_max_response_bytes <= 1024 * 1024:
             raise SettingsError("Smallstep response limit must be between 1024 bytes and one MiB")
+        if step_ca_enabled:
+            try:
+                agent_ca_certificate_lifetime_seconds = int(
+                    os.environ.get("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "86400")
+                )
+            except ValueError as error:
+                raise SettingsError(
+                    "Smallstep certificate lifetime must be an integer between 90 and 86400 seconds"
+                ) from error
+            if not 90 <= agent_ca_certificate_lifetime_seconds <= 86400:
+                raise SettingsError(
+                    "Smallstep certificate lifetime must be between 90 and 86400 seconds"
+                )
+        else:
+            agent_ca_certificate_lifetime_seconds = 86400
         agent_proxy_auth = (
             _agent_proxy_auth_secret("VONK_AGENT_PROXY_AUTH_FILE", production=True)
             if agent_enabled else b""
@@ -351,6 +367,7 @@ class Settings:
             agent_ca_provisioner_kid=agent_ca_provisioner_kid,
             agent_ca_timeout_seconds=agent_ca_timeout_seconds,
             agent_ca_max_response_bytes=agent_ca_max_response_bytes,
+            agent_ca_certificate_lifetime_seconds=agent_ca_certificate_lifetime_seconds,
             agent_artifact_root=agent_artifact_root,
             workload_tuf_metadata_root=workload_tuf_metadata_root,
             workload_tuf_target_root=workload_tuf_target_root,
