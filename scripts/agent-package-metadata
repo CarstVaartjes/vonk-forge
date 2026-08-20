@@ -55,6 +55,22 @@ def stable_next_version(version: str) -> str:
     return f"{version}+lifecycle.1"
 
 
+def acceptance_baseline_version(version: str, sha: str) -> str:
+    match = SEMVER_RE.fullmatch(version)
+    if match is None:
+        raise ValueError("workspace version is invalid")
+    major, minor, patch = (int(part) for part in version.split("."))
+    if patch:
+        patch -= 1
+    elif minor:
+        minor -= 1
+    elif major:
+        major -= 1
+    else:
+        raise ValueError("workspace version has no lower acceptance baseline")
+    return f"{major}.{minor}.{patch}~acceptance.1+g{sha[:12]}"
+
+
 def metadata(arguments: Sequence[str]) -> list[str]:
     if len(arguments) != 5:
         raise ValueError("metadata arguments are invalid")
@@ -80,12 +96,18 @@ def metadata(arguments: Sequence[str]) -> list[str]:
         channel = "stable"
     else:
         raise ValueError("release channel is invalid")
+    baseline_version = acceptance_baseline_version(version, sha)
+    baseline_artifact_name = f"{artifact_name}-acceptance-baseline"
     return [
         f"version={package_version}",
         f"next_version={next_version}",
+        f"baseline_version={baseline_version}",
         f"arm64_package=vonk-forge-agent_{package_version}_arm64.deb",
         f"amd64_package=vonk-forge-agent_{package_version}_amd64.deb",
+        f"arm64_baseline_package=vonk-forge-agent_{baseline_version}_arm64.deb",
+        f"amd64_baseline_package=vonk-forge-agent_{baseline_version}_amd64.deb",
         f"artifact_name={artifact_name}",
+        f"baseline_artifact_name={baseline_artifact_name}",
         f"channel={channel}",
         f"snapshot={channel}-{package_version}",
     ]

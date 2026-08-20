@@ -29,6 +29,39 @@ def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
         offset += count
 
 
+def _process_tree(root_pid: int) -> set[int]:
+    parents: dict[int, int] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            suffix = (entry / "stat").read_text().rpartition(") ")[2].split()
+            parents[int(entry.name)] = int(suffix[1])
+        except (IndexError, OSError, ValueError):
+            continue
+    tree = {root_pid}
+    while descendants := {
+        pid for pid, parent in parents.items() if parent in tree and pid not in tree
+    }:
+        tree.update(descendants)
+    return tree
+
+
+def _assert_process_values_absent(root_pid: int, forbidden: Sequence[bytes]) -> None:
+    if not forbidden:
+        return
+    for pid in _process_tree(root_pid):
+        for name in ("cmdline", "environ"):
+            try:
+                content = Path(f"/proc/{pid}/{name}").read_bytes()
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            if any(value in content for value in forbidden):
+                raise AcceptanceError(
+                    "secret value appeared in an acceptance process listing"
+                )
+
+
 def run_interactive(
     command: Sequence[str | os.PathLike[str]],
     *,
@@ -37,10 +70,16 @@ def run_interactive(
     responses: Sequence[tuple[str, str]],
     timeout: float,
     require_all_prompts: bool = True,
+    forbidden_values: Sequence[str] = (),
 ) -> str:
-    if not command or timeout <= 0:
+    if (
+        not command
+        or timeout <= 0
+        or any(not value or "\0" in value for value in forbidden_values)
+    ):
         raise AcceptanceError("interactive command is invalid")
     argv = [os.fspath(value) for value in command]
+    forbidden = tuple(value.encode("utf-8") for value in forbidden_values)
     pending = list(responses)
     transcript = bytearray()
     matched_through = 0
@@ -56,6 +95,7 @@ def run_interactive(
     status: int | None = None
     try:
         while status is None:
+            _assert_process_values_absent(pid, forbidden)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise AcceptanceError("interactive command timed out")
@@ -79,6 +119,7 @@ def run_interactive(
                         )
                         matched_through = position + len(prompt)
                         pending.pop(0)
+            _assert_process_values_absent(pid, forbidden)
             child, observed_status = os.waitpid(pid, os.WNOHANG)
             if child == pid:
                 status = observed_status
@@ -98,7 +139,7 @@ def run_interactive(
     except BaseException:
         if status is None:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.killpg(pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
             child, _ = os.waitpid(pid, 0)

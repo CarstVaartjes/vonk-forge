@@ -41,9 +41,36 @@ def test_interactive_runner_drives_a_real_tty_without_exporting_answers(
         environment={"PATH": "/usr/bin:/bin"},
         responses=[("Pairing token: ", "token-value")],
         timeout=5,
+        forbidden_values=["token-value"],
     )
 
     assert "Pairing token: " in transcript
+    assert "token-value" not in transcript
+
+
+def test_interactive_runner_rejects_secret_in_descendant_process_environment(
+    tmp_path: Path,
+) -> None:
+    child = tmp_path / "prompt.py"
+    child.write_text(
+        "import os,subprocess,time\n"
+        "with open('/dev/tty', 'w') as output, open('/dev/tty', 'r') as input:\n"
+        "    output.write('Pairing token: ')\n"
+        "    output.flush()\n"
+        "    value = input.readline().strip()\n"
+        "    subprocess.Popen(['/bin/sleep', '5'], env=os.environ | {'LEAK': value})\n"
+        "    time.sleep(2)\n"
+    )
+
+    with pytest.raises(AcceptanceError, match="process listing"):
+        run_interactive(
+            [sys.executable, child],
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            responses=[("Pairing token: ", "token-value")],
+            timeout=5,
+            forbidden_values=["token-value"],
+        )
 
 
 def test_interactive_runner_can_allow_upgrade_prompts_to_be_unchanged(

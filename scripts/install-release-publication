@@ -330,8 +330,10 @@ def _render_bootstrap(
     setups: dict[str, Path],
     payload: Path | None,
     packages: dict[str, Path] | None,
+    *,
+    output_name: str | None = None,
 ) -> bytes:
-    output = work / f"rendered-{kind}"
+    output = work / f"rendered-{output_name or kind}"
     command = [
         sys.executable,
         str(ROOT / "scripts/render-install-bootstrap"),
@@ -504,9 +506,17 @@ def assemble(arguments: argparse.Namespace) -> str:
     nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
+    baseline_packages = _pairs(
+        arguments.agent_baseline_package, "acceptance baseline agent package"
+    )
     _validate_platforms(nas, NAS_PLATFORMS, "NAS setup")
     _validate_platforms(spark, SPARK_PLATFORMS, "Spark setup")
     _validate_platforms(packages, SPARK_PLATFORMS, "agent package")
+    _validate_platforms(
+        baseline_packages,
+        SPARK_PLATFORMS,
+        "acceptance baseline agent package",
+    )
     source_contents: dict[str, bytes] = {}
     for platform, path in nas.items():
         source_contents[f"nas:{platform}"] = _safe_bytes(path, f"NAS setup {platform}")
@@ -522,12 +532,45 @@ def assemble(arguments: argparse.Namespace) -> str:
         source_contents[f"package:{platform}"] = _safe_bytes(
             path, f"agent package {platform}"
         )
+    baseline_versions: set[str] = set()
+    for platform, path in baseline_packages.items():
+        architecture = platform.removeprefix("linux-")
+        prefix = "vonk-forge-agent_"
+        suffix = f"_{architecture}.deb"
+        baseline_version = (
+            path.name.removeprefix(prefix).removesuffix(suffix)
+            if path.name.startswith(prefix) and path.name.endswith(suffix)
+            else ""
+        )
+        if VERSION.fullmatch(baseline_version) is None:
+            raise PublicationError(
+                f"{platform} acceptance baseline package filename is inconsistent"
+            )
+        _validate_agent_package(path, baseline_version, architecture)
+        baseline_versions.add(baseline_version)
+        source_contents[f"baseline-package:{platform}"] = _safe_bytes(
+            path, f"acceptance baseline agent package {platform}"
+        )
+    if len(baseline_versions) != 1:
+        raise PublicationError("acceptance baseline package versions are inconsistent")
+    baseline_version = baseline_versions.pop()
+    ordering = subprocess.run(
+        ["/usr/bin/dpkg", "--compare-versions", baseline_version, "lt", version],
+        cwd=ROOT,
+        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if ordering.returncode != 0:
+        raise PublicationError("acceptance baseline package is not strictly older")
     payload_content = _safe_bytes(arguments.nas_payload, "NAS payload")
     identity = {
         "artifacts": {
             name: _record(content) for name, content in sorted(source_contents.items())
         },
         "channel": channel,
+        "baseline_version": baseline_version,
         "images": images,
         "nas_payload": _record(payload_content),
         "schema_version": 1,
@@ -593,6 +636,71 @@ def assemble(arguments: argparse.Namespace) -> str:
                 "path": package_key,
                 **_record(package_content),
             }
+
+        baseline_prefix = f"{immutable_prefix}/acceptance-baseline"
+        baseline_artifacts: dict[str, dict[str, object]] = {}
+        for platform in SPARK_PLATFORMS:
+            setup_key = f"{baseline_prefix}/spark/current/{platform}/vonk-spark-setup"
+            setup_content = source_contents[f"spark:{platform}"]
+            add_immutable(setup_key, setup_content, 0o755)
+            baseline_artifacts[f"spark-setup-{platform}"] = {
+                "path": setup_key,
+                **_record(setup_content),
+            }
+            setup_signature_key = f"{setup_key}.sig"
+            setup_signature = (
+                _sign(arguments.signing_key, setup_content).encode("ascii") + b"\n"
+            )
+            add_immutable(setup_signature_key, setup_signature)
+            baseline_artifacts[f"spark-setup-signature-{platform}"] = {
+                "path": setup_signature_key,
+                **_record(setup_signature),
+            }
+            package_key = (
+                f"{baseline_prefix}/spark/current/{platform}/vonk-forge-agent.deb"
+            )
+            package_content = source_contents[f"baseline-package:{platform}"]
+            add_immutable(package_key, package_content)
+            baseline_artifacts[f"agent-package-{platform}"] = {
+                "path": package_key,
+                **_record(package_content),
+            }
+        baseline_bootstrap = _render_bootstrap(
+            temporary,
+            "spark",
+            f"{base_url}/acceptance-baseline",
+            spark,
+            None,
+            baseline_packages,
+            output_name="spark-acceptance-baseline",
+        )
+        baseline_bootstrap_key = f"{baseline_prefix}/bootstraps/spark"
+        add_immutable(baseline_bootstrap_key, baseline_bootstrap, 0o755)
+        baseline_release = {
+            "acceptance_only": True,
+            "artifacts": baseline_artifacts,
+            "bootstraps": {
+                "spark": {
+                    "path": baseline_bootstrap_key,
+                    **_record(baseline_bootstrap),
+                }
+            },
+            "channel": channel,
+            "generation": generation,
+            "images": images,
+            "schema_version": 1,
+            "source_sha": source_sha,
+            "version": baseline_version,
+        }
+        baseline_release_raw = _canonical(baseline_release)
+        baseline_release_key = f"{baseline_prefix}/release.json"
+        add_immutable(baseline_release_key, baseline_release_raw)
+        baseline_release_signature = (
+            _sign(arguments.signing_key, baseline_release_raw).encode("ascii") + b"\n"
+        )
+        add_immutable(
+            f"{baseline_prefix}/release.sig", baseline_release_signature
+        )
 
         nas_bootstrap = _render_bootstrap(
             temporary, "nas", base_url, nas, arguments.nas_payload, None
@@ -1262,6 +1370,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--nas-setup", action="append", default=[])
     build.add_argument("--spark-setup", action="append", default=[])
     build.add_argument("--agent-package", action="append", default=[])
+    build.add_argument("--agent-baseline-package", action="append", default=[])
     build.add_argument("--nas-payload", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
     approval = commands.add_parser("accept")

@@ -22,7 +22,7 @@ static BUILD_DIGEST_MARKER: &str =
     concat!("VONK_AGENT_BUILD_DIGEST=", env!("VONK_AGENT_BUILD_DIGEST"));
 #[used]
 static SEMANTIC_VERSION_MARKER: &str =
-    concat!("VONK_AGENT_SEMANTIC_VERSION=", env!("CARGO_PKG_VERSION"));
+    concat!("VONK_AGENT_SEMANTIC_VERSION=", env!("VONK_AGENT_SEMANTIC_VERSION"));
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +61,7 @@ impl AgentRuntimeIdentity {
         }
         let binary_digest = hex::encode(Sha256::digest(raw));
         Ok(Self {
-            semantic_version: env!("CARGO_PKG_VERSION").to_owned(),
+            semantic_version: env!("VONK_AGENT_SEMANTIC_VERSION").to_owned(),
             build_digest: env!("VONK_AGENT_BUILD_DIGEST").to_owned(),
             binary_digest,
             architecture: if cfg!(target_arch = "aarch64") {

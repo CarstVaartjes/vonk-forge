@@ -41,6 +41,9 @@ PACKAGE_VERSION = re.compile(
 DEVELOPMENT_VERSION = re.compile(
     rf"{SEMVER}~dev\.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
 )
+ACCEPTANCE_BASELINE_VERSION = re.compile(
+    rf"{SEMVER}~acceptance\.1\+g[0-9a-f]{{12}}\Z"
+)
 BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
@@ -166,7 +169,9 @@ def read_release_binary(
     return raw
 
 
-def compile_binaries(epoch: int, architecture: str, build_digest: str) -> Path:
+def compile_binaries(
+    epoch: int, architecture: str, build_digest: str, semantic_version: str
+) -> Path:
     cargo = shutil.which("cargo")
     if cargo is None:
         raise BuildError("cargo is unavailable")
@@ -174,6 +179,7 @@ def compile_binaries(epoch: int, architecture: str, build_digest: str) -> Path:
         "CARGO_INCREMENTAL": "0",
         "SOURCE_DATE_EPOCH": str(epoch),
         "VONK_AGENT_BUILD_DIGEST": build_digest,
+        "VONK_AGENT_SEMANTIC_VERSION": semantic_version,
     }
     if architecture == "linux-amd64" and os.uname().machine not in {
         "x86_64",
@@ -435,11 +441,22 @@ def build(
     epoch: int,
     architecture: str,
     build_digest: str,
+    acceptance_baseline: bool = False,
 ) -> Path:
-    if not valid_package_version(version):
+    if not valid_package_version(version) and not (
+        acceptance_baseline and ACCEPTANCE_BASELINE_VERSION.fullmatch(version)
+    ):
         raise BuildError("version is not canonical package version")
     cargo_version = cargo_semantic_version()
-    if package_semantic_version(version) != cargo_version:
+    semantic_version = package_semantic_version(version)
+    semantic_parts = tuple(int(part) for part in semantic_version.split("."))
+    cargo_parts = tuple(int(part) for part in cargo_version.split("."))
+    if acceptance_baseline and (
+        ACCEPTANCE_BASELINE_VERSION.fullmatch(version) is None
+        or semantic_parts >= cargo_parts
+    ):
+        raise BuildError("acceptance baseline must have a lower semantic version")
+    if not acceptance_baseline and semantic_version != cargo_version:
         raise BuildError(
             f"package semantic version does not match Cargo semantic version {cargo_version}"
         )
@@ -460,14 +477,14 @@ def build(
     binary_root = (
         binaries_dir.resolve()
         if binaries_dir
-        else compile_binaries(epoch, architecture, build_digest)
+        else compile_binaries(epoch, architecture, build_digest, semantic_version)
     )
     binaries = {
         name: read_release_binary(
             binary_root / name,
             machine=int(spec["machine"]),
             build_digest=build_digest if name == "vonk-agent" else None,
-            semantic_version=cargo_version if name == "vonk-agent" else None,
+            semantic_version=semantic_version if name == "vonk-agent" else None,
         )
         for name in BINARIES
     }
@@ -613,6 +630,7 @@ def main() -> int:
     parser.add_argument("--release-private-key", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--binaries-dir", type=Path)
+    parser.add_argument("--acceptance-baseline", action="store_true")
     parser.add_argument(
         "--source-date-epoch",
         type=int,
@@ -628,6 +646,7 @@ def main() -> int:
             arguments.source_date_epoch,
             arguments.architecture,
             arguments.build_digest,
+            arguments.acceptance_baseline,
         )
     except (BuildError, OSError, ValueError) as error:
         print(f"build-agent-deb: {error}", file=sys.stderr)

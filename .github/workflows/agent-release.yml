@@ -24,9 +24,13 @@ jobs:
     outputs:
       version: ${{ steps.metadata.outputs.version }}
       next_version: ${{ steps.metadata.outputs.next_version }}
+      baseline_version: ${{ steps.metadata.outputs.baseline_version }}
       arm64_package: ${{ steps.metadata.outputs.arm64_package }}
       amd64_package: ${{ steps.metadata.outputs.amd64_package }}
+      arm64_baseline_package: ${{ steps.metadata.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.metadata.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+      baseline_artifact_name: ${{ steps.metadata.outputs.baseline_artifact_name }}
       channel: ${{ steps.metadata.outputs.channel }}
     steps:
       - name: Check out selected main commit
@@ -74,6 +78,10 @@ jobs:
       arm64_package: ${{ steps.package.outputs.arm64_package }}
       amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
+      baseline_version: ${{ steps.package.outputs.baseline_version }}
+      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
+      baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,9 +96,13 @@ jobs:
           publication_sequence: ${{ github.run_number }}
           version: ${{ needs.package-metadata.outputs.version }}
           next_version: ${{ needs.package-metadata.outputs.next_version }}
+          baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
           arm64_package: ${{ needs.package-metadata.outputs.arm64_package }}
           amd64_package: ${{ needs.package-metadata.outputs.amd64_package }}
+          arm64_baseline_package: ${{ needs.package-metadata.outputs.arm64_baseline_package }}
+          amd64_baseline_package: ${{ needs.package-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
+          baseline_artifact_name: ${{ needs.package-metadata.outputs.baseline_artifact_name }}
           environment: agent-development
           source_sha: ${{ github.sha }}
           tag_name: ''

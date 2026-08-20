@@ -45,7 +45,7 @@ def _canonical(path: Path, document: object) -> None:
 
 def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
     architecture = platform.removeprefix("linux-")
-    root = tmp_path / f"package-root-{architecture}"
+    root = tmp_path / f"package-root-{version}-{architecture}"
     (root / "DEBIAN").mkdir(parents=True)
     (root / "DEBIAN/control").write_text(
         "Package: vonk-forge-agent\n"
@@ -100,17 +100,24 @@ def _inputs(
         nas[platform] = path
     spark: dict[str, Path] = {}
     packages: dict[str, Path] = {}
+    baseline_version = "0.0.0~acceptance.1+g" + SOURCE_SHA[:12]
+    baseline_packages: dict[str, Path] = {}
     for platform in SPARK_PLATFORMS:
         path = tmp_path / f"vonk-spark-setup-{platform}"
         path.write_bytes(f"spark setup {platform}\n".encode())
         spark[platform] = path
         packages[platform] = _agent_package(tmp_path, platform, version)
+        baseline_packages[platform] = _agent_package(
+            tmp_path, platform, baseline_version
+        )
     payload = tmp_path / "payload.json"
     _canonical(payload, {"compose": "pinned", "schema_version": 1})
     return {
         "nas": nas,
         "spark": spark,
         "packages": packages,
+        "baseline_packages": baseline_packages,
+        "baseline_version": baseline_version,
         "payload": payload,
         "signing_key": signing_key,
         "signing_public_key": signing_public_key,
@@ -159,6 +166,8 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         command.extend(("--spark-setup", f"{platform}={path}"))
     for platform, path in inputs["packages"].items():
         command.extend(("--agent-package", f"{platform}={path}"))
+    for platform, path in inputs["baseline_packages"].items():
+        command.extend(("--agent-baseline-package", f"{platform}={path}"))
     return command
 
 
@@ -572,6 +581,7 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
             key
             for key in keys
             if key.endswith(f"/spark/current/{platform}/vonk-spark-setup")
+            and "/acceptance-baseline/" not in key
         )
         setup_signature_key = f"{setup_key}.sig"
         assert setup_signature_key in keys
@@ -622,6 +632,54 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
         "spark",
     }
     assert plan["objects"][-1]["key"] == "artifacts/stable/current.manifest"
+
+
+def test_assemble_binds_lower_dual_architecture_baseline_without_a_pointer(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path)
+    publication = _assemble(tmp_path, inputs)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    immutable = {
+        entry["key"]: entry
+        for entry in plan["objects"]
+        if entry["phase"] == "immutable"
+    }
+    baseline_releases = [
+        key
+        for key in immutable
+        if key.endswith("/acceptance-baseline/release.json")
+    ]
+
+    assert len(baseline_releases) == 1
+    baseline_release_path = publication / "objects" / baseline_releases[0]
+    baseline_release = json.loads(baseline_release_path.read_text())
+    assert baseline_release["version"] == inputs["baseline_version"]
+    assert baseline_release["acceptance_only"] is True
+    assert set(baseline_release["artifacts"]) >= {
+        "agent-package-linux-amd64",
+        "agent-package-linux-arm64",
+    }
+    for record in baseline_release["artifacts"].values():
+        path = publication / "objects" / record["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == record["sha256"]
+        assert path.stat().st_size == record["size"]
+    assert all(
+        entry["phase"] == "immutable"
+        for entry in plan["objects"]
+        if "/acceptance-baseline/" in entry["key"]
+    )
+    ordered = subprocess.run(
+        [
+            "/usr/bin/dpkg",
+            "--compare-versions",
+            str(inputs["version"]),
+            "gt",
+            str(inputs["baseline_version"]),
+        ],
+        check=False,
+    )
+    assert ordered.returncode == 0
 
 
 def test_bootstraps_pin_final_digests_and_immutable_generation_urls(

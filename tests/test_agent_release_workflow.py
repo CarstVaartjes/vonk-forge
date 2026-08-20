@@ -19,6 +19,16 @@ EXPECTED_ACTION_OUTPUTS = {
     "arm64_package": "${{ steps.accepted.outputs.arm64_package }}",
     "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
+    "baseline_version": "${{ steps.accepted.outputs.baseline_version }}",
+    "arm64_baseline_package": (
+        "${{ steps.accepted.outputs.arm64_baseline_package }}"
+    ),
+    "amd64_baseline_package": (
+        "${{ steps.accepted.outputs.amd64_baseline_package }}"
+    ),
+    "baseline_artifact_name": (
+        "${{ steps.accepted.outputs.baseline_artifact_name }}"
+    ),
     "amd64_lifecycle_package": (
         "${{ steps.accepted.outputs.amd64_lifecycle_package }}"
     ),
@@ -351,6 +361,27 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "ci\\.yml@refs/tags/v" in text
 
 
+def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+    validation = package_step("Validate package metadata and environment")
+    lifecycle = package_step_run(
+        "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    )
+    upload = package_step("Upload immutable acceptance baseline packages")
+
+    assert "baseline_version:" in text
+    assert "arm64_baseline_package:" in text
+    assert "amd64_baseline_package:" in text
+    assert "baseline_artifact_name:" in text
+    assert "BASELINE_VERSION: ${{ inputs.baseline_version }}" in validation
+    assert "--acceptance-baseline" in lifecycle
+    assert '"$BASELINE_VERSION" "$VERSION"' in lifecycle
+    for architecture in ("arm64", "amd64"):
+        assert f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb" in upload
+    assert "retention-days: 7" in upload
+    assert "overwrite: false" in upload
+
+
 def test_package_build_outputs_and_attestations_name_both_architectures() -> None:
     text = PACKAGE_WORKFLOW.read_text()
     for architecture in ("arm64", "amd64"):
@@ -374,7 +405,8 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert lifecycle.count("scripts/build-agent-deb") == 2
+    assert lifecycle.count("scripts/build-agent-deb") == 3
+    assert "--acceptance-baseline" in lifecycle
     assert "--architecture linux-arm64" in lifecycle
     assert "--architecture linux-amd64" in lifecycle
     final_build = lifecycle.rindex("scripts/build-agent-deb")
@@ -389,7 +421,10 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         fallback_name,
         "Upload short-lived AMD64 lifecycle package",
     ]
-    assert step_names[lifecycle_index + 3] == cosign_name
+    assert step_names[lifecycle_index + 3 : lifecycle_index + 5] == [
+        "Upload immutable acceptance baseline packages",
+        cosign_name,
+    ]
     assert text.count(immediate_cleanup) == 2
 
 
@@ -442,22 +477,31 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
     )
 
 
-def test_reusable_agent_package_build_uploads_one_immutable_release_set() -> None:
+def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_sets() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert text.count("actions/upload-artifact@") == 2
+    assert text.count("actions/upload-artifact@") == 3
     accepted = workflow_step(text, "Upload exact package release set")
+    baseline = workflow_step(text, "Upload immutable acceptance baseline packages")
     lifecycle = workflow_step(text, "Upload short-lived AMD64 lifecycle package")
 
     assert "name: ${{ inputs.artifact_name }}" in accepted
     assert "retention-days: 30" in accepted
     assert "path: dist/*" in accepted
+    assert "name: ${{ inputs.baseline_artifact_name }}" in baseline
+    assert "retention-days: 7" in baseline
+    for architecture in ("arm64", "amd64"):
+        package = (
+            f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
+        )
+        assert package in baseline
+        assert f"{package}.sha256" in baseline
     assert "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
     assert "retention-days: 1" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
     assert "dist/" not in lifecycle
-    for step in (accepted, lifecycle):
+    for step in (accepted, baseline, lifecycle):
         assert "overwrite: false" in step
         assert "if-no-files-found: error" in step
 

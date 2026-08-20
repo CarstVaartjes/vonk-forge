@@ -993,6 +993,30 @@ def server():
         active.server_close()
 
 
+def test_protocol_client_is_reusable_outside_the_development_slice_runner(
+    server: SliceServer,
+) -> None:
+    program = (
+        "import json\n"
+        "from development_slice_client import Client\n"
+        f"client = Client('http://127.0.0.1:{server.server_port}', "
+        f"{ADMIN_TOKEN!r}, timeout=5)\n"
+        "status, payload = client.request('GET', '/api/v1/fleet')\n"
+        "print(json.dumps({'status': status, 'schema_version': payload['schema_version']}))\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=ROOT / "scripts",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"schema_version": 1, "status": 200}
+
+
 def _token(path: Path, value: str) -> Path:
     path.write_text(value + "\n", encoding="ascii")
     path.chmod(0o600)

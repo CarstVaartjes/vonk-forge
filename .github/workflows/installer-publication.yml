@@ -45,6 +45,10 @@ jobs:
       package_artifact: ${{ steps.accept.outputs.package_artifact }}
       amd64_package: ${{ steps.accept.outputs.amd64_package }}
       arm64_package: ${{ steps.accept.outputs.arm64_package }}
+      baseline_version: ${{ steps.accept.outputs.baseline_version }}
+      baseline_artifact: ${{ steps.accept.outputs.baseline_artifact }}
+      amd64_baseline_package: ${{ steps.accept.outputs.amd64_baseline_package }}
+      arm64_baseline_package: ${{ steps.accept.outputs.arm64_baseline_package }}
       compose_run_id: ${{ steps.accept.outputs.compose_run_id }}
       compose_artifact: ${{ steps.accept.outputs.compose_artifact }}
       setup_run_id: ${{ steps.accept.outputs.setup_run_id }}
@@ -154,6 +158,10 @@ jobs:
           package_artifact=$(sed -n 's/^artifact_name=//p' <<< "$metadata")
           amd64_package=$(sed -n 's/^amd64_package=//p' <<< "$metadata")
           arm64_package=$(sed -n 's/^arm64_package=//p' <<< "$metadata")
+          baseline_version=$(sed -n 's/^baseline_version=//p' <<< "$metadata")
+          baseline_artifact=$(sed -n 's/^baseline_artifact_name=//p' <<< "$metadata")
+          amd64_baseline_package=$(sed -n 's/^amd64_baseline_package=//p' <<< "$metadata")
+          arm64_baseline_package=$(sed -n 's/^arm64_baseline_package=//p' <<< "$metadata")
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
 
@@ -182,6 +190,7 @@ jobs:
             "/repos/$GITHUB_REPOSITORY/actions/runs/$package_run_id/artifacts?per_page=100" \
             --jq '.artifacts[]' | jq -s . > "$artifacts"
           test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+          test "$(jq --arg name "$baseline_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
           if [[ "$compose_run_id" != "$package_run_id" ]]; then
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \
@@ -211,6 +220,10 @@ jobs:
             "package_artifact=$package_artifact" \
             "amd64_package=$amd64_package" \
             "arm64_package=$arm64_package" \
+            "baseline_version=$baseline_version" \
+            "baseline_artifact=$baseline_artifact" \
+            "amd64_baseline_package=$amd64_baseline_package" \
+            "arm64_baseline_package=$arm64_baseline_package" \
             "compose_run_id=$compose_run_id" \
             "compose_artifact=$compose_artifact" \
             "setup_run_id=$setup_run_id" \
@@ -265,6 +278,14 @@ jobs:
           run-id: ${{ needs.authority.outputs.package_run_id }}
           github-token: ${{ github.token }}
 
+      - name: Download exact acceptance baseline agent packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.authority.outputs.baseline_artifact }}
+          path: ${{ runner.temp }}/baseline-packages
+          run-id: ${{ needs.authority.outputs.package_run_id }}
+          github-token: ${{ github.token }}
+
       - name: Download exact accepted Compose model
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -282,6 +303,8 @@ jobs:
           VERSION: ${{ needs.authority.outputs.version }}
           AMD64_PACKAGE: ${{ needs.authority.outputs.amd64_package }}
           ARM64_PACKAGE: ${{ needs.authority.outputs.arm64_package }}
+          AMD64_BASELINE_PACKAGE: ${{ needs.authority.outputs.amd64_baseline_package }}
+          ARM64_BASELINE_PACKAGE: ${{ needs.authority.outputs.arm64_baseline_package }}
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
           VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
@@ -354,6 +377,8 @@ jobs:
             --spark-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-spark-setup"
             --agent-package "linux-amd64=$RUNNER_TEMP/packages/$AMD64_PACKAGE"
             --agent-package "linux-arm64=$RUNNER_TEMP/packages/$ARM64_PACKAGE"
+            --agent-baseline-package "linux-amd64=$RUNNER_TEMP/baseline-packages/$AMD64_BASELINE_PACKAGE"
+            --agent-baseline-package "linux-arm64=$RUNNER_TEMP/baseline-packages/$ARM64_BASELINE_PACKAGE"
             --output "$output"
           )
           "${assemble[@]}" | tee "$RUNNER_TEMP/assembly.out"

@@ -337,9 +337,13 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       next_version: ${{ steps.release.outputs.next_version }}
+      baseline_version: ${{ steps.release.outputs.baseline_version }}
       arm64_package: ${{ steps.release.outputs.arm64_package }}
       amd64_package: ${{ steps.release.outputs.amd64_package }}
+      arm64_baseline_package: ${{ steps.release.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.release.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
+      baseline_artifact_name: ${{ steps.release.outputs.baseline_artifact_name }}
       channel: ${{ steps.release.outputs.channel }}
       image_version_tag: ${{ steps.release.outputs.image_version_tag }}
       commit_tag: ${{ steps.release.outputs.commit_tag }}
@@ -410,6 +414,10 @@ jobs:
       arm64_package: ${{ steps.package.outputs.arm64_package }}
       amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
+      baseline_version: ${{ steps.package.outputs.baseline_version }}
+      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
+      baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -424,9 +432,13 @@ jobs:
           publication_sequence: '0'
           version: ${{ needs.release-metadata.outputs.version }}
           next_version: ${{ needs.release-metadata.outputs.next_version }}
+          baseline_version: ${{ needs.release-metadata.outputs.baseline_version }}
           arm64_package: ${{ needs.release-metadata.outputs.arm64_package }}
           amd64_package: ${{ needs.release-metadata.outputs.amd64_package }}
+          arm64_baseline_package: ${{ needs.release-metadata.outputs.arm64_baseline_package }}
+          amd64_baseline_package: ${{ needs.release-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
+          baseline_artifact_name: ${{ needs.release-metadata.outputs.baseline_artifact_name }}
           environment: agent-release
           source_sha: ${{ github.sha }}
           tag_name: ${{ github.ref_name }}

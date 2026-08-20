@@ -58,9 +58,9 @@ def _build(
     key: Path,
     version: str = "0.1.0",
     architecture: str = "linux-arm64",
+    acceptance_baseline: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
+    command = [
             BUILD,
             "--version",
             version,
@@ -76,7 +76,11 @@ def _build(
             "1786060800",
             "--output-dir",
             output,
-        ],
+        ]
+    if acceptance_baseline:
+        command.append("--acceptance-baseline")
+    return subprocess.run(
+        command,
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -498,6 +502,48 @@ def test_builder_enforces_cargo_and_package_semantic_version_consistency(
 
     assert result.returncode == 2
     assert "does not match Cargo semantic version" in result.stderr
+
+
+def test_builder_allows_only_an_explicit_lower_acceptance_baseline(
+    tmp_path: Path,
+) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    agent = binaries / "vonk-agent"
+    agent.chmod(0o755)
+    agent.write_bytes(
+        agent.read_bytes().replace(
+            b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+            b"VONK_AGENT_SEMANTIC_VERSION=0.0.0",
+        )
+    )
+    agent.chmod(0o555)
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    version = "0.0.0~acceptance.1+g0123456789ab"
+
+    result = _build(
+        tmp_path / "dist",
+        binaries,
+        key,
+        version,
+        acceptance_baseline=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    package = tmp_path / f"dist/vonk-forge-agent_{version}_arm64.deb"
+    assert package.is_file()
+    assert (
+        subprocess.run(
+            ["/usr/bin/dpkg-deb", "--field", package, "Version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        == version
+    )
 
 
 def test_builder_rejects_a_build_digest_that_is_not_embedded_in_the_agent(

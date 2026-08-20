@@ -300,6 +300,8 @@ struct ApplyEnvelope {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReleaseDocument {
+    #[serde(default)]
+    acceptance_only: bool,
     artifacts: BTreeMap<String, ReleaseArtifact>,
     bootstraps: BTreeMap<String, ReleaseArtifact>,
     channel: String,
@@ -808,9 +810,11 @@ fn verified_release(
         .get(&format!("spark-setup-signature-{platform}"))
         .cloned()
         .ok_or(SetupError::ReleaseSignature)?;
-    let prefix = format!(
-        "artifacts/{}/releases/{}/spark/current/{platform}/",
-        document.channel, document.generation
+    let prefix = release_artifact_prefix(
+        &document.channel,
+        &document.generation,
+        platform,
+        document.acceptance_only,
     );
     if package.path != format!("{prefix}vonk-forge-agent.deb")
         || setup.path != format!("{prefix}vonk-spark-setup")
@@ -836,6 +840,22 @@ fn verified_release(
         version: document.version,
         architecture: architecture.to_owned(),
     })
+}
+
+fn release_artifact_prefix(
+    channel: &str,
+    generation: &str,
+    platform: &str,
+    acceptance_only: bool,
+) -> String {
+    let baseline = if acceptance_only {
+        "acceptance-baseline/"
+    } else {
+        ""
+    };
+    format!(
+        "artifacts/{channel}/releases/{generation}/{baseline}spark/current/{platform}/"
+    )
 }
 
 pub fn apply_setup_from(
@@ -1944,5 +1964,33 @@ mod tests {
             validate_host_description("ID=ubuntu\n", true, "amd64", "arm64"),
             Err(SetupError::UnsupportedHost)
         ));
+    }
+
+    #[test]
+    fn acceptance_only_release_resolves_only_its_immutable_baseline_graph() {
+        assert_eq!(
+            release_artifact_prefix(
+                "dev",
+                &"a".repeat(64),
+                "linux-arm64",
+                true,
+            ),
+            format!(
+                "artifacts/dev/releases/{}/acceptance-baseline/spark/current/linux-arm64/",
+                "a".repeat(64)
+            )
+        );
+        assert_eq!(
+            release_artifact_prefix(
+                "stable",
+                &"b".repeat(64),
+                "linux-amd64",
+                false,
+            ),
+            format!(
+                "artifacts/stable/releases/{}/spark/current/linux-amd64/",
+                "b".repeat(64)
+            )
+        );
     }
 }

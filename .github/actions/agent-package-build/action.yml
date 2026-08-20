@@ -14,14 +14,26 @@ inputs:
   next_version:
     description: Next version used by lifecycle upgrade checks
     required: true
+  baseline_version:
+    description: Lower immutable acceptance-only package version
+    required: true
   arm64_package:
     description: Exact ARM64 Debian package filename
     required: true
   amd64_package:
     description: Exact AMD64 Debian package filename
     required: true
+  arm64_baseline_package:
+    description: Exact acceptance-only ARM64 Debian package filename
+    required: true
+  amd64_baseline_package:
+    description: Exact acceptance-only AMD64 Debian package filename
+    required: true
   artifact_name:
     description: Immutable GitHub Actions artifact name
+    required: true
+  baseline_artifact_name:
+    description: Immutable acceptance-only baseline artifact name
     required: true
   environment:
     description: Literal protected environment selected by the caller job
@@ -55,6 +67,18 @@ outputs:
   artifact_name:
     description: Immutable Actions artifact name
     value: ${{ steps.accepted.outputs.artifact_name }}
+  baseline_version:
+    description: Lower acceptance-only Debian package version
+    value: ${{ steps.accepted.outputs.baseline_version }}
+  arm64_baseline_package:
+    description: Acceptance-only ARM64 package filename
+    value: ${{ steps.accepted.outputs.arm64_baseline_package }}
+  amd64_baseline_package:
+    description: Acceptance-only AMD64 package filename
+    value: ${{ steps.accepted.outputs.amd64_baseline_package }}
+  baseline_artifact_name:
+    description: Acceptance-only baseline artifact name
+    value: ${{ steps.accepted.outputs.baseline_artifact_name }}
   amd64_lifecycle_package:
     description: Short-lived next-version AMD64 package filename for native lifecycle acceptance
     value: ${{ steps.accepted.outputs.amd64_lifecycle_package }}
@@ -81,6 +105,10 @@ runs:
         CHANNEL: ${{ inputs.channel }}
         ARM64_PACKAGE: ${{ inputs.arm64_package }}
         AMD64_PACKAGE: ${{ inputs.amd64_package }}
+        ARM64_BASELINE_PACKAGE: ${{ inputs.arm64_baseline_package }}
+        AMD64_BASELINE_PACKAGE: ${{ inputs.amd64_baseline_package }}
+        BASELINE_ARTIFACT_NAME: ${{ inputs.baseline_artifact_name }}
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
         NEXT_VERSION: ${{ inputs.next_version }}
@@ -109,9 +137,13 @@ runs:
         actual=$(printf '%s\n' \
           "version=$VERSION" \
           "next_version=$NEXT_VERSION" \
+          "baseline_version=$BASELINE_VERSION" \
           "arm64_package=$ARM64_PACKAGE" \
           "amd64_package=$AMD64_PACKAGE" \
+          "arm64_baseline_package=$ARM64_BASELINE_PACKAGE" \
+          "amd64_baseline_package=$AMD64_BASELINE_PACKAGE" \
           "artifact_name=$ARTIFACT_NAME" \
+          "baseline_artifact_name=$BASELINE_ARTIFACT_NAME" \
           "channel=$CHANNEL" \
           "snapshot=$CHANNEL-$VERSION")
         test "$actual" = "$expected"
@@ -122,6 +154,10 @@ runs:
           "arm64_package=$ARM64_PACKAGE" \
           "amd64_package=$AMD64_PACKAGE" \
           "artifact_name=$ARTIFACT_NAME" \
+          "baseline_version=$BASELINE_VERSION" \
+          "arm64_baseline_package=$ARM64_BASELINE_PACKAGE" \
+          "amd64_baseline_package=$AMD64_BASELINE_PACKAGE" \
+          "baseline_artifact_name=$BASELINE_ARTIFACT_NAME" \
           "amd64_lifecycle_package=$amd64_lifecycle_package" \
           "amd64_lifecycle_artifact_name=$amd64_lifecycle_artifact_name" \
           >> "$GITHUB_OUTPUT"
@@ -272,6 +308,7 @@ runs:
     - name: Test fresh, offline, upgrade, downgrade, remove lifecycle
       shell: bash
       env:
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
         NEXT_VERSION: ${{ inputs.next_version }}
         VERSION: ${{ inputs.version }}
         VONK_SOURCE_REVISION: ${{ github.sha }}
@@ -320,13 +357,31 @@ runs:
           "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
         scripts/verify-agent-deb --json \
           "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
+        for architecture in arm64 amd64; do
+          platform="linux-$architecture"
+          baseline_build_digest="sha256:$(
+            printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+              "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          scripts/build-agent-deb \
+            --acceptance-baseline \
+            --version "$BASELINE_VERSION" \
+            --architecture "$platform" \
+            --build-digest "$baseline_build_digest" \
+            --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+            --source-date-epoch "$epoch" \
+            --output-dir baseline
+          scripts/verify-agent-deb --json \
+            "baseline/vonk-forge-agent_${BASELINE_VERSION}_${architecture}.deb"
+        done
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
         sudo scripts/test-agent-package-native-lifecycle \
           linux-arm64 \
+          "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
           "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
-          "$(realpath "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb")" \
-          "$VERSION" "$NEXT_VERSION"
+          "$BASELINE_VERSION" "$VERSION"
 
     - name: Remove protected agent key
       if: ${{ always() }}
@@ -343,6 +398,19 @@ runs:
         path: |
           lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb
           lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256
+
+    - name: Upload immutable acceptance baseline packages
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.baseline_artifact_name }}
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 7
+        path: |
+          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb
+          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb.sha256
+          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_amd64.deb
+          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_amd64.deb.sha256
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
