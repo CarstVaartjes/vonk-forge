@@ -1,0 +1,858 @@
+use std::{
+    collections::VecDeque, fs, io::Write, path::PathBuf, process::Command as ProcessCommand,
+};
+
+use sha2::{Digest, Sha256};
+use tempfile::tempdir;
+use vonk_spark_setup::{
+    CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, SetupError,
+    SetupRequest, apply_setup_from, handoff_to_root, prepare_setup,
+};
+
+const TOKEN: &str = "A123456789012345678901234567890123456789012";
+
+#[derive(Default)]
+struct RecordingRunner {
+    commands: Vec<Command>,
+    outputs: VecDeque<CommandOutput>,
+}
+
+impl CommandRunner for RecordingRunner {
+    fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+        let default = if command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args.first().map(String::as_str) == Some("show")
+        {
+            CommandOutput::success(b"4242\n".to_vec())
+        } else {
+            CommandOutput::success_empty()
+        };
+        self.commands.push(command);
+        Ok(self.outputs.pop_front().unwrap_or(default))
+    }
+
+    fn sleep(&mut self, _duration: std::time::Duration) {}
+}
+
+struct FreshAnswers {
+    values: VecDeque<String>,
+}
+
+struct TokenOnlyPrompt {
+    secrets: usize,
+}
+
+impl Prompt for TokenOnlyPrompt {
+    fn value(&mut self, _label: &str) -> Result<String, String> {
+        panic!("configured installations must not prompt for endpoints")
+    }
+
+    fn secret(&mut self, _label: &str) -> Result<String, String> {
+        self.secrets += 1;
+        Ok(TOKEN.to_owned())
+    }
+}
+
+struct NoPrompt;
+
+impl Prompt for NoPrompt {
+    fn value(&mut self, _label: &str) -> Result<String, String> {
+        panic!("upgrades must not prompt")
+    }
+
+    fn secret(&mut self, _label: &str) -> Result<String, String> {
+        panic!("upgrades must not prompt")
+    }
+}
+
+impl Prompt for FreshAnswers {
+    fn value(&mut self, _label: &str) -> Result<String, String> {
+        self.values
+            .pop_front()
+            .ok_or_else(|| "unexpected prompt".to_owned())
+    }
+
+    fn secret(&mut self, _label: &str) -> Result<String, String> {
+        Ok(TOKEN.to_owned())
+    }
+}
+
+fn controller_ca() -> Vec<u8> {
+    rcgen::generate_simple_self_signed(vec!["controller.example.test".to_owned()])
+        .unwrap()
+        .cert
+        .pem()
+        .into_bytes()
+}
+
+fn ca_fingerprint(ca: &[u8]) -> String {
+    let mut reader = std::io::BufReader::new(std::io::Cursor::new(ca));
+    let certificate = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
+    hex::encode(Sha256::digest(certificate.as_ref()))
+}
+
+fn fresh_answers(ca: &[u8]) -> FreshAnswers {
+    FreshAnswers {
+        values: [
+            "https://enroll.example.test/".to_owned(),
+            ca_fingerprint(ca),
+        ]
+        .into(),
+    }
+}
+
+fn package(path: &std::path::Path) {
+    package_with_identity(path, "vonk-forge-agent", "1.0.0", "amd64");
+}
+
+fn package_with_identity(
+    path: &std::path::Path,
+    package_name: &str,
+    version: &str,
+    architecture: &str,
+) {
+    let root = path.parent().unwrap().join("package");
+    fs::create_dir_all(root.join("DEBIAN")).unwrap();
+    fs::write(
+        root.join("DEBIAN/control"),
+        format!(
+            "Package: {package_name}\nVersion: {version}\nArchitecture: {architecture}\nMaintainer: test <test@example.test>\nDescription: test package\n"
+        ),
+    )
+    .unwrap();
+    assert!(
+        ProcessCommand::new("/usr/bin/dpkg-deb")
+            .args(["--build", "--root-owner-group"])
+            .arg(&root)
+            .arg(path)
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+fn paths(root: &std::path::Path) -> InstallPaths {
+    InstallPaths {
+        config: root.join("etc/vonk-forge-agent/agent.toml"),
+        ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        agent: root.join("usr/lib/vonk-forge/vonk-agent"),
+        service: "vonk-forge-agent.service".to_owned(),
+        required_owner: None,
+    }
+}
+
+fn request(root: &std::path::Path) -> SetupRequest {
+    let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    request_for_package(root, package_path)
+}
+
+fn request_for_package(root: &std::path::Path, package_path: PathBuf) -> SetupRequest {
+    let executable = root.join("vonk-spark-setup");
+    fs::write(&executable, b"verified setup executable").unwrap();
+    SetupRequest::new(
+        package_path.clone(),
+        hex::encode(Sha256::digest(fs::read(package_path).unwrap())),
+        "1.0.0".to_owned(),
+        "amd64".to_owned(),
+        hex::encode(Sha256::digest(b"verified setup executable")),
+        executable,
+    )
+    .unwrap()
+}
+
+fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
+    let bootstrap = serde_json::json!({
+        "controller_endpoint": "https://controller.example.test",
+        "enrollment_endpoint": "https://enroll.example.test",
+        "ca_fingerprint": ca_fingerprint(ca),
+        "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
+    });
+    RecordingRunner {
+        commands: Vec::new(),
+        outputs: [CommandOutput::success(
+            serde_json::to_vec(&bootstrap).unwrap(),
+        )]
+        .into(),
+    }
+}
+
+fn configured_install(paths: &InstallPaths, ca: &[u8], state: &str) {
+    fs::create_dir_all(paths.config.parent().unwrap()).unwrap();
+    fs::create_dir_all(paths.agent.parent().unwrap()).unwrap();
+    fs::write(
+        &paths.config,
+        format!(
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            paths.ca.display(),
+            ca_fingerprint(ca),
+        ),
+    )
+    .unwrap();
+    fs::write(&paths.ca, ca).unwrap();
+    fs::write(&paths.agent, "installed agent").unwrap();
+    fs::write(paths.config.with_file_name("setup-state"), state).unwrap();
+}
+
+#[test]
+fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
+    let temporary = tempdir().unwrap();
+    fs::create_dir_all(paths(temporary.path()).config.parent().unwrap()).unwrap();
+    let ca = controller_ca();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+    let mut prompt = fresh_answers(&ca);
+
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &paths(temporary.path()),
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+
+    assert_eq!(prepare_runner.commands.len(), 1);
+    assert_eq!(
+        prepare_runner.commands[0].program,
+        std::path::Path::new("/usr/bin/curl")
+    );
+
+    let mut root_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut root_runner).unwrap();
+
+    assert_eq!(root_runner.commands.len(), 1);
+    let sudo = &root_runner.commands[0];
+    assert_eq!(sudo.program, std::path::Path::new("/usr/bin/sudo"));
+    assert!(sudo.args.iter().all(|argument| argument != TOKEN));
+    assert!(sudo.env.values().all(|value| value != TOKEN));
+    assert!(
+        sudo.stdin
+            .windows(TOKEN.len())
+            .any(|value| value == TOKEN.as_bytes())
+    );
+    assert!(
+        sudo.args
+            .iter()
+            .any(|argument| argument.contains("__apply"))
+    );
+    assert!(
+        sudo.args
+            .iter()
+            .all(|argument| !argument.contains("exec \"$setup\"")),
+        "the root staging shell must regain control and remove its temporary copies"
+    );
+    assert!(
+        sudo.args
+            .iter()
+            .all(|argument| !argument.contains("--privileged"))
+    );
+    assert!(
+        sudo.args
+            .iter()
+            .all(|argument| !argument.contains("/dev/tty"))
+    );
+    assert!(sudo.args.iter().all(|argument| !argument.contains("curl")));
+}
+
+#[test]
+fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let ca = controller_ca();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+    let mut prompt = fresh_answers(&ca);
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let frame = handoff_runner.commands[0].stdin.clone();
+    let mut apply_runner = RecordingRunner::default();
+
+    apply_setup_from(
+        frame.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    assert_eq!(
+        apply_runner.commands[0].program,
+        std::path::Path::new("/usr/bin/apt-get")
+    );
+    assert_eq!(apply_runner.commands[0].args, ["update"]);
+    assert!(
+        apply_runner.commands[1]
+            .args
+            .iter()
+            .any(|argument| argument == "install")
+    );
+    let pair = apply_runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    assert_eq!(pair.program, std::path::Path::new("/usr/bin/setpriv"));
+    assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+    assert!(pair.args.iter().all(|argument| argument != TOKEN));
+    assert!(apply_runner.commands.iter().all(|command| {
+        command.program != std::path::Path::new("/usr/bin/curl")
+            && command.program != std::path::Path::new("/usr/bin/sudo")
+            && command.args.iter().all(|argument| argument != TOKEN)
+            && command.env.values().all(|value| value != TOKEN)
+    }));
+    assert!(install_paths.config.is_file());
+    assert!(install_paths.ca.is_file());
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "paired-v1\n"
+    );
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == install_paths.agent
+            && command
+                .args
+                .iter()
+                .any(|argument| argument == "verify-readiness")
+    }));
+}
+
+#[test]
+fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "unpaired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+
+    assert_eq!(prompt.secrets, 1);
+    assert!(prepare_runner.commands.is_empty());
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let mut apply_runner = RecordingRunner::default();
+    apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    let pair = apply_runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "paired-v1\n"
+    );
+}
+
+#[test]
+fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let mut prompt = NoPrompt;
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+
+    assert!(prepare_runner.commands.is_empty());
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    assert!(
+        !handoff_runner.commands[0]
+            .stdin
+            .windows(TOKEN.len())
+            .any(|value| value == TOKEN.as_bytes())
+    );
+    let mut apply_runner = RecordingRunner::default();
+    apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args == ["restart", "vonk-forge-agent.service"]
+    }));
+    assert!(
+        apply_runner
+            .commands
+            .iter()
+            .all(|command| !command.args.iter().any(|argument| argument == "pair"))
+    );
+}
+
+fn fresh_prepared(
+    root: &std::path::Path,
+    install_paths: &InstallPaths,
+) -> (vonk_spark_setup::PreparedSetup, RecordingRunner) {
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let ca = controller_ca();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+    let mut prompt = fresh_answers(&ca);
+    let prepared = prepare_setup(
+        &request(root),
+        install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    (prepared, handoff_runner)
+}
+
+fn rewrite_frame(
+    valid: &[u8],
+    change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Vec<u8> {
+    const MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
+    let payload_length =
+        u32::from_be_bytes(valid[MAGIC.len()..MAGIC.len() + 4].try_into().unwrap()) as usize;
+    let mut payload: serde_json::Value =
+        serde_json::from_slice(&valid[MAGIC.len() + 4..MAGIC.len() + 4 + payload_length]).unwrap();
+    change(payload["plan"].as_object_mut().unwrap());
+    let payload = serde_json::to_vec(&payload).unwrap();
+    let mut frame = Vec::new();
+    frame.extend_from_slice(MAGIC);
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&payload);
+    frame.extend_from_slice(&Sha256::digest(&payload));
+    frame
+}
+
+#[test]
+fn privileged_frame_fails_closed_when_truncated_tampered_oversized_or_extended() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    let valid = handoff_runner.commands[0].stdin.clone();
+    let mut truncated = valid.clone();
+    truncated.pop();
+    let mut tampered = valid.clone();
+    let middle = tampered.len() / 2;
+    tampered[middle] ^= 1;
+    let mut extended = valid.clone();
+    extended.push(0);
+    let oversized = vec![0_u8; 300 * 1024];
+
+    for malformed in [truncated, tampered, extended, oversized] {
+        let mut runner = RecordingRunner::default();
+        let result = apply_setup_from(
+            malformed.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut runner,
+            CallerIdentity::sudo_root(1000),
+        );
+        assert!(result.is_err());
+        assert!(runner.commands.is_empty());
+        assert!(!install_paths.config.exists());
+    }
+}
+
+#[test]
+fn apply_frame_is_bound_to_the_authenticated_sudo_caller() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    let frame = &handoff_runner.commands[0].stdin;
+
+    for caller in [
+        CallerIdentity::unprivileged(1000),
+        CallerIdentity::direct_root(),
+        CallerIdentity::sudo_root(1001),
+    ] {
+        let mut runner = RecordingRunner::default();
+        let result = apply_setup_from(
+            frame.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut runner,
+            caller,
+        );
+        assert!(result.is_err());
+        assert!(runner.commands.is_empty());
+    }
+}
+
+#[test]
+fn public_preparation_rejects_root_before_prompting_or_network_io() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let mut runner = RecordingRunner::default();
+    let mut prompt = NoPrompt;
+
+    let result = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::direct_root(),
+    );
+
+    assert!(result.is_err());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn apply_rejects_a_plan_for_a_different_installation_phase() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    configured_install(&install_paths, &controller_ca(), "unpaired-v1\n");
+    let mut runner = RecordingRunner::default();
+    let missing_package = temporary.path().join("missing-package.deb");
+
+    let result = apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        &missing_package,
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn package_mutation_after_preparation_is_rejected_before_root_commands() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(prepared.package_path())
+        .unwrap()
+        .write_all(b"changed")
+        .unwrap();
+    let mut runner = RecordingRunner::default();
+
+    let result = apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(result.is_err());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn root_rejects_a_setup_binary_changed_after_unprivileged_verification() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    fs::write(prepared.executable_path(), b"changed setup executable").unwrap();
+    let mut runner = RecordingRunner::default();
+
+    let result = apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(result.is_err());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn package_format_identity_and_release_name_are_verified_before_prompt_or_sudo() {
+    for case in ["format", "identity", "name"] {
+        let temporary = tempdir().unwrap();
+        let install_paths = paths(temporary.path());
+        fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+        let package_path = if case == "name" {
+            temporary.path().join("release.deb")
+        } else {
+            temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb")
+        };
+        match case {
+            "format" => fs::write(&package_path, vec![b'x'; 80]).unwrap(),
+            "identity" => {
+                package_with_identity(&package_path, "vonk-forge-agent", "1.0.0", "arm64")
+            }
+            "name" => package(&package_path),
+            _ => unreachable!(),
+        }
+        let setup_request = request_for_package(temporary.path(), package_path);
+        let mut prompt = NoPrompt;
+        let mut runner = RecordingRunner::default();
+
+        let result = prepare_setup(
+            &setup_request,
+            &install_paths,
+            &mut prompt,
+            &mut runner,
+            CallerIdentity::unprivileged(1000),
+        );
+
+        assert!(result.is_err(), "{case} must be rejected");
+        assert!(runner.commands.is_empty());
+    }
+}
+
+#[test]
+fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let ca = controller_ca();
+    let bootstrap = serde_json::json!({
+        "controller_endpoint": "https://controller.example.test",
+        "enrollment_endpoint": "https://enroll.example.test",
+        "ca_fingerprint": "0".repeat(64),
+        "ca_pem": String::from_utf8(ca.clone()).unwrap(),
+    });
+    let mut runner = RecordingRunner {
+        commands: Vec::new(),
+        outputs: [CommandOutput::success(
+            serde_json::to_vec(&bootstrap).unwrap(),
+        )]
+        .into(),
+    };
+    let mut prompt = fresh_answers(&ca);
+
+    let result = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(runner.commands.len(), 1);
+    assert_eq!(
+        runner.commands[0].program,
+        std::path::Path::new("/usr/bin/curl")
+    );
+}
+
+#[test]
+fn successful_pairing_is_recorded_before_later_service_recovery_is_needed() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    let mut runner = RecordingRunner {
+        commands: Vec::new(),
+        outputs: [
+            CommandOutput::success_empty(),
+            CommandOutput::success_empty(),
+            CommandOutput::success_empty(),
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            },
+        ]
+        .into(),
+    };
+
+    let result = apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "paired-v1\n",
+        "a retry must upgrade/restart without asking for an already consumed token"
+    );
+}
+
+#[test]
+fn privileged_plan_rejects_unknown_fields_even_with_a_valid_frame_digest() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    let valid = &handoff_runner.commands[0].stdin;
+    let frame = rewrite_frame(valid, |plan| {
+        plan.insert("unexpected".to_owned(), serde_json::Value::Bool(true));
+    });
+    let mut runner = RecordingRunner::default();
+
+    let result = apply_setup_from(
+        frame.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(result.is_err());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn semantic_plan_validation_precedes_any_root_artifact_processing() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
+    let frame = rewrite_frame(&handoff_runner.commands[0].stdin, |plan| {
+        plan.insert(
+            "pairing_token".to_owned(),
+            serde_json::Value::String("invalid".to_owned()),
+        );
+    });
+    let missing_package = temporary.path().join("missing-package.deb");
+    let mut runner = RecordingRunner::default();
+
+    let result = apply_setup_from(
+        frame.as_slice(),
+        &missing_package,
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn pairing_plan_must_match_root_owned_configuration_before_package_processing() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "unpaired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let frame = rewrite_frame(&handoff_runner.commands[0].stdin, |plan| {
+        plan.insert(
+            "ca_sha256".to_owned(),
+            serde_json::Value::String("0".repeat(64)),
+        );
+    });
+    let mut runner = RecordingRunner::default();
+
+    let result = apply_setup_from(
+        frame.as_slice(),
+        &temporary.path().join("missing-package.deb"),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn system_path_operations_cannot_use_a_synthetic_caller_identity() {
+    let temporary = tempdir().unwrap();
+    let mut install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    install_paths.required_owner = Some(0);
+    let ca = controller_ca();
+    let mut prompt = fresh_answers(&ca);
+    let mut runner = runner_with_bootstrap(&ca);
+
+    let result = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(u32::MAX - 1),
+    );
+
+    assert!(matches!(result, Err(SetupError::CallerPhase)));
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting() {
+    let temporary = tempdir().unwrap();
+    let real_directory = temporary.path().join("real-configuration");
+    fs::create_dir_all(&real_directory).unwrap();
+    let unsafe_directory = temporary.path().join("etc/vonk-forge-agent");
+    fs::create_dir_all(unsafe_directory.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real_directory, &unsafe_directory).unwrap();
+    let install_paths = InstallPaths {
+        config: unsafe_directory.join("agent.toml"),
+        ca: unsafe_directory.join("controller-ca.pem"),
+        agent: temporary.path().join("usr/lib/vonk-forge/vonk-agent"),
+        service: "vonk-forge-agent.service".to_owned(),
+        required_owner: None,
+    };
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut runner = RecordingRunner::default();
+
+    let result = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(prompt.secrets, 0);
+    assert!(runner.commands.is_empty());
+}

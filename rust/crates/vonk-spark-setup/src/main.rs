@@ -2,31 +2,41 @@
 
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use vonk_spark_setup::{
-    InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt, handoff_to_root, run_setup,
-    validate_system_host,
+    CallerIdentity, InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt, apply_setup_from,
+    handoff_to_root, prepare_setup, validate_system_host,
 };
 
 #[derive(Parser)]
 #[command(
     name = "vonk-spark-setup",
     version,
-    about = "Install or upgrade Vonk Forge on a Spark"
+    about = "Install or upgrade Vonk Forge on a Spark",
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
     #[arg(long, hide = true)]
-    package: PathBuf,
+    package: Option<PathBuf>,
     #[arg(long, hide = true)]
-    package_sha256: String,
+    package_sha256: Option<String>,
     #[arg(long, hide = true)]
-    package_version: String,
+    package_version: Option<String>,
     #[arg(long, hide = true)]
-    package_architecture: String,
+    package_architecture: Option<String>,
     #[arg(long, hide = true)]
-    setup_sha256: String,
-    #[arg(long, hide = true)]
-    privileged: bool,
+    setup_sha256: Option<String>,
+    #[command(subcommand)]
+    command: Option<InternalCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum InternalCommand {
+    #[command(name = "__apply", hide = true)]
+    Apply {
+        #[arg(long, hide = true)]
+        package: PathBuf,
+    },
 }
 
 fn main() {
@@ -39,25 +49,69 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let paths = InstallPaths::system();
+    let caller = CallerIdentity::current()?;
+    if let Some(InternalCommand::Apply { package }) = cli.command {
+        let executable = std::env::current_exe()?;
+        apply_setup_from(
+            std::io::stdin().lock(),
+            &package,
+            &executable,
+            &paths,
+            &mut SystemCommandRunner,
+            caller,
+        )?;
+        return Ok(());
+    }
+    caller.ensure_public()?;
     let request = SetupRequest::new(
-        cli.package,
-        cli.package_sha256,
-        cli.package_version,
-        cli.package_architecture,
-        cli.setup_sha256,
+        cli.package.ok_or("release package is required")?,
+        cli.package_sha256
+            .ok_or("release package SHA-256 is required")?,
+        cli.package_version
+            .ok_or("release package version is required")?,
+        cli.package_architecture
+            .ok_or("release package architecture is required")?,
+        cli.setup_sha256
+            .ok_or("release setup SHA-256 is required")?,
         std::env::current_exe()?,
     )?;
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
-    let root = rustix::process::geteuid().as_raw() == 0;
-    if !cli.privileged && !root {
-        handoff_to_root(&request, &mut runner)?;
-        return Ok(());
-    }
-    if cli.privileged && !root {
-        return Err("privileged setup must run as root".into());
-    }
     let mut prompt = TtyPrompt::open()?;
-    run_setup(&request, &paths, &mut prompt, &mut runner)?;
+    let prepared = prepare_setup(&request, &paths, &mut prompt, &mut runner, caller)?;
+    handoff_to_root(&prepared, &mut runner)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_apply_is_the_only_privileged_cli_phase() {
+        let cli = Cli::try_parse_from([
+            "vonk-spark-setup",
+            "__apply",
+            "--package",
+            "/var/tmp/vonk-spark-setup/agent.deb",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Some(InternalCommand::Apply { .. })));
+        assert!(
+            Cli::try_parse_from(["vonk-spark-setup", "--privileged"]).is_err(),
+            "the former whole-installer root mode must not remain accepted"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "vonk-spark-setup",
+                "--package-sha256",
+                &"a".repeat(64),
+                "__apply",
+                "--package",
+                "/var/tmp/vonk-spark-setup/agent.deb",
+            ])
+            .is_err(),
+            "public release arguments cannot be mixed into the root apply phase"
+        );
+    }
 }

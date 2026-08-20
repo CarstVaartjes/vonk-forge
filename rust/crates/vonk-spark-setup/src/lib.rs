@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use thiserror::Error;
@@ -26,18 +26,18 @@ const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
-const FRAME_MAGIC: &[u8] = b"VONK-SPARK-CONFIG-V1\0";
+const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
+const MAX_APPLY_FRAME_BYTES: usize = 256 * 1024;
 const ROOT_HANDOFF: &str = r#"
 umask 077
 root=$(/usr/bin/mktemp -d /var/tmp/vonk-spark-setup.XXXXXX)
 trap '/bin/rm -rf -- "$root"' EXIT HUP INT TERM
 setup=$root/vonk-spark-setup
-package=$root/vonk-forge-agent_$5_$6.deb
+package=$root/vonk-forge-agent.deb
 /usr/bin/install -o root -g root -m 0700 -- "$1" "$setup"
 /usr/bin/install -o root -g root -m 0600 -- "$2" "$package"
 printf '%s  %s\n' "$3" "$setup" | /usr/bin/sha256sum --check --status
-printf '%s  %s\n' "$4" "$package" | /usr/bin/sha256sum --check --status
-"$setup" --privileged --package "$package" --package-sha256 "$4" --package-version "$5" --package-architecture "$6" --setup-sha256 "$3"
+"$setup" __apply --package "$package"
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +114,127 @@ pub struct SetupRequest {
     executable: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallerIdentity {
+    effective_uid: u32,
+    sudo_uid: Option<u32>,
+}
+
+impl CallerIdentity {
+    pub fn unprivileged(uid: u32) -> Self {
+        Self {
+            effective_uid: uid,
+            sudo_uid: None,
+        }
+    }
+
+    pub fn sudo_root(uid: u32) -> Self {
+        Self {
+            effective_uid: 0,
+            sudo_uid: Some(uid),
+        }
+    }
+
+    pub fn direct_root() -> Self {
+        Self {
+            effective_uid: 0,
+            sudo_uid: None,
+        }
+    }
+
+    pub fn current() -> Result<Self, SetupError> {
+        let effective_uid = rustix::process::geteuid().as_raw();
+        let sudo_uid = std::env::var("SUDO_UID")
+            .ok()
+            .map(|value| value.parse::<u32>())
+            .transpose()
+            .map_err(|_| SetupError::CallerPhase)?;
+        Ok(Self {
+            effective_uid,
+            sudo_uid,
+        })
+    }
+
+    pub fn ensure_public(self) -> Result<(), SetupError> {
+        self.require_unprivileged().map(|_| ())
+    }
+
+    fn require_unprivileged(self) -> Result<u32, SetupError> {
+        if self.effective_uid == 0 || self.sudo_uid.is_some() {
+            return Err(SetupError::CallerPhase);
+        }
+        Ok(self.effective_uid)
+    }
+
+    fn require_sudo_root(self, expected_uid: u32) -> Result<(), SetupError> {
+        if self.effective_uid != 0 || expected_uid == 0 || self.sudo_uid != Some(expected_uid) {
+            return Err(SetupError::CallerPhase);
+        }
+        Ok(())
+    }
+
+    fn authenticate_for(self, paths: &InstallPaths) -> Result<(), SetupError> {
+        if paths.required_owner.is_some() && self != Self::current()? {
+            return Err(SetupError::CallerPhase);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackagePlan {
+    sha256: String,
+    version: String,
+    architecture: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
+enum ApplyOperation {
+    Fresh {
+        enrollment_url: Url,
+        controller_url: Url,
+        ca_sha256: String,
+        ca_pem: Vec<u8>,
+        node_id: String,
+        pairing_token: String,
+    },
+    Pair {
+        enrollment_url: Url,
+        ca_sha256: String,
+        pairing_token: String,
+    },
+    Upgrade,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplyEnvelope {
+    schema_version: u8,
+    caller_uid: u32,
+    setup_sha256: String,
+    package: PackagePlan,
+    plan: ApplyOperation,
+}
+
+pub struct PreparedSetup {
+    executable: PathBuf,
+    setup_sha256: String,
+    staged: StagedPackage,
+    frame: Vec<u8>,
+}
+
+impl PreparedSetup {
+    pub fn package_path(&self) -> &Path {
+        self.staged.path()
+    }
+
+    pub fn executable_path(&self) -> &Path {
+        &self.executable
+    }
+}
+
 impl SetupRequest {
     pub fn new(
         package: PathBuf,
@@ -146,15 +267,9 @@ impl SetupRequest {
 }
 
 pub fn handoff_to_root(
-    request: &SetupRequest,
+    prepared: &PreparedSetup,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
-    verify_regular_file_digest(
-        &request.executable,
-        &request.expected_executable_sha256,
-        64 * 1024 * 1024,
-    )?;
-    let staged = stage_verified_package(request)?;
     let command = Command::new(
         "/usr/bin/sudo",
         [
@@ -162,14 +277,12 @@ pub fn handoff_to_root(
             "-ceu".to_owned(),
             ROOT_HANDOFF.to_owned(),
             "vonk-spark-root-handoff".to_owned(),
-            request.executable.display().to_string(),
-            staged.path().display().to_string(),
-            request.expected_executable_sha256.clone(),
-            request.expected_sha256.clone(),
-            request.expected_version.clone(),
-            request.expected_architecture.clone(),
+            prepared.executable.display().to_string(),
+            prepared.staged.path().display().to_string(),
+            prepared.setup_sha256.clone(),
         ],
-    );
+    )
+    .with_stdin(prepared.frame.clone());
     run_checked(runner, command).map(|_| ())
 }
 
@@ -177,7 +290,6 @@ pub fn handoff_to_root(
 pub struct InstallPaths {
     pub config: PathBuf,
     pub ca: PathBuf,
-    pub credentials: PathBuf,
     pub agent: PathBuf,
     pub service: String,
     pub required_owner: Option<u32>,
@@ -188,7 +300,6 @@ impl InstallPaths {
         Self {
             config: PathBuf::from(CONFIG_PATH),
             ca: PathBuf::from(CA_PATH),
-            credentials: PathBuf::from(DATA_DIR).join("credentials"),
             agent: PathBuf::from(AGENT_PATH),
             service: SERVICE.to_owned(),
             required_owner: Some(0),
@@ -222,11 +333,13 @@ pub enum SetupError {
         "enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256"
     )]
     EnrollmentBootstrap,
-    #[error("privileged setup command failed: {0}")]
+    #[error("setup command failed: {0}")]
     Command(String),
     #[error("privileged configuration input is invalid")]
     PrivilegedInput,
-    #[error("privileged configuration write failed")]
+    #[error("setup was invoked from the wrong privilege phase")]
+    CallerPhase,
+    #[error("setup I/O failed")]
     PrivilegedWrite(#[source] io::Error),
 }
 
@@ -284,102 +397,328 @@ fn validate_host_description(
     Ok(())
 }
 
-pub fn run_setup(
+pub fn prepare_setup(
     request: &SetupRequest,
     paths: &InstallPaths,
     prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
-) -> Result<(), SetupError> {
-    let staged = stage_verified_package(request)?;
-    match install_state(paths)? {
-        InstallState::Existing => upgrade_existing(paths, runner, &staged),
-        InstallState::ConfiguredUnpaired => resume_pairing(paths, prompt, runner, &staged),
-        InstallState::Fresh => fresh_setup(paths, prompt, runner, &staged),
-    }
-}
-
-fn fresh_setup(
-    paths: &InstallPaths,
-    prompt: &mut dyn Prompt,
-    runner: &mut dyn CommandRunner,
-    staged: &StagedPackage,
-) -> Result<(), SetupError> {
-    let enrollment = required_origin(prompt, "Enrollment URL")?;
-    let ca_sha256 = required_sha256(prompt, "Controller CA SHA-256")?;
-    let pairing_token = prompt
-        .secret("Pairing token")
-        .map_err(|_| SetupError::Prompt)?;
-    if !valid_token(&pairing_token) {
-        return Err(SetupError::UnsafeInput("pairing token"));
-    }
-
-    let (controller, ca) = discover_enrollment(&enrollment, &ca_sha256, runner)?;
-
-    install_package(runner, staged)?;
-
-    let config = GeneratedConfig {
-        enrollment_url: enrollment,
-        controller_url: controller,
-        ca_path: paths.ca.clone(),
-        ca_sha256,
-        node_id: format!("spk_{}", Uuid::new_v4().simple()),
-    };
-    let write = PrivilegedWrite {
-        config: config.to_toml(),
-        ca,
-    };
-    write_privileged_as(
-        write.encode()?.as_slice(),
-        paths,
-        paths
-            .required_owner
-            .unwrap_or_else(|| rustix::process::geteuid().as_raw()),
+    caller: CallerIdentity,
+) -> Result<PreparedSetup, SetupError> {
+    caller.authenticate_for(paths)?;
+    let caller_uid = caller.require_unprivileged()?;
+    verify_regular_file_digest(
+        &request.executable,
+        &request.expected_executable_sha256,
+        64 * 1024 * 1024,
     )?;
-
-    pair_and_start(
-        paths,
-        prompt,
-        runner,
-        &config.enrollment_url,
-        &config.ca_sha256,
-        Some(pairing_token),
-    )
+    let staged = stage_verified_package(request)?;
+    let plan = match install_state(paths)? {
+        InstallState::Fresh => {
+            let enrollment_url = required_origin(prompt, "Enrollment URL")?;
+            let ca_sha256 = required_sha256(prompt, "Controller CA SHA-256")?;
+            let pairing_token = prompt
+                .secret("Pairing token")
+                .map_err(|_| SetupError::Prompt)?;
+            if !valid_token(&pairing_token) {
+                return Err(SetupError::UnsafeInput("pairing token"));
+            }
+            let (controller_url, ca_pem) =
+                discover_enrollment(&enrollment_url, &ca_sha256, runner)?;
+            ApplyOperation::Fresh {
+                enrollment_url,
+                controller_url,
+                ca_sha256,
+                ca_pem,
+                node_id: format!("spk_{}", Uuid::new_v4().simple()),
+                pairing_token,
+            }
+        }
+        InstallState::ConfiguredUnpaired => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            let pairing_token = prompt
+                .secret("Pairing token")
+                .map_err(|_| SetupError::Prompt)?;
+            if !valid_token(&pairing_token) {
+                return Err(SetupError::UnsafeInput("pairing token"));
+            }
+            ApplyOperation::Pair {
+                enrollment_url: config.enrollment_url,
+                ca_sha256: config.ca_sha256,
+                pairing_token,
+            }
+        }
+        InstallState::Existing => ApplyOperation::Upgrade,
+    };
+    let envelope = ApplyEnvelope {
+        schema_version: 1,
+        caller_uid,
+        setup_sha256: request.expected_executable_sha256.clone(),
+        package: PackagePlan {
+            sha256: request.expected_sha256.clone(),
+            version: request.expected_version.clone(),
+            architecture: request.expected_architecture.clone(),
+        },
+        plan,
+    };
+    Ok(PreparedSetup {
+        executable: request.executable.clone(),
+        setup_sha256: request.expected_executable_sha256.clone(),
+        staged,
+        frame: encode_apply_frame(&envelope)?,
+    })
 }
 
-fn resume_pairing(
+fn encode_apply_frame(envelope: &ApplyEnvelope) -> Result<Vec<u8>, SetupError> {
+    let payload = serde_json::to_vec(envelope).map_err(|_| SetupError::PrivilegedInput)?;
+    if payload.is_empty() || payload.len() > MAX_APPLY_FRAME_BYTES {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let mut frame = Vec::with_capacity(APPLY_FRAME_MAGIC.len() + 4 + payload.len() + 32);
+    frame.extend_from_slice(APPLY_FRAME_MAGIC);
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&payload);
+    frame.extend_from_slice(&Sha256::digest(&payload));
+    Ok(frame)
+}
+
+fn decode_apply_frame(input: impl Read) -> Result<ApplyEnvelope, SetupError> {
+    let maximum = APPLY_FRAME_MAGIC.len() + 4 + MAX_APPLY_FRAME_BYTES + 32;
+    let mut raw = Vec::new();
+    input
+        .take((maximum + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(SetupError::PrivilegedWrite)?;
+    if raw.len() < APPLY_FRAME_MAGIC.len() + 4 + 32
+        || raw.len() > maximum
+        || !raw.starts_with(APPLY_FRAME_MAGIC)
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let length_offset = APPLY_FRAME_MAGIC.len();
+    let payload_offset = length_offset + 4;
+    let payload_length = u32::from_be_bytes(
+        raw[length_offset..payload_offset]
+            .try_into()
+            .map_err(|_| SetupError::PrivilegedInput)?,
+    ) as usize;
+    if payload_length == 0 || payload_length > MAX_APPLY_FRAME_BYTES {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let digest_offset = payload_offset
+        .checked_add(payload_length)
+        .ok_or(SetupError::PrivilegedInput)?;
+    if digest_offset + 32 != raw.len() {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let payload = &raw[payload_offset..digest_offset];
+    if raw[digest_offset..] != Sha256::digest(payload)[..] {
+        return Err(SetupError::PrivilegedInput);
+    }
+    serde_json::from_slice(payload).map_err(|_| SetupError::PrivilegedInput)
+}
+
+pub fn apply_setup_from(
+    input: impl Read,
+    package_path: &Path,
+    executable_path: &Path,
     paths: &InstallPaths,
-    prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
-    staged: &StagedPackage,
+    caller: CallerIdentity,
 ) -> Result<(), SetupError> {
-    let config = paired_configuration(&paths.config, paths)?;
-    let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-    verify_ca(&ca, &config.ca_sha256)?;
-    install_package(runner, staged)?;
-    pair_and_start(
-        paths,
-        prompt,
-        runner,
-        &config.enrollment_url,
-        &config.ca_sha256,
-        None,
-    )
+    caller.authenticate_for(paths)?;
+    let envelope = decode_apply_frame(input)?;
+    caller.require_sudo_root(envelope.caller_uid)?;
+    validate_apply_envelope(&envelope)?;
+    let state = install_state(paths)?;
+    if !matches!(
+        (&envelope.plan, state),
+        (ApplyOperation::Fresh { .. }, InstallState::Fresh)
+            | (
+                ApplyOperation::Pair { .. },
+                InstallState::ConfiguredUnpaired
+            )
+            | (ApplyOperation::Upgrade, InstallState::Existing)
+    ) {
+        return Err(SetupError::PrivilegedInput);
+    }
+    validate_plan_against_installation(&envelope.plan, paths)?;
+    verify_regular_file_digest(executable_path, &envelope.setup_sha256, 64 * 1024 * 1024)
+        .map_err(|_| SetupError::PrivilegedInput)?;
+    let staged = stage_verified_package_from(
+        package_path,
+        &envelope.package.sha256,
+        &envelope.package.version,
+        &envelope.package.architecture,
+        false,
+    )?;
+    let owner = paths
+        .required_owner
+        .unwrap_or_else(|| rustix::process::geteuid().as_raw());
+    match envelope.plan {
+        ApplyOperation::Fresh {
+            enrollment_url,
+            controller_url,
+            ca_sha256,
+            ca_pem,
+            node_id,
+            pairing_token,
+        } => {
+            install_package(runner, &staged)?;
+            let config = GeneratedConfig {
+                enrollment_url,
+                controller_url,
+                ca_path: paths.ca.clone(),
+                ca_sha256,
+                node_id,
+            };
+            install_configuration(paths, &config, &ca_pem, owner)?;
+            write_setup_state(paths, b"unpaired-v1\n", owner)?;
+            pair_agent(
+                paths,
+                runner,
+                &config.enrollment_url,
+                &config.ca_sha256,
+                pairing_token,
+            )?;
+            write_setup_state(paths, b"paired-v1\n", owner)?;
+            start_and_verify(paths, runner)
+        }
+        ApplyOperation::Pair {
+            enrollment_url,
+            ca_sha256,
+            pairing_token,
+        } => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
+                return Err(SetupError::PrivilegedInput);
+            }
+            install_package(runner, &staged)?;
+            pair_agent(
+                paths,
+                runner,
+                &config.enrollment_url,
+                &config.ca_sha256,
+                pairing_token,
+            )?;
+            write_setup_state(paths, b"paired-v1\n", owner)?;
+            start_and_verify(paths, runner)
+        }
+        ApplyOperation::Upgrade => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            upgrade_existing(paths, runner, &staged)
+        }
+    }
 }
 
-fn pair_and_start(
+fn validate_plan_against_installation(
+    plan: &ApplyOperation,
     paths: &InstallPaths,
-    prompt: &mut dyn Prompt,
+) -> Result<(), SetupError> {
+    match plan {
+        ApplyOperation::Fresh { .. } => Ok(()),
+        ApplyOperation::Pair {
+            enrollment_url,
+            ca_sha256,
+            ..
+        } => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            if &config.enrollment_url != enrollment_url || &config.ca_sha256 != ca_sha256 {
+                return Err(SetupError::PrivilegedInput);
+            }
+            Ok(())
+        }
+        ApplyOperation::Upgrade => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)
+        }
+    }
+}
+
+fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
+    if envelope.schema_version != 1
+        || !valid_sha256(&envelope.setup_sha256)
+        || !valid_sha256(&envelope.package.sha256)
+        || !valid_package_version(&envelope.package.version)
+        || !matches!(envelope.package.architecture.as_str(), "amd64" | "arm64")
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    match &envelope.plan {
+        ApplyOperation::Fresh {
+            enrollment_url,
+            controller_url,
+            ca_sha256,
+            ca_pem,
+            node_id,
+            pairing_token,
+        } => {
+            if !valid_origin(enrollment_url)
+                || !valid_origin(controller_url)
+                || !valid_sha256(ca_sha256)
+                || !valid_node_id(node_id)
+                || !valid_token(pairing_token)
+            {
+                return Err(SetupError::PrivilegedInput);
+            }
+            verify_ca(ca_pem, ca_sha256).map_err(|_| SetupError::PrivilegedInput)
+        }
+        ApplyOperation::Pair {
+            enrollment_url,
+            ca_sha256,
+            pairing_token,
+        } => {
+            if !valid_origin(enrollment_url)
+                || !valid_sha256(ca_sha256)
+                || !valid_token(pairing_token)
+            {
+                return Err(SetupError::PrivilegedInput);
+            }
+            Ok(())
+        }
+        ApplyOperation::Upgrade => Ok(()),
+    }
+}
+
+fn install_configuration(
+    paths: &InstallPaths,
+    config: &GeneratedConfig,
+    ca: &[u8],
+    owner: u32,
+) -> Result<(), SetupError> {
+    let rendered = config.to_toml();
+    let parsed: WrittenConfig =
+        toml::from_str(&rendered).map_err(|_| SetupError::PrivilegedInput)?;
+    if !valid_written_config(&parsed, paths) {
+        return Err(SetupError::PrivilegedInput);
+    }
+    atomic_root_write(&paths.ca, ca, owner, 0o644)?;
+    atomic_root_write(&paths.config, rendered.as_bytes(), owner, 0o644)
+}
+
+fn setup_state_path(paths: &InstallPaths) -> PathBuf {
+    paths.config.with_file_name("setup-state")
+}
+
+fn write_setup_state(paths: &InstallPaths, state: &[u8], owner: u32) -> Result<(), SetupError> {
+    atomic_root_write(&setup_state_path(paths), state, owner, 0o644)
+}
+
+fn pair_agent(
+    paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
     enrollment_url: &Url,
     ca_sha256: &str,
-    pairing_token: Option<String>,
+    pairing_token: String,
 ) -> Result<(), SetupError> {
-    let pairing_token = match pairing_token {
-        Some(token) => token,
-        None => prompt
-            .secret("Pairing token")
-            .map_err(|_| SetupError::Prompt)?,
-    };
     if !valid_token(&pairing_token) {
         return Err(SetupError::UnsafeInput("pairing token"));
     }
@@ -405,6 +744,13 @@ fn pair_and_start(
     )
     .with_stdin(format!("{pairing_token}\n").into_bytes());
     run_checked(runner, pair)?;
+    Ok(())
+}
+
+fn start_and_verify(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+) -> Result<(), SetupError> {
     run_checked(
         runner,
         Command::new("/usr/bin/systemctl", ["enable", "--now", &paths.service]),
@@ -575,20 +921,42 @@ enum InstallState {
 }
 
 fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
+    safe_existing_parent(&paths.config, paths.required_owner)?;
+    safe_existing_parent(&paths.agent, paths.required_owner)?;
     let config = safe_existing_file(&paths.config, paths.required_owner)?;
+    let ca = safe_existing_file(&paths.ca, paths.required_owner)?;
     let agent = safe_existing_file(&paths.agent, paths.required_owner)?;
-    match (config, agent) {
-        (false, false) => Ok(InstallState::Fresh),
-        (false, true) => Ok(InstallState::Fresh),
-        (true, true) => {
+    let state_path = setup_state_path(paths);
+    let state = safe_existing_file(&state_path, paths.required_owner)?;
+    match (config, ca, agent, state) {
+        (false, false, _, false) => Ok(InstallState::Fresh),
+        (true, true, true, true) => {
             paired_configuration(&paths.config, paths)?;
-            if active_identity_present(paths)? {
-                Ok(InstallState::Existing)
-            } else {
-                Ok(InstallState::ConfiguredUnpaired)
+            let raw = fs::read(&state_path).map_err(|_| SetupError::ExistingInstall)?;
+            match raw.as_slice() {
+                b"unpaired-v1\n" => Ok(InstallState::ConfiguredUnpaired),
+                b"paired-v1\n" => Ok(InstallState::Existing),
+                _ => Err(SetupError::ExistingInstall),
             }
         }
         _ => Err(SetupError::ExistingInstall),
+    }
+}
+
+fn safe_existing_parent(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
+    let parent = path.parent().ok_or(SetupError::ExistingInstall)?;
+    match fs::symlink_metadata(parent) {
+        Ok(metadata)
+            if metadata.file_type().is_dir()
+                && !metadata.file_type().is_symlink()
+                && required_owner.is_none_or(|owner| metadata.uid() == owner)
+                && metadata.permissions().mode() & 0o022 == 0 =>
+        {
+            Ok(true)
+        }
+        Ok(_) => Err(SetupError::ExistingInstall),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(SetupError::ExistingInstall),
     }
 }
 
@@ -602,71 +970,6 @@ fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<WrittenConf
         return Err(SetupError::ExistingInstall);
     }
     Ok(config)
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ActiveGeneration {
-    generation: u64,
-}
-
-fn active_identity_present(paths: &InstallPaths) -> Result<bool, SetupError> {
-    if !safe_existing_directory(&paths.credentials, paths.required_owner)? {
-        return Ok(false);
-    }
-    let pointer_path = paths.credentials.join("active.json");
-    let root = if safe_existing_file(&pointer_path, paths.required_owner)? {
-        let raw = fs::read(&pointer_path).map_err(|_| SetupError::ExistingInstall)?;
-        if raw.len() > 4096 {
-            return Err(SetupError::ExistingInstall);
-        }
-        let pointer: ActiveGeneration =
-            serde_json::from_slice(&raw).map_err(|_| SetupError::ExistingInstall)?;
-        if pointer.generation == 0 {
-            return Err(SetupError::ExistingInstall);
-        }
-        let generation = paths
-            .credentials
-            .join(format!("generation-{:020}", pointer.generation));
-        if !safe_existing_directory(&generation, paths.required_owner)? {
-            return Err(SetupError::ExistingInstall);
-        }
-        generation
-    } else {
-        paths.credentials.clone()
-    };
-    let present = [
-        "private-key.pem",
-        "certificate.pem",
-        "chain.pem",
-        "identity.json",
-    ]
-    .into_iter()
-    .map(|name| safe_existing_file(&root.join(name), paths.required_owner))
-    .collect::<Result<Vec<_>, _>>()?;
-    if present.iter().all(|exists| *exists) {
-        Ok(true)
-    } else if present.iter().all(|exists| !*exists) && root == paths.credentials {
-        Ok(false)
-    } else {
-        Err(SetupError::ExistingInstall)
-    }
-}
-
-fn safe_existing_directory(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata)
-            if metadata.file_type().is_dir()
-                && !metadata.file_type().is_symlink()
-                && required_owner.is_none_or(|owner| metadata.uid() == owner)
-                && metadata.permissions().mode() & 0o022 == 0 =>
-        {
-            Ok(true)
-        }
-        Ok(_) => Err(SetupError::ExistingInstall),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(_) => Err(SetupError::ExistingInstall),
-    }
 }
 
 fn safe_existing_file(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
@@ -697,9 +1000,26 @@ impl StagedPackage {
 }
 
 fn stage_verified_package(request: &SetupRequest) -> Result<StagedPackage, SetupError> {
-    let source = &request.package;
-    let expected = &request.expected_sha256;
-    if !source.is_absolute() || !valid_sha256(expected) || !valid_package_name(source) {
+    stage_verified_package_from(
+        &request.package,
+        &request.expected_sha256,
+        &request.expected_version,
+        &request.expected_architecture,
+        true,
+    )
+}
+
+fn stage_verified_package_from(
+    source: &Path,
+    expected: &str,
+    expected_version: &str,
+    expected_architecture: &str,
+    require_release_name: bool,
+) -> Result<StagedPackage, SetupError> {
+    if !source.is_absolute()
+        || !valid_sha256(expected)
+        || (require_release_name && !valid_package_name(source))
+    {
         return Err(SetupError::UnsafePackage);
     }
     let before = fs::symlink_metadata(source).map_err(|_| SetupError::UnsafePackage)?;
@@ -757,14 +1077,10 @@ fn stage_verified_package(request: &SetupRequest) -> Result<StagedPackage, Setup
     if !same_file(&open, &after) || total != before.len() {
         return Err(SetupError::UnsafePackage);
     }
-    if hex::encode(digest.finalize()) != *expected {
+    if hex::encode(digest.finalize()) != expected {
         return Err(SetupError::PackageDigest);
     }
-    verify_debian_identity(
-        &path,
-        &request.expected_version,
-        &request.expected_architecture,
-    )?;
+    verify_debian_identity(&path, expected_version, expected_architecture)?;
     Ok(StagedPackage {
         _directory: directory,
         path,
@@ -1023,66 +1339,6 @@ impl GeneratedConfig {
     }
 }
 
-struct PrivilegedWrite {
-    config: String,
-    ca: Vec<u8>,
-}
-
-impl PrivilegedWrite {
-    fn encode(&self) -> Result<Vec<u8>, SetupError> {
-        let config = self.config.as_bytes();
-        if config.len() > 64 * 1024 || self.ca.len() > MAX_CA_BYTES {
-            return Err(SetupError::PrivilegedInput);
-        }
-        let mut frame = Vec::with_capacity(FRAME_MAGIC.len() + 8 + config.len() + self.ca.len());
-        frame.extend_from_slice(FRAME_MAGIC);
-        frame.extend_from_slice(&(config.len() as u32).to_be_bytes());
-        frame.extend_from_slice(config);
-        frame.extend_from_slice(&(self.ca.len() as u32).to_be_bytes());
-        frame.extend_from_slice(&self.ca);
-        Ok(frame)
-    }
-
-    fn decode(input: impl Read) -> Result<Self, SetupError> {
-        let mut raw = Vec::new();
-        input
-            .take((FRAME_MAGIC.len() + 8 + 64 * 1024 + MAX_CA_BYTES + 1) as u64)
-            .read_to_end(&mut raw)
-            .map_err(SetupError::PrivilegedWrite)?;
-        if raw.len() < FRAME_MAGIC.len() + 8 || !raw.starts_with(FRAME_MAGIC) {
-            return Err(SetupError::PrivilegedInput);
-        }
-        let mut cursor = FRAME_MAGIC.len();
-        let config = take_frame(&raw, &mut cursor, 64 * 1024)?;
-        let ca = take_frame(&raw, &mut cursor, MAX_CA_BYTES)?;
-        if cursor != raw.len() {
-            return Err(SetupError::PrivilegedInput);
-        }
-        Ok(Self {
-            config: String::from_utf8(config).map_err(|_| SetupError::PrivilegedInput)?,
-            ca,
-        })
-    }
-}
-
-fn take_frame(raw: &[u8], cursor: &mut usize, maximum: usize) -> Result<Vec<u8>, SetupError> {
-    let length = raw
-        .get(*cursor..*cursor + 4)
-        .ok_or(SetupError::PrivilegedInput)?;
-    *cursor += 4;
-    let length =
-        u32::from_be_bytes(length.try_into().map_err(|_| SetupError::PrivilegedInput)?) as usize;
-    if length > maximum {
-        return Err(SetupError::PrivilegedInput);
-    }
-    let value = raw
-        .get(*cursor..*cursor + length)
-        .ok_or(SetupError::PrivilegedInput)?
-        .to_vec();
-    *cursor += length;
-    Ok(value)
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WrittenConfig {
@@ -1094,35 +1350,6 @@ struct WrittenConfig {
     node_id: String,
     poll_min_seconds: u64,
     poll_max_seconds: u64,
-}
-
-pub fn privileged_write_from(input: impl Read, paths: &InstallPaths) -> Result<(), SetupError> {
-    if rustix::process::geteuid().as_raw() != 0 {
-        return Err(SetupError::PrivilegedInput);
-    }
-    write_privileged_as(input, paths, 0)
-}
-
-fn write_privileged_as(
-    input: impl Read,
-    paths: &InstallPaths,
-    required_owner: u32,
-) -> Result<(), SetupError> {
-    let write = PrivilegedWrite::decode(input)?;
-    let config: WrittenConfig =
-        toml::from_str(&write.config).map_err(|_| SetupError::PrivilegedInput)?;
-    if !valid_written_config(&config, paths) {
-        return Err(SetupError::PrivilegedInput);
-    }
-    verify_ca(&write.ca, &config.ca_sha256)?;
-    atomic_root_write(&paths.ca, &write.ca, required_owner, 0o644)?;
-    atomic_root_write(
-        &paths.config,
-        write.config.as_bytes(),
-        required_owner,
-        0o644,
-    )?;
-    Ok(())
 }
 
 fn valid_written_config(config: &WrittenConfig, paths: &InstallPaths) -> bool {
@@ -1265,90 +1492,6 @@ impl Prompt for TtyPrompt {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn valid_write(paths: &InstallPaths) -> Vec<u8> {
-        let certificate =
-            rcgen::generate_simple_self_signed(vec!["controller.example.test".to_owned()])
-                .unwrap()
-                .cert
-                .pem()
-                .into_bytes();
-        let mut reader = BufReader::new(certificate.as_slice());
-        let der = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
-        PrivilegedWrite {
-            config: format!(
-                "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
-                paths.ca.display(),
-                hex::encode(Sha256::digest(der.as_ref())),
-            ),
-            ca: certificate,
-        }
-        .encode()
-        .unwrap()
-    }
-
-    #[test]
-    fn failed_ca_write_never_replaces_the_configuration() {
-        let temporary = tempfile::tempdir().unwrap();
-        let config = temporary.path().join("etc/vonk-forge-agent/agent.toml");
-        let ca = temporary.path().join("unsafe-ca/controller-ca.pem");
-        fs::create_dir_all(config.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(temporary.path().join("outside"), ca.parent().unwrap()).unwrap();
-        let paths = InstallPaths {
-            config: config.clone(),
-            ca: ca.clone(),
-            credentials: temporary.path().join("credentials"),
-            agent: temporary.path().join("agent"),
-            service: SERVICE.to_owned(),
-            required_owner: None,
-        };
-        let frame = valid_write(&paths);
-
-        let result = write_privileged_as(
-            frame.as_slice(),
-            &paths,
-            rustix::process::geteuid().as_raw(),
-        );
-
-        assert!(result.is_err());
-        assert!(
-            !config.exists(),
-            "CA failure must not leave a new configuration behind"
-        );
-    }
-
-    #[test]
-    fn privileged_writer_keeps_agent_configuration_and_ca_root_owned_but_readable() {
-        let temporary = tempfile::tempdir().unwrap();
-        let paths = InstallPaths {
-            config: temporary.path().join("etc/vonk-forge-agent/agent.toml"),
-            ca: temporary
-                .path()
-                .join("etc/vonk-forge-agent/controller-ca.pem"),
-            credentials: temporary.path().join("credentials"),
-            agent: temporary.path().join("agent"),
-            service: SERVICE.to_owned(),
-            required_owner: None,
-        };
-        fs::create_dir_all(paths.config.parent().unwrap()).unwrap();
-        let frame = valid_write(&paths);
-
-        write_privileged_as(
-            frame.as_slice(),
-            &paths,
-            rustix::process::geteuid().as_raw(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            fs::metadata(&paths.config).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-        assert_eq!(
-            fs::metadata(&paths.ca).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-    }
 
     #[test]
     fn host_validation_rejects_non_debian_and_missing_systemd_before_setup() {
