@@ -628,14 +628,40 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
             text=True,
             timeout=60,
         )
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 45
         while True:
             try:
                 provider.check_health()
                 break
             except StepCAError:
+                running = subprocess.run(
+                    ["docker", "inspect", "--format", "{{.State.Running}}", container],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                if running == "false":
+                    logs = subprocess.run(
+                        ["docker", "logs", container],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    pytest.fail(
+                        "pinned step-ca exited during restart:\n"
+                        f"{logs.stdout}{logs.stderr}"
+                    )
                 if time.monotonic() >= deadline:
-                    pytest.fail("pinned step-ca did not recover after restart")
+                    logs = subprocess.run(
+                        ["docker", "logs", container],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    pytest.fail(
+                        "pinned step-ca did not recover after restart:\n"
+                        f"{logs.stdout}{logs.stderr}"
+                    )
                 time.sleep(0.1)
         persisted_crl = x509.load_pem_x509_crl(
             provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))

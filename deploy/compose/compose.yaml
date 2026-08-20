@@ -39,6 +39,7 @@ x-worker-environment: &worker-environment
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db}
+    entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
     restart: unless-stopped
     logging: *bounded-logging
     environment:
@@ -50,6 +51,7 @@ services:
     # Mount the parent so future pg_upgrade operations can work across versions.
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./postgres/entrypoint.sh:/usr/local/bin/vonk-postgres-entrypoint:ro
       - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro
     networks: [data, litellm-data]
     healthcheck:

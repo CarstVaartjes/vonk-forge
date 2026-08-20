@@ -52,6 +52,7 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/images.lock.json",
         "deploy/compose/Caddyfile",
         "deploy/compose/caddy/entrypoint.sh",
+        "deploy/compose/postgres/entrypoint.sh",
         "deploy/compose/postgres/init-databases.sh",
         "deploy/compose/grafana/dashboards/fleet.json",
         "deploy/compose/grafana/dashboards/jobs.json",

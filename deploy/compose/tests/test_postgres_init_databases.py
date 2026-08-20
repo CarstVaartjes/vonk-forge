@@ -4,12 +4,14 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy/compose/postgres/init-databases.sh"
+ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
 POSTGRES_IMAGE = (
     "postgres:18.3@sha256:"
     "7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"
@@ -100,13 +102,15 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
     password_file = tmp_path / "litellm-password"
     password_file.write_text("b" * 64 + "\n", encoding="ascii")
     password_file.chmod(0o600)
+    container = f"vonk-postgres-test-{uuid.uuid4().hex}"
     try:
-        container = subprocess.check_output(
+        subprocess.run(
             [
                 "docker",
                 "run",
-                "--rm",
                 "-d",
+                "--name",
+                container,
                 "-e",
                 "POSTGRES_DB=control",
                 "-e",
@@ -117,11 +121,18 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 f"{SCRIPT}:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro",
                 "-v",
                 f"{password_file}:/run/secrets/litellm-database-password:ro",
+                "-v",
+                f"{ENTRYPOINT}:/usr/local/bin/vonk-postgres-entrypoint:ro",
+                "--entrypoint",
+                "/usr/local/bin/vonk-postgres-entrypoint",
                 POSTGRES_IMAGE,
+                "postgres",
             ],
+            check=True,
+            capture_output=True,
             text=True,
             timeout=60,
-        ).strip()
+        )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
     try:
@@ -155,7 +166,9 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 text=True,
                 timeout=10,
             )
-            raise AssertionError(f"PostgreSQL did not become ready:\n{logs.stderr}")
+            raise AssertionError(
+                f"PostgreSQL did not become ready:\n{logs.stdout}{logs.stderr}"
+            )
         rows = subprocess.check_output(
             [
                 "docker",
@@ -200,7 +213,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
         assert roles == ["control", "litellm"]
     finally:
         subprocess.run(
-            ["docker", "stop", container],
+            ["docker", "rm", "--force", container],
             check=False,
             capture_output=True,
             timeout=30,

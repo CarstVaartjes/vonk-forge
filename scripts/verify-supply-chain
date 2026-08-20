@@ -320,6 +320,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         ".dockerignore", "control/web/package-lock.json", "control/Dockerfile",
         "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
         "deploy/compose/Caddyfile", "deploy/compose/caddy/entrypoint.sh",
+        "deploy/compose/postgres/entrypoint.sh",
         "deploy/compose/postgres/init-databases.sh",
         "deploy/compose/grafana/dashboards/fleet.json",
         "deploy/compose/grafana/dashboards/jobs.json",

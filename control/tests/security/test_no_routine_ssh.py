@@ -143,7 +143,7 @@ def test_built_worker_image_contains_no_direct_transport_executable() -> None:
             "-eu",
             "-c",
             (
-                "command -v git; "
+                "! command -v git; "
                 "for executable in ssh scp vonkctl; do "
                 "! command -v \"$executable\"; done; "
                 "test ! -e /repository; test ! -e /vonk-cluster-profiles; "

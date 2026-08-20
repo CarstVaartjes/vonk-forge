@@ -31,6 +31,12 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
     postgres = canonical["services"]["postgres"]
 
     assert "litellm-database-password" in postgres["secrets"]
+    assert postgres["entrypoint"] == ["/usr/local/bin/vonk-postgres-entrypoint"]
+    assert (
+        "./postgres/entrypoint.sh:"
+        "/usr/local/bin/vonk-postgres-entrypoint:ro"
+        in postgres["volumes"]
+    )
     assert (
         "./postgres/init-databases.sh:"
         "/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro"
