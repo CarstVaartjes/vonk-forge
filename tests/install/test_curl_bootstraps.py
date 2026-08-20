@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -17,7 +16,14 @@ def _fake_command(directory: Path, name: str, body: str) -> None:
     path.chmod(0o755)
 
 
-def _run_bootstrap(tmp_path: Path, kind: str, *, system: str, machine: str):
+def _run_bootstrap(
+    tmp_path: Path,
+    kind: str,
+    *,
+    system: str,
+    machine: str,
+    arguments: tuple[str, ...] = (),
+):
     commands = tmp_path / "commands"
     commands.mkdir()
     artifact = tmp_path / "published-installer"
@@ -67,7 +73,7 @@ def _run_bootstrap(tmp_path: Path, kind: str, *, system: str, machine: str):
         "VONK_TEST_FORBIDDEN": str(forbidden),
     }
     result = subprocess.run(
-        ["sh", str(rendered), "--output", "chosen"],
+        ["sh", str(rendered), *arguments],
         cwd=tmp_path,
         env=environment,
         text=True,
@@ -78,22 +84,32 @@ def _run_bootstrap(tmp_path: Path, kind: str, *, system: str, machine: str):
 
 
 @pytest.mark.parametrize(
-    ("kind", "system", "machine"),
+    ("kind", "system", "machine", "arguments", "expected_arguments"),
     (
-        ("nas", "Linux", "x86_64"),
-        ("nas", "Darwin", "arm64"),
-        ("spark", "Linux", "aarch64"),
+        ("nas", "Linux", "x86_64", ("--output", "chosen"), "--output chosen"),
+        ("nas", "Darwin", "arm64", ("--output", "chosen"), "--output chosen"),
+        ("spark", "Linux", "x86_64", (), ""),
+        ("spark", "Linux", "aarch64", (), ""),
     ),
 )
 def test_curl_bootstrap_verifies_and_runs_the_native_installer(
-    tmp_path: Path, kind: str, system: str, machine: str
+    tmp_path: Path,
+    kind: str,
+    system: str,
+    machine: str,
+    arguments: tuple[str, ...],
+    expected_arguments: str,
 ) -> None:
     result, receipt, forbidden = _run_bootstrap(
-        tmp_path, kind, system=system, machine=machine
+        tmp_path,
+        kind,
+        system=system,
+        machine=machine,
+        arguments=arguments,
     )
 
     assert result.returncode == 0, result.stderr
-    assert receipt.read_text().rstrip().endswith("|--output chosen")
+    assert receipt.read_text().rstrip().endswith(f"|{expected_arguments}")
     assert not forbidden.exists()
 
 
