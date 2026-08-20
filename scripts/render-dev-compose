@@ -19,6 +19,14 @@ IMAGE = re.compile(
 )
 PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
 DEFAULT_IMAGE = re.compile(r"^\$\{[A-Z0-9_]+:-([^}]+)\}$")
+DEV_MUTABLE_IMAGES = {
+    "API": "ghcr.io/carstvaartjes/vonk-forge-api:dev",
+    "worker": "ghcr.io/carstvaartjes/vonk-forge-worker:dev",
+}
+DEV_MUTABLE_SERVICE_IMAGES = {
+    "control-api": DEV_MUTABLE_IMAGES["API"],
+    "control-worker": DEV_MUTABLE_IMAGES["worker"],
+}
 TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
@@ -29,7 +37,9 @@ TOKENS = {
 def _validate(role: str, image: str, channel: str) -> None:
     if channel == "pinned" and PINNED_IMAGE.fullmatch(image) is not None:
         return
-    if channel == "dev" and IMAGE.fullmatch(image) is not None:
+    if channel == "dev" and (
+        DEV_MUTABLE_IMAGES.get(role) == image or IMAGE.fullmatch(image) is not None
+    ):
         return
     if channel not in {"dev", "pinned"} or IMAGE.fullmatch(image) is None:
         raise ValueError(
@@ -198,7 +208,9 @@ def _embed_runtime_assets(document: dict[str, object], source_root: Path) -> Non
             service["configs"] = [*current_configs, *embedded_mounts]
 
 
-def _resolve_runtime_images(document: dict[str, object]) -> None:
+def _resolve_runtime_images(
+    document: dict[str, object], channel: str = "pinned"
+) -> None:
     services = document.get("services")
     if not isinstance(services, dict):
         raise TypeError("Compose services are invalid")
@@ -212,6 +224,9 @@ def _resolve_runtime_images(document: dict[str, object]) -> None:
         if default is not None:
             image = default.group(1)
             service["image"] = image
+        if channel == "dev" and DEV_MUTABLE_SERVICE_IMAGES.get(name) == image:
+            service["pull_policy"] = "always"
+            continue
         if PINNED_IMAGE.fullmatch(image) is None:
             raise ValueError(f"runtime service image is not digest pinned: {name}")
 
@@ -266,7 +281,7 @@ def render(
             TOKENS["hermes"]: hermes_image,
         },
     )
-    _resolve_runtime_images(document)
+    _resolve_runtime_images(document, channel)
     _embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
