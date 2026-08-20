@@ -374,5 +374,5 @@ returns. Closing every terminal must not affect browser availability.
 - GPU nodes: after publication is complete, run
   `curl -fsSL https://install.vonkforge.ai/spark | sh` on one canary, wait for
   fresh controller inventory, then repeat on the next node.
-- Never substitute production `latest` tags or a local build. Production uses
+- Never substitute `latest` tags or a local build. Production uses
   only the digest-pinned assets from one immutable release.
