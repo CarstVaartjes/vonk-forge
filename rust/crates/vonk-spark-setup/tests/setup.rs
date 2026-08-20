@@ -16,10 +16,19 @@ struct RecordingRunner {
 
 impl RecordingRunner {
     fn with_ca(ca: &[u8]) -> Self {
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(ca));
+        let certificate = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
+        let fingerprint = hex::encode(Sha256::digest(certificate.as_ref()));
+        let bootstrap = serde_json::json!({
+            "controller_endpoint": "https://controller.example.test",
+            "enrollment_endpoint": "https://enroll.example.test",
+            "ca_fingerprint": fingerprint,
+            "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
+        });
         Self {
             commands: Vec::new(),
             outputs: [
-                CommandOutput::success(ca.to_vec()),
+                CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
@@ -85,8 +94,6 @@ impl Answers {
         Self {
             values: [
                 "https://enroll.example.test/".to_owned(),
-                "https://controller.example.test/".to_owned(),
-                "https://download.example.test/controller-ca.pem".to_owned(),
                 hex::encode(Sha256::digest(certificate.as_ref())),
             ]
             .into(),
@@ -191,6 +198,12 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
 
     assert!(result.is_ok(), "{result:?}");
     assert!(runner.commands[0].program.ends_with("curl"));
+    assert!(runner.commands[0].args.iter().any(|argument| argument == "--insecure"));
+    assert!(!runner.commands[0].args.iter().any(|argument| argument == "--location"));
+    assert_eq!(
+        runner.commands[0].args.last().map(String::as_str),
+        Some("https://enroll.example.test/agent/v1/bootstrap")
+    );
     let privileged = runner
         .commands
         .iter()
@@ -233,6 +246,37 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
             .iter()
             .all(|command| command.env.values().all(|value| value != TOKEN))
     );
+}
+
+#[test]
+fn bootstrap_must_match_the_out_of_band_ca_fingerprint_before_installation() {
+    let temporary = tempdir().unwrap();
+    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    let ca = ca();
+    fs::create_dir_all(paths(temporary.path()).config.parent().unwrap()).unwrap();
+    let mut runner = RecordingRunner::with_ca(&ca);
+    runner.outputs[0] = CommandOutput::success(
+        serde_json::to_vec(&serde_json::json!({
+            "controller_endpoint": "https://controller.example.test",
+            "enrollment_endpoint": "https://enroll.example.test",
+            "ca_fingerprint": "0".repeat(64),
+            "ca_pem": String::from_utf8(ca.clone()).unwrap(),
+        }))
+        .unwrap(),
+    );
+    let mut prompt = Answers::fresh(&ca);
+
+    let result = run_setup(
+        &request(package_path),
+        &paths(temporary.path()),
+        &mut prompt,
+        &mut runner,
+    );
+
+    assert!(format!("{result:?}").contains("EnrollmentBootstrap"));
+    assert_eq!(runner.commands.len(), 1);
+    assert_eq!(runner.commands[0].program, std::path::Path::new("/usr/bin/curl"));
 }
 
 #[test]

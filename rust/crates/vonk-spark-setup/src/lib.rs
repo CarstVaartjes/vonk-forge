@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CA_BYTES: usize = 64 * 1024;
+const MAX_BOOTSTRAP_BYTES: usize = 128 * 1024;
 const CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
 const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
@@ -218,6 +219,8 @@ pub enum SetupError {
     Prompt,
     #[error("controller CA is invalid or does not match its supplied SHA-256")]
     ControllerCa,
+    #[error("enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256")]
+    EnrollmentBootstrap,
     #[error("privileged setup command failed: {0}")]
     Command(String),
     #[error("privileged configuration input is invalid")]
@@ -300,8 +303,6 @@ fn fresh_setup(
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
     let enrollment = required_origin(prompt, "Enrollment URL")?;
-    let controller = required_origin(prompt, "Controller URL")?;
-    let ca_url = required_ca_url(prompt)?;
     let ca_sha256 = required_sha256(prompt, "Controller CA SHA-256")?;
     let pairing_token = prompt
         .secret("Pairing token")
@@ -310,26 +311,7 @@ fn fresh_setup(
         return Err(SetupError::UnsafeInput("pairing token"));
     }
 
-    let ca = run_checked(
-        runner,
-        Command::new(
-            "/usr/bin/curl",
-            [
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--proto",
-                "=https",
-                "--tlsv1.2",
-                "--max-filesize",
-                "65536",
-                ca_url.as_str(),
-            ],
-        ),
-    )?
-    .stdout;
-    verify_ca(&ca, &ca_sha256)?;
+    let (controller, ca) = discover_enrollment(&enrollment, &ca_sha256, runner)?;
 
     install_package(runner, staged)?;
 
@@ -785,21 +767,61 @@ fn required_origin(prompt: &mut dyn Prompt, label: &str) -> Result<Url, SetupErr
     }
 }
 
-fn required_ca_url(prompt: &mut dyn Prompt) -> Result<Url, SetupError> {
-    let value = prompt
-        .value("Controller CA PEM URL")
-        .map_err(|_| SetupError::Prompt)?;
-    let url = Url::parse(&value).map_err(|_| SetupError::UnsafeInput("controller CA URL"))?;
-    if url.scheme() == "https"
-        && url.host_str().is_some()
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.fragment().is_none()
-    {
-        Ok(url)
-    } else {
-        Err(SetupError::UnsafeInput("controller CA URL"))
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrollmentBootstrap {
+    controller_endpoint: String,
+    enrollment_endpoint: String,
+    ca_fingerprint: String,
+    ca_pem: String,
+}
+
+fn discover_enrollment(
+    expected_enrollment: &Url,
+    expected_ca_sha256: &str,
+    runner: &mut dyn CommandRunner,
+) -> Result<(Url, Vec<u8>), SetupError> {
+    let mut bootstrap_url = expected_enrollment.clone();
+    bootstrap_url.set_path("/agent/v1/bootstrap");
+    let output = run_checked(
+        runner,
+        Command::new(
+            "/usr/bin/curl",
+            [
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "--insecure",
+                "--max-filesize",
+                "131072",
+                bootstrap_url.as_str(),
+            ],
+        ),
+    )?
+    .stdout;
+    if output.is_empty() || output.len() > MAX_BOOTSTRAP_BYTES {
+        return Err(SetupError::EnrollmentBootstrap);
     }
+    let bootstrap: EnrollmentBootstrap =
+        serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let enrollment = Url::parse(&bootstrap.enrollment_endpoint)
+        .map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let controller = Url::parse(&bootstrap.controller_endpoint)
+        .map_err(|_| SetupError::EnrollmentBootstrap)?;
+    if !valid_origin(&enrollment)
+        || !valid_origin(&controller)
+        || &enrollment != expected_enrollment
+        || bootstrap.ca_fingerprint != expected_ca_sha256
+        || bootstrap.ca_pem.len() > MAX_CA_BYTES
+    {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
+    let ca = bootstrap.ca_pem.into_bytes();
+    verify_ca(&ca, expected_ca_sha256).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    Ok((controller, ca))
 }
 
 fn required_sha256(prompt: &mut dyn Prompt, label: &str) -> Result<String, SetupError> {

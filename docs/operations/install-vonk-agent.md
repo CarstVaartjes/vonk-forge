@@ -10,12 +10,14 @@ Do not prefix `curl` or the shell with `sudo`. The installer downloads the
 published package as the current user, verifies its release identity and exact
 digest, and only then asks `sudo` to install it.
 
-For a new Spark, the wizard asks for the enrollment and controller endpoints,
-controller CA URL and fingerprint, and one-use pairing token. Secret input is
-hidden and never appears in process arguments or environment variables. The
-token is the explicit enrollment authorization: the command exchanges it for
-the Spark identity, starts the direct Rust-agent systemd service, and verifies
-sustained readiness before returning.
+For a new Spark, the wizard asks for the enrollment endpoint, controller CA
+fingerprint, and one-use pairing token. Secret input is hidden and never
+appears in process arguments or environment variables. The installer retrieves
+the bounded bootstrap document from that endpoint, requires its CA to match the
+out-of-band fingerprint, and discovers the controller endpoint from the same
+document. The token is the explicit enrollment authorization: the command
+exchanges it for the Spark identity, starts the direct Rust-agent systemd
+service, and verifies sustained readiness before returning.
 
 For an installed Spark, run the same command. It preserves configuration and
 identity, replaces the Debian package directly, restarts the service, and
