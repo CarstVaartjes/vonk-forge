@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
@@ -395,6 +396,37 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         check=False,
     )
     assert verified.returncode == 0, verified.stderr
+
+
+def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["nas-acceptance"]["steps"]
+        if step["name"] == "Run literal clean NAS and Compose acceptance"
+    )
+    nas_gates = set(json.loads(step["env"]["VONK_ACCEPTANCE_GATE_NAMES"]))
+    reports = [
+        _gate_report(tmp_path / "nas.json", publication, nas_gates),
+        _gate_report(
+            tmp_path / "amd64.json", publication, {"spark_amd64", "spark_pairing", "spark_job"}
+        ),
+        _gate_report(
+            tmp_path / "arm64.json", publication, {"spark_arm64", "spark_renewal", "spark_upgrade"}
+        ),
+    ]
+    accepted = subprocess.run(_accept_command(publication, tmp_path / "accepted", reports), cwd=ROOT, text=True, capture_output=True, check=False)
+    assert accepted.returncode == 0, accepted.stderr
+    drifted = _gate_report(tmp_path / "drifted.json", publication, nas_gates - {"nas_workstation"})
+    rejected = subprocess.run(_accept_command(publication, tmp_path / "rejected", [drifted, *reports[1:]]), cwd=ROOT, text=True, capture_output=True, check=False)
+    assert rejected.returncode == 2
+    assert "incomplete" in rejected.stderr
 
 
 def _promote(

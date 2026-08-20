@@ -337,6 +337,17 @@ def verify_postgres_databases(bundle: Path) -> None:
         raise AcceptanceError("control and LiteLLM do not have distinct databases")
 
 
+def verify_authenticated_service_routes(bundle: Path) -> None:
+    checks = (
+        ("litellm", "python -c 'import urllib.request; assert urllib.request.urlopen(\"http://127.0.0.1:4000/health/readiness\").status == 200'"),
+        ("prometheus", "wget -qO- --header=\"Authorization: Bearer $(cat /run/vonk-normalized-secrets/prometheus-metrics-token)\" http://control-api:8000/metrics | grep -q \"^# TYPE\""),
+        ("grafana", "wget -qO- --user=admin --password=\"$(cat /run/vonk-normalized-secrets/grafana-admin-password)\" http://127.0.0.1:3000/api/user | grep -q \"\\\"login\\\":\\\"admin\\\"\""),
+        ("registry", "wget -qO- http://127.0.0.1:5000/v2/ | grep -qx \"{}\""),
+    )
+    for service, command in checks:
+        run([*reference_compose(), "exec", "-T", service, "sh", "-ec", command], cwd=bundle)
+
+
 def verify_tailscale_services(
     bundle: Path, *, hermes: bool, tailnet_suffix: str
 ) -> None:
@@ -445,6 +456,7 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
+        verify_authenticated_service_routes(bundle)
         verify_tailscale_services(bundle, hermes=hermes, tailnet_suffix=tailnet_suffix)
     finally:
         run(

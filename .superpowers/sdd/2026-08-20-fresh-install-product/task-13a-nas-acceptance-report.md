@@ -1,6 +1,6 @@
 # Task 13A NAS Acceptance Report
 
-**Status:** DONE_WITH_CONCERNS
+**Status:** DONE
 
 ## Commits and scope
 
@@ -111,7 +111,7 @@ current GitHub-only key and all external secrets were left untouched. No
 - The full canary acceptance cannot be validated without the protected external
   infrastructure listed above. It must run successfully before promotion.
 
-## Fix round 1 correction
+## Historical fix round 1 correction
 
 The earlier top-level `name`/`version` addition and Compose-v5 warning exemption
 were incorrect. The payload now omits both fields and rejects every parser
@@ -138,3 +138,16 @@ This round removes the forbidden YAML fields, rejects all Compose diagnostics,
 adds the NAS acceptance gates to authority validation, limits the reference
 rollout to Hermes, hardens full writes/TLS cleanup, and pins a CI-only Docker
 29.4.3 DIND service paired with the Compose 5.1.3 reference fixture.
+
+### Blocking follow-up completion
+
+The acceptance now constructs substantive LiteLLM readiness, authenticated
+Prometheus metrics, authenticated Grafana user, and registry API checks using
+mounted runtime secrets. The workflow's parsed NAS gate JSON is fed through the
+real acceptance authority, and a missing gate is rejected.
+
+```text
+$ uv run pytest tests/test_fresh_nas_acceptance.py tests/scripts/test_install_release_publication.py::test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected -q
+...                                                                      [100%]
+3 passed in 0.72s
+```
