@@ -7,7 +7,7 @@ and startup behavior; only immutable release identities differ.
 Prepare a complete upload directory on a Linux or macOS workstation:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/nas | sh
+curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 ```
 
 The interactive command creates `vonk-forge/docker-compose.yaml`,

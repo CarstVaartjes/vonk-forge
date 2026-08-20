@@ -288,6 +288,36 @@ fn upgrade_rejects_a_symlink_hidden_inside_secrets() {
 }
 
 #[test]
+fn upgrade_rejects_unmanaged_top_level_entries_before_writing() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(bundle.join("legacy-install.sh"), "operator data\n").expect("legacy file");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let error = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect_err("noncanonical bundle rejected");
+
+    assert!(error.to_string().contains("unexpected top-level entry"));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
+        "old compose\n",
+        "validation must happen before release-controlled state changes"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("legacy-install.sh")).expect("legacy file"),
+        "operator data\n",
+        "the installer must not delete an unknown operator file"
+    );
+}
+
+#[test]
 fn prompts_retry_invalid_required_values_and_confirmation() {
     let temporary = tempdir().expect("temporary directory");
     let input = Cursor::new(b"\nforge.example.test\n\nperhaps\nyes\n".to_vec());

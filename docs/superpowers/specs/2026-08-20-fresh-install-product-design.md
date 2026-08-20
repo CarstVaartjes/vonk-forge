@@ -47,12 +47,12 @@ does not consume the wizard input. It downloads a versioned setup executable
 for the local OS and architecture, verifies it against the selected signed
 release manifest, and executes it without `sudo` or Docker.
 
-The public endpoint selects the current accepted stable release. Development
-publishes the same artifact graph through CI for acceptance, but is not another
-operator-facing install command. The wizard asks for:
+The public endpoint selects the current accepted stable release. The
+development endpoint runs the identical wizard against the accepted development
+release. The wizard asks for:
 
-- the NAS LAN address and public port;
-- the desired Tailscale hostname and an auth key;
+- the NAS LAN address; the controller port remains the canonical `8443`;
+- Tailscale OAuth credentials used to maintain the canonical gateway identity;
 - external provider credentials that cannot be generated locally;
 - whether Hermes should be included; and
 - whether each locally owned secret should be generated or imported.
@@ -91,12 +91,14 @@ signature, and only then invokes `sudo` for package installation. `curl` itself
 never runs as root.
 
 On a fresh Spark, the installer prompts through `/dev/tty` for the enrollment
-endpoint and a short-lived pairing token without placing the token in process
-arguments. Creating that single-use token is the administrator's approval; a
-valid submission immediately issues the certificate. The installer discovers
-and pins the controller trust root from the enrollment bootstrap endpoint,
-installs a single agent binary and direct systemd service, and materializes the
-mTLS identity and configuration atomically.
+endpoint, the controller CA SHA-256 shown by the authenticated Fleet workflow,
+and a short-lived pairing token without placing the token in process arguments.
+Creating that single-use token is the administrator's approval; a valid
+submission immediately issues the certificate. The installer fetches the
+public bootstrap document without presenting the token, verifies its trust root
+against the out-of-band fingerprint, installs a single agent binary and direct
+systemd service, and materializes the mTLS identity and configuration
+atomically.
 
 On an existing Spark, the same command performs an in-place package upgrade,
 restarts the direct service, and verifies both local health and the version

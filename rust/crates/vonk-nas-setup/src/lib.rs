@@ -1721,6 +1721,16 @@ fn reject_symlink_components(path: &Path) -> Result<(), SetupError> {
 fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     reject_symlink_components(bundle)?;
     require_real_directory(bundle)?;
+    for entry in fs::read_dir(bundle)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name != ".env" && name != "docker-compose.yaml" && name != "secrets" {
+            return Err(SetupError::UnsafeDestination(format!(
+                "{} is an unexpected top-level entry",
+                entry.path().display()
+            )));
+        }
+    }
     require_regular_file(&bundle.join("docker-compose.yaml"))?;
     require_regular_file(&bundle.join(".env"))?;
     let secrets = bundle.join("secrets");

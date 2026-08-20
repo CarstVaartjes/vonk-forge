@@ -178,6 +178,7 @@ pub fn handoff_to_root(
 pub struct InstallPaths {
     pub config: PathBuf,
     pub ca: PathBuf,
+    pub credentials: PathBuf,
     pub agent: PathBuf,
     pub upgrade: PathBuf,
     pub service: String,
@@ -189,6 +190,7 @@ impl InstallPaths {
         Self {
             config: PathBuf::from(CONFIG_PATH),
             ca: PathBuf::from(CA_PATH),
+            credentials: PathBuf::from(DATA_DIR).join("credentials"),
             agent: PathBuf::from(AGENT_PATH),
             upgrade: PathBuf::from(UPGRADE_PATH),
             service: SERVICE.to_owned(),
@@ -219,7 +221,9 @@ pub enum SetupError {
     Prompt,
     #[error("controller CA is invalid or does not match its supplied SHA-256")]
     ControllerCa,
-    #[error("enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256")]
+    #[error(
+        "enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256"
+    )]
     EnrollmentBootstrap,
     #[error("privileged setup command failed: {0}")]
     Command(String),
@@ -292,6 +296,7 @@ pub fn run_setup(
     let staged = stage_verified_package(request)?;
     match install_state(paths)? {
         InstallState::Existing => upgrade_existing(paths, runner, &staged),
+        InstallState::ConfiguredUnpaired => resume_pairing(paths, prompt, runner, &staged),
         InstallState::Fresh => fresh_setup(paths, prompt, runner, &staged),
     }
 }
@@ -334,6 +339,53 @@ fn fresh_setup(
             .unwrap_or_else(|| rustix::process::geteuid().as_raw()),
     )?;
 
+    pair_and_start(
+        paths,
+        prompt,
+        runner,
+        &config.enrollment_url,
+        &config.ca_sha256,
+        Some(pairing_token),
+    )
+}
+
+fn resume_pairing(
+    paths: &InstallPaths,
+    prompt: &mut dyn Prompt,
+    runner: &mut dyn CommandRunner,
+    staged: &StagedPackage,
+) -> Result<(), SetupError> {
+    let config = paired_configuration(&paths.config, paths)?;
+    let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+    verify_ca(&ca, &config.ca_sha256)?;
+    install_package(runner, staged)?;
+    pair_and_start(
+        paths,
+        prompt,
+        runner,
+        &config.enrollment_url,
+        &config.ca_sha256,
+        None,
+    )
+}
+
+fn pair_and_start(
+    paths: &InstallPaths,
+    prompt: &mut dyn Prompt,
+    runner: &mut dyn CommandRunner,
+    enrollment_url: &Url,
+    ca_sha256: &str,
+    pairing_token: Option<String>,
+) -> Result<(), SetupError> {
+    let pairing_token = match pairing_token {
+        Some(token) => token,
+        None => prompt
+            .secret("Pairing token")
+            .map_err(|_| SetupError::Prompt)?,
+    };
+    if !valid_token(&pairing_token) {
+        return Err(SetupError::UnsafeInput("pairing token"));
+    }
     let pair = Command::new(
         "/usr/bin/setpriv",
         [
@@ -348,9 +400,9 @@ fn fresh_setup(
             paths.config.to_string_lossy().as_ref(),
             "pair",
             "--enrollment",
-            config.enrollment_url.as_str(),
+            enrollment_url.as_str(),
             "--ca-sha256",
-            &config.ca_sha256,
+            ca_sha256,
             "--token-stdin",
         ],
     )
@@ -521,6 +573,7 @@ fn verify_sustained_readiness(
 
 enum InstallState {
     Fresh,
+    ConfiguredUnpaired,
     Existing,
 }
 
@@ -532,13 +585,17 @@ fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
         (false, true) => Ok(InstallState::Fresh),
         (true, true) => {
             paired_configuration(&paths.config, paths)?;
-            Ok(InstallState::Existing)
+            if active_identity_present(paths)? {
+                Ok(InstallState::Existing)
+            } else {
+                Ok(InstallState::ConfiguredUnpaired)
+            }
         }
         _ => Err(SetupError::ExistingInstall),
     }
 }
 
-fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<(), SetupError> {
+fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<WrittenConfig, SetupError> {
     let raw = fs::read(path).map_err(|_| SetupError::ExistingInstall)?;
     if raw.len() > 64 * 1024 {
         return Err(SetupError::ExistingInstall);
@@ -547,7 +604,72 @@ fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<(), SetupEr
     if !valid_written_config(&config, paths) {
         return Err(SetupError::ExistingInstall);
     }
-    Ok(())
+    Ok(config)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActiveGeneration {
+    generation: u64,
+}
+
+fn active_identity_present(paths: &InstallPaths) -> Result<bool, SetupError> {
+    if !safe_existing_directory(&paths.credentials, paths.required_owner)? {
+        return Ok(false);
+    }
+    let pointer_path = paths.credentials.join("active.json");
+    let root = if safe_existing_file(&pointer_path, paths.required_owner)? {
+        let raw = fs::read(&pointer_path).map_err(|_| SetupError::ExistingInstall)?;
+        if raw.len() > 4096 {
+            return Err(SetupError::ExistingInstall);
+        }
+        let pointer: ActiveGeneration =
+            serde_json::from_slice(&raw).map_err(|_| SetupError::ExistingInstall)?;
+        if pointer.generation == 0 {
+            return Err(SetupError::ExistingInstall);
+        }
+        let generation = paths
+            .credentials
+            .join(format!("generation-{:020}", pointer.generation));
+        if !safe_existing_directory(&generation, paths.required_owner)? {
+            return Err(SetupError::ExistingInstall);
+        }
+        generation
+    } else {
+        paths.credentials.clone()
+    };
+    let present = [
+        "private-key.pem",
+        "certificate.pem",
+        "chain.pem",
+        "identity.json",
+    ]
+    .into_iter()
+    .map(|name| safe_existing_file(&root.join(name), paths.required_owner))
+    .collect::<Result<Vec<_>, _>>()?;
+    if present.iter().all(|exists| *exists) {
+        Ok(true)
+    } else if present.iter().all(|exists| !*exists) && root == paths.credentials {
+        Ok(false)
+    } else {
+        Err(SetupError::ExistingInstall)
+    }
+}
+
+fn safe_existing_directory(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.file_type().is_dir()
+                && !metadata.file_type().is_symlink()
+                && required_owner.is_none_or(|owner| metadata.uid() == owner)
+                && metadata.permissions().mode() & 0o022 == 0 =>
+        {
+            Ok(true)
+        }
+        Ok(_) => Err(SetupError::ExistingInstall),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(SetupError::ExistingInstall),
+    }
 }
 
 fn safe_existing_file(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
@@ -807,10 +929,10 @@ fn discover_enrollment(
     }
     let bootstrap: EnrollmentBootstrap =
         serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
-    let enrollment = Url::parse(&bootstrap.enrollment_endpoint)
-        .map_err(|_| SetupError::EnrollmentBootstrap)?;
-    let controller = Url::parse(&bootstrap.controller_endpoint)
-        .map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let enrollment =
+        Url::parse(&bootstrap.enrollment_endpoint).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let controller =
+        Url::parse(&bootstrap.controller_endpoint).map_err(|_| SetupError::EnrollmentBootstrap)?;
     if !valid_origin(&enrollment)
         || !valid_origin(&controller)
         || &enrollment != expected_enrollment
@@ -1178,6 +1300,7 @@ mod tests {
         let paths = InstallPaths {
             config: config.clone(),
             ca: ca.clone(),
+            credentials: temporary.path().join("credentials"),
             agent: temporary.path().join("agent"),
             upgrade: temporary.path().join("upgrade"),
             service: SERVICE.to_owned(),
@@ -1206,6 +1329,7 @@ mod tests {
             ca: temporary
                 .path()
                 .join("etc/vonk-forge-agent/controller-ca.pem"),
+            credentials: temporary.path().join("credentials"),
             agent: temporary.path().join("agent"),
             upgrade: temporary.path().join("upgrade"),
             service: SERVICE.to_owned(),

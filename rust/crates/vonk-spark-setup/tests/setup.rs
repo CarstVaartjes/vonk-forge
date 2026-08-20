@@ -69,6 +69,29 @@ impl RecordingRunner {
             .into(),
         }
     }
+
+    fn for_pairing_recovery() -> Self {
+        Self {
+            commands: Vec::new(),
+            outputs: [
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+            ]
+            .into(),
+        }
+    }
 }
 
 impl CommandRunner for RecordingRunner {
@@ -164,6 +187,7 @@ fn paths(root: &std::path::Path) -> InstallPaths {
     InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        credentials: root.join("var/lib/vonk-forge-agent/credentials"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
         upgrade: root.join("usr/bin/vonk-agent-upgrade"),
         service: "vonk-forge-agent.service".to_owned(),
@@ -177,6 +201,28 @@ fn paired_config(paths: &InstallPaths) -> String {
         paths.ca.display(),
         "a".repeat(64),
     )
+}
+
+fn paired_config_for_ca(paths: &InstallPaths, ca: &[u8]) -> String {
+    let mut reader = std::io::BufReader::new(std::io::Cursor::new(ca));
+    let certificate = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
+    format!(
+        "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+        paths.ca.display(),
+        hex::encode(Sha256::digest(certificate.as_ref())),
+    )
+}
+
+fn paired_identity(paths: &InstallPaths) {
+    fs::create_dir_all(&paths.credentials).unwrap();
+    for name in [
+        "private-key.pem",
+        "certificate.pem",
+        "chain.pem",
+        "identity.json",
+    ] {
+        fs::write(paths.credentials.join(name), "paired identity").unwrap();
+    }
 }
 
 #[test]
@@ -198,8 +244,18 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
 
     assert!(result.is_ok(), "{result:?}");
     assert!(runner.commands[0].program.ends_with("curl"));
-    assert!(runner.commands[0].args.iter().any(|argument| argument == "--insecure"));
-    assert!(!runner.commands[0].args.iter().any(|argument| argument == "--location"));
+    assert!(
+        runner.commands[0]
+            .args
+            .iter()
+            .any(|argument| argument == "--insecure")
+    );
+    assert!(
+        !runner.commands[0]
+            .args
+            .iter()
+            .any(|argument| argument == "--location")
+    );
     assert_eq!(
         runner.commands[0].args.last().map(String::as_str),
         Some("https://enroll.example.test/agent/v1/bootstrap")
@@ -276,7 +332,10 @@ fn bootstrap_must_match_the_out_of_band_ca_fingerprint_before_installation() {
 
     assert!(format!("{result:?}").contains("EnrollmentBootstrap"));
     assert_eq!(runner.commands.len(), 1);
-    assert_eq!(runner.commands[0].program, std::path::Path::new("/usr/bin/curl"));
+    assert_eq!(
+        runner.commands[0].program,
+        std::path::Path::new("/usr/bin/curl")
+    );
 }
 
 #[test]
@@ -392,6 +451,7 @@ fn existing_install_preserves_identity_and_resolves_dependencies_with_apt() {
     fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
     fs::write(&install_paths.config, paired_config(&install_paths)).unwrap();
     fs::write(&install_paths.agent, "existing agent").unwrap();
+    paired_identity(&install_paths);
     let mut runner = RecordingRunner::for_upgrade();
     let mut prompt = Answers::fresh(&ca());
 
@@ -506,4 +566,39 @@ fn installed_package_without_generated_configuration_retries_fresh_pairing() {
             .iter()
             .any(|argument| argument.ends_with("vonk-agent-upgrade"))
     }));
+}
+
+#[test]
+fn configured_install_without_active_identity_resumes_pairing() {
+    let temporary = tempdir().unwrap();
+    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
+    let controller_ca = ca();
+    fs::write(
+        &install_paths.config,
+        paired_config_for_ca(&install_paths, &controller_ca),
+    )
+    .unwrap();
+    fs::write(&install_paths.ca, &controller_ca).unwrap();
+    fs::write(&install_paths.agent, "installed agent").unwrap();
+    let mut runner = RecordingRunner::for_pairing_recovery();
+    let mut prompt = Answers::fresh(&ca());
+
+    let result = run_setup(
+        &request(package_path),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+    );
+
+    assert!(result.is_ok(), "{result:?}");
+    let pair = runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .expect("the interrupted installation must resume pairing");
+    assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
 }
