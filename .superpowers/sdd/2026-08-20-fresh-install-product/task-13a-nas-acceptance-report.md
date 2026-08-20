@@ -2,68 +2,106 @@
 
 **Status:** DONE
 
-## Commits and scope
+## Commits and scoped files
+
+Task 13A implementation and fix-round commits in scope:
 
 - `1df4b496` — behavioral candidate acceptance foundation
-- `123a7d34` — original acceptance evidence report
-- `b0311e45` — NAS acceptance hardening fix round
-- `c77f3342` — route and workflow-to-authority gate coverage
+- `123a7d34` — initial acceptance evidence
+- `b0311e45` — NAS acceptance hardening
+- `c77f3342` — initial route and gate-authority coverage
+- `c46a0908` — corrected current-state report
+- `d6813094dd1799d4b40357af9586b5e0312865b2` — routed-service, tunnel-exit,
+  DIND-fixture, and candidate-receipt fixes
 
-This report revision is committed separately. Only Task 13A paths were staged;
-unrelated worktree edits remain unstaged.
+This evidence update is committed separately. The implementation commit changes
+only `.github/workflows/installer-publication.yml`, the NAS acceptance runner,
+its transport runtime, and their focused tests. Unrelated worktree edits remain
+unstaged.
 
 ## Current requirements mapping
 
 | Requirement | Current evidence |
 | --- | --- |
-| Candidate before promotion | Parsed workflow dependency graph keeps candidate publication before NAS/Spark acceptance, signed aggregate acceptance, and pointer promotion. |
-| NAS Docker boundary | NAS bootstrap path does not install, pin, configure, or require NAS Docker/Compose. CI uses isolated compatibility/reference fixtures only. |
-| YAML compatibility | Generated YAML omits top-level `name` and `version`, has no include/build/host bind input, and uses digest-pinned images. Every Compose parser diagnostic fails acceptance. |
-| Versioned fixtures | Official v5.1.3 and v2.24.6 Compose binaries are SHA-256 verified for config checks. The one CI-only Hermes-superset rollout uses checksum-verified Compose v5.1.3 against a digest-pinned Docker Engine 29.4.3 DIND service. |
-| Bundle and workstation contract | PTY path remains constrained; exact three-item bundle, modes, secret isolation, repeatability, and in-place site-secret preservation are asserted. |
-| Full rollout behavior | One empty-volume Hermes-superset rollout validates exact healthy service set, TLS, PostgreSQL/LiteLLM separation, Tailscale, authenticated Prometheus metrics, authenticated Grafana user, registry API, and LiteLLM readiness. Default/Hermes and parser fixture compatibility are config-only where no rollout is required. |
-| Gate authority | The workflow's parsed NAS gate JSON is accepted by the real authority together with Spark reports; removing a gate fails as incomplete. |
-| Key custody | Protected GitHub environment execution copies remain; no 1Password/OIDC CI runtime dependency or external-secret change was made. |
+| Candidate before promotion | The parsed workflow keeps immutable candidate publication before NAS/Spark acceptance, signed aggregate acceptance, and channel-pointer promotion. The candidate receipt artifact now uploads both the immutable bundle and `candidate-receipt.jsonl`. |
+| NAS Docker boundary | The installer does not install, pin, configure, or require NAS Docker/Compose. Docker Engine 29.4.3 and Compose 5.1.3 are CI-only compatibility fixtures. |
+| YAML compatibility | Generated YAML omits top-level `name` and `version`, has no include/build/host-bind input, uses digest-pinned images, and rejects every parser diagnostic. |
+| One rollout and compatibility fixtures | Verified Compose v5.1.3 and v2.24.6 run config-only compatibility checks. Exactly one empty-volume Hermes-superset rollout remains; default topology is config-validated. |
+| Executable DIND fixture | The workflow manually starts the digest-pinned Docker 29.4.3 DIND daemon, publishes only `127.0.0.1:2375`, mounts `GITHUB_WORKSPACE` at the identical absolute path, waits for and requires server version `29.4.3`, propagates its inspected IPv4 for candidate Caddy routing, and always removes the daemon. Candidate bundles are generated under the shared workspace. |
+| Bundle and workstation contract | The constrained PTY path, exact three-item output, POSIX modes, repeatability, secret isolation, and site-secret preservation remain asserted. |
+| Routed LiteLLM and database behavior | The advertised Tailscale/Caddy route accepts authenticated `/v1/models` only with the generated LiteLLM key and returns JSON model data. Missing and wrong credentials must return 401/403. The PostgreSQL check also requires a nonempty initialized LiteLLM public schema. |
+| Routed Prometheus and Grafana behavior | Authenticated traffic through the advertised Tailscale/Caddy Grafana route verifies the administrator API, provisioned Prometheus datasource, both dashboards, and a successful `up{job="vonk-control"}` query through Grafana’s configured datasource proxy. Missing and wrong Grafana credentials must return 401/403. |
+| Routed registry and tailnet behavior | The configured external Caddy registry SNI `/v2/` rejects no-client-certificate traffic and returns exactly `{}` to a short-lived client certificate chained to the candidate CA. The Tailnet Serve status remains exact, and the successful LiteLLM/Grafana checks traverse its advertised `svc:vonk-forge` HTTPS route. |
+| PTY/tunnel hardening | Partial writes and TLS WANT_READ/WANT_WRITE handling remain. The HTTPS-over-command helper now closes stdin, waits for the tunnel child, and requires exit status zero after a successful HTTP response; cleanup cannot mask the primary failure. |
+| Gate authority and custody | Parsed workflow NAS gates feed the real acceptance authority and gate drift fails closed. Protected GitHub environment execution copies remain; no GitHub/1Password secret or OIDC runtime dependency changed. |
 
-## Current verification
+## Red/green evidence
+
+Initial focused red command:
+
+```text
+$ uv run pytest tests/test_acceptance_runtime.py::test_https_tunnel_rejects_a_successful_response_from_a_failing_child tests/test_fresh_nas_acceptance.py::test_routed_service_checks_require_authentication_and_expected_data tests/test_installer_publication_workflow.py::test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_version tests/test_installer_publication_workflow.py::test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded -q
+FFFF
+4 failed in 0.29s
+```
+
+The failures proved that a successful HTTP response masked tunnel exit 9, routed
+service acceptance did not exist, and the workflow lacked manual DIND start and
+always-run cleanup. The additional DIND-address regression was observed before
+implementation:
+
+```text
+$ uv run pytest tests/test_installer_publication_workflow.py::test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_version -q
+F
+1 failed in 0.07s
+```
+
+It required the nested daemon’s inspected IPv4 to reach the candidate Caddy
+route rather than incorrectly using the runner host address.
+
+Focused green regression command:
+
+```text
+$ uv run pytest tests/test_installer_publication_workflow.py::test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_version tests/test_installer_publication_workflow.py::test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded tests/test_acceptance_runtime.py::test_https_tunnel_rejects_a_successful_response_from_a_failing_child tests/test_fresh_nas_acceptance.py::test_routed_service_checks_require_authentication_and_expected_data -q
+....
+4 passed in 0.40s
+```
+
+## Final verification
 
 ```text
 $ uv run pytest tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py -q
-.................................................                        [100%]
-49 passed in 11.76s
+....................................................                     [100%]
+52 passed in 11.31s
 
-$ uvx --from ruff==0.16.1 ruff check --force-exclude <Task 13A Python paths>
+$ uvx --from ruff==0.16.1 ruff check --force-exclude tests/acceptance/runtime.py tests/acceptance/test_fresh_nas_install.py tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/test_installer_publication_workflow.py
 All checks passed!
+
+$ uv run python -c '<parse workflow; bash -n DIND/start/acceptance/cleanup steps>'
+workflow NAS shell syntax: ok
 
 $ git diff --check
 (exit 0; no output)
 ```
 
-## Red/green evidence
+## CI-only/full-rollout gap and self-review
 
-- The payload test failed when it required absent `name`/`version`; it passes
-  after their removal.
-- The compatibility test failed when parser stderr was allowed; it passes only
-  when every parser diagnostic is rejected.
-- The authority test failed when NAS reports contained gates outside the
-  authority set; it passes with the complete canonical set.
-- The parsed-workflow integration failed until the emitted NAS gate JSON was
-  provided; it passes for that exact JSON and rejects a removed gate.
-- The one-rollout test failed until Hermes became the sole reference rollout;
-  it now passes.
+The protected candidate curl, R2 publication, canary secrets, Tailscale
+registration, actual Docker 29.4.3 DIND daemon, and the one full clean rollout
+are CI-only and were not run locally. The workflow is executable and
+fail-closed: DIND readiness requires the exact server version, reports are
+emitted only after acceptance, aggregate signing requires the canonical gate
+set, and promotion is downstream.
 
-## CI-only gap and self-review
-
-The published-candidate curl, protected canary secrets, tailnet access, R2,
-and actual DIND rollout are CI-only and were not run locally. The workflow is
-fail-closed: reports are produced after acceptance succeeds, aggregate signing
-requires the complete gate set, and promotion is downstream. External 1Password
-replacement key and fingerprint-verified encrypted escrow provisioning remain
-required; the current GitHub-only key was not changed.
+Self-review found and corrected the nested-DIND route-address issue: the
+candidate Caddy port belongs to the DIND network namespace, so its inspected
+IPv4 is now the acceptance NAS address. No installer, bundle, `.env`, secret,
+prompt, or deployment input contains Docker/Compose fixture versions. External
+1Password replacement-key and fingerprint-verified encrypted-offline-escrow
+provisioning remain required; the current GitHub-only key was untouched.
 
 ## Superseded historical record
 
-Earlier report revisions incorrectly described generated top-level `name` and
-`version` fields and an allowed Compose-v5 version diagnostic. Those were
-intermediate defects, not current product behavior; the current mapping and
-verification above supersede them.
+Earlier report revisions that described generated top-level `name`/`version`
+fields or an allowed Compose-v5 warning were intermediate defects, not current
+behavior. The mapping and verification above supersede those statements.
