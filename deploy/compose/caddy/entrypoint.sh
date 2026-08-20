@@ -64,6 +64,17 @@ if [ "$control_hostname" = "$enrollment_hostname" ] \
   exit 64
 fi
 
+for required_file in \
+  /run/secrets/controller-server-certificate \
+  /run/secrets/controller-server-key \
+  /run/secrets/agent-client-ca
+do
+  if [ -L "$required_file" ] || [ ! -f "$required_file" ] || [ ! -r "$required_file" ] || [ ! -s "$required_file" ]; then
+    echo "Vonk Forge Caddy required runtime file is unavailable" >&2
+    exit 1
+  fi
+done
+
 if ! invalid_proxy_auth_bytes=$(LC_ALL=C tr -d 'A-Za-z0-9_\r\n-' < /run/secrets/agent-proxy-auth | wc -c); then
   echo "Vonk Forge Caddy proxy authentication secret is unavailable" >&2
   exit 1

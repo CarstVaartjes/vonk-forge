@@ -74,6 +74,11 @@ services:
       caddy:
         condition: service_healthy
         restart: true
+    healthcheck:
+      test: [CMD-SHELL, "test -f /tmp/tailscale-configurator-ready && tailscale --socket=/var/run/tailscale/tailscaled.sock serve status --json >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
 
 secrets:
   tailscale-oauth-client-id:

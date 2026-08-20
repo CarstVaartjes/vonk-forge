@@ -14,7 +14,7 @@ import yaml
 
 IMAGE = re.compile(
     r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker):"
-    r"(?:dev|dev-sha-[0-9a-f]{40})(?:@sha256:[0-9a-f]{64})?$"
+    r"dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
 )
 TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
@@ -30,6 +30,7 @@ RUNTIME_ASSETS = (
     "litellm/entrypoint.sh",
     "prometheus/alerts.yaml",
     "prometheus/prometheus.yml",
+    "postgres/init-databases.sh",
     "registry/config.yml",
     "tailscale/configure.sh",
 )
@@ -73,16 +74,16 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
     seen.add(path)
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
-        raise ValueError(f"Compose document is not a mapping: {path}")
+        raise TypeError(f"Compose document is not a mapping: {path}")
 
     merged: dict[str, object] = {}
     includes = document.pop("include", [])
     if not isinstance(includes, list):
-        raise ValueError(f"Compose include list is invalid: {path}")
+        raise TypeError(f"Compose include list is invalid: {path}")
     for included in includes:
         included_path = included if isinstance(included, str) else included.get("path")
         if not isinstance(included_path, str):
-            raise ValueError(f"Compose include path is invalid: {path}")
+            raise TypeError(f"Compose include path is invalid: {path}")
         child = _compose_document(path.parent / included_path, seen)
         prefix = str(Path(included_path).parent)
         if prefix != ".":
@@ -122,6 +123,19 @@ def _count_template_token(path: Path, needle: str, seen: set[Path] | None = None
     return count
 
 
+def _copy_runtime_assets(template: Path, output: Path) -> None:
+    for relative in RUNTIME_ASSETS:
+        asset = template.parent / relative
+        if not asset.is_file() and not asset.is_dir():
+            raise ValueError(f"runtime asset is missing: {relative}")
+        destination = output.parent / relative
+        if asset.is_dir():
+            shutil.copytree(asset, destination, dirs_exist_ok=True)
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(asset, destination)
+
+
 def render(template: Path, output: Path, api_image: str, worker_image: str, *, channel: str) -> None:
     if channel not in {"dev", "pinned"}:
         raise ValueError("channel must be dev or pinned")
@@ -144,16 +158,7 @@ def render(template: Path, output: Path, api_image: str, worker_image: str, *, c
     # The inlined graph still bind-mounts these runtime assets. Keep the
     # rendered project small: Compose fragments, build inputs, documentation,
     # and optional CA/Hermes source files do not belong in the runtime bundle.
-    for relative in RUNTIME_ASSETS:
-        asset = template.parent / relative
-        if not asset.is_file() and not asset.is_dir():
-            raise ValueError(f"runtime asset is missing: {relative}")
-        destination = output.parent / relative
-        if asset.is_dir():
-            shutil.copytree(asset, destination, dirs_exist_ok=True)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(asset, destination)
+    _copy_runtime_assets(template, output)
     descriptor, staged_name = tempfile.mkstemp(prefix=".render-dev-compose-", dir=output.parent)
     staged = Path(staged_name)
     try:

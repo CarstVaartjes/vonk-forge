@@ -73,7 +73,7 @@ services:
     command: [python, -m, vonk_control.compose_bootstrap]
     depends_on:
       postgres: {condition: service_healthy}
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -98,10 +98,12 @@ services:
       POSTGRES_DB: control
       POSTGRES_USER: control
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
-    secrets: [postgres-password]
+    secrets: [postgres-password, litellm-database-password]
     # PostgreSQL 18 stores the cluster in a major-version-specific subdirectory.
     # Mount the parent so future pg_upgrade operations can work across versions.
-    volumes: [postgres-data:/var/lib/postgresql]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro
     networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control"]
@@ -120,6 +122,19 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
+      VONK_AGENT_CA_PROVIDER: step-ca
+      VONK_AGENT_RUNTIME: enabled
+      VONK_AGENT_CLIENT_CA_FILE: /run/vonk-normalized-secrets/agent-client-ca
+      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/vonk-normalized-secrets/agent-intermediate-certificate
+      VONK_AGENT_CA_CREDENTIAL_FILE: /run/vonk-normalized-secrets/agent-ca-credential
+      VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE: /run/vonk-normalized-secrets/agent-ca-provisioner-public-jwk
+      VONK_AGENT_CA_ROOT_FILE: /run/vonk-normalized-secrets/step-ca-root-certificate
+      VONK_AGENT_CA_URL: https://step-ca:9000
+      VONK_AGENT_CA_PROVISIONER_NAME: ${AGENT_CA_PROVISIONER_NAME:-vonk-forge-agent}
+      VONK_AGENT_CA_PROVISIONER_KID: ${AGENT_CA_PROVISIONER_KID:?set agent CA provisioner key ID}
+      VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
+      VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
+      VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
     secrets: []
     volumes:
       - control-state:/state
@@ -140,10 +155,11 @@ services:
     tmpfs:
       - /tmp
       - /state/agent-artifacts
-    networks: [application, data, agent-proxy, worker-authority]
+    networks: [application, data, agent-proxy, worker-authority, ca]
     depends_on:
       postgres: {condition: service_healthy}
       control-bootstrap: {condition: service_healthy}
+      step-ca: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -180,6 +196,11 @@ services:
       postgres: {condition: service_healthy}
       control-bootstrap: {condition: service_healthy}
       control-signer: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://control-api:8000/internal/v1/generation/readiness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   control-signer:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
@@ -225,6 +246,28 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+
+  step-ca:
+    image: ${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270}
+    restart: unless-stopped
+    logging: *bounded-logging
+    read_only: true
+    command: [step-ca, /home/step/config/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
+    user: "1000:1000"
+    secrets: []
+    volumes:
+      - ${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}:/home/step/config/ca.json:ro
+      - step-ca-data:/home/step
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
+    tmpfs: [/tmp]
+    depends_on:
+      control-bootstrap: {condition: service_healthy}
+    networks: [ca]
+    healthcheck:
+      test: [CMD, step, ca, health, --ca-url, https://step-ca:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable@sha256:c81eb79cd4333c6cfe374c0ec929110fd23f0ee5f7fd198855a6fbddc77b83ba}
@@ -284,6 +327,11 @@ services:
     networks: [application]
     depends_on:
       control-api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana:13.0.2@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2}
@@ -306,7 +354,13 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     networks: [application, ingress]
-    depends_on: [prometheus]
+    depends_on:
+      prometheus: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   caddy:
     image: ${CADDY_IMAGE:-caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9}
@@ -331,13 +385,13 @@ services:
       VONK_AGENT_HOSTNAME: ${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}
       VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
       VONK_BACKEND_PORT: "8443"
-    secrets: [agent-client-ca, agent-proxy-auth]
+    secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
-      control-api: {condition: service_started}
+      control-api: {condition: service_healthy}
       registry: {condition: service_healthy}
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8082/healthz"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -365,6 +419,8 @@ secrets:
     file: "${DATABASE_URL_FILE:?set database URL secret file}"
   postgres-password:
     file: "${POSTGRES_PASSWORD_FILE:?set PostgreSQL password secret file}"
+  litellm-database-password:
+    file: "${LITELLM_DATABASE_PASSWORD_FILE:?set LiteLLM database password secret file}"
   token-signing-key:
     file: "${TOKEN_SIGNING_KEY_FILE:?set token signing key secret file}"
   metrics-token:
@@ -383,6 +439,10 @@ secrets:
     file: "${AGENT_INTERMEDIATE_CERTIFICATE_FILE:?set agent intermediate certificate secret file}"
   controller-ca:
     file: "${CONTROLLER_CA_FILE:?set public controller CA certificate secret file}"
+  controller-server-certificate:
+    file: "${CONTROLLER_SERVER_CERTIFICATE_FILE:?set controller server certificate secret file}"
+  controller-server-key:
+    file: "${CONTROLLER_SERVER_KEY_FILE:?set controller server private key secret file}"
   agent-proxy-auth:
     file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
   worker-api-token:
@@ -401,6 +461,16 @@ secrets:
     file: "${PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE:?set workload package helper receipt private key file}"
   host-runtime-grant-private-key:
     file: "${HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE:?set host runtime grant private key file}"
+  agent-ca-credential:
+    file: "${AGENT_CA_CREDENTIAL_FILE:?set agent CA provider credential secret file}"
+  agent-ca-provisioner-public-jwk:
+    file: "${AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE:?set agent CA provisioner public JWK file}"
+  step-ca-root-certificate:
+    file: "${STEP_CA_ROOT_CERTIFICATE_FILE:?set step-ca root certificate secret file}"
+  step-ca-intermediate-key:
+    file: "${STEP_CA_INTERMEDIATE_KEY_FILE:?set encrypted step-ca intermediate signing key secret file}"
+  step-ca-password:
+    file: "${STEP_CA_PASSWORD_FILE:?set step-ca password secret file}"
 
 networks:
   ingress: {}
@@ -415,6 +485,7 @@ networks:
   # No standing service joins this network. A Docker-daemon administrator may
   # attach a digest-pinned one-shot ORAS publisher as documented in registry/README.md.
   registry-publisher: {internal: true}
+  ca: {internal: true}
 
 volumes:
   postgres-data: {}
@@ -432,3 +503,4 @@ volumes:
   workload-tuf-publication: {}
   api-admin-grant-runtime: {}
   normalized-private-keys: {}
+  step-ca-data: {}

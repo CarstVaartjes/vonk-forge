@@ -28,10 +28,6 @@ def _rendered() -> dict[str, object]:
             "compose",
             "-f",
             str(COMPOSE / "compose.yaml"),
-            "-f",
-            str(COMPOSE / "compose.step-ca.yaml"),
-            "--profile",
-            "setup",
             "--profile",
             "hermes",
             "config",
@@ -102,9 +98,9 @@ def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
 
     volumes = {item["target"]: item for item in service["volumes"]}
     assert set(volumes) == {"/opt/data", "/workspace", "/opt/data/home/.cache"}
-    assert volumes["/opt/data"]["source"] == "/srv/vonk-forge/hermes/data"
-    assert volumes["/workspace"]["source"] == "/srv/vonk-forge/hermes/workspaces"
-    assert volumes["/opt/data/home/.cache"]["source"] == "/srv/vonk-forge/hermes/cache"
+    assert volumes["/opt/data"]["source"] == "hermes-data"
+    assert volumes["/workspace"]["source"] == "hermes-workspaces"
+    assert volumes["/opt/data/home/.cache"]["source"] == "hermes-cache"
 
 
 def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
@@ -121,7 +117,7 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     assert environment["API_SERVER_CORS_ORIGINS"] == "https://hermes.test.example"
     assert service["depends_on"] == {
         "caddy": {
-            "condition": "service_started",
+            "condition": "service_healthy",
             "required": True,
             "restart": True,
         },
@@ -140,32 +136,6 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     health = json.dumps(service["healthcheck"]["test"])
     assert "127.0.0.1:8642" in health
     assert "127.0.0.1:9119" in health
-
-
-def test_setup_profile_shares_state_without_exposing_an_ingress() -> None:
-    service = _rendered()["services"]["hermes-setup"]
-
-    assert service["profiles"] == ["setup"]
-    assert set(service["networks"]) == {"hermes-egress", "hermes-inference"}
-    assert not service.get("ports")
-    assert service["stdin_open"] is True
-    assert service["tty"] is True
-    assert service["command"] == ["setup"]
-    assert service["depends_on"] == {
-        "caddy": {
-            "condition": "service_started",
-            "required": True,
-        },
-        "litellm": {
-            "condition": "service_healthy",
-            "required": True,
-        },
-    }
-    assert {item["target"] for item in service["volumes"]} == {
-        "/opt/data",
-        "/workspace",
-        "/opt/data/home/.cache",
-    }
 
 
 def _run_entrypoint(tmp_path: Path, payload: bytes | None, *, symlink: bool = False):

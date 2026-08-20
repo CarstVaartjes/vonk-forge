@@ -87,21 +87,13 @@ direct-fabric, link-local metadata, and sibling project networks. Docker DNS
 and ordinary Internet tools remain available. The default action is the
 non-mutating `--check`.
 
-## Run the one-time setup
+## Enable Hermes
 
 Provision a dedicated LiteLLM client key for Hermes; never use the LiteLLM
-master key. With LiteLLM healthy, review the selected-generation setup plan,
-then apply that exact allowlisted operation through the installed updater:
-
-```bash
-sudo vonk-control-offline maintenance hermes-setup
-sudo vonk-control-offline maintenance hermes-setup \
-  --generation REPLACE_GENERATION_FROM_PLAN --apply
-```
-
-The apply path holds the host-operation lock and invokes only the signed active
-generation's fixed `hermes-setup` profile. It cannot select another Compose
-file, profile, entrypoint, mount, environment file, or service.
+master key. Run the NAS preparation command again, select Hermes when prompted,
+and replace the upload directory on the NAS. The generated bundle contains the
+immutable Hermes image, its dedicated key, and its persistent named volumes;
+there is no setup container or separate mutation step.
 
 Resolve, map, and install the exact recipe revision in the browser Library
 workflow. Start it under a temporary alias, run its source, placement, health,

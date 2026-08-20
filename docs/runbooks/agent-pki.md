@@ -219,16 +219,8 @@ Afterward run `maintenance step-ca-health`, compare intermediate and
 provisioner public-key fingerprints, and test one disposable enrollment before
 restoring ingress.
 
-## Built-in-to-step-ca migration
+## Issuer boundary
 
-Built-in mode is an explicit bootstrap/development overlay, not a second active
-issuer. Under the same offline root, prepare step-ca and its deployment-specific
-provisioner, validate it on an isolated network, stop control-api, and replace
-`compose.builtin-ca.yaml` with `compose.step-ca.yaml`. Existing leaves continue
-through the root trust anchor; all new issuance uses Smallstep. Do not merge both
-overlays—the settings guard rejects mixed provider material.
-
-Publish and select a signed platform generation whose reviewed site selector is
-`step-ca`; the updater validates the overlay, renders it from the immutable
-generation, and performs the fixed service transition. There is no supported
-in-place Compose overlay switch.
+Step CA is the sole issuer in the canonical runtime. The setup flow generates
+or imports one coherent Step CA hierarchy and controller certificate set. There
+is no built-in issuer, provider overlay, or in-place provider migration path.

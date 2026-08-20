@@ -39,8 +39,6 @@ REQUIRED_DEPLOYMENT_ASSETS = (
     "Caddyfile",
     "bin/harden-hermes-egress",
     "caddy/entrypoint.sh",
-    "compose.builtin-ca.yaml",
-    "compose.step-ca.yaml",
     "compose.yaml",
     "grafana/dashboards/fleet.json",
     "grafana/dashboards/jobs.json",
@@ -54,6 +52,7 @@ REQUIRED_DEPLOYMENT_ASSETS = (
     "litellm/entrypoint.sh",
     "prometheus/alerts.yaml",
     "prometheus/prometheus.yml",
+    "postgres/init-databases.sh",
     "registry/config.yml",
     "step-ca/ca.json",
     "tailscale/compose.yaml",
@@ -65,6 +64,7 @@ _EXECUTABLE_ASSETS = frozenset(
     {
         "litellm/config_supervisor.py",
         "litellm/entrypoint.sh",
+        "postgres/init-databases.sh",
         "bin/harden-hermes-egress",
     }
 )

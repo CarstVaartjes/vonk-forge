@@ -56,8 +56,6 @@ def _rendered() -> dict[str, object]:
             "compose",
             "-f",
             str(COMPOSE / "compose.yaml"),
-            "-f",
-            str(COMPOSE / "compose.step-ca.yaml"),
             "config",
             "--format",
             "json",

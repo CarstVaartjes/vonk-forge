@@ -52,8 +52,11 @@ def _environment() -> dict[str, str]:
         "LITELLM_MASTER_KEY_FILE": "/dev/null",
         "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
         "LITELLM_DATABASE_URL_FILE": "/dev/null",
+        "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
         "CONTROLLER_CA_FILE": "/dev/null",
+        "CONTROLLER_SERVER_CERTIFICATE_FILE": "/dev/null",
+        "CONTROLLER_SERVER_KEY_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
         "AGENT_PROXY_AUTH_FILE": "/dev/null",
         "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
@@ -93,7 +96,7 @@ def _require_docker_runtime() -> None:
 
 def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
     command = ["docker", "compose"]
-    for file in files or ("compose.yaml", "compose.step-ca.yaml"):
+    for file in files or ("compose.yaml",):
         command.extend(("-f", str(ROOT / "deploy/compose" / file)))
     command.extend(("config", "--format", "json"))
     result = subprocess.run(command, check=True, capture_output=True, text=True, env=environment or _environment())
@@ -281,6 +284,9 @@ def _entrypoint_result(
         command.extend(("-e", f"{name}={value}"))
     command.extend((
         "-v", f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/usr/local/bin/vonk-caddy-entrypoint:ro",
+        "-v", "/etc/hostname:/run/secrets/controller-server-certificate:ro",
+        "-v", "/etc/hostname:/run/secrets/controller-server-key:ro",
+        "-v", "/etc/hostname:/run/secrets/agent-client-ca:ro",
     ))
     if secret_source is not None:
         command.extend(("-v", f"{secret_source}:/run/secrets/agent-proxy-auth:ro"))
@@ -391,7 +397,7 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
     }
     assert services["litellm"].get("ports") in (None, [])
     assert caddy["depends_on"]["control-api"] == {
-        "condition": "service_started",
+        "condition": "service_healthy",
         "required": True,
     }
 
@@ -958,49 +964,17 @@ def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
     assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
 
 
-def test_builtin_ca_override_is_explicit_and_only_it_mounts_the_builtin_signing_key() -> None:
-    production = _rendered()
-    builtin = _rendered("compose.yaml", "compose.builtin-ca.yaml")
-    production_secrets = {
-        secret["source"]
-        for secret in production["services"]["control-api"].get("secrets", [])
-    }
-    builtin_secrets = {
-        secret["source"]
-        for secret in builtin["services"]["control-api"].get("secrets", [])
-    }
-    assert production_secrets == set()
-    assert builtin_secrets == set()
-    assert {
-        secret["source"]
-        for secret in builtin["services"]["control-bootstrap"]["secrets"]
-    } >= {"agent-intermediate-key"}
-    assert "agent-ca-credential" not in {
-        secret["source"]
-        for secret in builtin["services"]["control-bootstrap"]["secrets"]
-    }
-    assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "builtin"
-    assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
-    assert "VONK_AGENT_CA_CREDENTIAL_FILE" not in builtin["services"]["control-api"]["environment"]
-
-
-def test_provider_overlays_require_only_their_own_secrets() -> None:
-    base = _rendered("compose.yaml")
-    assert "step-ca" not in base["services"]
-    assert "VONK_AGENT_CA_PROVIDER" not in base["services"]["control-api"]["environment"]
-
-    builtin_environment = _environment()
-    for name in ("AGENT_CA_CREDENTIAL_FILE", "STEP_CA_ROOT_CERTIFICATE_FILE", "STEP_CA_INTERMEDIATE_KEY_FILE", "STEP_CA_PASSWORD_FILE"):
-        builtin_environment.pop(name)
-    builtin = _rendered("compose.yaml", "compose.builtin-ca.yaml", environment=builtin_environment)
-    assert "agent-ca-credential" not in {
-        secret["source"]
-        for secret in builtin["services"]["control-bootstrap"]["secrets"]
-    }
-
+def test_canonical_runtime_requires_step_ca_secrets() -> None:
     missing_step_secret = _environment()
     missing_step_secret.pop("STEP_CA_PASSWORD_FILE")
-    command = ["docker", "compose", "-f", str(ROOT / "deploy/compose/compose.yaml"), "-f", str(ROOT / "deploy/compose/compose.step-ca.yaml"), "config", "--quiet"]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(ROOT / "deploy/compose/compose.yaml"),
+        "config",
+        "--quiet",
+    ]
     result = subprocess.run(
         command,
         capture_output=True,
@@ -1012,32 +986,17 @@ def test_provider_overlays_require_only_their_own_secrets() -> None:
     assert "STEP_CA_PASSWORD_FILE" in result.stderr
 
 
-def test_provider_overlays_are_mutually_exclusive_at_application_startup(tmp_path: Path) -> None:
-    for overlays in (
-        ("compose.step-ca.yaml", "compose.builtin-ca.yaml"),
-        ("compose.builtin-ca.yaml", "compose.step-ca.yaml"),
-    ):
-        rendered = _rendered("compose.yaml", *overlays)
-        result = _settings_result(rendered, tmp_path / overlays[0])
-        assert result.returncode != 0
-        assert "CA provider settings cannot be combined" in result.stderr
-
-
-def test_each_provider_overlay_passes_application_settings_guard(tmp_path: Path) -> None:
+def test_canonical_step_ca_settings_pass_application_guard(tmp_path: Path) -> None:
     token = "A" * 30 + "_-"
-    for overlay, provider in (
-        ("compose.step-ca.yaml", "step-ca"),
-        ("compose.builtin-ca.yaml", "builtin"),
-    ):
-        rendered = _rendered("compose.yaml", overlay)
-        environment = rendered["services"]["control-api"]["environment"]
-        assert environment["VONK_DEPLOYMENT_MODE"] == "production"
-        assert environment["VONK_AGENT_RUNTIME"] == "enabled"
-        result = _settings_result(rendered, tmp_path / provider)
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.splitlines() == [
-            provider,
-            token,
-            "10.0.0.0/24",
-            "192.168.100.0/24,192.168.101.0/24",
-        ]
+    rendered = _rendered()
+    environment = rendered["services"]["control-api"]["environment"]
+    assert environment["VONK_DEPLOYMENT_MODE"] == "production"
+    assert environment["VONK_AGENT_RUNTIME"] == "enabled"
+    result = _settings_result(rendered, tmp_path / "step-ca")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "step-ca",
+        token,
+        "10.0.0.0/24",
+        "192.168.100.0/24,192.168.101.0/24",
+    ]

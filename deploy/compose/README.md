@@ -259,7 +259,7 @@ exact `svc:hermes-dashboard` HTTPS origin supplied by Tailscale.
 
 ### PKI
 
-For the production-shaped `compose.step-ca.yaml` overlay set
+Step CA is part of the canonical production-shaped graph. Set
 `AGENT_CLIENT_CA_FILE`, `AGENT_INTERMEDIATE_CERTIFICATE_FILE`,
 `AGENT_PROXY_AUTH_FILE`, `AGENT_CA_CREDENTIAL_FILE`,
 `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE`, `AGENT_CA_PROVISIONER_NAME`,
@@ -277,7 +277,8 @@ Set every required secret path in `.env`; these are paths only, never values:
 `AGENT_UPDATE_AUTHORITY_KEY_FILE`, `ADMIN_GRANT_PUBLIC_KEY_FILE`,
 `AGENT_TUF_BOOTSTRAP_ROOT_FILE`,
 `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`,
-`LITELLM_DATABASE_URL_FILE`, `GRAFANA_ADMIN_PASSWORD_FILE`,
+`LITELLM_DATABASE_URL_FILE`, `LITELLM_DATABASE_PASSWORD_FILE`,
+`GRAFANA_ADMIN_PASSWORD_FILE`,
 `AGENT_CLIENT_CA_FILE`, `AGENT_INTERMEDIATE_CERTIFICATE_FILE`,
 `AGENT_PROXY_AUTH_FILE`, `AGENT_CA_CREDENTIAL_FILE`,
 `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE`, `STEP_CA_ROOT_CERTIFICATE_FILE`,
@@ -417,9 +418,9 @@ tailnet policy, and exact Services. Do this in order:
    the candidate API in inert preselection mode, selects the generation, and
    requires generation-bound API and worker readiness.
 
-The production-shaped graph uses `compose.step-ca.yaml` for both production and
-development. Development uses synthetic PKI credentials and disposable step-ca
-state; the provider topology does not change.
+The canonical graph includes Step CA for both production and development.
+Development uses different immutable release identities and site-local
+credentials; the provider topology does not change.
 
 ## Install and first selection
 

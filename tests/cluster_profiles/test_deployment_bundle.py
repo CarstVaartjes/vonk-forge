@@ -23,8 +23,6 @@ ASSETS = (
     "Caddyfile",
     "bin/harden-hermes-egress",
     "caddy/entrypoint.sh",
-    "compose.builtin-ca.yaml",
-    "compose.step-ca.yaml",
     "compose.yaml",
     "grafana/dashboards/fleet.json",
     "grafana/dashboards/jobs.json",
@@ -38,6 +36,7 @@ ASSETS = (
     "litellm/entrypoint.sh",
     "prometheus/alerts.yaml",
     "prometheus/prometheus.yml",
+    "postgres/init-databases.sh",
     "registry/config.yml",
     "step-ca/ca.json",
     "tailscale/compose.yaml",
@@ -82,6 +81,7 @@ def _copy_source(tmp_path: Path) -> Path:
             in {
                 "litellm/config_supervisor.py",
                 "litellm/entrypoint.sh",
+                "postgres/init-databases.sh",
                 "bin/harden-hermes-egress",
             }
             else 0o644
@@ -235,8 +235,6 @@ def test_bundle_allowlist_covers_every_local_production_compose_asset() -> None:
     local_assets: set[str] = set()
     for relative in (
         "compose.yaml",
-        "compose.builtin-ca.yaml",
-        "compose.step-ca.yaml",
         "hermes-agent/compose.yaml",
         "tailscale/compose.yaml",
     ):
@@ -286,6 +284,7 @@ def test_verified_bundle_extracts_exact_bytes_and_modes(tmp_path: Path) -> None:
                     "bin/harden-hermes-egress",
                     "litellm/config_supervisor.py",
                     "litellm/entrypoint.sh",
+                    "postgres/init-databases.sh",
                 }
             else 0o644
         )

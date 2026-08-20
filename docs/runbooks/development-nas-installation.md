@@ -40,15 +40,11 @@ HERMES_DASHBOARD_ORIGIN=https://hermes-dashboard.<tailnet>.ts.net
 Then start the profile alongside the normal project:
 
 ```bash
-sudo install -d -m 0750 /srv/vonk-forge/hermes/{data,workspaces,cache}
 docker compose --env-file .env --profile hermes up -d --wait
 ```
 
-The optional setup container is run explicitly with the `setup` profile:
-
-```bash
-docker compose --env-file .env --profile setup run --rm hermes-setup
-```
+Hermes is selected while preparing the NAS upload bundle. No setup container
+or additional Compose command is required.
 
 Do not enable the profile with a mutable tag or the upstream base image. The
 published Vonk Forge Hermes image contains the fixed UID/GID and the Vonk

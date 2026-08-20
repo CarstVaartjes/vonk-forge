@@ -49,7 +49,7 @@ def test_compose_and_public_template_keep_root_key_out_and_provider_private_key_
     compose = ROOT / "deploy/compose"
     result = subprocess.run([
         "docker", "compose", "--env-file", str(compose / "tests/test.env"),
-        "-f", str(compose / "compose.yaml"), "-f", str(compose / "compose.step-ca.yaml"),
+        "-f", str(compose / "compose.yaml"),
         "config", "--format", "json",
     ], check=True, capture_output=True, text=True)
     rendered = json.loads(result.stdout)

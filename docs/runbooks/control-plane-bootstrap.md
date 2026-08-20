@@ -51,16 +51,13 @@ identity: authenticated agent presence supplies the current validated address.
 4. After the guide's successful first selection, check `/api/v1/healthz`
    through the `svc:vonk-forge` Tailscale Service.
 
-   The base file deliberately has no CA provider selection, so it is not a
-   runnable production configuration. A development-only generation may use
-   `compose.builtin-ca.yaml`; production selects `compose.step-ca.yaml`.
-   Select exactly one provider overlay. Combining both overlays is rejected by
-   the control API at startup regardless of their order.
+   Step CA is part of the canonical graph in every release channel. There is no
+   provider overlay or built-in CA alternative.
 
 The API and worker are separate targets built from the same release commit and
-remain separate services. The API image contains Git/OpenSSH for signed
-repository administration. The worker image contains neither Git nor OpenSSH,
-mounts no repository or Git key, and has no GPU node-facing network.
+remain separate services. Neither application image contains a runtime Git
+checkout or SSH service. The control authority is stored in PostgreSQL, and
+neither service mounts a repository or Git key.
 PostgreSQL, Caddy, LiteLLM, Prometheus, Grafana, Tailscale, and Hermes Agent are
 independent containers in this one project. Only Caddy publishes a host port,
 and that is the `10.0.0.2:8443` GPU node backend. The Tailscale gateway publishes

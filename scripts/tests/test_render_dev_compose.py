@@ -4,14 +4,15 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DEVELOPMENT_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DIGEST = "a" * 64
-API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}"
-WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev@sha256:{DIGEST}"
+API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 
 
 def _renderer():
@@ -59,3 +60,17 @@ def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path)
     bootstrap_secrets = document["services"]["control-bootstrap"]["secrets"]
     assert "admin-grant-private-key" in bootstrap_secrets
     assert "step-ca-password" in bootstrap_secrets
+
+
+def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> None:
+    """Catches a development bundle that is not reproducible from its manifest."""
+    output = tmp_path / "docker-compose.yaml"
+
+    with pytest.raises(ValueError, match="immutable published development image"):
+        _renderer().render(
+            TEMPLATE,
+            output,
+            f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+            WORKER_IMAGE,
+            channel="dev",
+        )

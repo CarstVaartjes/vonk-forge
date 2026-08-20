@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import os
 import re
 import tempfile
 from pathlib import Path
+
+import yaml
 
 API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
 WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
@@ -24,6 +28,17 @@ def _validate_image(image: str, role: str) -> None:
         raise ValueError(
             f"{role} image must be the public production alias locked by digest"
         )
+
+
+def _canonical_renderer():
+    script = Path(__file__).with_name("render-dev-compose")
+    loader = importlib.machinery.SourceFileLoader("canonical_compose_renderer", str(script))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise ValueError("canonical Compose renderer is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 def render(template: Path, output: Path, api_image: str, worker_image: str) -> None:
@@ -46,12 +61,19 @@ def render(template: Path, output: Path, api_image: str, worker_image: str) -> N
         if text.count(token) != count:
             role = "API" if token == API_TOKEN else "worker"
             raise ValueError(f"template {role} image token count changed")
-    rendered = text.replace(API_TOKEN, api_image).replace(WORKER_TOKEN, worker_image)
+    canonical_renderer = _canonical_renderer()
+    document = canonical_renderer._compose_document(template)
+    document = canonical_renderer._replace_image_tokens(
+        document,
+        {API_TOKEN: api_image, WORKER_TOKEN: worker_image},
+    )
+    rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "CONTROL_API_IMAGE" in rendered or "CONTROL_WORKER_IMAGE" in rendered:
         raise ValueError("template contains unresolved control image input")
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("template is not the production graph")
 
+    canonical_renderer._copy_runtime_assets(template, output)
     descriptor, stage_name = tempfile.mkstemp(
         prefix=".render-production-compose-", dir=output.parent
     )

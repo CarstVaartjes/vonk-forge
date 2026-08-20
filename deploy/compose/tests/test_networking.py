@@ -40,11 +40,14 @@ def _rendered() -> dict:
         "LITELLM_MASTER_KEY_FILE": "/dev/null",
         "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
         "LITELLM_DATABASE_URL_FILE": "/dev/null",
+        "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
         "TAILSCALE_IMAGE": "tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
         "CONTROLLER_CA_FILE": "/dev/null",
+        "CONTROLLER_SERVER_CERTIFICATE_FILE": "/dev/null",
+        "CONTROLLER_SERVER_KEY_FILE": "/dev/null",
         "AGENT_PROXY_AUTH_FILE": "/dev/null",
         "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
         "AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "/dev/null",
@@ -75,8 +78,6 @@ def _rendered() -> dict:
             "compose",
             "-f",
             str(root / "deploy/compose/compose.yaml"),
-            "-f",
-            str(root / "deploy/compose/compose.step-ca.yaml"),
             "config",
             "--format",
             "json",
@@ -408,7 +409,7 @@ def test_caddy_has_readiness_checks() -> None:
 
     assert services["caddy"]["healthcheck"]["test"] == [
         "CMD-SHELL",
-        "wget -q -O /dev/null http://127.0.0.1:8080/healthz",
+        "wget -q -O /dev/null http://127.0.0.1:8082/healthz",
     ]
 
 

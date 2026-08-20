@@ -66,6 +66,15 @@
 	}
 }
 
+# Container readiness must not depend on a virtual host or any upstream. This
+# listener is loopback-only and is never published by Compose.
+http://127.0.0.1:8082 {
+	handle /healthz {
+		respond 200
+	}
+	respond 404
+}
+
 # Browser and operator traffic arrives only from the Tailscale gateway over the
 # private tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
 # listener; Docker does not publish port 8080.
@@ -127,6 +136,7 @@
 # certificate. It exposes exactly the bounded enrollment submission route.
 https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 
 	@not_enrollment not path /agent/v1/enroll
 	handle @not_enrollment {
@@ -142,7 +152,7 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 # node-ID grammar before it reaches the application.
 https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import agent_edge_guards
-	tls {
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
 			mode require_and_verify
@@ -176,7 +186,7 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 # publication uses the private registry network, never this SNI.
 https://{$VONK_REGISTRY_HOSTNAME:registry.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
-	tls {
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
 			mode require_and_verify

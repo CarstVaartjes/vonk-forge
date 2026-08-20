@@ -77,6 +77,8 @@ if ! wait_for_exact_services; then
     exit 1
 fi
 
+touch /tmp/tailscale-configurator-ready
+
 ts status --json >/tmp/tailscale-status.json
 if grep -Fq '"service-host"' /tmp/tailscale-status.json; then
     :
@@ -99,7 +101,9 @@ fi
 while :; do
     sleep 60
     if ! serve_is_exact; then
+        rm -f /tmp/tailscale-configurator-ready
         configure_services
         wait_for_exact_services || exit 1
+        touch /tmp/tailscale-configurator-ready
     fi
 done
