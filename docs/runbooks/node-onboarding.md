@@ -7,12 +7,12 @@
    curl -fsSL https://install.vonkforge.ai/spark | sh
    ```
 
-3. Enter the values requested by the installer. Review the pending Spark's
-   hardware, host-key, agent, and CSR evidence in the browser and approve it.
+3. Enter the values requested by the installer. The one-use token authorizes
+   that enrollment and is exchanged directly for the Spark identity.
 
-The command remains active while approval is pending. It finishes only after
-the direct Rust agent is paired, running, and verified. Repeat the same command
-later to upgrade. Routine operation is outbound mTLS and never uses SSH.
+The command finishes only after the direct Rust agent is paired, running, and
+verified. Repeat the same command later to upgrade. Routine operation is
+outbound mTLS and never uses SSH.
 
 Repeat this flow independently for every Spark; the product has no fixed fleet
 size or repository-owned node list.

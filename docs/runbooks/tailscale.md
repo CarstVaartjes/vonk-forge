@@ -50,38 +50,16 @@ tailnet-only Service host.
 
 The OAuth client is created under **Tailscale admin console → Trust credentials
 → Credential → OAuth** with only `auth_keys` write scope and only
-`tag:vonk-gateway`. Capture its values once into separate mode `0600` files
-without putting either value in a command argument or terminal output.
+`tag:vonk-gateway`. Enter the ID and secret when the one-command NAS installer
+asks for them:
 
-For development, use the silent-input procedure in
-[Prepare private Tailscale browser access](development-nas-installation.md#prepare-private-tailscale-browser-access),
-pass those files to `scripts/dev-runtime-secrets.py`, and let
-`scripts/dev-runtime-project-remote` publish the exact files on the NAS's real
-filesystem. A direct POSIX-capable Linux mount may use the underlying
-`scripts/dev-runtime-project`. For production, create
-the two empty root-owned mode `0600` NAS files, edit them with the host's
-privileged secret editor, and verify only metadata—never file contents:
-
-```bash
-sudo install -d -m 0700 -o root -g root /srv/vonk-forge/secrets
-sudo install -m 0600 -o root -g root /dev/null \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-id
-sudo install -m 0600 -o root -g root /dev/null \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-secret
-sudoedit /srv/vonk-forge/secrets/tailscale-oauth-client-id
-sudoedit /srv/vonk-forge/secrets/tailscale-oauth-client-secret
-sudo stat -c '%n %U:%G %a %s bytes' \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-id \
-  /srv/vonk-forge/secrets/tailscale-oauth-client-secret
+```sh
+curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-Set only the file paths in the site environment. Start and verify the complete
-released Compose graph from its deployment directory:
-
-```bash
-docker compose up -d --wait --remove-orphans
-docker compose ps
-```
+The terminal hides secret input and writes the values directly into the local
+upload bundle. Do not place either credential in a command argument, `.env`, or
+shell history.
 
 Keep the OAuth client secret file equal to the raw value issued by Tailscale;
 do not append query parameters to the operator copy. At startup, the Compose
@@ -109,9 +87,8 @@ gateway entry. Never delete database, repository, model, control-state, or
 other application volumes during this repair.
 
 The configurator tolerates the bounded control-plane propagation delay after a
-new advertisement. It accepts both the legacy `service-host` capability and
-the current per-Service `services/<name>` capability, but still requires the
-exact HTTPS listeners and upstream map before publishing browser readiness.
+new advertisement and requires the exact HTTPS listeners and upstream map
+before publishing browser readiness.
 
 The configurator waits for Caddy and Hermes health. It resets any missing,
 extra, downgraded, or retargeted Serve map and deterministically creates:

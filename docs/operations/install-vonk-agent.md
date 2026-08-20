@@ -11,11 +11,11 @@ published package as the current user, verifies its release identity and exact
 digest, and only then asks `sudo` to install it.
 
 For a new Spark, the wizard asks for the enrollment and controller endpoints,
-controller CA fingerprint, and one-use pairing token. Secret input is hidden
-and never appears in process arguments or environment variables. The command
-waits visibly while an administrator reviews and approves the pending Spark in
-the Vonk Forge web interface. It then stores the issued identity, starts the
-direct Rust-agent systemd service, and verifies readiness before returning.
+controller CA URL and fingerprint, and one-use pairing token. Secret input is
+hidden and never appears in process arguments or environment variables. The
+token is the explicit enrollment authorization: the command exchanges it for
+the Spark identity, starts the direct Rust-agent systemd service, and verifies
+sustained readiness before returning.
 
 For an installed Spark, run the same command. It preserves configuration and
 identity, replaces the Debian package directly, restarts the service, and
