@@ -17,6 +17,7 @@ from vonk_control.database_authority import (
     AuthorityChange,
     DatabaseAuthorityService,
     DatabaseProposalService,
+    StaleAuthorityRevision,
 )
 from vonk_control.db import initialize_database
 from vonk_control.models import (
@@ -124,6 +125,18 @@ def test_postgres_initialization_persists_revision_before_head(authority):
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
 
 
+def test_postgres_initial_authority_document_is_readable(authority):
+    service, _, _ = authority
+
+    revision = service.ensure_initialized()
+
+    assert service.read_document(revision, "inventory/topology.json").parsed == {
+        "schema_version": 1,
+        "nodes": [],
+        "links": [],
+    }
+
+
 def test_postgres_apply_persists_revision_before_moving_head(authority):
     service, proposals, sessions = authority
     base = service.ensure_initialized()
@@ -145,6 +158,60 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
         assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == revision
+
+
+def test_postgres_preview_survives_service_restart_and_apply_is_idempotent(authority):
+    service, proposals, sessions = authority
+    base = service.ensure_initialized()
+    preview = proposals.preview(
+        "admin",
+        base,
+        [
+            AuthorityChange(
+                "inventory/topology.json",
+                {"schema_version": 1, "nodes": ["first"], "links": []},
+            )
+        ],
+    )
+
+    restarted = DatabaseProposalService(service)
+    persisted = restarted.apply(preview.digest)
+    changed = service.apply(persisted)
+
+    assert service.apply(persisted) == changed
+    assert service.head() == changed
+    with sessions() as session:
+        assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == changed
+
+
+def test_postgres_compare_and_swap_rejects_stale_proposal(authority):
+    service, proposals, _ = authority
+    base = service.ensure_initialized()
+    first = proposals.preview(
+        "admin",
+        base,
+        [
+            AuthorityChange(
+                "inventory/topology.json",
+                {"schema_version": 1, "nodes": ["first"], "links": []},
+            )
+        ],
+    )
+    second = proposals.preview(
+        "admin",
+        base,
+        [
+            AuthorityChange(
+                "inventory/topology.json",
+                {"schema_version": 1, "nodes": ["second"], "links": []},
+            )
+        ],
+    )
+
+    service.apply(first)
+
+    with pytest.raises(StaleAuthorityRevision):
+        service.apply(second)
 
 
 def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
