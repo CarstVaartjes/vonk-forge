@@ -192,15 +192,16 @@ manifest is assembled from their accepted receipts, the manifest is verified,
 and only then is the channel pointer advanced atomically. Branch protection
 requires one fail-closed aggregate covering all behavioral suites.
 
-1Password is the canonical recoverable copy for every private release-signing
-key, while protected GitHub Actions environments may retain controlled
-execution copies. A separately encrypted offline escrow must have a derived
-public fingerprint matching the tracked verification key; escrow never reaches
-CI. The current GitHub-only key remains untouched until a replacement exists in
-both 1Password and escrow and succeeds in end-to-end sign/verify testing.
-Public verification keys and fingerprints remain tracked, non-secret release
-inputs. CI does not add a 1Password/OIDC runtime dependency merely to avoid
-those protected execution copies.
+Every private release-signing key must have a recoverable human-controlled
+backup, with 1Password available as an optional destination rather than a
+product or CI dependency. Protected GitHub Actions environments may retain
+controlled execution copies. A separately encrypted offline escrow must have a
+derived public fingerprint matching the tracked verification key; escrow never
+reaches CI. The current GitHub-only key remains untouched until a replacement
+exists in verified recoverable backup and escrow copies and succeeds in
+end-to-end sign/verify testing. Public verification keys and fingerprints
+remain tracked, non-secret release inputs. CI does not add a 1Password/OIDC
+runtime dependency.
 
 ## Testing and acceptance
 

@@ -97,8 +97,9 @@ Self-review found and corrected the nested-DIND route-address issue: the
 candidate Caddy port belongs to the DIND network namespace, so its inspected
 IPv4 is now the acceptance NAS address. No installer, bundle, `.env`, secret,
 prompt, or deployment input contains Docker/Compose fixture versions. External
-1Password replacement-key and fingerprint-verified encrypted-offline-escrow
-provisioning remain required; the current GitHub-only key was untouched.
+Recoverable replacement-key backup and fingerprint-verified encrypted offline
+escrow provisioning remain required; 1Password is optional rather than a CI or
+product dependency. The current GitHub-only key was untouched.
 
 ## Superseded historical record
 
