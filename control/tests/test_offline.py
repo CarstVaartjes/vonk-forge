@@ -41,9 +41,9 @@ def test_installed_updater_exposes_only_allowlisted_maintenance_actions(
         "tailscale-serve-status",
         "tailscale-serve-config",
         "step-ca-health",
-        "hermes-setup",
     ):
         assert action in output
+    assert "hermes-setup" not in output
 
 
 def test_installed_updater_routes_maintenance_without_loading_release_authority(

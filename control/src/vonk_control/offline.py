@@ -19,6 +19,7 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
+
 from tuf.ngclient import Urllib3Fetcher
 
 from cluster_profiles.deployment_bundle import (
@@ -90,7 +91,6 @@ _MAINTENANCE_ACTIONS = (
     "tailscale-serve-status",
     "tailscale-serve-config",
     "step-ca-health",
-    "hermes-setup",
 )
 
 
@@ -544,7 +544,7 @@ class HostUpgradeBoundary:
             recipients_file=Path(recipients_file),
             identity_file=None if identity_file is None else Path(identity_file),
             compose_environment=self._site_environment_if_available(),
-            compose_overlays=self._compose_overlay_names_if_available(),
+            compose_overlays=(),
             control_identity_root=self._generation_store.identity_root,
             runner=self._runner,
         )
@@ -1277,9 +1277,9 @@ class HostUpgradeBoundary:
         """Run one allowlisted operation against the selected immutable generation."""
 
         selected = self._require_active()
-        if apply and action != "hermes-setup":
+        if apply:
             raise UpgradeConflict("maintenance apply is not allowed for diagnostics")
-        if action != "hermes-setup" and expected_generation is not None:
+        if expected_generation is not None:
             raise UpgradeConflict("planned generation is not allowed for diagnostics")
         if action != "logs" and service is not None:
             raise UpgradeConflict("maintenance service is not allowed for this action")
@@ -1345,20 +1345,6 @@ class HostUpgradeBoundary:
                 "--root",
                 "/run/secrets/root_ca.crt",
             )
-        elif action == "hermes-setup":
-            plan = {
-                "action": action,
-                "generation_id": selected.generation_id,
-                "mode": "applied" if apply else "plan",
-            }
-            if not apply:
-                return plan
-            if (
-                not isinstance(expected_generation, str)
-                or _IDENTIFIER.fullmatch(expected_generation) is None
-            ):
-                raise UpgradeConflict("planned generation is required for Hermes setup")
-            arguments = ("--profile", "setup", "run", "--rm", "hermes-setup")
         else:
             raise UpgradeConflict("maintenance action is not allowed")
 
@@ -1369,16 +1355,7 @@ class HostUpgradeBoundary:
                 policy=CommandPolicy(300, 1024 * 1024, 1024 * 1024),
             )
 
-        if action == "hermes-setup":
-            with HostOperationLock(
-                self._state_root, owner_uid=os.geteuid()
-            ):
-                locked_selected = self._require_active()
-                if locked_selected.generation_id != expected_generation:
-                    raise UpgradeConflict("planned generation is no longer active")
-                output = execute(locked_selected)
-        else:
-            output = execute(selected)
+        output = execute(selected)
         try:
             rendered = output.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -1386,7 +1363,7 @@ class HostUpgradeBoundary:
         return {
             "action": action,
             "generation_id": selected.generation_id,
-            "mode": "applied" if action == "hermes-setup" else "diagnostic",
+            "mode": "diagnostic",
             "output": rendered,
         }
 
@@ -1540,44 +1517,14 @@ class HostUpgradeBoundary:
             return {}
         return self._site_environment()
 
-    def _compose_overlay_names_if_available(self) -> tuple[str, ...]:
-        environment = self._site_environment_if_available()
-        selector = environment.get("VONK_CONTROL_CA_OVERLAY")
-        if selector is None:
-            return ()
-        overlays = {
-            "step-ca": "compose.step-ca.yaml",
-            "builtin-ca": "compose.builtin-ca.yaml",
-        }
-        try:
-            return (overlays[selector],)
-        except KeyError as error:
-            raise BackupError("site CA overlay is invalid") from error
-
     def _compose_arguments(
         self,
         root: Path,
         compose: Path,
         environment: Mapping[str, str],
     ) -> tuple[str, ...]:
-        paths = [compose]
-        selector = environment.get("VONK_CONTROL_CA_OVERLAY")
-        if selector is not None:
-            overlays = {
-                "step-ca": "compose.step-ca.yaml",
-                "builtin-ca": "compose.builtin-ca.yaml",
-            }
-            try:
-                overlay = root / overlays[selector]
-            except KeyError as error:
-                raise UpgradeConflict("site CA overlay is invalid") from error
-            _read_stable_file(
-                overlay,
-                label="generation Compose overlay",
-                maximum=4 * 1024 * 1024,
-            )
-            paths.append(overlay)
-        return tuple(item for path in paths for item in ("--file", str(path)))
+        del root, environment
+        return ("--file", str(compose))
 
     @staticmethod
     def _host_plan(plan: ControlGenerationPlan) -> HostOperationPlan:

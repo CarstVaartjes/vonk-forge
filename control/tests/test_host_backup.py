@@ -290,7 +290,7 @@ def test_upgrade_backup_uses_fixed_commands_and_canonical_allowlisted_archive(
     assert not list(output.parent.glob(".*.partial"))
 
 
-def test_backup_compose_uses_selected_overlay_and_exact_generation_environment(
+def test_backup_compose_uses_canonical_graph_and_exact_generation_environment(
     tmp_path: Path,
 ) -> None:
     state_root = tmp_path / "control-host"
@@ -301,9 +301,8 @@ def test_backup_compose_uses_selected_overlay_and_exact_generation_environment(
     generation_json = b'{"receipt_kind":"selection","schema_version":1}\n'
     (generation / "generation.json").write_bytes(generation_json)
     (generation / "generation.json").chmod(0o400)
-    for name in ("compose.yaml", "compose.step-ca.yaml"):
-        (generation / name).write_text("services: {}\n", encoding="utf-8")
-        (generation / name).chmod(0o444)
+    (generation / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    (generation / "compose.yaml").chmod(0o444)
     recipients = tmp_path / "recipients"
     identity = tmp_path / "identity"
     recipients.write_text("age1test\n", encoding="utf-8")
@@ -319,20 +318,18 @@ def test_backup_compose_uses_selected_overlay_and_exact_generation_environment(
         command_policy=CommandPolicy(30, 0, 4096),
         artifact_policy=ArtifactPolicy(8 * 1024 * 1024, 0),
         compose_environment={"COMPOSE_PROJECT_NAME": "vonk-forge-control"},
-        compose_overlays=("compose.step-ca.yaml",),
+        compose_overlays=(),
         control_identity_root=tmp_path / "control-identity",
     )
 
     boundary.create_upgrade_backup(_selected(generation_json), "upgrade-operation")
 
     docker_call = runner.calls[0]
-    assert docker_call["argv"][:7] == (
+    assert docker_call["argv"][:5] == (
         "/usr/bin/docker",
         "compose",
         "--file",
         str(generation / "compose.yaml"),
-        "--file",
-        str(generation / "compose.step-ca.yaml"),
         "exec",
     )
     assert docker_call["env"]["COMPOSE_PROJECT_NAME"] == "vonk-forge-control"

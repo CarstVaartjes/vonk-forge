@@ -325,37 +325,6 @@ def test_maintenance_logs_have_a_fixed_service_allowlist_and_bounded_since(
         boundary.maintenance("status", apply=True)
 
 
-def test_hermes_setup_requires_explicit_apply_and_uses_the_fixed_profile(
-    tmp_path: Path,
-) -> None:
-    boundary, runner, _site = _boundary(tmp_path)
-
-    plan = boundary.maintenance("hermes-setup", apply=False)
-    assert plan["mode"] == "plan"
-    assert runner.calls == []
-
-    (tmp_path / "control-host").chmod(0o700)
-    with pytest.raises(Exception, match="planned generation"):
-        boundary.maintenance("hermes-setup", apply=True)
-    with pytest.raises(Exception, match="planned generation"):
-        boundary.maintenance(
-            "hermes-setup", apply=True, expected_generation="gen-" + "b" * 24
-        )
-    applied = boundary.maintenance(
-        "hermes-setup",
-        apply=True,
-        expected_generation=str(plan["generation_id"]),
-    )
-
-    assert applied["mode"] == "applied"
-    assert runner.calls[-1]["argv"][-5:] == (
-        "--profile",
-        "setup",
-        "run",
-        "--rm",
-        "hermes-setup",
-    )
-
 def test_predecessor_verified_is_an_exact_generation_receipt_probe(
     tmp_path: Path,
 ) -> None:
@@ -432,19 +401,15 @@ def test_selected_service_start_uses_generation_directory_and_persists_fresh_non
     ).exists()
 
 
-def test_selected_service_start_applies_full_generation_with_exact_ca_overlay(
+def test_selected_service_start_applies_the_canonical_generation(
     tmp_path: Path,
 ) -> None:
     boundary, runner, site = _boundary(tmp_path)
-    site.write_text(
-        "COMPOSE_PROJECT_NAME=forge-test\nVONK_CONTROL_CA_OVERLAY=step-ca\n",
-        encoding="utf-8",
-    )
+    site.write_text("COMPOSE_PROJECT_NAME=forge-test\n", encoding="utf-8")
     plan = _plan()
     target = tmp_path / "control-host" / "generations" / plan.generation_id
     target.mkdir(mode=0o700)
-    for name in ("compose.yaml", "compose.step-ca.yaml"):
-        (target / name).write_text("services: {}\n", encoding="utf-8")
+    (target / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
 
     boundary.perform_phase(UpgradePhase.SERVICES_STARTED, plan)
 
@@ -454,8 +419,6 @@ def test_selected_service_start_applies_full_generation_with_exact_ca_overlay(
         "compose",
         "--file",
         str(target / "compose.yaml"),
-        "--file",
-        str(target / "compose.step-ca.yaml"),
         "up",
         "-d",
         "--remove-orphans",
@@ -487,10 +450,7 @@ def test_first_install_boundary_does_not_require_repository_or_active_compose(
     state = tmp_path / "control-host"
     state.mkdir(mode=0o700)
     site = tmp_path / "site.env"
-    site.write_text(
-        "COMPOSE_PROJECT_NAME=forge-test\nVONK_CONTROL_CA_OVERLAY=step-ca\n",
-        encoding="utf-8",
-    )
+    site.write_text("COMPOSE_PROJECT_NAME=forge-test\n", encoding="utf-8")
     recipients = tmp_path / "recipients"
     recipients.write_text("age1test\n", encoding="utf-8")
     recipients.chmod(0o400)
