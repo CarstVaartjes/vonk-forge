@@ -13,17 +13,8 @@ function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\"'\"'")}'`;
-}
-
-function bootstrapCommand(grant: EnrollmentGrantResponse): string {
-  return [
-    "sudo /usr/lib/vonk-forge/vonk-agent pair \\",
-    "  --enrollment " + shellQuote(grant.enrollment_endpoint) + " \\",
-    "  --ca-sha256 " + shellQuote(grant.ca_fingerprint) + " \\",
-    "  --token-stdin",
-  ].join("\n");
+function bootstrapCommand(): string {
+  return "curl -fsSL https://install.vonkforge.ai/spark | sh";
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {
@@ -54,17 +45,17 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
 
   return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title">
-      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived, pinned bootstrap command.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
       <div className="library-action-dialog-body">
         {!grant && <>
-          <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><strong>Create</strong><span>Generate a one-time grant here.</span></li><li><strong>Run</strong><span>Copy the command to the Spark.</span></li><li><strong>Review</strong><span>Approve the pending enrollment.</span></li></ol>
-          <p className="onboarding-guidance">The Spark generates its immutable <code>spk_…</code> identity locally. The command carries the controller endpoints and CA fingerprint required for a pinned bootstrap.</p>
+          <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><strong>Create</strong><span>Generate a one-time grant here.</span></li><li><strong>Run</strong><span>Run the public installer on the Spark.</span></li><li><strong>Enter</strong><span>Provide the values shown here when prompted.</span></li></ol>
+          <p className="onboarding-guidance">The Spark generates its immutable <code>spk_…</code> identity locally. The installer verifies the release before requesting sudo and pins the controller CA.</p>
           {error && <p role="alert" className="dialog-error">{error}</p>}
         </>}
         {grant && <>
           <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
-          <p>Run this command on the Spark, paste the one-time token below into standard input, then approve the enrollment from the Fleet queue.</p>
-          <code className="onboarding-command">{bootstrapCommand(grant)}</code>
+          <p>Run this command on the Spark and enter the values below when prompted. The one-time token is the enrollment authorization.</p>
+          <code className="onboarding-command">{bootstrapCommand()}</code>
           <dl className="grant-facts"><div><dt>One-time token</dt><dd><code>{grant.token}</code></dd></div><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
       </div>
