@@ -452,7 +452,7 @@
 
       <article class="flow">
         <span class="num">2</span>
-        <div><h3>Each GPU node is paired once</h3><p><code>vonk-agent pair</code> stores the controller URL and CA, creates the key on the GPU node, and exchanges an approved pairing code for its node certificate.</p></div>
+        <div><h3>Each GPU node is paired once</h3><p><code>curl -fsSL https://install.vonkforge.ai/spark | sh</code> verifies and installs the Rust agent, pins the controller CA, creates the key on the GPU node, and exchanges the one-use authorization for its node certificate.</p></div>
         <div class="route">Spark → agents.vonk-forge.lan → Caddy's agent-only SNI → controller</div>
       </article>
 

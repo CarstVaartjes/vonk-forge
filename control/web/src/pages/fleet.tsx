@@ -54,7 +54,7 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
         </>}
         {grant && <>
           <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
-          <p>Run this command on the Spark and enter the values below when prompted. The one-time token is the enrollment authorization.</p>
+          <p>Run this command on the Spark. Enter the enrollment URL, CA fingerprint, and one-time token below when prompted; the installer discovers the controller endpoint.</p>
           <code className="onboarding-command">{bootstrapCommand()}</code>
           <dl className="grant-facts"><div><dt>One-time token</dt><dd><code>{grant.token}</code></dd></div><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
