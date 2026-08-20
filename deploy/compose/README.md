@@ -42,7 +42,6 @@ vonk-forge/
     ├── postgres-password
     ├── database-url
     ├── admin-password-verifier
-    ├── git-signing-key
     ├── host-runtime-grant-private-key
     ├── agent-ca-certificate
     ├── agent-ca-key
@@ -85,8 +84,10 @@ agent has no Docker-socket access and no Docker-group membership. Raw RDMA,
 host networking, arbitrary devices, privileged mode, and host socket mounts
 are outside the workload contract.
 
-The resulting OCI layout is retained in the local artifact store and is
-identified by its immutable image digest. For a multi-node mapping, Vonk
+The resulting OCI layout is retained in the controller's ephemeral transfer
+staging area and is identified by its immutable image digest. PostgreSQL stores
+the build authority and evidence; the enrolled node owns the imported runtime
+image. For a multi-node mapping, Vonk
 transfers that exact OCI layout through the authenticated agent channel and
 verifies the digest on every target node; it never rebuilds independently on
 each node. A community container registry is therefore not required. The
@@ -142,49 +143,23 @@ Use a supported `linux/amd64` machine with Docker Engine plus the Docker
 Compose plugin, ORAS 1.3, age, POSIX ACL tools (`setfacl` and `getfacl`), local
 DNS, and persistent storage. Install the reviewed host-updater package as a
 root-owned executable; neither that executable nor its Python package may be
-writable by a service UID. Keep authority, site configuration, application
-data, and the admin Git repository in separate host trees:
+writable by a service UID. Keep the host updater, site configuration,
+application data, and deployment secrets in separate host trees:
 
 ```bash
-operator_user=$(id -un)
-operator_group=$(id -gn)
 sudo install -d -m 0755 -o root -g root /srv/vonk-forge
 sudo install -d -m 0700 -o root -g root /srv/vonk-forge/control-host
 sudo install -d -m 0755 -o root -g root /srv/vonk-forge/control-identity
 sudo install -d -m 0700 -o root -g root /srv/vonk-forge/site
-sudo install -d -m 0750 -o "$operator_user" -g "$operator_group" /srv/vonk-forge/admin-repository
-git clone https://github.com/CarstVaartjes/vonk-forge.git /srv/vonk-forge/admin-repository
 sudo install -d -m 0700 /srv/vonk-forge/secrets /srv/vonk-forge/hermes /srv/vonk-forge/step-ca
 ```
 
-Use `/srv/vonk-forge/admin-repository` for platform and release-policy source.
-The deployment operator owns this checkout so later reviewed Git updates work.
-`id -gn` records the actual primary group; do not
-assume a same-named group. The updater reads site values from the root-owned
-`/srv/vonk-forge/site` boundary and release assets from verified generations,
-never from this checkout.
-
-`control-api` mounts this checkout read-write as UID `10001:10001` for the
-platform/release administration path. CONTROL_API writes `.git` for signed
-changes.
-Recipe CRUD and imports use the local catalog database instead. Preserve
-operator administration while granting both the named operator and UID 10001
-recursive read/write/traverse access now and on all future files and
-directories. The access-control masks keep both named-user entries effective:
-
-```bash
-sudo setfacl -R -m u:"$operator_user":rwX,u:10001:rwX,m::rwX /srv/vonk-forge/admin-repository
-sudo find /srv/vonk-forge/admin-repository -type d -exec setfacl -m \
-  u:"$operator_user":rwx,u:10001:rwx,m::rwx,d:u:"$operator_user":rwx,d:u:10001:rwx,d:m::rwx {} +
-sudo getfacl /srv/vonk-forge/admin-repository /srv/vonk-forge/admin-repository/.git
-```
-
-The first command repairs existing operator- or UID-10001-created entries; the
-default ACLs on every directory make the rule bidirectional for future files.
-Reapply both commands after a checkout replacement or restore. Do not replace
-this with `chown -R 10001`, which would remove the operator's administrative
-ownership. The secrets, Hermes data, and step-ca directories stay
-administrator-owned and are prepared with the consumer-specific ownership below.
+The updater reads site values from the root-owned `/srv/vonk-forge/site`
+boundary and release assets from verified generations. The control API does
+not mount a source checkout and does not write Git metadata. PostgreSQL is the
+authoritative store for control-plane documents, proposals, recipe data, source
+bundles, job logs, and fleet state; the deployment bundle contains only the
+immutable service configuration and runtime assets.
 
 Reserve a host management-LAN address and put it in the host-local `.env`:
 
@@ -259,14 +234,16 @@ Keep the checked-in upstream image pins (`POSTGRES_IMAGE`, `CADDY_IMAGE`,
 
 ### NAS paths and networking
 
-Set `COMPOSE_PROJECT_NAME`, `REPOSITORY_PATH`, `HERMES_DATA_ROOT`,
+Set `COMPOSE_PROJECT_NAME`, `HERMES_DATA_ROOT`,
 `NAS_LAN_IP`, `VONK_MANAGEMENT_CIDRS`, and optional
-`VONK_DIRECT_FABRIC_CIDRS`. `REPOSITORY_PATH` is the platform/release checkout
-mounted into the API as data; it is not the Compose source or the recipe
-catalog database.
+`VONK_DIRECT_FABRIC_CIDRS`. The control authority and recipe catalog are stored
+in PostgreSQL; the NAS bundle contains only Compose configuration, secrets,
+images, and Docker volumes.
 `HERMES_DATA_ROOT` contains `data`, `workspaces`, and `cache`.
-The control state volume contains the explicitly separated agent artifact and
-TUF publication roots. Active mTLS-authenticated GPU nodes can read only bounded,
+The control state volume contains host-generation state and the explicitly
+separated TUF publication roots. OCI upload staging is an API-local tmpfs and
+is deliberately lost on API restart; the build remains retryable from its
+PostgreSQL record. Active mTLS-authenticated GPU nodes can read only bounded,
 strictly named regular files below `/state/agent-tuf/metadata` and
 `/state/agent-tuf/targets`; never place signing keys or registry credentials in
 either publication directory.
@@ -295,7 +272,7 @@ with separate synthetic PKI credentials and disposable CA state.
 
 Set every required secret path in `.env`; these are paths only, never values:
 `DATABASE_URL_FILE`, `POSTGRES_PASSWORD_FILE`, `TOKEN_SIGNING_KEY_FILE`,
-`METRICS_TOKEN_FILE`, `GIT_SIGNING_KEY_FILE`, `WORKER_API_TOKEN_FILE`,
+`METRICS_TOKEN_FILE`, `WORKER_API_TOKEN_FILE`,
 `HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE`,
 `AGENT_UPDATE_AUTHORITY_KEY_FILE`, `ADMIN_GRANT_PUBLIC_KEY_FILE`,
 `AGENT_TUF_BOOTSTRAP_ROOT_FILE`,
@@ -351,7 +328,6 @@ command line.
 | `POSTGRES_PASSWORD_FILE` → `postgres-password` | PostgreSQL startup, `root:root 0400` | One PostgreSQL password. |
 | `TOKEN_SIGNING_KEY_FILE` → `token-signing-key` | API `10001:10001 0400` | At least 32 bytes. |
 | `METRICS_TOKEN_FILE` → `metrics-token` | API `10001:10001 0400`; Prometheus gets a separate `65534:65534 0400` projection | At least 16 non-whitespace characters. |
-| `GIT_SIGNING_KEY_FILE` → `git-signing-key` | API `10001:10001 0400` | Private SSH signing key. |
 | `WORKER_API_TOKEN_FILE` → `worker-api-token` | API/worker `10001:10001 0400` | One unpadded base64url token, at least 32 characters. |
 | `AGENT_UPDATE_AUTHORITY_KEY_FILE` → `agent-update-authority-key` | Signer only, `10003:10001 0400` | Ed25519 PKCS#8 PEM. The API, worker, and every GPU node must never receive this private key. |
 | `ADMIN_GRANT_PUBLIC_KEY_FILE` → `admin-grant-public-key` | Signer only, `10003:10001 0400` | Canonical public document for the separate API admin-action grant authority. |

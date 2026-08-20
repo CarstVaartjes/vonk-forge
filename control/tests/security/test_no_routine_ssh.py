@@ -38,7 +38,6 @@ def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() 
     assert {
         "git_policy",
         "code_host",
-        "repository",
         "hermes_routes",
         "legacy_runtime",
         "runtime",
@@ -56,9 +55,7 @@ def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() 
     for forbidden in (
         "vonk_control.git_policy",
         "vonk_control.code_host",
-        "vonk_control.repository",
         "vonk_control.hermes_routes",
-        "RepositoryService",
         "GitPolicy",
     ):
         assert forbidden not in worker

@@ -517,7 +517,7 @@ class DurableUpdateGrantRefresher:
                     request_id=request_id,
                     actor=actor,
                     action="platform.update.grant-refresh",
-                    base_commit=rollout.base_commit,
+                    authority_revision=rollout.authority_revision,
                     targets=list(node_ids),
                     occurred_at=now,
                 )
@@ -801,7 +801,7 @@ def topology_exclusions_from_document(
 def target_platform_from_release(
     release: Any,
     *,
-    base_commit: str,
+    authority_revision: str,
     tuf_targets_version: int,
 ) -> TargetPlatform:
     """Map one validated platform manifest into the planner's immutable target."""
@@ -825,7 +825,7 @@ def target_platform_from_release(
         platform_version=release.platform_version,
         build_digest=release.build_digest,
         release_digest=release.digest,
-        base_commit=base_commit,
+        authority_revision=authority_revision,
         protocol_minimum=protocol_minimum,
         protocol_maximum=protocol_maximum,
         tuf_targets_version=tuf_targets_version,
@@ -851,7 +851,7 @@ def selected_platform_target(
     running_build_digest: str,
     metadata_root: Path,
     target_root: Path,
-    base_commit: str,
+    authority_revision: str,
     loader: Callable[..., TargetPlatform] | None = None,
 ) -> TargetPlatform:
     """Bind one admin read or mutation to the freshly selected host projection."""
@@ -893,7 +893,7 @@ def selected_platform_target(
         platform_version=platform_version,
         release_digest=release_digest,
         build_digest=build_digest,
-        base_commit=base_commit,
+        authority_revision=authority_revision,
         platform_target_name=target_name,
         platform_target_sha256=target_sha256,
         minimum_tuf_targets_version=targets_version,
@@ -907,7 +907,7 @@ def published_platform_target(
     platform_version: str,
     release_digest: str,
     build_digest: str,
-    base_commit: str,
+    authority_revision: str,
     platform_target_name: str,
     platform_target_sha256: str,
     minimum_tuf_targets_version: int,
@@ -967,7 +967,7 @@ def published_platform_target(
         raise RuntimeError("published platform TUF target binding is invalid")
     return target_platform_from_release(
         release,
-        base_commit=base_commit,
+        authority_revision=authority_revision,
         tuf_targets_version=targets_version,
     )
 

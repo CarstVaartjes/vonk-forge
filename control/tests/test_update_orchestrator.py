@@ -33,7 +33,7 @@ from vonk_control.update_routes import RouteDrainReceipt
 NODE_A = "spk_00000000000000000000000000000001"
 NODE_B = "spk_00000000000000000000000000000002"
 NODE_C = "spk_00000000000000000000000000000003"
-BASE_COMMIT = "f" * 40
+BASE_COMMIT = "f"  * 64
 OLD_BUILD = "sha256:" + "c" * 64
 TARGET_BUILD = "sha256:" + "a" * 64
 
@@ -177,7 +177,7 @@ class AgentJobs:
             rollout.job_id,
             node_id,
             operation,
-            rollout.base_commit,
+            rollout.authority_revision,
             payload,
             operation_id=str(reserved["operation_id"]),
             prepared_update=payload if operation == "agent.update" else None,
@@ -193,7 +193,7 @@ class AgentJobs:
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: dict[str, object],
         *,
         operation_id: str,
@@ -209,7 +209,7 @@ class AgentJobs:
             kind=operation,
             payload_digest=hashlib.sha256(repr(payload).encode()).hexdigest(),
             payload=payload,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             state="queued",
             current_attempt=0,
             created_at=self.clock(),
@@ -224,7 +224,7 @@ class AgentJobs:
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: dict[str, object],
     ) -> AgentOperation:
         with self.sessions.begin() as session:
@@ -233,7 +233,7 @@ class AgentJobs:
                 parent_job_id,
                 node_id,
                 operation,
-                base_commit,
+                authority_revision,
                 payload,
                 operation_id=str(uuid.uuid4()),
             )
@@ -377,7 +377,7 @@ def _target() -> updates.TargetPlatform:
         platform_version="2.0.0",
         build_digest=TARGET_BUILD,
         release_digest="sha256:" + "b" * 64,
-        base_commit=BASE_COMMIT,
+        authority_revision=BASE_COMMIT,
         protocol_minimum=3,
         protocol_maximum=3,
         tuf_targets_version=7,
@@ -1371,7 +1371,7 @@ def test_update_does_not_overlap_a_running_reconciliation_mutation(tmp_path) -> 
             kind="reconcile",
             state="running",
             actor="admin",
-            base_commit=BASE_COMMIT,
+            authority_revision=BASE_COMMIT,
             targets=[NODE_A],
             payload_digest="9" * 64,
             payload={},
@@ -1388,7 +1388,7 @@ def test_update_does_not_overlap_a_running_reconciliation_mutation(tmp_path) -> 
                 kind="workload.start",
                 payload_digest="8" * 64,
                 payload={},
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 state="running",
                 current_attempt=1,
                 created_at=now,

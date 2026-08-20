@@ -127,11 +127,6 @@ def test_configurator_waits_for_every_exact_backend_health_gate() -> None:
     assert configurator["restart"] == "unless-stopped"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
-        "hermes-agent": {
-            "condition": "service_healthy",
-            "required": False,
-            "restart": True,
-        },
         "tailscale-gateway": {
             "condition": "service_healthy",
             "required": True,

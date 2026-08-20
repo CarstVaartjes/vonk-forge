@@ -130,7 +130,7 @@ git commit -m "feat: add control plane operational database"
 - Create: `control/tests/test_worker.py`
 
 **Interfaces:**
-- `JobService.enqueue(kind, actor, base_commit, targets, payload) -> Job`.
+- `JobService.enqueue(kind, actor, authority_revision, targets, payload) -> Job`.
 - `claim(worker_id, lease_seconds) -> JobAttempt | None`, `heartbeat`, `succeed`, `fail`, `wait_for_operator` require matching attempt fence.
 
 - [ ] **Step 1: Write failing claim, expiry, and restart tests**
@@ -195,7 +195,7 @@ def test_viewer_cannot_enqueue_mutation(client, viewer_token):
 def test_admin_mutation_has_actor_request_commit_and_targets(client, admin_token, audit_store):
     response = client.post("/api/v1/jobs", headers=admin_token, json=MUTATION)
     event = audit_store.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.base_commit, event.targets) == ("admin", COMMIT, TARGETS)
+    assert (event.actor, event.authority_revision, event.targets) == ("admin", COMMIT, TARGETS)
 ```
 
 - [ ] **Step 2: Run and verify API is absent**

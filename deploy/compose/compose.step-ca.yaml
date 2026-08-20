@@ -45,12 +45,14 @@ services:
     secrets: []
     volumes:
       - ${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}:/home/step/config/ca.json:ro
-      - step-ca-data:/home/step/db
+      - step-ca-data:/home/step
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
+    depends_on:
+      control-bootstrap: {condition: service_healthy}
     networks: [ca]
     healthcheck:
-      test: [CMD, step, ca, health, --ca-url, https://127.0.0.1:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
+      test: [CMD, step, ca, health, --ca-url, https://step-ca:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
       interval: 15s
       timeout: 5s
       retries: 10

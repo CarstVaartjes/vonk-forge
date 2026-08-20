@@ -3,6 +3,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from deploy.compose.tests.test_agent_ingress import _require_docker_runtime
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -45,6 +47,7 @@ def test_registry_config_disables_delete_and_agent_sni_is_read_only_mtls() -> No
 
 
 def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
+    _require_docker_runtime()
     environment = {
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",

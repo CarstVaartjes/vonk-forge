@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging as stdlib_logging
-import os
 import re
-import tempfile
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 _SENSITIVE_KEY = re.compile(r"(?i)(authorization|api.?key|password|secret|token|private.?key|credential)")
 _AUTHORIZATION = re.compile(r"(?i)authorization\s*:\s*(?:bearer|basic)\s+[^\s,;]+")
@@ -62,23 +62,26 @@ def log_event(logger: stdlib_logging.Logger, event: str, *, service: str, **fiel
     logger.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
-class JobLogStore:
-    def __init__(self, root: Path) -> None:
-        if root.is_symlink():
-            raise ValueError("job log root must not be a symlink")
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        root.chmod(0o700)
-        self._root = root
+def _job_id(job_id: str) -> str:
+    try:
+        parsed = uuid.UUID(job_id)
+    except ValueError:
+        raise ValueError("job log ID must be a UUID") from None
+    if str(parsed) != job_id:
+        raise ValueError("job log ID must use canonical UUID form")
+    return job_id
+
+
+class DatabaseJobLogStore:
+    """Redacted content-addressed job logs stored in PostgreSQL."""
+
+    def __init__(self, sessions: sessionmaker[Session], *, clock=None) -> None:
+        self._sessions = sessions
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     @staticmethod
     def _job_id(job_id: str) -> str:
-        try:
-            parsed = uuid.UUID(job_id)
-        except ValueError:
-            raise ValueError("job log ID must be a UUID") from None
-        if str(parsed) != job_id:
-            raise ValueError("job log ID must use canonical UUID form")
-        return job_id
+        return _job_id(job_id)
 
     def save(self, job_id: str, content: bytes) -> str:
         identity = self._job_id(job_id)
@@ -86,42 +89,47 @@ class JobLogStore:
             raise ValueError("job log input is invalid or too large")
         sanitized = redact_text(content.decode("utf-8", errors="replace")).encode() + b"\n"
         digest = hashlib.sha256(sanitized).hexdigest()
-        directory = self._root / identity
-        if directory.is_symlink():
-            raise ValueError("job log directory must not be a symlink")
-        directory.mkdir(mode=0o700, exist_ok=True)
-        target = directory / f"{digest}.log"
-        descriptor, temporary_raw = tempfile.mkstemp(prefix=".job-log-", dir=directory)
-        temporary = Path(temporary_raw)
-        try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(sanitized); output.flush(); os.fsync(output.fileno())
-            try:
-                os.link(temporary, target)
-            except FileExistsError:
-                if target.is_symlink() or target.read_bytes() != sanitized:
-                    raise ValueError("existing job log conflicts") from None
-            target.chmod(0o600)
-        finally:
-            temporary.unlink(missing_ok=True)
+        from .models import JobLogEntry
+
+        with self._sessions.begin() as session:
+            existing = session.get(JobLogEntry, (identity, digest))
+            if existing is None:
+                session.add(
+                    JobLogEntry(
+                        job_id=identity,
+                        digest=digest,
+                        content=sanitized,
+                        created_at=self._clock(),
+                    )
+                )
+            elif existing.content != sanitized:
+                raise ValueError("existing job log conflicts")
         return digest
 
     def list(self, job_id: str) -> tuple[str, ...]:
-        directory = self._root / self._job_id(job_id)
-        if not directory.exists():
-            return ()
-        if directory.is_symlink() or not directory.is_dir():
-            raise ValueError("job log directory is unsafe")
-        return tuple(sorted(path.stem for path in directory.glob("*.log") if _DIGEST.fullmatch(path.stem)))
+        identity = self._job_id(job_id)
+        from .models import JobLogEntry
+
+        with self._sessions() as session:
+            return tuple(
+                session.scalars(
+                    select(JobLogEntry.digest)
+                    .where(JobLogEntry.job_id == identity)
+                    .order_by(JobLogEntry.digest)
+                )
+            )
 
     def read(self, job_id: str, digest: str) -> bytes:
+        identity = self._job_id(job_id)
         if _DIGEST.fullmatch(digest) is None:
             raise ValueError("job log digest is invalid")
-        target = self._root / self._job_id(job_id) / f"{digest}.log"
-        if target.is_symlink() or not target.is_file():
-            raise KeyError(digest)
-        content = target.read_bytes()
+        from .models import JobLogEntry
+
+        with self._sessions() as session:
+            row = session.get(JobLogEntry, (identity, digest))
+            if row is None:
+                raise KeyError(digest)
+            content = row.content
         if hashlib.sha256(content).hexdigest() != digest:
             raise ValueError("job log checksum mismatch")
         return content

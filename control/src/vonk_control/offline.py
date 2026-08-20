@@ -2247,8 +2247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--health-url", default="https://127.0.0.1/api/v1/healthz")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor")
-    init = commands.add_parser("init")
-    init.add_argument("--repository", type=Path, required=True)
+    commands.add_parser("init")
     commands.add_parser("migrate")
     admin = commands.add_parser("create-admin")
     admin.add_argument("--subject", required=True)
@@ -2368,8 +2367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         with lock:
             if args.command == "init":
-                for path in (args.state_path, args.repository):
-                    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+                args.state_path.mkdir(parents=True, exist_ok=True, mode=0o700)
                 return 0
             if args.command == "migrate":
                 from alembic import command

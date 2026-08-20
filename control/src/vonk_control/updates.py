@@ -37,7 +37,7 @@ _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_COMMIT = re.compile(r"[0-9a-f]{40,64}\Z")
+_AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _AGENT_FRESHNESS_SECONDS = 300
 _OPERATION_COMPLETION_SECONDS = 600
 _POST_SUCCESS_RECONNECT_SECONDS = 180
@@ -79,7 +79,7 @@ class TargetPlatform:
     platform_version: str
     build_digest: str
     release_digest: str
-    base_commit: str
+    authority_revision: str
     protocol_minimum: int
     protocol_maximum: int
     tuf_targets_version: int
@@ -93,8 +93,8 @@ class TargetPlatform:
             or _DIGEST.fullmatch(self.release_digest) is None
         ):
             raise ValueError("target platform digest is invalid")
-        if _COMMIT.fullmatch(self.base_commit) is None:
-            raise ValueError("target platform commit is invalid")
+        if _AUTHORITY_REVISION.fullmatch(self.authority_revision) is None:
+            raise ValueError("target platform authority revision is invalid")
         if (
             isinstance(self.protocol_minimum, bool)
             or isinstance(self.protocol_maximum, bool)
@@ -774,7 +774,7 @@ class UpdateAgentQueue(Protocol):
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: dict[str, object],
         *,
         operation_id: str,
@@ -868,7 +868,7 @@ class UpdateOrchestrator:
                 kind="platform.update",
                 state="running",
                 actor=actor,
-                base_commit=plan.target.base_commit,
+                authority_revision=plan.target.authority_revision,
                 targets=targets,
                 payload_digest=_raw_digest(_digest(document)),
                 payload=document,
@@ -882,7 +882,7 @@ class UpdateOrchestrator:
                 state="planned",
                 plan_digest=_raw_digest(plan.plan_digest),
                 release_digest=_raw_digest(plan.target.release_digest),
-                base_commit=plan.target.base_commit,
+                authority_revision=plan.target.authority_revision,
                 fleet_digest=_raw_digest(plan.fleet_digest),
                 topology_digest=_raw_digest(plan.topology_digest),
                 agent_input_digest=_raw_digest(plan.agent_input_digest),
@@ -1839,7 +1839,7 @@ class UpdateOrchestrator:
                     request_id=request_id,
                     actor=actor,
                     action="platform.update.rollback",
-                    base_commit=rollout.base_commit,
+                    authority_revision=rollout.authority_revision,
                     targets=[node.node_id for node in failed],
                     occurred_at=now,
                 )
@@ -1950,7 +1950,7 @@ class UpdateOrchestrator:
                     request_id=request_id,
                     actor=actor,
                     action="platform.update.resume-approved",
-                    base_commit=rollout.base_commit,
+                    authority_revision=rollout.authority_revision,
                     targets=[node.node_id for node in self._batch_nodes(session, rollout)],
                     occurred_at=now,
                 )
@@ -2585,7 +2585,7 @@ def _validate_persisted_plan(rollout: UpdateRollout) -> None:
         or document.get("topology_digest") != "sha256:" + rollout.topology_digest
         or document.get("agent_input_digest")
         != "sha256:" + rollout.agent_input_digest
-        or target.get("base_commit") != rollout.base_commit
+        or target.get("authority_revision") != rollout.authority_revision
         or target.get("platform_version") != rollout.target_platform_version
         or target.get("build_digest") != rollout.target_build_digest
         or target.get("release_digest") != "sha256:" + rollout.release_digest

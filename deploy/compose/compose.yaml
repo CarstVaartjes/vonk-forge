@@ -25,11 +25,7 @@ x-api-environment: &api-environment
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
   VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
-  VONK_REPOSITORY_PATH: /repository
   VONK_STATE_PATH: /state
-  VONK_GIT_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/git-signing-key
-  VONK_DEPLOYMENT_BRANCH: ${DEPLOYMENT_BRANCH:-deploy}
-  VONK_REQUIRED_CHECKS: ${REQUIRED_CHECKS:-}
   VONK_GLOBAL_CATALOG_URL: ${VONK_GLOBAL_CATALOG_URL:-https://vonkforge.ai}
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
@@ -77,7 +73,7 @@ services:
     command: [python, -m, vonk_control.compose_bootstrap]
     depends_on:
       postgres: {condition: service_healthy}
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
     volumes:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -126,7 +122,6 @@ services:
       <<: *api-environment
     secrets: []
     volumes:
-      - ${REPOSITORY_PATH:?set repository path}:/repository
       - control-state:/state
       - agent-tuf-publication:/agent-tuf
       - workload-tuf-publication:/workload-tuf:ro
@@ -139,7 +134,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    tmpfs: [/tmp]
+    # OCI archives are transfer staging only; PostgreSQL owns the build
+    # authority and the enrolled node owns the imported runtime image. Never
+    # make the controller's temporary upload bytes part of persistent state.
+    tmpfs:
+      - /tmp
+      - /state/agent-artifacts
     networks: [application, data, agent-proxy, worker-authority]
     depends_on:
       postgres: {condition: service_healthy}
@@ -369,8 +369,6 @@ secrets:
     file: "${TOKEN_SIGNING_KEY_FILE:?set token signing key secret file}"
   metrics-token:
     file: "${METRICS_TOKEN_FILE:?set metrics scrape token secret file}"
-  git-signing-key:
-    file: "${GIT_SIGNING_KEY_FILE:?set Git SSH signing key file}"
   litellm-master-key:
     file: "${LITELLM_MASTER_KEY_FILE:?set LiteLLM master key secret file}"
   litellm-upstream-key:

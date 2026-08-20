@@ -77,7 +77,7 @@ class RecordingQueue:
         parent_job_id,
         node_id,
         operation,
-        base_commit,
+        authority_revision,
         payload,
         *,
         operation_id,
@@ -89,7 +89,7 @@ class RecordingQueue:
             kind=operation,
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=dict(payload),
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             state="queued",
             current_attempt=0,
             created_at=NOW,
@@ -1357,7 +1357,7 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
             "run_id",
             "plan_digest",
         }
-        assert {child.base_commit for child in children} == {first_run.plan_digest[:40]}
+        assert {child.authority_revision for child in children} == {first_run.plan_digest}
         assert {child.payload["plan_digest"] for child in children} == {
             first_run.plan_digest
         }
@@ -1571,7 +1571,7 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
     with sessions() as session:
         retried_job = session.get(Job, retry.id)
         assert retried_job is not None
-        assert retried_job.base_commit == plan_digest[:40]
+        assert retried_job.authority_revision == plan_digest
         retried_children = tuple(
             session.scalars(
                 select(AgentOperation)
@@ -1646,13 +1646,13 @@ def test_image_distribution_retry_rejects_malformed_persisted_group(
         elif tamper == "targets":
             job.targets = []
         elif tamper == "authority":
-            job.base_commit = "0" * 40
+            job.authority_revision = "0" * 64
         elif tamper == "child-kind":
             child.kind = "recipe.install"
         elif tamper == "child-state":
             child.state = "queued"
         elif tamper == "child-authority":
-            child.base_commit = "0" * 40
+            child.authority_revision = "0" * 64
         elif tamper == "child-digest":
             child.payload_digest = "0" * 64
         else:
@@ -1980,8 +1980,8 @@ def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
         )
         assert len(children) == 2
         assert revision is not None
-        assert {child.base_commit for child in children} == {
-            revision.content_sha256[:40]
+        assert {child.authority_revision for child in children} == {
+            revision.content_sha256
         }
         assert {child.payload["plan_digest"] for child in children} == {
             installation.plan_digest

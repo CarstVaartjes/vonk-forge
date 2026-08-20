@@ -333,7 +333,7 @@ def load_authoritative_route_request(
         routes=routes,
         endpoints=endpoints,
         expires_at=expires_at,
-        base_commit=reconciliation.base_commit,
+        authority_revision=reconciliation.authority_revision,
     )
 
 

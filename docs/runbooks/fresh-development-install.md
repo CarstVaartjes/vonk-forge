@@ -168,12 +168,12 @@ derives the required non-ephemeral enrollment credential only in the
 Tailscale gateway's tmpfs; neither the local secret generation nor the NAS
 project contains a second plaintext credential file.
 
-Back up exactly 22 local source files as one encrypted generation. Create a
+Back up the local source inputs as one encrypted generation. Create a
 1Password Password item named **Vonk Forge NAS Development Administrator**,
 set its username to exact `admin`, and store the local `admin-password` there
 without placing it in a command argument or terminal output. The publisher
-copies exactly 18 files to the NAS. The four local-only files are
-`admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
+copies only the runtime files required by the Compose bundle to the NAS. The
+local-only files include `admin-password`, `controller-ca-key`, and
 `host-runtime-grant-public-key`; the plaintext administrator password is never
 published to the NAS. Do not display secret contents while checking the
 result. The underlying publisher takes a nonblocking Linux file lock on the
@@ -213,8 +213,8 @@ sources. In the NAS Docker/Compose UI:
 3. Keep all named volumes.
 4. Wait for PostgreSQL, API, worker, Caddy, and LiteLLM to become healthy.
 
-One-shot cohort, initializer, and migration containers should exit with status
-zero. They are completed prerequisites, not failed services. See
+The bootstrap service remains running and healthy; there are no one-shot
+initializer or migration containers in the production-shaped graph. See
 [Development NAS installation](development-nas-installation.md) if startup
 does not reach healthy state. Do not expose ports 8080 or 4000 on the LAN.
 

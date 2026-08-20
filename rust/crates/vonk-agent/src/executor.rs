@@ -793,7 +793,7 @@ mod tests {
         let payload = json!({"plan_digest": "a".repeat(64)});
         AgentClaim {
             attempt: 1,
-            base_commit: "b".repeat(40),
+            authority_revision: "b".repeat(64),
             deadline: (Utc::now() + ChronoDuration::seconds(20))
                 .with_timezone(&FixedOffset::east_opt(0).unwrap()),
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),

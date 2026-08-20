@@ -21,7 +21,7 @@ def target() -> TargetPlatform:
         platform_version="2.0.0",
         build_digest="sha256:" + "a" * 64,
         release_digest="sha256:" + "b" * 64,
-        base_commit="f" * 40,
+        authority_revision="f"  * 64,
         protocol_minimum=3,
         protocol_maximum=3,
         tuf_targets_version=7,
@@ -287,7 +287,7 @@ def test_plan_pins_commit_release_fleet_topology_and_agent_inputs() -> None:
         RolloutPolicy(batch_size=1),
     )
 
-    assert plan.target.base_commit == "f" * 40
+    assert plan.target.authority_revision == "f"  * 64
     assert plan.target.release_digest == "sha256:" + "b" * 64
     assert plan.fleet_digest.startswith("sha256:")
     assert plan.topology_digest.startswith("sha256:")

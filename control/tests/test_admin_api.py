@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from vonk_control.api import AdminServices, SpaFiles, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.proposals import ProposalPreview
+from vonk_control.database_authority import AuthorityProposalPreview
 
 
 class Jobs:
@@ -13,45 +13,46 @@ class Jobs:
 
 
 class Repository:
-    def inspect(self, commit):
-        return type("Snapshot", (), {"commit": commit, "documents": {"inventory/topology.json": "blob"}, "dependencies": {}})()
-    def read_document(self, commit, path):
-        return type("Document", (), {"commit": commit, "path": path, "sha256": "hash", "parsed": {"schema_version": 2}})()
+    def head(self): return "a" * 64
+    def inspect(self, revision):
+        return type("Snapshot", (), {"revision": revision, "documents": {"inventory/topology.json": "blob"}, "dependencies": {}})()
+    def read_document(self, revision, path):
+        return type("Document", (), {"revision": revision, "path": path, "sha256": "hash", "parsed": {"schema_version": 2}})()
 
 
 class Proposals:
     def preview(self, actor, base, changes):
         assert actor == "admin"
-        return ProposalPreview(actor, base, b"canonical diff", tuple(change.path for change in changes), ("passed",), "d" * 64)
+        return AuthorityProposalPreview(actor, base, b"canonical diff", tuple(change.path for change in changes), ("passed",), "d" * 64)
 
 
 def test_admin_proposal_returns_canonical_patch_and_digest() -> None:
     codec = TokenCodec(b"k" * 32)
     app = create_app(
         jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), fleet=lambda: {"nodes": []}, now=lambda: 10,
-        admin=AdminServices(repository=Repository(), proposals=Proposals(), changes=None),
+        admin=AdminServices(authority=Repository(), proposals=Proposals(), changes=None),
     )
     client = TestClient(app)
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     response = client.post("/api/v1/proposals", headers={"Authorization": f"Bearer {token}"}, json={
-        "base_commit": "a" * 40,
+        "base_revision": "a" * 64,
         "changes": [{"path": "inventory/topology.json", "document": {"schema_version": 1}}],
     })
     assert response.status_code == 200
     assert response.json() == {
         "affected_documents": ["inventory/topology.json"],
-        "base_commit": "a" * 40,
+        "base_revision": "a" * 64,
         "digest": "d" * 64,
         "patch": base64.b64encode(b"canonical diff").decode(),
         "validation_results": ["passed"],
     }
 
 
-def test_repository_document_reads_require_authentication() -> None:
+def test_authority_document_reads_require_authentication() -> None:
     codec = TokenCodec(b"k" * 32)
     app = create_app(jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), fleet=dict, admin=AdminServices(Repository(), Proposals(), None))
     client = TestClient(app)
-    assert client.get("/api/v1/repository", params={"commit": "a" * 40}).status_code == 401
+    assert client.get("/api/v1/authority", params={"revision": "a" * 64}).status_code == 401
 
 
 def test_spa_falls_back_to_index_for_client_routes_but_not_assets(tmp_path) -> None:

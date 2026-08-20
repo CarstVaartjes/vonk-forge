@@ -42,7 +42,7 @@ from vonk_control.telemetry import (
 )
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
-COMMIT = "a" * 40
+COMMIT = "a"  * 64
 NODE_ID = "spk_" + "1" * 32
 SAMPLE_ID = "00000000-0000-4000-8000-000000000001"
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
@@ -58,7 +58,7 @@ class Projection:
         return FleetSnapshot(
             event_cursor=cursor,
             generated_at=NOW,
-            repository_commit=COMMIT,
+            authority_revision=COMMIT,
             nodes=[],
         )
 
@@ -430,7 +430,7 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
             "event_cursor": 5,
             "generated_at": "2026-08-15T12:00:00Z",
             "nodes": [],
-            "repository_commit": COMMIT,
+            "authority_revision": COMMIT,
             "schema_version": 1,
         },
     }
@@ -1002,7 +1002,7 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
         jobs=Jobs(),
         tokens=tokens,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"commit": COMMIT, "nodes": []},
+        fleet=lambda: {"authority_revision": COMMIT, "nodes": []},
         fleet_projection=Projection(),
         fleet_stream=api_stream,
         now=lambda: 10,

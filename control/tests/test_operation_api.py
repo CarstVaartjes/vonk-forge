@@ -28,7 +28,7 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import JobProgress, OperationApiServices, OperationPage
 
-COMMIT = "a" * 40
+COMMIT = "a" * 64
 DIGEST = "d" * 64
 NODE_ID = "spk_" + "1" * 32
 
@@ -42,7 +42,7 @@ class EnqueuedJob:
     id: str = "11111111-1111-4111-8111-111111111111"
     state: str = "queued"
     kind: str = "reconcile"
-    base_commit: str = COMMIT
+    authority_revision: str = COMMIT
     targets: tuple[str, ...] = (NODE_ID,)
     current_attempt: int = 1
     status_reason: str | None = None
@@ -82,7 +82,7 @@ class ProjectedFleet:
         return FleetSnapshot(
             event_cursor=11,
             generated_at=datetime(2026, 8, 15, 12, tzinfo=UTC),
-            repository_commit=COMMIT,
+            authority_revision=COMMIT,
             nodes=[],
         )
 
@@ -115,11 +115,11 @@ def _client(*, fleet=None, fleet_projection=None, operations=None, role="operato
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=fleet or (lambda: {"commit": COMMIT, "nodes": []}),
+        fleet=fleet or (lambda: {"authority_revision": COMMIT, "nodes": []}),
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
         admin=AdminServices(
-            repository=Repository(),
+            authority=Repository(),
             proposals=None,
             changes=None,
         ),
@@ -161,12 +161,12 @@ def test_fleet_exposes_visual_state_and_node_evidence() -> (
         "schema_version": 1,
         "event_cursor": 11,
         "generated_at": "2026-08-15T12:00:00Z",
-        "repository_commit": COMMIT,
+        "authority_revision": COMMIT,
         "nodes": [],
     }
     assert "evidence_digest" not in visual.json()
     assert evidence.status_code == 200
-    assert evidence.json()["commit"] == COMMIT
+    assert evidence.json()["authority_revision"] == COMMIT
     assert evidence.json()["nodes"] == []
     assert len(evidence.json()["evidence_digest"]) == 64
     assert "event_cursor" not in evidence.json()
@@ -237,7 +237,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
 def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
     def fleet():
         return {
-            "commit": COMMIT,
+            "authority_revision": COMMIT,
             "nodes": [
                 {
                     "id": NODE_ID,
@@ -289,7 +289,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "base_commit": COMMIT,
+        "authority_revision": COMMIT,
         "current_attempt": 1,
         "id": "11111111-1111-4111-8111-111111111111",
         "kind": "reconcile",
@@ -382,11 +382,11 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=COMMIT,
+                authority_revision=COMMIT,
                 status="succeeded",
                 summary={},
                 graph={
-                    "base_commit": COMMIT,
+                    "authority_revision": COMMIT,
                     "nodes": [],
                     "schema_version": 1,
                     "targets": [NODE_ID],
@@ -567,7 +567,7 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
         kind="reconcile",
         state="waiting-for-operator",
         actor="operator",
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
         targets=[NODE_ID],
         payload_digest="e" * 64,
         payload={},
@@ -610,7 +610,7 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
         kind="reconcile",
         state="running",
         actor="operator",
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
         targets=[NODE_ID],
         payload_digest="e" * 64,
         payload={},
@@ -630,7 +630,7 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
                     kind="node.probe",
                     payload_digest=f"{index:064x}",
                     payload={},
-                    base_commit=COMMIT,
+                    authority_revision=COMMIT,
                     state="succeeded" if index < 8 else "queued",
                     current_attempt=0,
                     created_at=now + timedelta(seconds=index // 3),
@@ -675,7 +675,7 @@ def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
             kind="reconcile",
             state="running",
             actor="operator",
-            base_commit=COMMIT,
+            authority_revision=COMMIT,
             targets=[NODE_ID],
             payload_digest="e" * 64,
             payload={},
@@ -698,7 +698,7 @@ def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
                         kind="node.probe",
                         payload_digest=f"{index:064x}",
                         payload={},
-                        base_commit=COMMIT,
+                        authority_revision=COMMIT,
                         state="queued",
                         current_attempt=0,
                         created_at=now + timedelta(seconds=index),

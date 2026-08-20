@@ -200,8 +200,8 @@ class AgentJobService:
         clock: Callable[[], datetime],
         result_consumer: ResultConsumer | None = None,
         contact_consumer: ContactConsumer | None = None,
-        commit_eligible: Callable[[str], bool] | None = None,
-        current_commit: Callable[[], str] | None = None,
+        revision_eligible: Callable[[str], bool] | None = None,
+        current_revision: Callable[[], str] | None = None,
         update_authorizer: UpdateAuthorizer | None = None,
         update_signer: UpdateSigner | None = None,
     ) -> None:
@@ -209,14 +209,14 @@ class AgentJobService:
             raise TypeError("agent result consumer must be callable")
         if contact_consumer is not None and not callable(contact_consumer):
             raise TypeError("agent contact consumer must be callable")
-        if (commit_eligible is None) != (current_commit is None):
-            raise ValueError("reconciliation commit authority is incomplete")
+        if (revision_eligible is None) != (current_revision is None):
+            raise ValueError("reconciliation authority is incomplete")
         self._sessions = sessions
         self._clock = clock
         self._result_consumer = result_consumer
         self._contact_consumer = contact_consumer
-        self._commit_eligible = commit_eligible
-        self._current_commit = current_commit
+        self._revision_eligible = revision_eligible
+        self._current_revision = current_revision
         self._update_authorizer = update_authorizer
         self._update_signer = update_signer
         self._configuration_lock = threading.Lock()
@@ -231,7 +231,7 @@ class AgentJobService:
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: Mapping[str, object],
         *,
         platform_target_name: str | None = None,
@@ -247,7 +247,7 @@ class AgentJobService:
                 parent_job_id,
                 node_id,
                 operation,
-                base_commit,
+                authority_revision,
                 payload,
                 operation_id=str(uuid.uuid4()),
                 prepared_update=prepared_update,
@@ -261,7 +261,7 @@ class AgentJobService:
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: Mapping[str, object],
         *,
         operation_id: str,
@@ -310,8 +310,8 @@ class AgentJobService:
             raise ValueError(
                 "cannot enqueue an agent operation beneath a terminal parent"
             )
-        if parent.base_commit != base_commit:
-            raise ValueError("agent operation base commit must match its parent")
+        if parent.authority_revision != authority_revision:
+            raise ValueError("agent operation authority revision must match its parent")
         if node_id not in parent.targets:
             raise ValueError("agent operation node must be a parent target")
         reserved_fence = str(uuid.uuid4())
@@ -378,7 +378,7 @@ class AgentJobService:
             fence=reserved_fence,
             node_id=node_id,
             operation=protocol_operation,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             payload_digest=hashlib.sha256(canonical_message(final_payload)).hexdigest(),
             payload=final_payload,
             deadline=now,
@@ -390,7 +390,7 @@ class AgentJobService:
             kind=protocol_operation.value,
             payload_digest=validated.payload_digest,
             payload=_document(validated.payload),
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             state="queued",
             current_attempt=0,
             created_at=now,
@@ -499,7 +499,7 @@ class AgentJobService:
         if (
             parent.kind != "platform.update"
             or parent.id != rollout.job_id
-            or parent.base_commit != rollout.base_commit
+            or parent.authority_revision != rollout.authority_revision
             or rollout_node.node_id not in parent.targets
             or lease is None
             or lease.owner_kind != "update-rollout"
@@ -832,7 +832,7 @@ class AgentJobService:
             fence=intent.fence,
             node_id=intent.node_id,
             operation=AgentOperation(intent.action),
-            base_commit=rollout.base_commit,
+            authority_revision=rollout.authority_revision,
             payload_digest=hashlib.sha256(canonical_message(final_payload)).hexdigest(),
             payload=final_payload,
             deadline=now,
@@ -844,7 +844,7 @@ class AgentJobService:
             kind=validated.operation.value,
             payload_digest=validated.payload_digest,
             payload=_document(validated.payload),
-            base_commit=validated.base_commit,
+            authority_revision=validated.authority_revision,
             state="queued",
             current_attempt=0,
             created_at=now,
@@ -1147,7 +1147,7 @@ class AgentJobService:
                 fence=attempt.fence,
                 node_id=operation.node_id,
                 operation=AgentOperation(operation.kind),
-                base_commit=operation.base_commit,
+                authority_revision=operation.authority_revision,
                 payload_digest=operation.payload_digest,
                 payload=operation.payload,
                 deadline=deadline,
@@ -1446,16 +1446,16 @@ class AgentJobService:
         job: Job,
         operation: StoredOperation,
     ) -> str | None:
-        if self._commit_eligible is None or self._current_commit is None:
+        if self._revision_eligible is None or self._current_revision is None:
             return None
         try:
             if (
-                not self._commit_eligible(reconciliation.base_commit)
-                or self._current_commit() != reconciliation.base_commit
+                not self._revision_eligible(reconciliation.authority_revision)
+                or self._current_revision() != reconciliation.authority_revision
             ):
-                return "reconciliation commit is no longer eligible"
+                return "reconciliation authority revision is no longer eligible"
         except (OSError, RuntimeError, TypeError, ValueError):
-            return "reconciliation commit eligibility is unavailable"
+            return "reconciliation authority revision eligibility is unavailable"
         document = reconciliation.resolved_plan
         if not isinstance(document, Mapping):
             return "reconciliation plan authority is unavailable"
@@ -1470,7 +1470,7 @@ class AgentJobService:
             )
             or not isinstance(targets, list)
             or targets != job.targets
-            or operation.base_commit != reconciliation.base_commit
+            or operation.authority_revision != reconciliation.authority_revision
         ):
             return "reconciliation plan authority is invalid"
         nodes = list(

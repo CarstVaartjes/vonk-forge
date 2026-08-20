@@ -41,7 +41,6 @@ def _copy(tmp_path: Path) -> Path:
         ".dockerignore", "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
         "bin/vonk-control-offline",
         "control/src/vonk_control/offline.py",
-        "control/src/vonk_control/dev_init.py",
         "control/src/vonk_control/generation_launch.py",
         "control/src/vonk_control/host_backup.py",
         "control/src/vonk_control/host_commands.py",

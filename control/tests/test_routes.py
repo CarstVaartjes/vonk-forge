@@ -37,7 +37,7 @@ def _candidate(
 ) -> RouteCandidate:
     selected = endpoint or _endpoint()
     return RouteCandidate(
-        commit="a" * 40,
+        authority_revision="a" * 64,
         profile="agent",
         workload="deepseek",
         node_ids=(NODE_ID,),

@@ -38,7 +38,7 @@ from vonk_control.models import (
 )
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
-COMMIT = "a" * 40
+COMMIT = "a" * 64
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32
 NODE_C = "spk_" + "3" * 32
@@ -360,7 +360,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         "schema_version": 1,
         "event_cursor": 7,
         "generated_at": "2026-08-15T12:00:00Z",
-        "repository_commit": COMMIT,
+        "authority_revision": COMMIT,
         "nodes": [
             {
                 "id": NODE_A,
@@ -549,7 +549,7 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         FleetSnapshot(
             event_cursor="1",
             generated_at=NOW,
-            repository_commit=COMMIT,
+            authority_revision=COMMIT,
             nodes=[],
         )
     with pytest.raises(ValidationError, match="disk_bytes"):

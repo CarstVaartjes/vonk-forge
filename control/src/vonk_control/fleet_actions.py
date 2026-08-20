@@ -114,7 +114,7 @@ class FleetActionService:
         self,
         actor: Actor,
         request_id: str,
-        base_commit: str,
+        authority_revision: str,
         node_ids: Sequence[str],
         preview: SignedUpdatePreview,
     ) -> FleetAction:
@@ -126,12 +126,12 @@ class FleetActionService:
         for node_id in node_ids:
             self._active_node(node_id)
         job = self._services.jobs.enqueue(
-            "fleet.update", actor.subject, base_commit, node_ids,
+            "fleet.update", actor.subject, authority_revision, node_ids,
             {"preview": preview.exact, "operation": AgentOperation.AGENT_UPDATE.value},
             request_id=request_id,
         )
         action = FleetAction(str(job.id), "update", "queued", tuple(node_ids), dict(job.payload))
-        self._audit(request_id, actor, "fleet.update", base_commit, tuple(node_ids))
+        self._audit(request_id, actor, "fleet.update", authority_revision, tuple(node_ids))
         return action
 
     def revoke(
@@ -196,5 +196,5 @@ class FleetActionService:
             session.expunge(node)
             return node
 
-    def _audit(self, request_id: str, actor: Actor, action: str, base_commit: str | None, targets: tuple[str, ...]) -> None:
-        self._services.audits.append(AuditRecord(request_id, actor.subject, action, base_commit, targets))
+    def _audit(self, request_id: str, actor: Actor, action: str, authority_revision: str | None, targets: tuple[str, ...]) -> None:
+        self._services.audits.append(AuditRecord(request_id, actor.subject, action, authority_revision, targets))

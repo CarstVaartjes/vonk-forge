@@ -109,7 +109,7 @@ def _request(clock: Clock, addresses: dict[str, str]) -> RouteBundleRequest:
         routes=ROUTES,
         endpoints=endpoints,
         expires_at=now + timedelta(seconds=180),
-        base_commit="e" * 40,
+        authority_revision="e"  * 64,
     )
 
 
@@ -130,7 +130,7 @@ def _harness(tmp_path: Path, *, clock=None):
         session.add(
             Reconciliation(
                 id=RECONCILIATION_ID,
-                base_commit="e" * 40,
+                authority_revision="e"  * 64,
                 status="succeeded",
                 summary={},
                 plan_digest=PLAN_DIGEST,
@@ -244,7 +244,7 @@ def test_restore_refuses_superseded_publication_and_retains_fence(
         session.add(
             Reconciliation(
                 id=successor_id,
-                base_commit="f" * 40,
+                authority_revision="f"  * 64,
                 status="running",
                 summary={},
                 current_phase="routes-withdrawn",

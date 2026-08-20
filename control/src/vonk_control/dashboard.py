@@ -21,7 +21,7 @@ from .models import (
 class DashboardService:
     def __init__(
         self,
-        repository,
+        authority,
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -39,7 +39,7 @@ class DashboardService:
             or inventory_stale_after_seconds <= 0
         ):
             raise ValueError("observation windows must be positive")
-        self._repository = repository
+        self._authority = authority
         self._sessions = sessions
         self._clock = clock
         self._protocol_minimum = protocol_minimum
@@ -49,7 +49,7 @@ class DashboardService:
         self._inventory_stale_after_seconds = inventory_stale_after_seconds
 
     def fleet(self) -> dict[str, object]:
-        commit = self._repository.head()
+        revision = self._authority.head()
         with self._sessions() as session:
             agent_nodes = {
                 node.node_id: node
@@ -257,4 +257,4 @@ class DashboardService:
                     maximum=self._protocol_maximum,
                 ),
             })
-        return {"commit": commit, "nodes": nodes}
+        return {"authority_revision": revision, "nodes": nodes}

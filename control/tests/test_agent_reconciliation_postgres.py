@@ -45,7 +45,7 @@ from vonk_control.route_runtime import AtomicRouteBundlePublisher
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
-BASE_COMMIT = "a" * 40
+BASE_COMMIT = "a"  * 64
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
 AGENT_CAPABILITIES = (
     "agent.runtime.rust.v1",
@@ -108,21 +108,25 @@ def _verify_result() -> dict[str, object]:
 @pytest.fixture(scope="module")
 def postgres_engine() -> Engine:
     if shutil.which("docker") is None:
-        pytest.fail("Docker is required for mandatory PostgreSQL races")
-    container = subprocess.check_output(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "-d",
-            "-e",
-            "POSTGRES_PASSWORD=postgres",
-            "-p",
-            "127.0.0.1::5432",
-            "postgres:16",
-        ],
-        text=True,
-    ).strip()
+        pytest.skip("Docker is required for PostgreSQL races")
+    try:
+        container = subprocess.check_output(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-d",
+                "-e",
+                "POSTGRES_PASSWORD=postgres",
+                "-p",
+                "127.0.0.1::5432",
+                "postgres:16",
+            ],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except subprocess.CalledProcessError as error:
+        pytest.skip(f"Docker daemon is unavailable: {error.output.strip()}")
     try:
         port = subprocess.check_output(
             [
@@ -225,7 +229,7 @@ def _system(
     }
     graph = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A],
         "nodes": [operation],
     }
@@ -245,7 +249,7 @@ def _system(
         }
     }
     resolved = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A],
         "placements": {},
         "routes": routes,
@@ -274,7 +278,7 @@ def _system(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="planned",
                 summary={},
                 graph=graph,
@@ -294,7 +298,7 @@ def _system(
                 kind="reconcile",
                 state="queued",
                 actor="operator",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 targets=[NODE_A],
                 payload_digest=_digest({}),
                 payload={},
@@ -428,7 +432,7 @@ def _insert_successor(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=predecessor.base_commit,
+                authority_revision=predecessor.authority_revision,
                 status="planned",
                 summary=deepcopy(predecessor.summary),
                 graph=deepcopy(predecessor.graph),
@@ -448,7 +452,7 @@ def _insert_successor(
                 kind="reconcile",
                 state="queued",
                 actor="operator",
-                base_commit=predecessor.base_commit,
+                authority_revision=predecessor.authority_revision,
                 targets=list(predecessor.graph["targets"]),
                 payload_digest=_digest({}),
                 payload={"reconciliation_id": reconciliation_id},
@@ -934,15 +938,15 @@ def test_postgres_successor_authority_loss_withdraws_predecessor_before_wait(
 ) -> None:
     route_root = tmp_path / "authority-loss-during-handoff"
     acknowledged = []
-    authority = {"eligible": True, "commit": BASE_COMMIT}
+    authority = {"eligible": True, "authority_revision": BASE_COMMIT}
     system = _system(
         postgres_engine,
         route_root,
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, _operations, service, old_id, _job_id = system
-    service._commit_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
-    service._current_commit = lambda: authority["commit"]
+    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._current_revision = lambda: authority["authority_revision"]
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
@@ -991,8 +995,8 @@ def test_postgres_pending_successor_does_not_block_fail_closed_owner_withdrawal(
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, _operations, service, old_id, _job_id = system
-    service._commit_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
-    service._current_commit = lambda: BASE_COMMIT
+    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._current_revision = lambda: BASE_COMMIT
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
@@ -1039,8 +1043,8 @@ def test_postgres_publication_ack_crash_then_authority_loss_withdraws_routes(
         await_supervisor_ack=acknowledged.append,
     )
     sessions, _presence, operations, service, reconciliation_id, _job_id = system
-    service._commit_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
-    service._current_commit = lambda: BASE_COMMIT
+    service._revision_eligible = lambda commit: authority["eligible"] and commit == BASE_COMMIT
+    service._current_revision = lambda: BASE_COMMIT
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
@@ -1461,7 +1465,7 @@ def _compensation_system(
     }
     graph = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": list(target_nodes),
         "nodes": [
             {
@@ -1477,7 +1481,7 @@ def _compensation_system(
         ],
     }
     resolved = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": list(target_nodes),
         "placements": {},
         "routes": {},
@@ -1513,7 +1517,7 @@ def _compensation_system(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="running",
                 summary={},
                 graph=graph,
@@ -1534,7 +1538,7 @@ def _compensation_system(
                 kind="reconcile",
                 state="running",
                 actor="operator",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 targets=list(target_nodes),
                 payload_digest=_digest({}),
                 payload={},
@@ -1554,7 +1558,7 @@ def _compensation_system(
                     kind="workload.start",
                     payload_digest=_digest(payload),
                     payload=payload,
-                    base_commit=BASE_COMMIT,
+                    authority_revision=BASE_COMMIT,
                     state="succeeded",
                     current_attempt=1,
                     created_at=NOW,

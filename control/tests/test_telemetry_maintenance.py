@@ -1401,7 +1401,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
 
     class Repository:
         def head(self) -> str:
-            return "a" * 40
+            return "a" * 64
 
         def read_document(self, commit: str, path: str) -> SimpleNamespace:
             raise AssertionError(f"unexpected document read: {commit} {path}")

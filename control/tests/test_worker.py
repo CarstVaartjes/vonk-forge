@@ -26,7 +26,7 @@ def test_worker_dispatches_registered_handler_and_persists_result(tmp_path) -> N
 
 def test_worker_handler_receives_pinned_job_metadata(tmp_path) -> None:
     jobs = _service(tmp_path)
-    job = jobs.enqueue("probe", "admin", "a" * 40, ["spk_a"], {"value": 4})
+    job = jobs.enqueue("probe", "admin", "a" * 64, ["spk_a"], {"value": 4})
     received = []
 
     def handle(request: HandlerRequest):
@@ -36,7 +36,7 @@ def test_worker_handler_receives_pinned_job_metadata(tmp_path) -> None:
     Worker(jobs, "worker-a", {"probe": handle}).run_once()
 
     assert received[0]["value"] == 4
-    assert received[0].base_commit == "a" * 40
+    assert received[0].authority_revision == "a" * 64
     assert received[0].targets == ("spk_a",)
     assert jobs.get(job.id).state == "succeeded"
 

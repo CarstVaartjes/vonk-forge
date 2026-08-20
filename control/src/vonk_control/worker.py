@@ -157,7 +157,7 @@ class HandlerRequest(Mapping[str, object]):
     job_id: str
     kind: str
     payload: Mapping[str, object]
-    base_commit: str
+    authority_revision: str
     targets: tuple[str, ...]
 
     def __getitem__(self, key: str) -> object:
@@ -237,7 +237,7 @@ class Worker:
         try:
             result = handler(HandlerRequest(
                 attempt.job_id, attempt.kind, attempt.payload,
-                attempt.base_commit, attempt.targets,
+                attempt.authority_revision, attempt.targets,
             ))
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")

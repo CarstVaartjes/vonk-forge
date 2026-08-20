@@ -22,6 +22,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     SmallInteger,
     String,
     Text,
@@ -90,7 +91,7 @@ class Job(Base):
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    base_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
     targets: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -126,6 +127,20 @@ class JobAttempt(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class JobLogEntry(Base):
+    """Redacted content-addressed job log stored in PostgreSQL."""
+
+    __tablename__ = "job_log_entries"
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id: Mapped[str] = mapped_column(
@@ -134,9 +149,63 @@ class AuditEvent(Base):
     request_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
-    base_commit: Mapped[str | None] = mapped_column(String(128))
+    authority_revision: Mapped[str | None] = mapped_column(String(128))
     targets: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class ControlAuthorityRevision(Base):
+    """Immutable control-plane authority document revision in PostgreSQL."""
+
+    __tablename__ = "control_authority_revisions"
+    revision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_revision: Mapped[str | None] = mapped_column(
+        ForeignKey("control_authority_revisions.revision_id"), index=True
+    )
+    documents: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    dependencies: Mapped[dict[str, list[str]]] = mapped_column(JSON, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class ControlAuthorityHead(Base):
+    """Singleton pointer to the current immutable authority revision."""
+
+    __tablename__ = "control_authority_heads"
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision_id: Mapped[str] = mapped_column(
+        ForeignKey("control_authority_revisions.revision_id"),
+        nullable=False,
+        unique=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ControlAuthorityProposal(Base):
+    """Persisted proposal preview, allowing submission after API restart."""
+
+    __tablename__ = "control_authority_proposals"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    base_revision: Mapped[str] = mapped_column(
+        ForeignKey("control_authority_revisions.revision_id"),
+        nullable=False,
+        index=True,
+    )
+    changes: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    patch: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    affected_documents: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    validation_results: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    applied_revision: Mapped[str | None] = mapped_column(
+        ForeignKey("control_authority_revisions.revision_id"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
 
@@ -220,19 +289,19 @@ class Reconciliation(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    base_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     graph: Mapped[dict[str, object]] = mapped_column(
         JSON,
         nullable=False,
         default=lambda: {
-            "base_commit": "",
+            "authority_revision": "",
             "nodes": [],
             "schema_version": 1,
             "targets": [],
         },
-        server_default='{"base_commit":"","nodes":[],"schema_version":1,"targets":[]}',
+        server_default='{"authority_revision":"","nodes":[],"schema_version":1,"targets":[]}',
     )
     graph_digest: Mapped[str] = mapped_column(
         String(64),
@@ -745,7 +814,7 @@ class AgentOperation(Base):
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    base_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retry_disposition: Mapped[str | None] = mapped_column(String(32))
@@ -864,7 +933,7 @@ class UpdateRollout(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     release_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    base_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
     fleet_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     topology_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     agent_input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1152,6 +1221,17 @@ class RecipeSourceBundle(Base):
     verified_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class SourceBundleArchive(Base):
+    """Content-addressed source archive bytes stored in PostgreSQL."""
+
+    __tablename__ = "source_bundle_archives"
+    sha256: Mapped[str] = mapped_column(
+        ForeignKey("recipe_source_bundles.sha256", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    archive: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
 class CatalogEntity(Base):

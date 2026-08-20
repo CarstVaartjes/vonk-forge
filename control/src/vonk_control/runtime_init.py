@@ -125,7 +125,6 @@ def stage_compose_secrets() -> None:
         "database-url",
         "token-signing-key",
         "metrics-token",
-        "git-signing-key",
         "agent-client-ca",
         "agent-intermediate-certificate",
         "controller-ca",

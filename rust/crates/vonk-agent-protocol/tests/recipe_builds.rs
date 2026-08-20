@@ -7,7 +7,7 @@ use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest, canonical_json, he
 fn claim(operation: &str, payload: serde_json::Value) -> AgentClaim {
     AgentClaim {
         attempt: 1,
-        base_commit: "c".repeat(40),
+        authority_revision: "c".repeat(64),
         deadline: DateTime::parse_from_rfc3339("2026-08-07T12:05:00+00:00").unwrap(),
         fence: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
         job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),

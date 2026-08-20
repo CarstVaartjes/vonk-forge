@@ -103,7 +103,7 @@ class RecipeLibraryClient:
         self._client.close()
 
     def list(self) -> RecipeLibrarySnapshot:
-        commit = self._current_commit()
+        commit = self._current_revision()
         tree = self._get_json(
             f"/repos/{self._repository}/git/trees/{commit}?recursive=1"
         )
@@ -146,7 +146,7 @@ class RecipeLibraryClient:
                 "recipe_library.not_found",
                 "recipe is not in the default recipe library",
             )
-        item = self._item(self._current_commit(), f"recipes/{slug}.json")
+        item = self._item(self._current_revision(), f"recipes/{slug}.json")
         if item.uri != uri or item.publisher != publisher:
             raise RecipeLibraryError(
                 "recipe_library.digest_mismatch",
@@ -154,7 +154,7 @@ class RecipeLibraryClient:
             )
         return item
 
-    def _current_commit(self) -> str:
+    def _current_revision(self) -> str:
         value = self._get_json(f"/repos/{self._repository}/commits/{self._ref}")
         commit = value.get("sha")
         if not isinstance(commit, str) or not _SHA.fullmatch(commit):

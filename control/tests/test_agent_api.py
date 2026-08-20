@@ -1027,7 +1027,7 @@ def parent(sessions, clock: Clock) -> Job:
         kind="agent.operations",
         state="queued",
         actor="administrator",
-        base_commit="a" * 40,
+        authority_revision="a"  * 64,
         targets=[NODE_A],
         payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={},
@@ -1398,7 +1398,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1455,7 +1455,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1509,7 +1509,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1564,7 +1564,7 @@ def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) 
 def test_failed_probe_result_never_writes_health_observation(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1616,7 +1616,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node.protocol_version is None
 
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1719,7 +1719,7 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
 def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2393,7 +2393,7 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
         event = audits.for_request(request_id)
         assert event.actor == "administrator"
         assert event.action == action
-        assert event.base_commit is None
+        assert event.authority_revision is None
         assert event.targets == targets
 
     successful_count = len(audits.list())
@@ -2565,7 +2565,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2605,7 +2605,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2662,7 +2662,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         )
         time.sleep(0.05)
         operation = services.operations.enqueue(
-            parent_job.id, NODE_A, "node.probe", "a" * 40, {}
+            parent_job.id, NODE_A, "node.probe", "a"  * 64, {}
         )
         response = waiting.result(timeout=1)
 
@@ -2917,7 +2917,7 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a" * 40,
+        "a"  * 64,
         {"artifact_digest": digest},
     )
     response = client.get(
@@ -2961,7 +2961,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         parent(services.sessions, clock).id,
         NODE_A,
         "recipe.image.import.v1",
-        "a" * 40,
+        "a"  * 64,
         {
             "schema_version": 1,
             "kind": "recipe.image.import.v1",
@@ -2994,7 +2994,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a" * 40,
+        "a"  * 64,
         {"artifact_digest": digest},
     )
     assert (
@@ -3013,7 +3013,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a" * 40,
+        "a"  * 64,
         {"artifact_digest": digest},
     )
     assert (
@@ -3242,7 +3242,7 @@ def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a" * 40,
+        "a"  * 64,
         {"artifact_digest": digest},
     )
     fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"

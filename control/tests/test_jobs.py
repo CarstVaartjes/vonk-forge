@@ -112,7 +112,7 @@ def test_job_list_cursor_is_authenticated_and_filter_bound(service) -> None:
 def test_job_list_keyset_cursor_excludes_concurrent_newer_insert(service) -> None:
     jobs, clock = service
     initial = [
-        jobs.enqueue("probe", "admin", "a" * 40, [f"spk_{index:032x}"], {})
+        jobs.enqueue("probe", "admin", "a" * 64, [f"spk_{index:032x}"], {})
         for index in range(3)
     ]
     first, cursor, total = jobs.list_page(limit=2)
@@ -152,12 +152,12 @@ def test_job_list_rejects_syntactically_valid_cursor_forged_with_other_key(
 
 def test_claim_carries_commit_and_targets_to_the_worker(service) -> None:
     jobs, _ = service
-    jobs.enqueue("probe", "admin", "a" * 40, ["spk_a", "spk_b"], {})
+    jobs.enqueue("probe", "admin", "a" * 64, ["spk_a", "spk_b"], {})
 
     attempt = jobs.claim("worker", 30)
 
     assert attempt is not None
-    assert attempt.base_commit == "a" * 40
+    assert attempt.authority_revision == "a" * 64
     assert attempt.targets == ("spk_a", "spk_b")
 
 

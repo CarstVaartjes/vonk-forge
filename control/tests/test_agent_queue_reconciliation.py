@@ -22,7 +22,7 @@ from vonk_control.models import (
 )
 
 NODE_ID = "spk_" + "a" * 32
-COMMIT = "a" * 40
+COMMIT = "a"  * 64
 
 
 class Clock:
@@ -61,7 +61,7 @@ def _parent(clock: Clock) -> Job:
         kind="agent.operations",
         state="queued",
         actor="operator",
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
         targets=[NODE_ID],
         payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={},
@@ -90,7 +90,7 @@ def _link_reconciliation(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=COMMIT,
+                authority_revision=COMMIT,
                 status="planned",
                 summary={},
                 created_at=clock.now,

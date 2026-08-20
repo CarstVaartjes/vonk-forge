@@ -313,7 +313,6 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(secret))
     settings = Settings.from_env_and_secrets()
     assert settings.database_host == "postgres"
-    assert settings.repository_path == Path("/srv/vonk-forge/repository")
     assert settings.global_catalog_url == "https://vonkforge.ai"
 
 
@@ -515,7 +514,6 @@ def _configure_agent_authority(
         "VONK_DATABASE_URL_FILE": "postgresql://db/control\n",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
         "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "admin-grant-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
@@ -548,7 +546,6 @@ def _configure_agent_authority(
             "VONK_DATABASE_URL_FILE",
             "VONK_TOKEN_SIGNING_KEY_FILE",
             "VONK_METRICS_TOKEN_FILE",
-            "VONK_GIT_SIGNING_KEY_FILE",
             "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE",
         ):
             monkeypatch.setenv(name, str(paths[name]))
@@ -710,22 +707,6 @@ def test_secret_file_must_not_be_symlink(tmp_path: Path, monkeypatch) -> None:
         Settings.from_env_and_secrets()
 
 
-def test_git_policy_configuration_uses_key_reference_and_unique_checks(tmp_path: Path, monkeypatch) -> None:
-    key = tmp_path / "signing-key"
-    key.write_text("fixture")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_GIT_SIGNING_KEY_FILE", str(key))
-    monkeypatch.setenv("VONK_DEPLOYMENT_BRANCH", "deploy")
-    monkeypatch.setenv("VONK_REQUIRED_CHECKS", "tests,security")
-    settings = Settings.from_env_and_secrets()
-    assert settings.git_signing_key_path == key
-    assert settings.required_checks == ("tests", "security")
-
-    monkeypatch.setenv("VONK_REQUIRED_CHECKS", "tests,tests")
-    with pytest.raises(SettingsError, match="unique"):
-        Settings.from_env_and_secrets()
-
-
 def test_compose_is_platform_neutral_and_only_caddy_publishes_ports() -> None:
     root = Path(__file__).resolve().parents[2]
     text = (root / "deploy/compose/compose.yaml").read_text()
@@ -757,7 +738,6 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: P
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
         "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
@@ -810,7 +790,6 @@ def test_production_rejects_noncanonical_agent_proxy_auth(
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
         "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
@@ -876,7 +855,6 @@ def test_production_builtin_bootstrap_requires_and_loads_the_mounted_intermediat
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
         "VONK_AGENT_INTERMEDIATE_KEY_FILE": "built-in-key",
@@ -946,7 +924,6 @@ def test_builtin_bootstrap_key_must_be_a_regular_non_symlink_file(tmp_path: Path
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
         "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
         "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
         "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32,

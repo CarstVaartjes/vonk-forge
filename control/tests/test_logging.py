@@ -1,7 +1,11 @@
 import logging
-from pathlib import Path
 
-from vonk_control.logging import JobLogStore, log_event, redact_text
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import vonk_control.logging as control_logging
+from vonk_control.logging import DatabaseJobLogStore, log_event, redact_text
+from vonk_control.models import Base, JobLogEntry
 
 
 def test_structured_logger_redacts_secrets(caplog) -> None:
@@ -17,14 +21,20 @@ def test_structured_logger_redacts_secrets(caplog) -> None:
     assert "<redacted>" in caplog.text
 
 
-def test_job_log_store_is_content_addressed_bounded_and_sanitized(tmp_path: Path) -> None:
-    store = JobLogStore(tmp_path)
+def test_job_log_store_is_postgres_backed_content_addressed_and_sanitized() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[JobLogEntry.__table__])
+    store = DatabaseJobLogStore(sessionmaker(engine))
     job_id = "00000000-0000-4000-8000-000000000001"
     digest = store.save(job_id, b"started\nAuthorization: Bearer no\nfinished\n")
     content = store.read(job_id, digest)
     assert b"started" in content and b"finished" in content
     assert b"Bearer no" not in content and b"<redacted>" in content
-    assert (tmp_path / job_id / f"{digest}.log").stat().st_mode & 0o777 == 0o600
+    assert store.list(job_id) == (digest,)
+
+
+def test_filesystem_job_log_store_is_not_available() -> None:
+    assert not hasattr(control_logging, "JobLogStore")
 
 
 def test_redaction_truncates_remote_output() -> None:

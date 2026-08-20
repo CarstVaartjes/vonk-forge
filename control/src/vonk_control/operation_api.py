@@ -56,7 +56,7 @@ _ADMIN_OPERATION_IDS = {
     ): "getNodeTelemetryHistory",
     ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/v1/agents"): "listAgents",
-    ("get", "/api/v1/repository"): "getRepository",
+    ("get", "/api/v1/authority"): "getAuthority",
     ("post", "/api/v1/proposals"): "previewProposal",
     ("post", "/api/v1/changes"): "submitChange",
     ("get", "/api/v1/jobs"): "listJobs",
@@ -178,7 +178,7 @@ class JobDetailResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=80)
     kind: str = Field(min_length=1, max_length=80)
-    base_commit: str = Field(min_length=1, max_length=128)
+    authority_revision: str = Field(min_length=1, max_length=128)
     targets: list[BoundedIdentifier] = Field(max_length=100)
     target_next_cursor: str | None = Field(default=None, max_length=512)
     target_total: int = Field(ge=0)
@@ -274,7 +274,7 @@ def job_response(
         id=str(job.id),
         state=str(job.state),
         kind=str(job.kind),
-        base_commit=str(job.base_commit),
+        authority_revision=str(job.authority_revision),
         targets=visible_targets,
         target_next_cursor=target_next_cursor,
         target_total=len(targets),
@@ -806,13 +806,13 @@ class NodeStatus(StrictModel):
 
 
 class FleetStatusResponse(StrictModel):
-    commit: str = Field(pattern=COMMIT_PATTERN)
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     nodes: list[NodeStatus]
     evidence_digest: str = Field(pattern=DIGEST_PATTERN)
 
 
 class _FleetEvidence(StrictModel):
-    commit: str = Field(pattern=COMMIT_PATTERN)
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     nodes: list[NodeStatus]
 
 

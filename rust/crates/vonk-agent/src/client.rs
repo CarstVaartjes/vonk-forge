@@ -817,7 +817,7 @@ mod tests {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation: "recipe.image.import.v1".to_owned(),
-            base_commit: "a".repeat(40),
+            authority_revision: "a".repeat(64),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),

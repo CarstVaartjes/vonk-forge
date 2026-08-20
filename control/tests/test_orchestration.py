@@ -13,7 +13,7 @@ from vonk_control.orchestration import ReconciliationOrchestrator
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-BASE_COMMIT = "a" * 40
+BASE_COMMIT = "a"  * 64
 
 
 def _digest(document: object) -> str:
@@ -65,7 +65,7 @@ def _persisted_gate_plan() -> tuple[dict[str, object], dict[str, object], str, s
         )
     graph: dict[str, object] = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A, NODE_B],
         "nodes": nodes,
     }
@@ -78,7 +78,7 @@ def _persisted_gate_plan() -> tuple[dict[str, object], dict[str, object], str, s
         "new:b:install": install_payload,
     }
     resolved: dict[str, object] = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A, NODE_B],
         "placements": {},
         "routes": {},
@@ -170,7 +170,7 @@ def _corrupt_persisted_plan(
 
 def distributed_plan() -> dict[str, object]:
     return {
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_B, NODE_A],
         "route_withdrawal_generation": 3,
         "operations": [
@@ -242,7 +242,7 @@ def test_graph_is_dependency_ordered_and_digest_stable(planner) -> None:
     )
     assert graph.targets == (NODE_A, NODE_B)
     assert graph.digest == repeated.digest == (
-        "def0e95a03404d2efb9ad6ab53ce2dbc8040d6cc0d40c337a533783b0cad3317"
+        "358d14d79e22b7d5cac55f971615f28a5fa5c74784f0a6258e9f743549245e5c"
     )
     assert graph.document == repeated.document
 
@@ -366,7 +366,7 @@ def test_persisted_plan_consumers_reject_semantic_gate_and_nonmutating_corruptio
         session.add(
             Reconciliation(
                 id=f"restart-{corruption}",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="succeeded",
                 summary={},
                 graph=graph,
@@ -403,12 +403,12 @@ def test_persisted_plan_consumers_reject_deleted_package_operations(planner) -> 
     }
     graph: dict[str, object] = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A],
         "nodes": [package_node],
     }
     resolved: dict[str, object] = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A],
         "placements": {},
         "routes": {},
@@ -424,7 +424,7 @@ def test_persisted_plan_consumers_reject_deleted_package_operations(planner) -> 
         session.add(
             Reconciliation(
                 id="persisted-package-operation",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="succeeded",
                 summary={},
                 graph=graph,
@@ -492,7 +492,7 @@ def test_plan_persists_immutable_canonical_graph_and_progress_fields(planner) ->
     with sessions() as session:
         stored = session.get(Reconciliation, graph.reconciliation_id)
         assert stored is not None
-        assert stored.base_commit == BASE_COMMIT
+        assert stored.authority_revision == BASE_COMMIT
         assert stored.graph == graph.document
         assert stored.graph_digest == graph.digest
         assert stored.status == "planned"

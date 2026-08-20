@@ -8,9 +8,12 @@ import tarfile
 import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import BinaryIO
+
+from sqlalchemy.orm import Session, sessionmaker
 
 
 class SourceBundleError(ValueError):
@@ -168,20 +171,102 @@ class SourceBundleStore:
             raise SourceBundleError(
                 "bundle.storage_collision", "stored source bundle is inconsistent"
             )
-        files: dict[str, bytes] = {}
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as bundle:
-            for member in bundle:
-                if not member.isfile():
-                    continue
-                stream = bundle.extractfile(member)
-                if stream is None:
-                    raise SourceBundleError(
-                        "bundle.read_failed", "source bundle file cannot be read"
-                    )
-                files[_safe_path(member.name)] = stream.read(
-                    self._limits.max_file_bytes + 1
+        return _generated_bundle(archive, manifest, self._limits)
+
+
+class DatabaseSourceBundleStore:
+    """Content-addressed source bundle store backed entirely by PostgreSQL."""
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        limits: BundleLimits | None = None,
+    ) -> None:
+        self._sessions = sessions
+        self._limits = limits or BundleLimits()
+
+    def put(self, expected_sha256: str, payload: BinaryIO) -> StoredBundle:
+        _validate_digest(expected_sha256, "bundle.digest_invalid")
+        archive = _read_archive(payload, self._limits)
+        manifest = _inspect_archive(archive, self._limits)
+        if manifest.sha256 != expected_sha256:
+            raise SourceBundleError(
+                "bundle.digest_mismatch", "source bundle digest does not match"
+            )
+        from .models import RecipeSourceBundle, SourceBundleArchive
+
+        with self._sessions.begin() as session:
+            metadata = session.get(RecipeSourceBundle, expected_sha256)
+            stored = session.get(SourceBundleArchive, expected_sha256)
+            if stored is not None and stored.archive != archive:
+                raise SourceBundleError(
+                    "bundle.storage_collision", "stored source bundle is inconsistent"
                 )
-        return GeneratedSourceBundle(MappingProxyType(files), archive, manifest)
+            if stored is None:
+                if metadata is None:
+                    metadata = RecipeSourceBundle(
+                        sha256=manifest.sha256,
+                        media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                        archive_bytes=len(archive),
+                        total_bytes=manifest.total_bytes,
+                        file_count=len(manifest.files),
+                        storage_key=f"postgres:{manifest.sha256}",
+                        manifest={
+                            "schema_version": 1,
+                            "files": [asdict(item) for item in manifest.files],
+                            "total_bytes": manifest.total_bytes,
+                            "sha256": manifest.sha256,
+                        },
+                        verified_at=datetime.now(UTC),
+                    )
+                    session.add(metadata)
+                session.add(SourceBundleArchive(sha256=expected_sha256, archive=archive))
+        return StoredBundle(Path(f"/postgresql/source-bundles/{expected_sha256}"), manifest, len(archive))
+
+    def get(self, sha256: str) -> GeneratedSourceBundle:
+        _validate_digest(sha256, "bundle.digest_invalid")
+        from .models import SourceBundleArchive
+
+        with self._sessions() as session:
+            stored = session.get(SourceBundleArchive, sha256)
+            if stored is None:
+                raise SourceBundleError(
+                    "bundle.not_found", "source bundle is unavailable"
+                )
+            archive = stored.archive
+        manifest = _inspect_archive(archive, self._limits)
+        if manifest.sha256 != sha256:
+            raise SourceBundleError(
+                "bundle.storage_collision", "stored source bundle is inconsistent"
+            )
+        return _generated_bundle(archive, manifest, self._limits)
+
+
+def _validate_digest(value: str, code: str) -> None:
+    if len(value) != 64 or value.lower() != value or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise SourceBundleError(code, "source bundle digest is invalid")
+
+
+def _generated_bundle(
+    archive: bytes,
+    manifest: BundleManifest,
+    limits: BundleLimits,
+) -> GeneratedSourceBundle:
+    files: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as bundle:
+        for member in bundle:
+            if not member.isfile():
+                continue
+            stream = bundle.extractfile(member)
+            if stream is None:
+                raise SourceBundleError(
+                    "bundle.read_failed", "source bundle file cannot be read"
+                )
+            files[_safe_path(member.name)] = stream.read(limits.max_file_bytes + 1)
+    return GeneratedSourceBundle(MappingProxyType(files), archive, manifest)
 
 
 def _read_archive(payload: BinaryIO, limits: BundleLimits) -> bytes:

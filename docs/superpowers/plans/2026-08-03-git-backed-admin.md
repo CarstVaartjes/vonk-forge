@@ -72,7 +72,7 @@ git commit -m "feat: inspect repository-backed cluster state"
 - Create: `control/tests/test_proposals.py`
 
 **Interfaces:**
-- `ProposalService.preview(actor, base_commit, changes) -> ProposalPreview`.
+- `ProposalService.preview(actor, authority_revision, changes) -> ProposalPreview`.
 - Preview contains canonical patch, affected documents/profiles/nodes, validation results, and digest.
 
 - [ ] **Step 1: Write failing determinism, stale-base, and path-policy tests**

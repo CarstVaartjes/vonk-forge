@@ -17,12 +17,10 @@ def _rendered() -> dict:
         "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
-        "REPOSITORY_PATH": "/srv/vonk-forge/repository",
         "DATABASE_URL_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
         "METRICS_TOKEN_FILE": "/dev/null",
-        "GIT_SIGNING_KEY_FILE": "/dev/null",
         "WORKER_API_TOKEN_FILE": "/dev/null",
         "AGENT_UPDATE_AUTHORITY_KEY_FILE": "/dev/null",
         "ADMIN_GRANT_PRIVATE_KEY_FILE": "/dev/null",
@@ -377,7 +375,6 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
         ("VONK_DATABASE_URL_FILE", "database-url"),
         ("VONK_TOKEN_SIGNING_KEY_FILE", "token-signing-key"),
         ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
-        ("VONK_GIT_SIGNING_KEY_FILE", "git-signing-key"),
         ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
         ("VONK_WORKER_API_TOKEN_FILE", "worker-api-token"),
     ):
@@ -423,6 +420,8 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     api_volumes = {
         volume["target"]: volume for volume in services["control-api"]["volumes"]
     }
+    assert "/state/agent-artifacts" in services["control-api"]["tmpfs"]
+    assert "/state/agent-artifacts" not in api_volumes
     litellm_volumes = {
         volume["target"]: volume for volume in services["litellm"]["volumes"]
     }

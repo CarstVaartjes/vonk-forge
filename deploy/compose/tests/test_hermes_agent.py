@@ -32,6 +32,8 @@ def _rendered() -> dict[str, object]:
             str(COMPOSE / "compose.step-ca.yaml"),
             "--profile",
             "setup",
+            "--profile",
+            "hermes",
             "config",
             "--format",
             "json",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -485,6 +486,10 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
 
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_path: Path, monkeypatch) -> None:
     """Exercise the tracked public config against the exact production image."""
+    if shutil.which("docker") is None or subprocess.run(
+        ["docker", "info"], capture_output=True
+    ).returncode != 0:
+        pytest.skip("Docker daemon is required for the pinned step-ca integration test")
     tmp_path.chmod(0o777)
     root_password = tmp_path / "root-password"
     intermediate_password = tmp_path / "intermediate-password"

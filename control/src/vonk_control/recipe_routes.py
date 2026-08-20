@@ -726,7 +726,7 @@ class RecipeRouteService:
             return
         now = _aware(self._clock())
         graph = {
-            "base_commit": "recipe",
+            "authority_revision": "recipe",
             "nodes": [],
             "schema_version": 1,
             "targets": [],
@@ -735,7 +735,7 @@ class RecipeRouteService:
         if reconciliation is None:
             reconciliation = Reconciliation(
                 id=RECIPE_ROUTE_AUTHORITY_ID,
-                base_commit="recipe",
+                authority_revision="recipe",
                 status="succeeded",
                 summary={"authority": "recipe-routes"},
                 graph=graph,
@@ -929,7 +929,7 @@ class RecipeRouteService:
         state = RouteState(
             generation=0,
             state="published",
-            commit=None,
+            authority_revision=None,
             profile="recipe",
             workload="recipe",
             node_ids=tuple(sorted(node_ids)),

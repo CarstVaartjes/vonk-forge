@@ -28,7 +28,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-COMMIT = "a" * 40
+COMMIT = "a"  * 64
 PLATFORM_TARGET = "platform/releases/1.2.3/" + "c" * 64 + ".json"
 PROBE_RESULT = {
     "status": "ok",
@@ -238,7 +238,7 @@ def parent(sessions, clock) -> Job:
         kind="agent.operations",
         state="queued",
         actor="operator",
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
         targets=[NODE_A, NODE_B],
         payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={},
@@ -838,7 +838,7 @@ def test_running_unrelated_parent_cannot_claim_injected_signed_rollback(
                 kind="agent.rollback",
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                base_commit=COMMIT,
+                authority_revision=COMMIT,
                 state="queued",
                 current_attempt=0,
                 created_at=clock.now,
@@ -883,7 +883,7 @@ def test_invalid_rollback_is_quarantined_without_starving_valid_work(service) ->
                 kind="agent.rollback",
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                base_commit=COMMIT,
+                authority_revision=COMMIT,
                 state="queued",
                 current_attempt=0,
                 created_at=clock.now - timedelta(seconds=1),
@@ -1052,8 +1052,8 @@ def test_sqlite_enqueue_enforces_parent_commit_and_target(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
 
-    with pytest.raises(ValueError, match="base commit"):
-        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b" * 40, {})
+    with pytest.raises(ValueError, match="authority revision"):
+        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b"  * 64, {})
     with sessions.begin() as session:
         stored_parent = session.get(Job, parent_job.id)
         assert stored_parent is not None

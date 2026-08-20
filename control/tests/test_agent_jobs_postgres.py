@@ -34,7 +34,7 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-COMMIT = "a" * 40
+COMMIT = "a"  * 64
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -138,7 +138,7 @@ def service(postgres_engine):
 def parent(sessions, clock) -> Job:
     job = Job(
         request_id=str(uuid.uuid4()), kind="agent.operations", state="queued", actor="operator",
-        base_commit=COMMIT, targets=[NODE_A, NODE_B], payload_digest=hashlib.sha256(b"{}").hexdigest(),
+        authority_revision=COMMIT, targets=[NODE_A, NODE_B], payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={}, current_attempt=0, created_at=clock.now, updated_at=clock.now,
     )
     with sessions.begin() as session:
@@ -276,7 +276,7 @@ def test_postgres_platform_update_failure_serializes_before_claim_without_deadlo
                     kind="platform.update",
                     state="running",
                     actor="admin",
-                    base_commit=COMMIT,
+                    authority_revision=COMMIT,
                     targets=[NODE_A],
                     payload_digest="2" * 64,
                     payload={},
@@ -290,7 +290,7 @@ def test_postgres_platform_update_failure_serializes_before_claim_without_deadlo
                     state="updating",
                     plan_digest="3" * 64,
                     release_digest="4" * 64,
-                    base_commit=COMMIT,
+                    authority_revision=COMMIT,
                     fleet_digest="5" * 64,
                     topology_digest="6" * 64,
                     agent_input_digest="7" * 64,
@@ -311,7 +311,7 @@ def test_postgres_platform_update_failure_serializes_before_claim_without_deadlo
                         canonical_message(payload)
                     ).hexdigest(),
                     payload=payload,
-                    base_commit=COMMIT,
+                    authority_revision=COMMIT,
                     state="queued",
                     current_attempt=0,
                     created_at=clock.now,
@@ -622,8 +622,8 @@ def test_postgres_enqueue_rejects_parent_commit_mismatch(service) -> None:
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
 
-    with pytest.raises(ValueError, match="base commit"):
-        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b" * 40, {})
+    with pytest.raises(ValueError, match="authority revision"):
+        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b"  * 64, {})
 
 
 def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:

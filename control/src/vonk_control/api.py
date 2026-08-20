@@ -84,13 +84,18 @@ from .operation_api import (
     fleet_response,
     job_response,
 )
-from .proposals import DocumentChange
+from .database_authority import (
+    AuthorityChange,
+    DatabaseAuthorityService,
+    DatabaseChangeService,
+    DatabaseProposalService,
+)
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient
 from .recipe_operations import RecipeOperationService
 from .settings import StartupMode
-from .source_bundles import SourceBundleStore
+from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
 from .workload_run_workflow import WorkloadRunWorkflow
@@ -628,7 +633,7 @@ def install_selected_generation_readiness(
 
 @dataclass(frozen=True)
 class AdminServices:
-    repository: Any
+    authority: Any
     proposals: Any
     changes: Any | None
 
@@ -638,8 +643,8 @@ def build_agent_services(
     sessions: Any,
     clock: Callable[[], Any],
     *,
-    commit_eligible: Callable[[str], bool] | None = None,
-    current_commit: Callable[[], str] | None = None,
+    revision_eligible: Callable[[str], bool] | None = None,
+    current_revision: Callable[[], str] | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
@@ -665,8 +670,8 @@ def build_agent_services(
         operations = AgentJobService(
             sessions,
             clock=clock,
-            commit_eligible=commit_eligible,
-            current_commit=current_commit,
+            revision_eligible=revision_eligible,
+            current_revision=current_revision,
         )
         policy = ManagementAddressPolicy.parse(
             settings.management_cidrs or "127.0.0.1/32",
@@ -680,10 +685,7 @@ def build_agent_services(
             clock=clock,
             presence=presence,
             artifact_root=settings.agent_artifact_root,
-            source_bundles=SourceBundleStore(
-                getattr(settings, "state_path", settings.agent_artifact_root.parent)
-                / "source-bundles"
-            ),
+            source_bundles=DatabaseSourceBundleStore(sessions),
             tuf_metadata_root=settings.agent_tuf_metadata_root,
             tuf_target_root=settings.agent_tuf_target_root,
             workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
@@ -766,8 +768,8 @@ def build_agent_services(
     operations = AgentJobService(
         sessions,
         clock=clock,
-        commit_eligible=commit_eligible,
-        current_commit=current_commit,
+        revision_eligible=revision_eligible,
+        current_revision=current_revision,
     )
     operations.set_contact_consumer(presence.observe_in_session)
     helper_authority = None
@@ -810,10 +812,7 @@ def build_agent_services(
         clock=clock,
         presence=presence,
         artifact_root=settings.agent_artifact_root,
-        source_bundles=SourceBundleStore(
-            getattr(settings, "state_path", settings.agent_artifact_root.parent)
-            / "source-bundles"
-        ),
+        source_bundles=DatabaseSourceBundleStore(sessions),
         tuf_metadata_root=tuf_metadata_root,
         tuf_target_root=tuf_target_root,
         workload_tuf_metadata_root=workload_tuf_metadata_root,
@@ -847,7 +846,7 @@ class JobQueue(Protocol):
         self,
         kind: str,
         actor: str,
-        base_commit: str,
+        authority_revision: str,
         targets: Sequence[str],
         payload: Mapping[str, object],
         *,
@@ -896,7 +895,7 @@ def refresh_fleet_metrics(
 class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(min_length=1, max_length=80)
-    base_commit: str = Field(min_length=1, max_length=128)
+    authority_revision: str = Field(min_length=1, max_length=128)
     targets: list[str] = Field(max_length=64)
     payload: dict[str, object]
 
@@ -914,7 +913,7 @@ class ProposalChangeRequest(BaseModel):
 
 class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    base_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    base_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     changes: list[ProposalChangeRequest] = Field(min_length=1, max_length=32)
 
 
@@ -1379,18 +1378,18 @@ def create_app(
                 status_code=503, detail="agent projection unavailable"
             ) from None
 
-    @app.get("/api/v1/repository")
-    def repository_view(
-        commit: str | None = None, _actor: Actor = authenticated_actor
+    @app.get("/api/v1/authority")
+    def authority_view(
+        revision: str | None = None, _actor: Actor = authenticated_actor
     ) -> dict[str, object]:
         if admin is None:
             raise HTTPException(
-                status_code=503, detail="repository administration unavailable"
+                status_code=503, detail="authority unavailable"
             )
-        resolved = commit or admin.repository.head()
-        snapshot = admin.repository.inspect(resolved)
+        resolved = revision or admin.authority.head()
+        snapshot = admin.authority.inspect(resolved)
         return {
-            "commit": snapshot.commit,
+            "revision": snapshot.revision,
             "documents": dict(snapshot.documents),
             "dependencies": dict(snapshot.dependencies),
         }
@@ -1402,15 +1401,15 @@ def create_app(
         require_mutation_role(authenticated, "/api/v1/proposals")
         if admin is None:
             raise HTTPException(
-                status_code=503, detail="repository administration unavailable"
+                status_code=503, detail="authority unavailable"
             )
         preview = admin.proposals.preview(
             authenticated.subject,
-            body.base_commit,
-            [DocumentChange(change.path, change.document) for change in body.changes],
+            body.base_revision,
+            [AuthorityChange(change.path, change.document) for change in body.changes],
         )
         return {
-            "base_commit": preview.base_commit,
+            "base_revision": preview.base_revision,
             "digest": preview.digest,
             "patch": base64.b64encode(preview.patch).decode(),
             "affected_documents": list(preview.affected_documents),
@@ -1433,7 +1432,7 @@ def create_app(
             AuditRecord(
                 request.state.request_id,
                 authenticated.subject,
-                "repository.change.submit",
+                "authority.change.submit",
                 None,
                 (),
             )
@@ -1463,7 +1462,7 @@ def create_app(
         job = jobs.enqueue(
             body.kind,
             authenticated.subject,
-            body.base_commit,
+            body.authority_revision,
             body.targets,
             body.payload,
             request_id=request.state.request_id,
@@ -1473,7 +1472,7 @@ def create_app(
                 request.state.request_id,
                 authenticated.subject,
                 f"job.enqueue:{body.kind}",
-                body.base_commit,
+                body.authority_revision,
                 tuple(body.targets),
             )
         )
@@ -1522,7 +1521,7 @@ def create_app(
                     "request_id": event.request_id,
                     "actor": event.actor,
                     "action": event.action,
-                    "base_commit": event.base_commit,
+                    "authority_revision": event.authority_revision,
                     "targets": list(event.targets),
                 }
                 for event in audits.list()
@@ -1836,26 +1835,22 @@ def production_app() -> FastAPI:
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .catalog_seeds import seed_builtin_harnesses
-    from .code_host import RepositoryCodeHost
+    from .database_authority import DatabaseAuthorityService, DatabaseChangeService, DatabaseProposalService
     from .dashboard import DashboardService
     from .db import build_engine, session_factory
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
-    from .git_policy import GitPolicy, PolicyStore
     from .host_state import HostGenerationStore
     from .install_admission import InstallAdmissionService
     from .jobs import JobService
     from .library_projection import LibraryProjection
-    from .logging import JobLogStore
+    from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .models import Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
-    from .proposals import ProposalService
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-    from .reconcile import ChangeService
-    from .repository import RepositoryService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
     from .settings import GenerationStartupSettings, Settings
@@ -1872,7 +1867,7 @@ def production_app() -> FastAPI:
     )
     from .update_grants import AdminActionGrantIssuer
     from .updates import UpdateOrchestrator
-    from .worker_authority import RepositoryAuthorityService
+    from .worker_authority import WorkerAuthorityService
 
     generation = GenerationStartupSettings.from_env_and_secrets()
     sessions = session_factory(build_engine(generation.database_url))
@@ -1919,25 +1914,13 @@ def production_app() -> FastAPI:
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
-    repository = RepositoryService(settings.repository_path)
-    proposals = ProposalService(repository, head=repository.head)
-    if settings.git_signing_key_path is None:
-        raise RuntimeError("production Git signing key is unavailable")
-    policy_store = PolicyStore(settings.state_path / "git-policy")
-    code_host = RepositoryCodeHost(
-        settings.repository_path,
-        signing_key=settings.git_signing_key_path,
-        lock_path=settings.state_path / "git-change.lock",
-    )
-    git_policy = GitPolicy(
-        policy_store,
-        code_host,
-        protected_branch=settings.deployment_branch,
-        required_checks=settings.required_checks,
-    )
-    changes = ChangeService(proposals, git_policy)
+    authority = DatabaseAuthorityService(sessions, clock=clock)
+    authority.ensure_initialized()
+    proposals = DatabaseProposalService(authority)
+    changes = DatabaseChangeService(authority, proposals)
+    database_bundles = DatabaseSourceBundleStore(sessions)
     dashboard = DashboardService(
-        repository,
+        authority,
         sessions,
         protocol_minimum=generation.protocol_minimum,
         protocol_maximum=generation.protocol_maximum,
@@ -1945,7 +1928,7 @@ def production_app() -> FastAPI:
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
-        repository,
+        authority,
         sessions,
         clock=clock,
         events=fleet_event_repository,
@@ -1975,14 +1958,14 @@ def production_app() -> FastAPI:
         protocol_minimum=generation.protocol_minimum,
         protocol_maximum=generation.protocol_maximum,
     )
-    commit_eligible = lambda commit: git_policy.eligible(commit).ok
-    current_commit = lambda: repository.head(settings.deployment_branch)
+    revision_eligible = lambda revision: revision == authority.head()
+    current_revision = authority.head
     agent_services = build_agent_services(
         settings,
         sessions,
         clock,
-        commit_eligible=commit_eligible,
-        current_commit=current_commit,
+        revision_eligible=revision_eligible,
+        current_revision=current_revision,
     )
     if settings.admin_grant_private_key_path is None:
         raise RuntimeError("production admin grant private key is unavailable")
@@ -2013,7 +1996,7 @@ def production_app() -> FastAPI:
             running_build_digest=generation.build_digest,
             metadata_root=settings.agent_tuf_metadata_root,
             target_root=settings.agent_tuf_target_root,
-            base_commit=current_commit(),
+            authority_revision=current_revision(),
         )
 
     update_admin = PlatformUpdateAdminService(
@@ -2030,7 +2013,7 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         topology_source=lambda: topology_exclusions_from_document(
-            repository.read_document(current_commit(), "inventory/topology.json").parsed
+            authority.read_document(current_revision(), "inventory/topology.json").parsed
         ),
         route_source=lambda: durable_route_impacts(sessions),
     )
@@ -2053,15 +2036,15 @@ def production_app() -> FastAPI:
                 endpoint,
             )
         return (
-            snapshot.base_commit,
+            snapshot.authority_revision,
             snapshot.plan_digest,
             snapshot.routes,
             snapshot.fleet_evidence_digest,
         )
 
-    worker_authority = RepositoryAuthorityService(
-        current_commit=current_commit,
-        commit_eligible=commit_eligible,
+    worker_authority = WorkerAuthorityService(
+        current_revision=current_revision,
+        revision_eligible=revision_eligible,
         reconciliation_input=reconciliation_authority_input,
         current_fleet_evidence=lambda: (
             fleet_response(dashboard.fleet()).evidence_digest
@@ -2107,7 +2090,7 @@ def production_app() -> FastAPI:
         route_publications=recipe_routes,
         builds=RecipeBuildService(
             sessions,
-            bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+            bundles=database_bundles,
             inventory_max_age=300,
         ),
         mappings=ClusterMappingService(sessions),
@@ -2117,8 +2100,8 @@ def production_app() -> FastAPI:
         operations=agent_services.operations,
         presence=agent_services.presence,
         clock=clock,
-        commit_eligible=commit_eligible,
-        current_commit=current_commit,
+        revision_eligible=revision_eligible,
+        current_revision=current_revision,
         additional_result_consumer=recipe_operations.consume_agent_result,
     )
 
@@ -2145,7 +2128,7 @@ def production_app() -> FastAPI:
         sessions,
         clock=clock,
         cursors=cursor_codec,
-        source_bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+        source_bundles=database_bundles,
     )
     app = create_app(
         jobs=job_service,
@@ -2156,14 +2139,14 @@ def production_app() -> FastAPI:
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
         admin=AdminServices(
-            repository,
+            authority,
             proposals,
             changes,
         ),
         metrics=metrics,
         metrics_token=settings.metrics_token,
         metrics_refresh=refresh_metrics,
-        job_logs=JobLogStore(settings.state_path / "job-logs"),
+        job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime == "enabled" else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
         worker_authority=(
@@ -2185,7 +2168,7 @@ def production_app() -> FastAPI:
         workload_run=WorkloadRunWorkflow(
             sessions,
             clock=clock,
-            bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+            bundles=database_bundles,
             recipe_resolver=lambda document, actor: (
                 catalog_service.resolve_recipe_revision(document, actor=actor)
             ),

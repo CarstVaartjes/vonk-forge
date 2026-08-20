@@ -88,17 +88,21 @@ def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health
 
     assert service["environment"] == {
         "DISABLE_ADMIN_UI": "False",
+        "LITELLM_DATABASE_URL_FILE": "/run/vonk-normalized-secrets/litellm-database-url",
+        "LITELLM_MASTER_KEY_FILE": "/run/vonk-normalized-secrets/litellm-master-key",
+        "LITELLM_UPSTREAM_KEY_FILE": "/run/vonk-normalized-secrets/litellm-upstream-key",
         "LITELLM_UI_PATH": "/tmp/litellm-ui",
         "SERVER_ROOT_PATH": "/litellm",
         "STORE_MODEL_IN_DB": "False",
     }
     assert service["read_only"] is True
     assert service["tmpfs"] == ["/tmp"]
-    assert {secret["source"] for secret in service["secrets"]} == {
-        "litellm-database-url",
-        "litellm-master-key",
-        "litellm-upstream-key",
-    }
+    assert service.get("secrets", []) == []
+    assert any(
+        volume["target"] == "/run/vonk-normalized-secrets"
+        and volume["source"] == "normalized-private-keys"
+        for volume in service["volumes"]
+    )
     assert "/health/liveliness" in json.dumps(service["healthcheck"])
 
 

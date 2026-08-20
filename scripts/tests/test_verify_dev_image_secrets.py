@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -23,6 +24,17 @@ OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 OTHER_REPOSITORY = "https://github.com/example/fork"
 BUILD_DIGEST = "sha256:060aad6cb641311ac0e198b6b50ec022b96e6797c429db5f09d5cfcea79f73ba"
+
+
+def _docker_available() -> bool:
+    return bool(shutil.which("docker")) and subprocess.run(
+        ("docker", "info"), capture_output=True
+    ).returncode == 0
+
+
+pytestmark = pytest.mark.skipif(
+    not _docker_available(), reason="Docker daemon is unavailable"
+)
 
 
 def _embedded_identity_document(**overrides: object) -> dict[str, object]:
@@ -430,7 +442,7 @@ def test_scanner_allows_only_documented_secret_file_paths(image_factory) -> None
     image = image_factory(
         dockerfile=(
             "FROM scratch\nCOPY . /scan/\n"
-            "ENV VONK_GIT_SIGNING_KEY_FILE=/run/secrets/git-signing-key\n"
+            "ENV VONK_ADMIN_GRANT_PRIVATE_KEY_FILE=/run/secrets/admin-grant-private-key\n"
             "USER 10001:10001\n"
         )
     )
@@ -641,7 +653,7 @@ def test_scanner_rejects_private_key_material_in_metadata_values(
                 {
                     "CreatedBy": (
                         "ARG AWSACCESSKEYID=never-print-metadata "
-                        "ENV VONK_GIT_SIGNING_KEY_FILE=/run/secrets/git-signing-key"
+                        "ENV VONK_ADMIN_GRANT_PRIVATE_KEY_FILE=/run/secrets/admin-grant-private-key"
                     )
                 }
             ],
