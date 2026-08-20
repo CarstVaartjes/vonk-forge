@@ -91,7 +91,7 @@ def _client(*, role: str = "operator"):
         jobs=Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"commit": "a" * 40, "nodes": []},
+        fleet=lambda: {"authority_revision": "a" * 64, "nodes": []},
         library_projection=library,
         now=lambda: 10,
     )

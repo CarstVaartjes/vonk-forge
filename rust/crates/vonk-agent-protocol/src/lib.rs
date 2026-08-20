@@ -61,7 +61,7 @@ pub enum ProtocolError {
 #[serde(deny_unknown_fields)]
 pub struct AgentClaim {
     pub attempt: u32,
-    pub base_commit: String,
+    pub authority_revision: String,
     pub deadline: DateTime<FixedOffset>,
     pub fence: Uuid,
     pub job_id: Uuid,
@@ -78,7 +78,7 @@ impl AgentClaim {
         if self.schema_version != 1 || self.attempt == 0 {
             return Err(ProtocolError::Identity("claim version or attempt"));
         }
-        if !valid_node_id(&self.node_id) || !lower_hex(&self.base_commit, 40) {
+        if !valid_node_id(&self.node_id) || !lower_hex(&self.authority_revision, 64) {
             return Err(ProtocolError::Identity("claim node or authority"));
         }
         if !matches!(

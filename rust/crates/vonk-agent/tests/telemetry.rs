@@ -128,7 +128,7 @@ fn claim() -> AgentClaim {
     let payload = json!({"run_id": "telemetry-lock-isolation"});
     AgentClaim {
         attempt: 1,
-        base_commit: "b".repeat(40),
+        authority_revision: "b".repeat(64),
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),

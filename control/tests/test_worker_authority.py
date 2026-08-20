@@ -20,13 +20,13 @@ from vonk_control.route_runtime import (
 )
 from vonk_control.worker_authority import (
     HttpWorkerAuthority,
-    RepositoryAuthorityService,
+    WorkerAuthorityService,
     WorkerAuthorityError,
     install_worker_authority_routes,
     worker_document_signature,
 )
 
-COMMIT = "a" * 40
+COMMIT = "a" * 64
 RECONCILIATION_ID = "00000000-0000-4000-8000-000000000001"
 PLAN_DIGEST = "b" * 64
 ROUTE = PublishedRoute(
@@ -39,9 +39,9 @@ ROUTE = PublishedRoute(
 
 
 def _client(*, eligible: bool = True) -> TestClient:
-    service = RepositoryAuthorityService(
-        current_commit=lambda: COMMIT,
-        commit_eligible=lambda value: eligible and value == COMMIT,
+    service = WorkerAuthorityService(
+        current_revision=lambda: COMMIT,
+        revision_eligible=lambda value: eligible and value == COMMIT,
         reconciliation_input=lambda reconciliation_id: (
             COMMIT,
             PLAN_DIGEST,
@@ -63,7 +63,7 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     body = {
         "schema_version": 1,
         "reconciliation_id": RECONCILIATION_ID,
-        "commit": COMMIT,
+        "revision": COMMIT,
         "plan_digest": PLAN_DIGEST,
         "nonce": "0" * 32,
         "routes": [
@@ -78,10 +78,10 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     }
 
     assert client.post(
-        "/internal/v1/repository/evaluate", json=body
+        "/internal/v1/authority/evaluate", json=body
     ).status_code == 401
     assert client.post(
-        "/internal/v1/repository/evaluate",
+        "/internal/v1/authority/evaluate",
         headers={
             "x-vonk-worker-signature": worker_document_signature(
                 b"x" * 32,
@@ -92,7 +92,7 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
         json=body,
     ).status_code == 401
     response = client.post(
-        "/internal/v1/repository/evaluate",
+        "/internal/v1/authority/evaluate",
         headers={
             "x-vonk-worker-signature": worker_document_signature(
                 b"w" * 32,
@@ -104,7 +104,7 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["commit"] == COMMIT
+    assert response.json()["revision"] == COMMIT
     assert response.json()["nonce"] == "0" * 32
     assert response.json()["expires_at"] == 115
 def test_internal_worker_authority_fails_closed_before_repository_policy_output() -> None:
@@ -112,7 +112,7 @@ def test_internal_worker_authority_fails_closed_before_repository_policy_output(
     body = {
         "schema_version": 1,
         "reconciliation_id": RECONCILIATION_ID,
-        "commit": COMMIT,
+        "revision": COMMIT,
         "plan_digest": PLAN_DIGEST,
         "nonce": "2" * 32,
         "routes": [
@@ -126,7 +126,7 @@ def test_internal_worker_authority_fails_closed_before_repository_policy_output(
         ],
     }
     response = client.post(
-        "/internal/v1/repository/evaluate",
+        "/internal/v1/authority/evaluate",
         headers={
             "x-vonk-worker-signature": worker_document_signature(
                 b"w" * 32,
@@ -161,7 +161,7 @@ def test_worker_prefetches_once_then_consumes_only_exact_cached_authority() -> N
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": COMMIT,
+            "revision": COMMIT,
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": True,
@@ -189,8 +189,8 @@ def test_worker_prefetches_once_then_consumes_only_exact_cached_authority() -> N
     authority.prefetch(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ())
     assert authority.authorized(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ()) is True
     assert authority.eligible(COMMIT) is True
-    assert authority.current_commit() == COMMIT
-    assert calls == ["http://control-api:8000/internal/v1/repository/evaluate"]
+    assert authority.current_revision() == COMMIT
+    assert calls == ["http://control-api:8000/internal/v1/authority/evaluate"]
 
     with pytest.raises(WorkerAuthorityError):
         authority.authorized(
@@ -222,7 +222,7 @@ def test_worker_publication_uses_prefetched_route_policy_without_network() -> No
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": body["commit"],
+            "revision": body["revision"],
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": True,
@@ -283,7 +283,7 @@ def test_atomic_publisher_never_performs_authority_network_io_under_file_lock(
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": body["commit"],
+            "revision": body["revision"],
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": True,
@@ -364,7 +364,7 @@ def test_atomic_publisher_never_performs_authority_network_io_under_file_lock(
             )
         },
         expires_at=now + timedelta(seconds=60),
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
     )
 
     publisher.publish(request)
@@ -374,11 +374,11 @@ def test_atomic_publisher_never_performs_authority_network_io_under_file_lock(
 
 
 def test_repository_head_change_during_policy_evaluation_fails_closed() -> None:
-    heads = iter((COMMIT, "b" * 40))
+    heads = iter((COMMIT, "b" * 64))
     policy_calls: list[str] = []
-    service = RepositoryAuthorityService(
-        current_commit=lambda: next(heads),
-        commit_eligible=lambda _commit: True,
+    service = WorkerAuthorityService(
+        current_revision=lambda: next(heads),
+        revision_eligible=lambda _commit: True,
         reconciliation_input=lambda _reconciliation_id: (
             COMMIT,
             PLAN_DIGEST,
@@ -386,8 +386,8 @@ def test_repository_head_change_during_policy_evaluation_fails_closed() -> None:
             "e" * 64,
         ),
         current_fleet_evidence=lambda: "e" * 64,
-        deployments=lambda commit, _routes: (
-            policy_calls.append(commit) or ()
+        deployments=lambda revision, _routes: (
+            policy_calls.append(revision) or ()
         ),
         clock=lambda: 100,
     )
@@ -407,9 +407,9 @@ def test_repository_head_change_during_policy_evaluation_fails_closed() -> None:
 
 def test_fleet_evidence_change_during_authority_evaluation_fails_closed() -> None:
     fleet = iter(("e" * 64, "f" * 64))
-    service = RepositoryAuthorityService(
-        current_commit=lambda: COMMIT,
-        commit_eligible=lambda _commit: True,
+    service = WorkerAuthorityService(
+        current_revision=lambda: COMMIT,
+        revision_eligible=lambda _commit: True,
         reconciliation_input=lambda _reconciliation_id: (
             COMMIT,
             PLAN_DIGEST,
@@ -417,7 +417,7 @@ def test_fleet_evidence_change_during_authority_evaluation_fails_closed() -> Non
             "e" * 64,
         ),
         current_fleet_evidence=lambda: next(fleet),
-        deployments=lambda _commit, _routes: (),
+        deployments=lambda _revision, _routes: (),
         clock=lambda: 100,
     )
 
@@ -442,7 +442,7 @@ def test_worker_reports_explicit_signed_fleet_evidence_authority_loss() -> None:
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": body["commit"],
+            "revision": body["revision"],
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": True,
@@ -471,7 +471,7 @@ def test_worker_reports_explicit_signed_fleet_evidence_authority_loss() -> None:
     ) == "fleet acceptance evidence changed since planning"
 
 
-@pytest.mark.parametrize("mismatch", ("reconciliation", "commit", "plan", "route"))
+@pytest.mark.parametrize("mismatch", ("reconciliation", "revision", "plan", "route"))
 def test_internal_worker_authority_rejects_scope_not_in_persisted_plan(
     mismatch: str,
 ) -> None:
@@ -486,21 +486,21 @@ def test_internal_worker_authority_rejects_scope_not_in_persisted_plan(
     body = {
         "schema_version": 1,
         "reconciliation_id": RECONCILIATION_ID,
-        "commit": COMMIT,
+        "revision": COMMIT,
         "plan_digest": PLAN_DIGEST,
         "nonce": "3" * 32,
         "routes": [route],
     }
     if mismatch == "reconciliation":
         body["reconciliation_id"] = "00000000-0000-4000-8000-000000000002"
-    elif mismatch == "commit":
-        body["commit"] = "c" * 40
+    elif mismatch == "revision":
+        body["revision"] = "c" * 40
     elif mismatch == "plan":
         body["plan_digest"] = "c" * 64
     else:
         route["api_base"] = "http://10.0.0.11:8000/v1"
     response = client.post(
-        "/internal/v1/repository/evaluate",
+        "/internal/v1/authority/evaluate",
         headers={
             "x-vonk-worker-signature": worker_document_signature(
                 b"w" * 32,
@@ -540,7 +540,7 @@ def test_worker_rejects_internally_inconsistent_signed_decision(
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": body["commit"],
+            "revision": body["revision"],
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": current,
@@ -584,7 +584,7 @@ def test_failed_second_prefetch_cannot_reuse_first_positive_cache() -> None:
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": body["commit"],
+            "revision": body["revision"],
             "plan_digest": body["plan_digest"],
             "nonce": body["nonce"],
             "current": True,
@@ -636,7 +636,7 @@ def test_worker_rejects_tampered_stale_redirected_or_oversized_authority(
         def geturl(self) -> str:
             if fault == "redirect":
                 return "http://attacker.invalid/authority"
-            return "http://control-api:8000/internal/v1/repository/evaluate"
+            return "http://control-api:8000/internal/v1/authority/evaluate"
 
     def open_request(request, *, timeout):
         assert timeout == 3
@@ -646,7 +646,7 @@ def test_worker_rejects_tampered_stale_redirected_or_oversized_authority(
         response = {
             "schema_version": 1,
             "reconciliation_id": body["reconciliation_id"],
-            "commit": COMMIT,
+            "revision": COMMIT,
             "plan_digest": body["plan_digest"],
             "nonce": "f" * 32 if fault == "nonce" else body["nonce"],
             "current": True,

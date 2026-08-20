@@ -174,6 +174,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/authority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authority View */
+        get: operations["getAuthority"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/entities": {
         parameters: {
             query?: never;
@@ -1078,23 +1095,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/repository": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Repository View */
-        get: operations["getRepository"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -1486,6 +1486,8 @@ export interface components {
         };
         /** FleetSnapshot */
         FleetSnapshot: {
+            /** Authority Revision */
+            authority_revision: string;
             /** Event Cursor */
             event_cursor: number;
             /**
@@ -1495,8 +1497,6 @@ export interface components {
             generated_at: string;
             /** Nodes */
             nodes: components["schemas"]["FleetNode"][];
-            /** Repository Commit */
-            repository_commit: string;
             /**
              * Schema Version
              * @default 1
@@ -1506,8 +1506,8 @@ export interface components {
         };
         /** FleetStatusResponse */
         FleetStatusResponse: {
-            /** Commit */
-            commit: string;
+            /** Authority Revision */
+            authority_revision: string;
             /** Evidence Digest */
             evidence_digest: string;
             /** Nodes */
@@ -1726,8 +1726,8 @@ export interface components {
         };
         /** JobDetailResponse */
         JobDetailResponse: {
-            /** Base Commit */
-            base_commit: string;
+            /** Authority Revision */
+            authority_revision: string;
             /** Current Attempt */
             current_attempt: number;
             /** Id */
@@ -2514,8 +2514,8 @@ export interface components {
         };
         /** ProposalRequest */
         ProposalRequest: {
-            /** Base Commit */
-            base_commit: string;
+            /** Base Revision */
+            base_revision: string;
             /** Changes */
             changes: components["schemas"]["ProposalChangeRequest"][];
         };
@@ -4092,6 +4092,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthSession"];
+                };
+            };
+        };
+    };
+    getAuthority: {
+        parameters: {
+            query?: {
+                revision?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6525,39 +6558,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UninstallPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getRepository: {
-        parameters: {
-            query?: {
-                commit?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

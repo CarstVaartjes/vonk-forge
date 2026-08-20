@@ -68,13 +68,50 @@ def upgrade() -> None:
     sa.Column('request_id', sa.String(length=36), nullable=False),
     sa.Column('actor', sa.String(length=200), nullable=False),
     sa.Column('action', sa.String(length=120), nullable=False),
-    sa.Column('base_commit', sa.String(length=128), nullable=True),
+    sa.Column('authority_revision', sa.String(length=128), nullable=True),
     sa.Column('targets', sa.JSON(), nullable=False),
     sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_audit_events_occurred_at'), 'audit_events', ['occurred_at'], unique=False)
     op.create_index(op.f('ix_audit_events_request_id'), 'audit_events', ['request_id'], unique=False)
+    op.create_table('control_authority_revisions',
+    sa.Column('revision_id', sa.String(length=64), nullable=False),
+    sa.Column('parent_revision', sa.String(length=64), nullable=True),
+    sa.Column('documents', sa.JSON(), nullable=False),
+    sa.Column('dependencies', sa.JSON(), nullable=False),
+    sa.Column('actor', sa.String(length=200), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['parent_revision'], ['control_authority_revisions.revision_id']),
+    sa.PrimaryKeyConstraint('revision_id')
+    )
+    op.create_index(op.f('ix_control_authority_revisions_parent_revision'), 'control_authority_revisions', ['parent_revision'], unique=False)
+    op.create_index(op.f('ix_control_authority_revisions_created_at'), 'control_authority_revisions', ['created_at'], unique=False)
+    op.create_table('control_authority_heads',
+    sa.Column('singleton_id', sa.Integer(), nullable=False),
+    sa.Column('revision_id', sa.String(length=64), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['revision_id'], ['control_authority_revisions.revision_id']),
+    sa.PrimaryKeyConstraint('singleton_id'),
+    sa.UniqueConstraint('revision_id')
+    )
+    op.create_table('control_authority_proposals',
+    sa.Column('digest', sa.String(length=64), nullable=False),
+    sa.Column('actor', sa.String(length=200), nullable=False),
+    sa.Column('base_revision', sa.String(length=64), nullable=False),
+    sa.Column('changes', sa.JSON(), nullable=False),
+    sa.Column('patch', sa.LargeBinary(), nullable=False),
+    sa.Column('affected_documents', sa.JSON(), nullable=False),
+    sa.Column('validation_results', sa.JSON(), nullable=False),
+    sa.Column('applied_revision', sa.String(length=64), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['applied_revision'], ['control_authority_revisions.revision_id']),
+    sa.ForeignKeyConstraint(['base_revision'], ['control_authority_revisions.revision_id']),
+    sa.PrimaryKeyConstraint('digest')
+    )
+    op.create_index(op.f('ix_control_authority_proposals_base_revision'), 'control_authority_proposals', ['base_revision'], unique=False)
+    op.create_index(op.f('ix_control_authority_proposals_applied_revision'), 'control_authority_proposals', ['applied_revision'], unique=False)
+    op.create_index(op.f('ix_control_authority_proposals_created_at'), 'control_authority_proposals', ['created_at'], unique=False)
     op.create_table('catalog_entities',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('kind', sa.String(length=32), nullable=False),
@@ -183,6 +220,12 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('sha256'),
     sa.UniqueConstraint('storage_key')
     )
+    op.create_table('source_bundle_archives',
+    sa.Column('sha256', sa.String(length=64), nullable=False),
+    sa.Column('archive', sa.LargeBinary(), nullable=False),
+    sa.ForeignKeyConstraint(['sha256'], ['recipe_source_bundles.sha256'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('sha256')
+    )
     op.create_table('reconciliation_completion_generation',
     sa.Column('singleton_id', sa.Integer(), nullable=False),
     sa.Column('last_generation', sa.BigInteger(), nullable=False),
@@ -190,10 +233,10 @@ def upgrade() -> None:
     )
     op.create_table('reconciliations',
     sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('base_commit', sa.String(length=128), nullable=False),
+    sa.Column('authority_revision', sa.String(length=128), nullable=False),
     sa.Column('status', sa.String(length=32), nullable=False),
     sa.Column('summary', sa.JSON(), nullable=False),
-    sa.Column('graph', sa.JSON(), server_default='{"base_commit":"","nodes":[],"schema_version":1,"targets":[]}', nullable=False),
+    sa.Column('graph', sa.JSON(), server_default='{"authority_revision":"","nodes":[],"schema_version":1,"targets":[]}', nullable=False),
     sa.Column('graph_digest', sa.String(length=64), server_default='5c061eb8dfce0a3f2bcbfbf06cb71d695c33e8f4269e17bfe5cd1cda0054cdc5', nullable=False),
     sa.Column('plan_digest', sa.String(length=64), nullable=True),
     sa.Column('resolved_plan', sa.JSON(), nullable=True),
@@ -374,7 +417,7 @@ def upgrade() -> None:
     sa.Column('kind', sa.String(length=80), nullable=False),
     sa.Column('state', sa.String(length=32), nullable=False),
     sa.Column('actor', sa.String(length=200), nullable=False),
-    sa.Column('base_commit', sa.String(length=128), nullable=False),
+    sa.Column('authority_revision', sa.String(length=128), nullable=False),
     sa.Column('targets', sa.JSON(), nullable=False),
     sa.Column('payload_digest', sa.String(length=64), nullable=False),
     sa.Column('payload', sa.JSON(), nullable=False),
@@ -391,6 +434,15 @@ def upgrade() -> None:
     op.create_index(op.f('ix_jobs_created_at'), 'jobs', ['created_at'], unique=False)
     op.create_index(op.f('ix_jobs_reconciliation_id'), 'jobs', ['reconciliation_id'], unique=True)
     op.create_index(op.f('ix_jobs_state'), 'jobs', ['state'], unique=False)
+    op.create_table('job_log_entries',
+    sa.Column('job_id', sa.String(length=36), nullable=False),
+    sa.Column('digest', sa.String(length=64), nullable=False),
+    sa.Column('content', sa.LargeBinary(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['job_id'], ['jobs.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('job_id', 'digest')
+    )
+    op.create_index(op.f('ix_job_log_entries_created_at'), 'job_log_entries', ['created_at'], unique=False)
     op.create_table('local_recipe_revisions',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('recipe_id', sa.String(length=36), nullable=False),
@@ -665,7 +717,7 @@ def upgrade() -> None:
     sa.Column('kind', sa.String(length=80), nullable=False),
     sa.Column('payload_digest', sa.String(length=64), nullable=False),
     sa.Column('payload', sa.JSON(), nullable=False),
-    sa.Column('base_commit', sa.String(length=128), nullable=False),
+    sa.Column('authority_revision', sa.String(length=128), nullable=False),
     sa.Column('state', sa.String(length=32), nullable=False),
     sa.Column('current_attempt', sa.Integer(), nullable=False),
     sa.Column('retry_disposition', sa.String(length=32), nullable=True),
@@ -819,7 +871,7 @@ def upgrade() -> None:
     sa.Column('state', sa.String(length=32), nullable=False),
     sa.Column('plan_digest', sa.String(length=64), nullable=False),
     sa.Column('release_digest', sa.String(length=64), nullable=False),
-    sa.Column('base_commit', sa.String(length=128), nullable=False),
+    sa.Column('authority_revision', sa.String(length=128), nullable=False),
     sa.Column('fleet_digest', sa.String(length=64), nullable=False),
     sa.Column('topology_digest', sa.String(length=64), nullable=False),
     sa.Column('agent_input_digest', sa.String(length=64), nullable=False),
@@ -1229,6 +1281,8 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_local_recipe_revisions_lifecycle'), table_name='local_recipe_revisions')
     op.drop_index(op.f('ix_local_recipe_revisions_content_sha256'), table_name='local_recipe_revisions')
     op.drop_table('local_recipe_revisions')
+    op.drop_index(op.f('ix_job_log_entries_created_at'), table_name='job_log_entries')
+    op.drop_table('job_log_entries')
     op.drop_index(op.f('ix_jobs_state'), table_name='jobs')
     op.drop_index(op.f('ix_jobs_reconciliation_id'), table_name='jobs')
     op.drop_index(op.f('ix_jobs_created_at'), table_name='jobs')
@@ -1258,6 +1312,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_reconciliations_completion_generation'), table_name='reconciliations')
     op.drop_table('reconciliations')
     op.drop_table('reconciliation_completion_generation')
+    op.drop_table('source_bundle_archives')
     op.drop_table('recipe_source_bundles')
     op.drop_index(op.f('ix_observations_observed_at'), table_name='observations')
     op.drop_index(op.f('ix_observations_node_id'), table_name='observations')
@@ -1280,6 +1335,14 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_audit_events_request_id'), table_name='audit_events')
     op.drop_index(op.f('ix_audit_events_occurred_at'), table_name='audit_events')
     op.drop_table('audit_events')
+    op.drop_index(op.f('ix_control_authority_proposals_created_at'), table_name='control_authority_proposals')
+    op.drop_index(op.f('ix_control_authority_proposals_applied_revision'), table_name='control_authority_proposals')
+    op.drop_index(op.f('ix_control_authority_proposals_base_revision'), table_name='control_authority_proposals')
+    op.drop_table('control_authority_proposals')
+    op.drop_table('control_authority_heads')
+    op.drop_index(op.f('ix_control_authority_revisions_created_at'), table_name='control_authority_revisions')
+    op.drop_index(op.f('ix_control_authority_revisions_parent_revision'), table_name='control_authority_revisions')
+    op.drop_table('control_authority_revisions')
     op.drop_table('agent_nodes')
     op.drop_index(op.f('ix_agent_issued_certificate_revocations_state'), table_name='agent_issued_certificate_revocations')
     op.drop_index(op.f('ix_agent_issued_certificate_revocations_node_id'), table_name='agent_issued_certificate_revocations')

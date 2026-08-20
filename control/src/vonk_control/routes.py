@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .presence import ManagementAddressPolicy, PresenceError
 
-_COMMIT = re.compile(r"[0-9a-f]{40}")
+_AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}")
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
 
@@ -114,7 +114,7 @@ class RouteEndpointPolicy:
 
 @dataclass(frozen=True)
 class RouteCandidate:
-    commit: str
+    authority_revision: str
     profile: str
     workload: str
     node_ids: tuple[str, ...]
@@ -126,7 +126,7 @@ class RouteCandidate:
 class RouteState:
     generation: int
     state: str
-    commit: str | None
+    authority_revision: str | None
     profile: str | None
     workload: str | None
     node_ids: tuple[str, ...]
@@ -178,7 +178,7 @@ class RoutePublisher:
                 raise RouteValidationError("active route generation checksum mismatch")
             payload = json.loads(content)
             self._state = RouteState(
-                generation=payload["generation"], state=payload["state"], commit=payload.get("commit"),
+                generation=payload["generation"], state=payload["state"], authority_revision=payload.get("authority_revision"),
                 profile=payload.get("profile"), workload=payload.get("workload"),
                 node_ids=tuple(payload["node_ids"]), aliases=dict(payload["aliases"]),
                 health_timestamp=payload.get("health_timestamp"), reason=payload.get("reason"),
@@ -218,7 +218,7 @@ class RoutePublisher:
         finally:
             temporary.unlink(missing_ok=True)
         self._state = RouteState(
-            generation=generation, state=str(payload["state"]), commit=payload.get("commit"),
+            generation=generation, state=str(payload["state"]), authority_revision=payload.get("authority_revision"),
             profile=payload.get("profile"), workload=payload.get("workload"),
             node_ids=tuple(payload["node_ids"]), aliases=dict(payload["aliases"]),
             health_timestamp=payload.get("health_timestamp"), reason=payload.get("reason"), digest=digest,
@@ -230,13 +230,13 @@ class RoutePublisher:
             raise RouteValidationError("maintenance targets must be stable node IDs")
         safe_reason = re.sub(r"(?i)(bearer|token|secret|password)\S*", "<redacted>", reason)[:256]
         return self._publish_payload({
-            "state": "maintenance", "commit": None, "profile": None, "workload": None,
+            "state": "maintenance", "authority_revision": None, "profile": None, "workload": None,
             "node_ids": sorted(set(targets)), "aliases": {}, "health_timestamp": None,
             "reason": safe_reason or "maintenance",
         })
 
     def publish(self, candidate: RouteCandidate) -> RouteState:
-        if _COMMIT.fullmatch(candidate.commit) is None or _NAME.fullmatch(candidate.profile) is None or _NAME.fullmatch(candidate.workload) is None:
+        if _AUTHORITY_REVISION.fullmatch(candidate.authority_revision) is None or _NAME.fullmatch(candidate.profile) is None or _NAME.fullmatch(candidate.workload) is None:
             raise RouteValidationError("route candidate identity is invalid")
         if not candidate.node_ids or any(_NODE.fullmatch(node) is None for node in candidate.node_ids):
             raise RouteValidationError("route candidate nodes are invalid")
@@ -259,7 +259,7 @@ class RoutePublisher:
             endpoints=tuple(endpoints.values()),
         )
         return self._publish_payload({
-            "state": "published", "commit": candidate.commit, "profile": candidate.profile,
+            "state": "published", "authority_revision": candidate.authority_revision, "profile": candidate.profile,
             "workload": candidate.workload, "node_ids": sorted(set(candidate.node_ids)),
             "aliases": dict(sorted(aliases.items())),
             "health_timestamp": health_timestamp.isoformat(), "reason": None,

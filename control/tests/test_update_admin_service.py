@@ -80,7 +80,7 @@ def _target() -> TargetPlatform:
         platform_version="2.0.0",
         build_digest="sha256:" + "a" * 64,
         release_digest="sha256:" + "b" * 64,
-        base_commit="c" * 40,
+        authority_revision="c"  * 64,
         protocol_minimum=3,
         protocol_maximum=3,
         tuf_targets_version=9,
@@ -318,7 +318,7 @@ def test_selected_platform_target_reopens_projection_and_rejects_process_drift()
         running_build_digest=selected.build_digest,
         metadata_root=SimpleNamespace(),
         target_root=SimpleNamespace(),
-        base_commit="c" * 40,
+        authority_revision="c"  * 64,
         loader=load,
     )
     second = selected_platform_target(
@@ -329,7 +329,7 @@ def test_selected_platform_target_reopens_projection_and_rejects_process_drift()
         running_build_digest=selected.build_digest,
         metadata_root=SimpleNamespace(),
         target_root=SimpleNamespace(),
-        base_commit="c" * 40,
+        authority_revision="c"  * 64,
         loader=load,
     )
 
@@ -348,7 +348,7 @@ def test_selected_platform_target_reopens_projection_and_rejects_process_drift()
             running_build_digest=selected.build_digest,
             metadata_root=SimpleNamespace(),
             target_root=SimpleNamespace(),
-            base_commit="c" * 40,
+            authority_revision="c"  * 64,
             loader=load,
         )
 
@@ -362,7 +362,7 @@ def test_durable_route_impacts_use_only_the_accepted_publication_owner(tmp_path)
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit="c" * 40,
+                authority_revision="c"  * 64,
                 status="succeeded",
                 summary={},
                 plan_digest="d" * 64,

@@ -34,7 +34,7 @@ from .telemetry import (
     TelemetrySampleView,
 )
 
-_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
+_REVISION_PATTERN = r"^[0-9a-f]{64}$"
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -54,7 +54,7 @@ _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 BootId = Annotated[str, StringConstraints(pattern=_BOOT_UUID_PATTERN)]
-CommitId = Annotated[str, StringConstraints(pattern=_COMMIT_PATTERN)]
+AuthorityRevision = Annotated[str, StringConstraints(pattern=_REVISION_PATTERN)]
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -287,7 +287,7 @@ class FleetSnapshot(_StrictModel):
     schema_version: Literal[1] = 1
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
-    repository_commit: CommitId
+    authority_revision: AuthorityRevision
     nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
 
 
@@ -365,7 +365,7 @@ class FleetProjection:
 
     def __init__(
         self,
-        repository: object,
+        authority: object,
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -388,7 +388,7 @@ class FleetProjection:
             raise ValueError("Fleet projection freshness windows must be positive")
         if telemetry_delayed_seconds < telemetry_live_seconds:
             raise ValueError("Fleet telemetry freshness windows are invalid")
-        self._repository = repository
+        self._authority = authority
         self._sessions = sessions
         self._clock = clock
         self._events = events or FleetEventRepository(sessions, clock=clock)
@@ -408,7 +408,7 @@ class FleetProjection:
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
             raise ValueError("Fleet event cursor is invalid")
-        commit = self._repository.head()
+        revision = self._authority.head()
         current = _utc(self._clock())
         with self._sessions.begin() as session:
             agents = self._registered_agents(session)
@@ -438,7 +438,7 @@ class FleetProjection:
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
-            repository_commit=commit,
+            authority_revision=revision,
             nodes=[
                 self._node(
                     node_id,

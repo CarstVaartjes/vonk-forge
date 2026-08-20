@@ -14,12 +14,12 @@ class AuditRecord:
     request_id: str
     actor: str
     action: str
-    base_commit: str | None
+    authority_revision: str | None
     targets: tuple[str, ...]
 
     def __post_init__(self) -> None:
         """Keep audit projections free of bearer keys and private credentials."""
-        values = (self.request_id, self.actor, self.action, self.base_commit, *self.targets)
+        values = (self.request_id, self.actor, self.action, self.authority_revision, *self.targets)
         if any(_contains_secret_material(value) for value in values if value is not None):
             raise ValueError("audit record contains secret material")
 
@@ -95,7 +95,7 @@ class SqlAuditStore:
                 request_id=event.request_id,
                 actor=event.actor,
                 action=event.action,
-                base_commit=event.base_commit,
+                authority_revision=event.authority_revision,
                 targets=list(event.targets),
                 occurred_at=self._clock(),
             ))
@@ -105,6 +105,6 @@ class SqlAuditStore:
 
         with self._sessions() as session:
             rows = session.scalars(select(AuditEvent).order_by(AuditEvent.occurred_at.desc()).limit(limit))
-            return [AuditRecord(row.request_id, row.actor, row.action, row.base_commit, tuple(row.targets)) for row in rows]
+            return [AuditRecord(row.request_id, row.actor, row.action, row.authority_revision, tuple(row.targets)) for row in rows]
     def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]:
         return _identity_history_rows(self._sessions, limit)

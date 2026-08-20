@@ -27,7 +27,7 @@ T = TypeVar("T", bound="JobDetailResponse")
 class JobDetailResponse:
     """
         Attributes:
-            base_commit (str):
+            authority_revision (str):
             current_attempt (int):
             id (str):
             kind (str):
@@ -43,7 +43,7 @@ class JobDetailResponse:
             target_next_cursor (Union[None, Unset, str]):
      """
 
-    base_commit: str
+    authority_revision: str
     current_attempt: int
     id: str
     kind: str
@@ -65,7 +65,7 @@ class JobDetailResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
-        base_commit = self.base_commit
+        authority_revision = self.authority_revision
 
         current_attempt = self.current_attempt
 
@@ -120,7 +120,7 @@ class JobDetailResponse:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "base_commit": base_commit,
+            "authority_revision": authority_revision,
             "current_attempt": current_attempt,
             "id": id,
             "kind": kind,
@@ -149,7 +149,7 @@ class JobDetailResponse:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
         d = dict(src_dict)
-        base_commit = d.pop("base_commit")
+        authority_revision = d.pop("authority_revision")
 
         current_attempt = d.pop("current_attempt")
 
@@ -222,7 +222,7 @@ class JobDetailResponse:
 
 
         job_detail_response = cls(
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             current_attempt=current_attempt,
             id=id,
             kind=kind,

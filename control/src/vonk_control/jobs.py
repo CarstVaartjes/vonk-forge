@@ -35,7 +35,7 @@ class AttemptFence:
     lease_deadline: datetime
     kind: str
     payload: Mapping[str, object]
-    base_commit: str
+    authority_revision: str
     targets: tuple[str, ...]
 
 
@@ -147,15 +147,15 @@ class JobService:
         self,
         kind: str,
         actor: str,
-        base_commit: str,
+        authority_revision: str,
         targets: Sequence[str],
         payload: Mapping[str, object],
         *,
         request_id: str | None = None,
         reconciliation_id: str | None = None,
     ) -> Job:
-        if not all(value.strip() for value in (kind, actor, base_commit)):
-            raise ValueError("job kind, actor, and base commit are required")
+        if not all(value.strip() for value in (kind, actor, authority_revision)):
+            raise ValueError("job kind, actor, and authority revision are required")
         if reconciliation_id is not None:
             try:
                 reconciliation_id = str(uuid.UUID(reconciliation_id))
@@ -168,7 +168,7 @@ class JobService:
             kind=kind,
             state="queued",
             actor=actor,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             targets=list(targets),
             payload_digest=hashlib.sha256(encoded).hexdigest(),
             payload=clean,
@@ -279,7 +279,7 @@ class JobService:
         self,
         kind: str,
         actor: str,
-        base_commit: str,
+        authority_revision: str,
         targets: Sequence[str],
         payload: Mapping[str, object],
         *,
@@ -291,8 +291,8 @@ class JobService:
 
         if not callable(authority_check):
             raise TypeError("job enqueue authority check is invalid")
-        if not all(value.strip() for value in (kind, actor, base_commit)):
-            raise ValueError("job kind, actor, and base commit are required")
+        if not all(value.strip() for value in (kind, actor, authority_revision)):
+            raise ValueError("job kind, actor, and authority revision are required")
         if reconciliation_id is not None:
             try:
                 reconciliation_id = str(uuid.UUID(reconciliation_id))
@@ -305,7 +305,7 @@ class JobService:
             kind=kind,
             state="queued",
             actor=actor,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             targets=list(targets),
             payload_digest=hashlib.sha256(encoded).hexdigest(),
             payload=clean,
@@ -376,7 +376,7 @@ class JobService:
             )
             return AttemptFence(
                 job.id, job.current_attempt, fence, worker_id, deadline, job.kind,
-                dict(job.payload), job.base_commit, tuple(job.targets),
+                dict(job.payload), job.authority_revision, tuple(job.targets),
             )
 
     def _active(self, session: Session, fence: AttemptFence) -> tuple[Job, JobAttempt]:
@@ -403,7 +403,7 @@ class JobService:
             job.updated_at = self._clock()
             return AttemptFence(
                 fence.job_id, fence.attempt, fence.fence, fence.worker_id, deadline,
-                fence.kind, fence.payload, fence.base_commit, fence.targets,
+                fence.kind, fence.payload, fence.authority_revision, fence.targets,
             )
 
     def _finish(self, fence: AttemptFence, state: str, result: Mapping[str, object] | None, reason: str | None) -> None:

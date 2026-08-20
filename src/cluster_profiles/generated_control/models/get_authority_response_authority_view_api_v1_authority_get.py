@@ -12,12 +12,12 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="GetRepositoryResponseRepositoryViewApiV1RepositoryGet")
+T = TypeVar("T", bound="GetAuthorityResponseAuthorityViewApiV1AuthorityGet")
 
 
 
 @_attrs_define
-class GetRepositoryResponseRepositoryViewApiV1RepositoryGet:
+class GetAuthorityResponseAuthorityViewApiV1AuthorityGet:
     """
      """
 
@@ -39,12 +39,12 @@ class GetRepositoryResponseRepositoryViewApiV1RepositoryGet:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        get_repository_response_repository_view_api_v1_repository_get = cls(
+        get_authority_response_authority_view_api_v1_authority_get = cls(
         )
 
 
-        get_repository_response_repository_view_api_v1_repository_get.additional_properties = d
-        return get_repository_response_repository_view_api_v1_repository_get
+        get_authority_response_authority_view_api_v1_authority_get.additional_properties = d
+        return get_authority_response_authority_view_api_v1_authority_get
 
     @property
     def additional_keys(self) -> list[str]:

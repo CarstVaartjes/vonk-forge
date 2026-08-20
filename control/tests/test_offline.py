@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,15 @@ from vonk_control.offline import (
 def test_offline_mutation_refuses_healthy_api(tmp_path: Path) -> None:
     with pytest.raises(OfflineConflict, match="control plane is running"):
         require_offline(tmp_path, probe=lambda: True, owner_uid=os.geteuid())
+
+
+def test_init_creates_only_host_upgrade_state_without_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(offline, "require_offline", lambda *_args, **_kwargs: nullcontext())
+    state = tmp_path / "state"
+    assert main(["--state-path", str(state), "init"]) == 0
+    assert state.is_dir()
 
 
 def test_installed_updater_exposes_only_allowlisted_maintenance_actions(

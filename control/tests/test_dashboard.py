@@ -14,7 +14,7 @@ NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 
 
 class Repository:
-    def head(self): return "a" * 40
+    def head(self): return "a" * 64
     def read_document(self, commit, path):
         raise AssertionError(f"unexpected document read: {commit} {path}")
 
@@ -25,13 +25,13 @@ def test_dashboard_does_not_read_the_repository_fleet_document(tmp_path) -> None
     sessions = sessionmaker(engine, expire_on_commit=False)
 
     assert DashboardService(Repository(), sessions, clock=lambda: NOW).fleet() == {
-        "commit": "a" * 40,
+        "authority_revision": "a" * 64,
         "nodes": [],
     }
 
 
 class PresenceRepository:
-    def head(self): return "b" * 40
+    def head(self): return "b" * 64
     def read_document(self, commit, path):
         raise AssertionError(f"unexpected document read: {commit} {path}")
 
@@ -65,7 +65,7 @@ def test_dashboard_joins_registered_fleet_with_latest_observation(tmp_path) -> N
         sessions,
         clock=lambda: datetime(2026, 8, 3, 0, 5, 1, tzinfo=UTC),
     ).fleet()
-    assert result["commit"] == "a" * 40
+    assert result["authority_revision"] == "a" * 64
     node = result["nodes"][0]
     assert {key: node[key] for key in ("id", "display_name", "hostname", "lifecycle", "healthy", "labels")} == {
         "id": "spk_00000000000000000000000000000001", "display_name": "Alpha", "hostname": "alpha", "lifecycle": "ready", "healthy": True, "labels": {"zone": "lab"},

@@ -23,11 +23,11 @@ T = TypeVar("T", bound="ProposalRequest")
 class ProposalRequest:
     """
         Attributes:
-            base_commit (str):
+            base_revision (str):
             changes (list['ProposalChangeRequest']):
      """
 
-    base_commit: str
+    base_revision: str
     changes: list['ProposalChangeRequest']
 
 
@@ -36,7 +36,7 @@ class ProposalRequest:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.proposal_change_request import ProposalChangeRequest
-        base_commit = self.base_commit
+        base_revision = self.base_revision
 
         changes = []
         for changes_item_data in self.changes:
@@ -49,7 +49,7 @@ class ProposalRequest:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "base_commit": base_commit,
+            "base_revision": base_revision,
             "changes": changes,
         })
 
@@ -61,7 +61,7 @@ class ProposalRequest:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.proposal_change_request import ProposalChangeRequest
         d = dict(src_dict)
-        base_commit = d.pop("base_commit")
+        base_revision = d.pop("base_revision")
 
         changes = []
         _changes = d.pop("changes")
@@ -74,7 +74,7 @@ class ProposalRequest:
 
 
         proposal_request = cls(
-            base_commit=base_commit,
+            base_revision=base_revision,
             changes=changes,
         )
 

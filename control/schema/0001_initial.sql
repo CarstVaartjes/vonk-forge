@@ -191,6 +191,55 @@ CREATE TABLE operations (
 );
 CREATE INDEX ix_operations_owner ON operations(owner_kind, owner_id);
 
+CREATE TABLE control_authority_revisions (
+    revision_id TEXT PRIMARY KEY,
+    parent_revision TEXT REFERENCES control_authority_revisions(revision_id),
+    documents JSONB NOT NULL,
+    dependencies JSONB NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (revision_id ~ '^[0-9a-f]{64}$'),
+    CHECK (parent_revision IS NULL OR parent_revision ~ '^[0-9a-f]{64}$'),
+    CHECK (jsonb_typeof(documents) = 'object'),
+    CHECK (jsonb_typeof(dependencies) = 'object')
+);
+CREATE INDEX ix_control_authority_revisions_parent
+    ON control_authority_revisions(parent_revision);
+CREATE INDEX ix_control_authority_revisions_created
+    ON control_authority_revisions(created_at DESC);
+
+CREATE TABLE control_authority_heads (
+    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+    revision_id TEXT NOT NULL UNIQUE
+        REFERENCES control_authority_revisions(revision_id),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE control_authority_proposals (
+    digest TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    base_revision TEXT NOT NULL
+        REFERENCES control_authority_revisions(revision_id),
+    changes JSONB NOT NULL,
+    patch BYTEA NOT NULL,
+    affected_documents JSONB NOT NULL,
+    validation_results JSONB NOT NULL,
+    applied_revision TEXT REFERENCES control_authority_revisions(revision_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (digest ~ '^[0-9a-f]{64}$'),
+    CHECK (base_revision ~ '^[0-9a-f]{64}$'),
+    CHECK (applied_revision IS NULL OR applied_revision ~ '^[0-9a-f]{64}$'),
+    CHECK (jsonb_typeof(changes) = 'array'),
+    CHECK (jsonb_typeof(affected_documents) = 'array'),
+    CHECK (jsonb_typeof(validation_results) = 'array')
+);
+CREATE INDEX ix_control_authority_proposals_base
+    ON control_authority_proposals(base_revision);
+CREATE INDEX ix_control_authority_proposals_applied
+    ON control_authority_proposals(applied_revision);
+CREATE INDEX ix_control_authority_proposals_created
+    ON control_authority_proposals(created_at DESC);
+
 -- A grant is represented by an intent; at most one unconsumed grant exists per intent.
 CREATE UNIQUE INDEX uq_active_grant_per_intent
     ON enrollment_intents(intent_id)

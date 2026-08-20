@@ -4,6 +4,8 @@ import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = (
     ROOT / "control/src/vonk_control/resources/dev/Caddyfile"
@@ -27,12 +29,10 @@ def _environment() -> dict[str, str]:
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
         "TAILSCALE_IMAGE": "tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f",
-        "REPOSITORY_PATH": "/srv/vonk-forge/repository",
         "DATABASE_URL_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
         "METRICS_TOKEN_FILE": "/dev/null",
-        "GIT_SIGNING_KEY_FILE": "/dev/null",
         "WORKER_API_TOKEN_FILE": "/dev/null",
         "AGENT_UPDATE_AUTHORITY_KEY_FILE": "/dev/null",
         "ADMIN_GRANT_PRIVATE_KEY_FILE": "/dev/null",
@@ -83,6 +83,14 @@ def _environment() -> dict[str, str]:
     }
 
 
+def _require_docker_runtime() -> None:
+    result = subprocess.run(
+        ["docker", "info"], capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        pytest.skip("Docker daemon unavailable")
+
+
 def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
     command = ["docker", "compose"]
     for file in files or ("compose.yaml", "compose.step-ca.yaml"):
@@ -93,6 +101,7 @@ def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
 
 
 def _adapted_caddy(environment: dict[str, str]) -> dict:
+    _require_docker_runtime()
     result = subprocess.run(
         [
             "docker", "run", "--rm", "-i",
@@ -206,6 +215,7 @@ def _assert_browser_sanitizer_precedes_each_upstream(value: object) -> None:
 
 
 def _adapted_development_caddy() -> dict:
+    _require_docker_runtime()
     result = subprocess.run(
         [
             "docker",
@@ -259,6 +269,7 @@ def _entrypoint_result(
     secret_source: str | None = None,
     entrypoint_arguments: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
+    _require_docker_runtime()
     environment = environment | {
         "VONK_REGISTRY_HOSTNAME": environment.get(
             "VONK_REGISTRY_HOSTNAME", "registry.test.example"
@@ -295,7 +306,6 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_DATABASE_URL_FILE": "postgresql://control:pw@postgres/control\n",
         "VONK_TOKEN_SIGNING_KEY_FILE": "t" * 32 + "\n",
         "VONK_METRICS_TOKEN_FILE": "m" * 16 + "\n",
-        "VONK_GIT_SIGNING_KEY_FILE": "test-git-key\n",
         "VONK_AGENT_CLIENT_CA_FILE": "test-client-ca\n",
         "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "test-intermediate-certificate\n",
         "VONK_AGENT_CA_CREDENTIAL_FILE": "test-provider-credential\n",
@@ -370,6 +380,7 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
     assert set(api["networks"]) == {
         "agent-proxy",
         "application",
+        "ca",
         "data",
         "worker-authority",
     }
@@ -914,7 +925,7 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert services["control-api"]["environment"]["VONK_AGENT_PROXY_AUTH_FILE"] == (
         "/run/vonk-normalized-secrets/agent-proxy-auth"
     )
-    assert services["step-ca"]["secrets"] == []
+    assert services["step-ca"].get("secrets", []) == []
     assert services["step-ca"]["command"][-1] == (
         "/run/vonk-normalized-secrets/step-ca/password"
     )
@@ -922,6 +933,29 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
         ROOT / "deploy/compose/step-ca/ca.json"
     ).read_text()
     assert "root-private" not in json.dumps(services["step-ca"], sort_keys=True).lower()
+
+
+def test_step_ca_waits_for_bootstrap_staged_secrets() -> None:
+    rendered = _rendered()
+    service = rendered["services"]["step-ca"]
+    assert service.get("depends_on", {}).get("control-bootstrap") == {
+        "condition": "service_healthy",
+        "required": True,
+    }
+    targets = {volume["target"]: volume for volume in service["volumes"]}
+    assert targets["/home/step"]["source"] == "step-ca-data"
+    assert "/home/step/db" not in targets
+    assert "https://step-ca:9000" in service["healthcheck"]["test"]
+    assert "https://127.0.0.1:9000" not in service["healthcheck"]["test"]
+
+
+def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
+    rendered = _rendered()
+    api = rendered["services"]["control-api"]
+    assert "group_add" not in api
+    assert all("/repository" not in json.dumps(volume) for volume in api.get("volumes", []))
+    assert "VONK_REPOSITORY_PATH" not in api.get("environment", {})
+    assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
 
 
 def test_builtin_ca_override_is_explicit_and_only_it_mounts_the_builtin_signing_key() -> None:

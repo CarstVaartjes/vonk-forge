@@ -13,7 +13,7 @@ fn claim(attempt: u32, deadline: &str) -> AgentClaim {
     let payload = json!({"plan_digest": "a".repeat(64)});
     AgentClaim {
         attempt,
-        base_commit: "b".repeat(40),
+        authority_revision: "b".repeat(64),
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339(deadline).unwrap(),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),

@@ -19,7 +19,7 @@ from vonk_control.models import AgentCertificate, AgentNode, Base, Job
 ROOT = Path(__file__).resolve().parents[3]
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-COMMIT = "a" * 40
+COMMIT = "a"  * 64
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -72,7 +72,7 @@ def enqueue(service: AgentJobService, sessions, clock) -> None:
         kind="agent.operations",
         state="queued",
         actor="operator",
-        base_commit=COMMIT,
+        authority_revision=COMMIT,
         targets=[NODE_A],
         payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={},
@@ -110,7 +110,7 @@ def test_secret_bearing_payload_is_rejected(service) -> None:
     jobs, sessions, clock = service
     parent = Job(
         request_id=str(uuid.uuid4()), kind="agent.operations", state="queued",
-        actor="operator", base_commit=COMMIT, targets=[NODE_A],
+        actor="operator", authority_revision=COMMIT, targets=[NODE_A],
         payload_digest=hashlib.sha256(b"{}").hexdigest(), payload={},
         current_attempt=0, created_at=clock.now, updated_at=clock.now,
     )
@@ -125,7 +125,7 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
     jobs, sessions, clock = service
     parent = Job(
         request_id=str(uuid.uuid4()), kind="agent.operations", state="queued",
-        actor="operator", base_commit=COMMIT, targets=[NODE_A],
+        actor="operator", authority_revision=COMMIT, targets=[NODE_A],
         payload_digest=hashlib.sha256(b"{}").hexdigest(), payload={},
         current_attempt=0, created_at=clock.now, updated_at=clock.now,
     )

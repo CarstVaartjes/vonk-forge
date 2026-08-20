@@ -7,6 +7,9 @@ from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
 
 EXPECTED_BASELINE_TABLES = {
+    "control_authority_heads",
+    "control_authority_proposals",
+    "control_authority_revisions",
     "agent_certificate_rotations",
     "agent_certificates",
     "agent_enrollment_grants",
@@ -28,6 +31,7 @@ EXPECTED_BASELINE_TABLES = {
     "fleet_stream_events",
     "installation_nodes",
     "job_attempts",
+    "job_log_entries",
     "jobs",
     "local_recipe_revisions",
     "local_recipes",
@@ -47,6 +51,7 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_installations",
     "recipe_runs",
     "recipe_source_bundles",
+    "source_bundle_archives",
     "recipe_revisions",
     "recipes",
     "recipe_test_reports",

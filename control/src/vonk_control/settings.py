@@ -284,15 +284,11 @@ class GenerationStartupSettings:
 @dataclass(frozen=True)
 class Settings:
     database_url: str
-    repository_path: Path
     state_path: Path
     deployment_mode: str
     token_signing_key: bytes
     metrics_token: str
-    git_signing_key_path: Path | None
     admin_grant_private_key_path: Path | None
-    deployment_branch: str
-    required_checks: tuple[str, ...]
     agent_ca_provider: str
     agent_runtime: str
     agent_controller_origin: str
@@ -426,23 +422,6 @@ class Settings:
             metrics_token = "development-metrics-token"
         if len(metrics_token) < 16 or any(character.isspace() for character in metrics_token):
             raise SettingsError("metrics token is invalid")
-        git_signing_raw = os.environ.get("VONK_GIT_SIGNING_KEY_FILE")
-        git_signing_key_path = Path(git_signing_raw) if git_signing_raw else None
-        if git_signing_key_path is not None and (
-            git_signing_key_path.is_symlink() or not git_signing_key_path.is_file()
-        ):
-            raise SettingsError("Git signing key must be a regular non-symlink file")
-        if mode == "production" and git_signing_key_path is None:
-            raise SettingsError("VONK_GIT_SIGNING_KEY_FILE is required in production")
-        deployment_branch = os.environ.get("VONK_DEPLOYMENT_BRANCH", "deploy")
-        if not deployment_branch or any(value in deployment_branch for value in ("..", "//", "\n", "\x00")):
-            raise SettingsError("deployment branch is invalid")
-        required_checks = tuple(
-            value.strip() for value in os.environ.get("VONK_REQUIRED_CHECKS", "").split(",")
-            if value.strip()
-        )
-        if len(required_checks) != len(set(required_checks)):
-            raise SettingsError("required checks must be unique")
         agent_controller_origin = (
             _fixed_https_origin(
                 "VONK_AGENT_CONTROLLER_ORIGIN",
@@ -582,15 +561,11 @@ class Settings:
             raise SettingsError("global catalog URL must be a fixed HTTPS origin")
         return cls(
             database_url=database_url,
-            repository_path=Path(os.environ.get("VONK_REPOSITORY_PATH", "/srv/vonk-forge/repository")),
             state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
             deployment_mode=mode,
             token_signing_key=signing_key,
             metrics_token=metrics_token,
-            git_signing_key_path=git_signing_key_path,
             admin_grant_private_key_path=admin_grant_private_key_path,
-            deployment_branch=deployment_branch,
-            required_checks=required_checks,
             agent_ca_provider=agent_ca_provider,
             agent_runtime=agent_runtime,
             agent_controller_origin=agent_controller_origin,

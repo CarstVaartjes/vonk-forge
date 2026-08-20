@@ -18,7 +18,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 VERSIONED_PLATFORM_TARGET = re.compile(
     r"platform/releases/"
@@ -635,7 +635,7 @@ class AgentClaim:
     fence: str
     node_id: str
     operation: AgentOperation
-    base_commit: str
+    authority_revision: str
     payload_digest: str
     payload: Mapping[str, Any]
     deadline: datetime
@@ -651,12 +651,10 @@ class AgentClaim:
         object.__setattr__(self, "node_id", _node_id(self.node_id))
         if not isinstance(self.operation, AgentOperation):
             raise AgentProtocolError("operation is not supported")
-        if not isinstance(self.base_commit, str) or not COMMIT.fullmatch(
-            self.base_commit
+        if not isinstance(self.authority_revision, str) or not AUTHORITY_REVISION.fullmatch(
+            self.authority_revision
         ):
-            raise AgentProtocolError(
-                "base_commit must be a 40-character lowercase SHA-1"
-            )
+            raise AgentProtocolError("authority_revision must be a 64-character lowercase SHA-256")
         if not isinstance(self.payload_digest, str) or not DIGEST.fullmatch(
             self.payload_digest
         ):
@@ -687,7 +685,7 @@ class AgentClaim:
                 "fence",
                 "node_id",
                 "operation",
-                "base_commit",
+                "authority_revision",
                 "payload_digest",
                 "payload",
                 "deadline",
@@ -697,18 +695,16 @@ class AgentClaim:
             operation = AgentOperation(value["operation"])
         except (TypeError, ValueError) as error:
             raise AgentProtocolError("operation is not supported") from error
-        base_commit = value["base_commit"]
-        if not isinstance(base_commit, str) or not COMMIT.fullmatch(base_commit):
-            raise AgentProtocolError(
-                "base_commit must be a 40-character lowercase SHA-1"
-            )
+        authority_revision = value["authority_revision"]
+        if not isinstance(authority_revision, str) or not AUTHORITY_REVISION.fullmatch(authority_revision):
+            raise AgentProtocolError("authority_revision must be a 64-character lowercase SHA-256")
         payload_digest = value["payload_digest"]
         if not isinstance(payload_digest, str) or not DIGEST.fullmatch(payload_digest):
             raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
         return cls(
             **_attempt_fields(value),
             operation=operation,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             payload_digest=payload_digest,
             payload=value["payload"],
         )

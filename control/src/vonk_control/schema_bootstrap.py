@@ -20,7 +20,10 @@ def reset_schema(engine: Engine) -> None:
     with engine.begin() as connection:
         connection.exec_driver_sql(
             """
-            DROP TABLE IF EXISTS operations, runs, installations, placements,
+            DROP TABLE IF EXISTS control_authority_proposals,
+                control_authority_heads, control_authority_revisions,
+                source_bundle_archives, job_log_entries,
+                operations, runs, installations, placements,
                 recipe_import_reports, recipe_revisions, recipes,
                 inventory_snapshots, telemetry_snapshots, presence_snapshots,
                 certificate_records, enrollment_evidence, enrollment_intents,
@@ -36,7 +39,10 @@ def bootstrap_schema(engine: Engine, *, reset: bool = False) -> None:
         if reset:
             connection.exec_driver_sql(
                 """
-                DROP TABLE IF EXISTS operations, runs, installations, placements,
+                    DROP TABLE IF EXISTS control_authority_proposals,
+                        control_authority_heads, control_authority_revisions,
+                        source_bundle_archives, job_log_entries,
+                        operations, runs, installations, placements,
                     recipe_import_reports, recipe_revisions, recipes,
                     inventory_snapshots, telemetry_snapshots, presence_snapshots,
                     certificate_records, enrollment_evidence, enrollment_intents,

@@ -213,7 +213,7 @@ class RouteBundleRequest:
     routes: Mapping[str, object]
     endpoints: Mapping[str, AcceptedEndpointEvidence]
     expires_at: datetime
-    base_commit: str = ""
+    authority_revision: str = ""
 
 
 @dataclass(frozen=True)

@@ -27,8 +27,8 @@ class Jobs:
     def __init__(self) -> None:
         self.calls = []
 
-    def enqueue(self, kind, actor, base_commit, targets, payload, *, request_id):
-        self.calls.append((kind, actor, base_commit, targets, payload, request_id))
+    def enqueue(self, kind, actor, authority_revision, targets, payload, *, request_id):
+        self.calls.append((kind, actor, authority_revision, targets, payload, request_id))
         return Enqueued()
 
     def get(self, job_id):
@@ -151,7 +151,7 @@ def test_viewer_cannot_enqueue_mutation() -> None:
         headers=headers,
         json={
             "kind": "probe",
-            "base_commit": "abc",
+            "authority_revision": "abc",
             "targets": ["node"],
             "payload": {},
         },
@@ -166,7 +166,7 @@ def test_admin_mutation_is_correlated_and_audited() -> None:
         headers=headers,
         json={
             "kind": "probe",
-            "base_commit": "abc",
+            "authority_revision": "abc",
             "targets": ["node"],
             "payload": {"safe": True},
         },
@@ -175,7 +175,7 @@ def test_admin_mutation_is_correlated_and_audited() -> None:
     request_id = response.headers["x-request-id"]
     assert jobs.calls[0][1:4] == ("administrator", "abc", ["node"])
     event = audits.for_request(request_id)
-    assert (event.actor, event.base_commit, event.targets) == (
+    assert (event.actor, event.authority_revision, event.targets) == (
         "administrator",
         "abc",
         ("node",),
@@ -190,7 +190,7 @@ def test_generic_job_endpoint_cannot_create_reconciliation_authority() -> None:
         headers=headers,
         json={
             "kind": "reconcile",
-            "base_commit": "a" * 40,
+            "authority_revision": "a"  * 64,
             "targets": ["spk_" + "1" * 32],
             "payload": {"reconciliation_id": "attacker-controlled"},
         },
@@ -211,7 +211,7 @@ def test_production_boundary_rejects_direct_probe_job_submission() -> None:
         headers=headers,
         json={
             "kind": "probe",
-            "base_commit": "a" * 40,
+            "authority_revision": "a"  * 64,
             "targets": ["spk_" + "1" * 32],
             "payload": {},
         },
@@ -236,7 +236,7 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     client.cookies.set("vonk_session", issued.token)
     document = {
         "kind": "probe",
-        "base_commit": "abc",
+        "authority_revision": "abc",
         "targets": [],
         "payload": {},
     }

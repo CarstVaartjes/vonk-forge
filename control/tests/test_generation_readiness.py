@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control import dev_cohort, dev_init
+from vonk_control import dev_cohort
 from vonk_control.api import (
     DirectoryIdentityProjectionSource,
     GenerationProcessIdentity,
@@ -26,6 +26,7 @@ from vonk_control.api import (
 )
 from vonk_control.dev_cohort import build_identity, verify_cohort
 from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.host_state import HostOperationPlan, SelectionReceipt
 from vonk_control.settings import (
     GenerationStartupSettings,
     SettingsError,
@@ -78,10 +79,46 @@ def _development_cohort_runtime(
     identity_root = tmp_path / "identity"
     identity_root.mkdir()
     active = identity_root / "active.json"
-    active.write_bytes(
-        dev_init._active_projection(
-            dev_init._selected_generation_identity(selected)
+    target_sha256 = selected.release_digest.removeprefix("sha256:")
+    plan = HostOperationPlan(
+        operation_id="dev-compose",
+        plan_digest="sha256:" + "2" * 64,
+        generation_id=selected.generation_id,
+        platform_target_name=(
+            f"platform/releases/{selected.platform_version}/{target_sha256}.json"
+        ),
+        platform_target_sha256=target_sha256,
+        tuf_targets_version=1,
+        release_digest=selected.release_digest,
+        build_digest=selected.build_digest,
+        platform_version=selected.platform_version,
+        deployment_bundle_digest="sha256:" + "3" * 64,
+        api_image=selected.api_image,
+        worker_image=selected.worker_image,
+        database_revision=selected.database_revision,
+    )
+    receipt = SelectionReceipt.from_plan(plan, previous_generation=None)
+    generation_raw = json.dumps(
+        receipt.generation.document(), sort_keys=True, separators=(",", ":")
+    ).encode() + b"\n"
+    selection_raw = json.dumps(
+        receipt.document(), sort_keys=True, separators=(",", ":")
+    ).encode() + b"\n"
+    active.write_text(
+        json.dumps(
+            {
+                "generation_receipt_sha256": hashlib.sha256(generation_raw).hexdigest(),
+                "projection_kind": "active",
+                "projection_sequence": 1,
+                "schema_version": 1,
+                "selection": receipt.document(),
+                "selection_receipt_sha256": hashlib.sha256(selection_raw).hexdigest(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
         )
+        + "\n",
+        encoding="utf-8",
     )
     active.chmod(0o444)
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "development")
@@ -255,9 +292,9 @@ def test_preselection_app_exposes_only_generation_readiness(tmp_path: Path) -> N
     }
     for path in (
         "/api/v1/healthz",
-        "/api/v1/repository",
+        "/api/v1/authority",
         "/agent/v1/operations",
-        "/internal/v1/repository/evaluate",
+        "/internal/v1/authority/evaluate",
         "/metrics",
         "/openapi.json",
     ):
@@ -270,8 +307,6 @@ def test_production_entrypoint_selects_inert_preselection_before_registration(
 ) -> None:
     from vonk_control import api as api_module
     from vonk_control import jobs as jobs_module
-    from vonk_control import proposals as proposals_module
-    from vonk_control import repository as repository_module
     from vonk_control import update_admin as update_admin_module
 
     constructed: list[str] = []
@@ -283,16 +318,6 @@ def test_production_entrypoint_selects_inert_preselection_before_registration(
 
         return construct
 
-    monkeypatch.setattr(
-        repository_module,
-        "RepositoryService",
-        forbidden_constructor("repository service"),
-    )
-    monkeypatch.setattr(
-        proposals_module,
-        "ProposalService",
-        forbidden_constructor("admin proposal service"),
-    )
     monkeypatch.setattr(
         jobs_module,
         "JobService",

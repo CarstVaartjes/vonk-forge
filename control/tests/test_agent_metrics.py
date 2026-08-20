@@ -23,7 +23,7 @@ UNKNOWN_NODE = "spk_00000000000000000000000000000004"
 
 class Repository:
     def head(self) -> str:
-        return "a" * 40
+        return "a"  * 64
 
     def read_document(self, _commit: str, _path: str):
         return type(
@@ -101,7 +101,7 @@ def _sessions(tmp_path):
                 kind="reconcile",
                 state="waiting-for-operator",
                 actor="actor-secret-value",
-                base_commit="a" * 40,
+                authority_revision="a"  * 64,
                 targets=[NODE],
                 payload_digest="b" * 64,
                 payload={"content": "payload-secret-value"},
@@ -120,7 +120,7 @@ def _sessions(tmp_path):
                     kind="workload.start",
                     payload_digest="c" * 64,
                     payload={"content": "operation-payload-secret"},
-                    base_commit="a" * 40,
+                    authority_revision="a"  * 64,
                     state="running",
                     current_attempt=1,
                     created_at=NOW - timedelta(minutes=1),
@@ -133,7 +133,7 @@ def _sessions(tmp_path):
                     kind="release.install",
                     payload_digest="d" * 64,
                     payload={},
-                    base_commit="a" * 40,
+                    authority_revision="a"  * 64,
                     state="failed",
                     current_attempt=0,
                     created_at=NOW - timedelta(minutes=1),
@@ -146,7 +146,7 @@ def _sessions(tmp_path):
                     kind="unique-operation-secret",
                     payload_digest="e" * 64,
                     payload={},
-                    base_commit="a" * 40,
+                    authority_revision="a"  * 64,
                     state="unique-state-secret",
                     current_attempt=0,
                     created_at=NOW - timedelta(minutes=1),

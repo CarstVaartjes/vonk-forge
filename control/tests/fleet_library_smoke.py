@@ -50,9 +50,9 @@ class _Authority(CertificateAuthority):
         return None
 
 
-class _Repository:
+class _AuthorityStore:
     def head(self) -> str:
-        return "a" * 40
+        return "a" * 64
 
 
 def _csr() -> bytes:
@@ -118,7 +118,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         services.workload_tuf_target_root,
     ):
         path.mkdir(parents=True, exist_ok=True)
-    projection = FleetProjection(_Repository(), sessions, clock=lambda: now)
+    projection = FleetProjection(_AuthorityStore(), sessions, clock=lambda: now)
     codec = TokenCodec(b"k" * 32)
     library_projection = LibraryProjection(
         sessions,

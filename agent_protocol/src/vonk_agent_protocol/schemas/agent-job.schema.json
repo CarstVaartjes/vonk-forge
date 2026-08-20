@@ -3,7 +3,7 @@
   "$comment": "Canonical payload UTF-8 JSON is limited to 65536 bytes by mandatory validate_schema_message runtime validation; JSON Schema cannot express aggregate encoded-byte size.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "operation", "base_commit", "payload_digest", "payload", "deadline"],
+  "required": ["schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "operation", "authority_revision", "payload_digest", "payload", "deadline"],
   "properties": {
     "schema_version": {"const": 1},
     "job_id": {"type": "string", "format": "uuid"},
@@ -12,7 +12,7 @@
     "fence": {"type": "string", "format": "uuid"},
     "node_id": {"type": "string", "pattern": "^spk_[0-9a-f]{32}$"},
     "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "agent.update", "agent.rollback", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
-    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "authority_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload": {
       "$ref": "#/$defs/safe-object"

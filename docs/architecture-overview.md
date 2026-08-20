@@ -26,7 +26,7 @@ flowchart LR
         tailscale[Tailscale gateway]
         caddy[Caddy]
         api[Control API and authority services]
-        worker[Repository-less control worker]
+        worker[PostgreSQL-backed control worker]
         db[(PostgreSQL)]
         litellm[LiteLLM]
         hermes[Hermes Agent]
@@ -44,7 +44,7 @@ flowchart LR
     caddy --> api
     api --> db
     worker --> db
-    api <-->|HMAC repository authority| worker
+    api <-->|HMAC revision authority| worker
     hermes -->|published v1 hermes-agent run| caddy
     telemetry --> api
     litellm -->|accepted published route only| s1
@@ -77,24 +77,22 @@ API.
 ## Trust and control flow
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the
-local recipe catalog: package families, authored and imported revisions,
-WorkloadRun import reports, installations, placements, and runs. The public
-`vonk-forge-recipes` repository is the standard source of reviewed immutable
-recipe revisions; once imported, a snapshot can be resolved, installed, and run
-while the operator is offline. A hosted catalog is optional discovery, never a
-remote dependency for local execution. Git/TUF remains authoritative for platform
-source, fleet/topology policy, and the existing workload-release projection
-until that projection is migrated to catalog revisions.
+local platform authority and recipe catalog: topology, fleet policy, package
+families, authored and imported revisions, WorkloadRun import reports,
+installations, placements, and runs. A published recipe catalog is optional
+discovery, never a remote dependency for local execution. TUF remains the
+authority for signed platform release artifacts; desired platform topology and
+policy are persisted in PostgreSQL.
 
-For the current platform path, the API owns the repository, signed changes,
-current deployment-branch head, and eligibility policy. The catalog owns exact
-model versions, execution harnesses, recipe revisions, installations, mappings,
-and runs. Recipe route publication derives LiteLLM configuration from the
-accepted v1 run itself; no repository model-definition or Hermes fallback
-policy participates. Platform plans remain canonical and persisted in
-PostgreSQL with their commit, targets, operation graph, payload digests, routes,
-protocol range, and plan digest. Catalog plans use a recipe revision digest
-instead of treating `base_commit` as authorization.
+For the current platform path, the API owns the PostgreSQL authority head,
+immutable revisions, persisted proposals, and eligibility policy. The catalog
+owns exact model versions, execution harnesses, recipe revisions,
+installations, mappings, and runs. Recipe route publication derives LiteLLM
+configuration from the accepted v1 run itself; no external repository or
+Hermes fallback policy participates. Platform plans remain canonical and
+persisted in PostgreSQL with their authority revision, targets, operation graph,
+payload digests, routes, protocol range, and plan digest. Catalog plans use a
+recipe revision digest as their own content identity.
 
 The worker deliberately has no repository mount, Git key, Git/OpenSSH executable,
 or GPU node-facing network. It advances durable reconciliations and publishes
@@ -114,7 +112,7 @@ fabric recovery, and explicit break-glass inspection.
 | Component | Responsibility |
 | --- | --- |
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
-| Control API | Admin API/web backend, repository and policy authority, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
+| Control API | Admin API/web backend, PostgreSQL authority and policy, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
 | PostgreSQL | Jobs, immutable resolved plans, operation/attempt fences, agent identity/presence, reconciliation state, cancellation, and audit evidence. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
@@ -124,7 +122,7 @@ fabric recovery, and explicit break-glass inspection.
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
 | GPU node runtimes | Repository-declared model adapters and verified local artifacts; model weights and tensor traffic remain off the service host. |
 
-The Compose project keeps PostgreSQL, agent ingress, repository authority,
+The Compose project keeps PostgreSQL, agent ingress, revision authority,
 registry publication, inference, and Hermes networks separate. Only Caddy
 publishes a host port. LiteLLM alone joins GPU node-facing cluster egress; the
 worker and API do not.
@@ -209,7 +207,7 @@ restart-safe sequence:
 1. Verify the platform commit or recipe revision is current and eligible, resolve the exact run plan, and
    persist the immutable plan before mutation.
 2. Withdraw the prior route into acknowledged maintenance.
-3. Execute stop operations in repository-declared order, then prove every
+3. Execute stop operations in authority-declared order, then prove every
    affected node has zero active NVIDIA compute processes.
 4. Install, prepare, start, health-check, and verify the new workload graph
    through outbound agent operations.
@@ -232,7 +230,7 @@ record to the repository fleet definition. Placement and operation ordering are
 deterministic for one, two, sixteen, or more nodes; sixteen is a tested small-
 cluster shape, not a hard product limit.
 
-Tensor-parallel traffic follows the repository topology directly between the
+Tensor-parallel traffic follows the PostgreSQL topology directly between the
 selected GPU nodes. It never traverses Caddy, LiteLLM, PostgreSQL, or the service
 host. The [node onboarding runbook](runbooks/node-onboarding.md) covers stable
 identity and count-independent inventory. Model-version, harness, recipe, and

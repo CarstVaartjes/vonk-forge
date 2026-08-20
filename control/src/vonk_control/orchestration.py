@@ -18,7 +18,7 @@ from vonk_agent_protocol import AgentOperation
 
 from .models import Reconciliation, ReconciliationCompletionGeneration
 
-_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _OPERATION_ID = re.compile(r"[a-z0-9](?:[a-z0-9._:-]{0,126}[a-z0-9])?\Z")
@@ -72,7 +72,7 @@ class OperationGraph:
     """Canonical topological graph persisted independently of input ordering."""
 
     reconciliation_id: str
-    base_commit: str
+    authority_revision: str
     targets: tuple[str, ...]
     nodes: tuple[OperationNode, ...]
     digest: str
@@ -81,7 +81,7 @@ class OperationGraph:
     def document(self) -> dict[str, object]:
         return {
             "schema_version": 1,
-            "base_commit": self.base_commit,
+            "authority_revision": self.authority_revision,
             "targets": list(self.targets),
             "nodes": [node.to_document() for node in self.nodes],
         }
@@ -106,19 +106,19 @@ class ReconciliationOrchestrator:
         self._clock = clock
 
     def plan(self, document: Mapping[str, Any]) -> OperationGraph:
-        base_commit, targets, generation, nodes = _parse_plan(document)
-        graph_document = _graph_document(base_commit, targets, nodes)
+        authority_revision, targets, generation, nodes = _parse_plan(document)
+        graph_document = _graph_document(authority_revision, targets, nodes)
         digest = _digest(graph_document)
         graph = OperationGraph(
             reconciliation_id=str(uuid.uuid4()),
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             targets=targets,
             nodes=nodes,
             digest=digest,
         )
         stored = Reconciliation(
             id=graph.reconciliation_id,
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             status="planned",
             summary={
                 "operation_count": len(nodes),
@@ -193,8 +193,8 @@ class ReconciliationOrchestrator:
     ) -> OperationGraph:
         """Atomically persist or return the exact plan identified by its digest."""
 
-        base_commit, targets, generation, nodes = _parse_plan(graph_plan)
-        graph_document = _graph_document(base_commit, targets, nodes)
+        authority_revision, targets, generation, nodes = _parse_plan(graph_plan)
+        graph_document = _graph_document(authority_revision, targets, nodes)
         graph_digest = _digest(graph_document)
         stored_document = _resolved_document(plan_digest, document)
         if stored_document.get("operation_graph") != graph_document:
@@ -202,7 +202,7 @@ class ReconciliationOrchestrator:
 
         candidate = Reconciliation(
             id=str(uuid.uuid4()),
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             status="planned",
             summary={
                 "operation_count": len(nodes),
@@ -232,7 +232,7 @@ class ReconciliationOrchestrator:
                 if accepted is None:
                     raise
             if (
-                accepted.base_commit != base_commit
+                accepted.authority_revision != authority_revision
                 or accepted.graph != graph_document
                 or accepted.graph_digest != graph_digest
                 or accepted.route_withdrawal_generation != generation
@@ -241,7 +241,7 @@ class ReconciliationOrchestrator:
                 raise ValueError("plan digest identifies different persisted content")
             return OperationGraph(
                 accepted.id,
-                accepted.base_commit,
+                accepted.authority_revision,
                 targets,
                 nodes,
                 accepted.graph_digest,
@@ -262,7 +262,7 @@ class ReconciliationOrchestrator:
                 return None
             return validate_persisted_resolved_plan(
                 reconciliation_id=stored.id,
-                base_commit=stored.base_commit,
+                authority_revision=stored.authority_revision,
                 graph_document=stored.graph,
                 graph_digest=stored.graph_digest,
                 plan_digest=stored.plan_digest,
@@ -331,7 +331,7 @@ def _resolved_document(
 def validate_persisted_resolved_plan(
     *,
     reconciliation_id: object,
-    base_commit: object,
+    authority_revision: object,
     graph_document: object,
     graph_digest: object,
     plan_digest: object,
@@ -349,7 +349,7 @@ def validate_persisted_resolved_plan(
     except (TypeError, ValueError) as error:
         raise ValueError("persisted resolved plan digest is invalid") from error
     fields = {
-        "commit",
+        "authority_revision",
         "targets",
         "placements",
         "routes",
@@ -364,11 +364,11 @@ def validate_persisted_resolved_plan(
     if set(document) != fields:
         raise ValueError("persisted resolved plan fields are invalid")
     if (
-        not isinstance(base_commit, str)
-        or _COMMIT.fullmatch(base_commit) is None
-        or document["commit"] != base_commit
+        not isinstance(authority_revision, str)
+        or _AUTHORITY_REVISION.fullmatch(authority_revision) is None
+        or document["authority_revision"] != authority_revision
     ):
-        raise ValueError("persisted resolved plan base commit is invalid")
+        raise ValueError("persisted resolved plan authority revision is invalid")
     for field in (
         "placements",
         "routes",
@@ -408,9 +408,9 @@ def validate_persisted_resolved_plan(
     if not isinstance(graph_document, Mapping):
         raise TypeError("persisted resolved plan graph is invalid")
     try:
-        parsed_commit, targets, _, nodes = _parse_plan(
+        parsed_revision, targets, _, nodes = _parse_plan(
             {
-                "base_commit": graph_document.get("base_commit"),
+                "authority_revision": graph_document.get("authority_revision"),
                 "targets": graph_document.get("targets"),
                 "route_withdrawal_generation": route_withdrawal_generation,
                 "operations": graph_document.get("nodes"),
@@ -418,10 +418,10 @@ def validate_persisted_resolved_plan(
         )
     except (TypeError, ValueError) as error:
         raise ValueError("persisted resolved plan graph is invalid") from error
-    expected_graph = _graph_document(parsed_commit, targets, nodes)
+    expected_graph = _graph_document(parsed_revision, targets, nodes)
     if (
         expected_graph != graph_document
-        or parsed_commit != base_commit
+        or parsed_revision != authority_revision
         or document["operation_graph"] != expected_graph
         or document["targets"] != list(targets)
         or not isinstance(graph_digest, str)
@@ -476,7 +476,7 @@ def validate_persisted_resolved_plan(
     return (
         OperationGraph(
             reconciliation_id,
-            base_commit,
+            authority_revision,
             targets,
             nodes,
             graph_digest,
@@ -489,15 +489,15 @@ def _parse_plan(
     document: Mapping[str, Any],
 ) -> tuple[str, tuple[str, ...], int, tuple[OperationNode, ...]]:
     if not isinstance(document, Mapping) or set(document) != {
-        "base_commit",
+        "authority_revision",
         "targets",
         "route_withdrawal_generation",
         "operations",
     }:
         raise ValueError("reconciliation plan fields are invalid")
-    base_commit = document["base_commit"]
-    if not isinstance(base_commit, str) or _COMMIT.fullmatch(base_commit) is None:
-        raise ValueError("base commit is invalid")
+    authority_revision = document["authority_revision"]
+    if not isinstance(authority_revision, str) or _AUTHORITY_REVISION.fullmatch(authority_revision) is None:
+        raise ValueError("authority revision is invalid")
     targets = _targets(document["targets"])
     generation = _generation(document["route_withdrawal_generation"])
     raw_operations = document["operations"]
@@ -527,7 +527,7 @@ def _parse_plan(
             )
             if required.workload_id != node.workload_id and not cross_workload_gate:
                 raise ValueError("cross-workload dependency is invalid")
-    return base_commit, targets, generation, _topological(by_id)
+    return authority_revision, targets, generation, _topological(by_id)
 
 
 def _targets(value: Any) -> tuple[str, ...]:
@@ -627,13 +627,13 @@ def _topological(by_id: Mapping[str, OperationNode]) -> tuple[OperationNode, ...
 
 
 def _graph_document(
-    base_commit: str,
+    authority_revision: str,
     targets: tuple[str, ...],
     nodes: tuple[OperationNode, ...],
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
-        "base_commit": base_commit,
+        "authority_revision": authority_revision,
         "targets": list(targets),
         "nodes": [node.to_document() for node in nodes],
     }

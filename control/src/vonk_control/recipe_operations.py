@@ -56,7 +56,7 @@ class AgentJobQueue(Protocol):
         parent_job_id: str,
         node_id: str,
         operation: str,
-        base_commit: str,
+        authority_revision: str,
         payload: Mapping[str, object],
         *,
         operation_id: str,
@@ -227,7 +227,7 @@ class RecipeOperationService:
                     kind=succeeded.kind,
                     state="succeeded",
                     actor=actor,
-                    base_commit=succeeded.base_commit,
+                    authority_revision=succeeded.authority_revision,
                     targets=list(succeeded.targets),
                     payload_digest=succeeded.payload_digest,
                     payload=dict(succeeded.payload),
@@ -959,12 +959,12 @@ class RecipeOperationService:
             or not children
             or tuple(child.node_id for child in children)
             != tuple(sorted(previous.targets))
-            or previous.base_commit != plan_digest[:40]
+            or previous.authority_revision != plan_digest.removeprefix("sha256:")
             or len(payload_identities) != 1
             or any(
                 child.kind != "recipe.image.import.v1"
                 or child.state not in _RETRYABLE_IMAGE_OPERATION_STATES
-                or child.base_commit != plan_digest[:40]
+                or child.authority_revision != plan_digest.removeprefix("sha256:")
                 or child.payload_digest
                 != hashlib.sha256(canonical_message(child.payload)).hexdigest()
                 or not _valid_image_import_payload(child.payload, owner_id)
@@ -1310,7 +1310,7 @@ class RecipeOperationService:
                                 job.id,
                                 next_node_id,
                                 job.kind,
-                                job.base_commit,
+                                job.authority_revision,
                                 next_payload,
                                 operation_id=str(uuid.uuid4()),
                             )
@@ -1953,7 +1953,7 @@ class RecipeOperationService:
             kind=kind,
             state="running",
             actor=actor,
-            base_commit=authority_digest[:40],
+            authority_revision=authority_digest.removeprefix("sha256:"),
             targets=targets,
             payload_digest=hashlib.sha256(canonical_message(job_payload)).hexdigest(),
             payload=job_payload,
@@ -1968,7 +1968,7 @@ class RecipeOperationService:
                 job_id,
                 node_id,
                 kind,
-                authority_digest[:40],
+                authority_digest.removeprefix("sha256:"),
                 payload,
                 operation_id=str(uuid.uuid4()),
             )

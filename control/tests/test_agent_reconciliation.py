@@ -41,7 +41,7 @@ from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMark
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-BASE_COMMIT = "a" * 40
+BASE_COMMIT = "a"  * 64
 AGENT_CAPABILITIES = (
     "agent.runtime.rust.v1",
     "node.probe",
@@ -312,7 +312,7 @@ class FakeAgentJobs:
         parent_job_id,
         node_id,
         operation,
-        base_commit,
+        authority_revision,
         payload,
         *,
         operation_id,
@@ -324,7 +324,7 @@ class FakeAgentJobs:
             kind=operation,
             payload_digest=_digest(payload),
             payload=dict(payload),
-            base_commit=base_commit,
+            authority_revision=authority_revision,
             state="queued",
             current_attempt=0,
             created_at=datetime(2026, 8, 5, tzinfo=UTC),
@@ -421,12 +421,12 @@ def _execution_fixture(
     ]
     graph = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": list(targets),
         "nodes": operations,
     }
     resolved = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": list(targets),
         "placements": {},
         "routes": routes or {},
@@ -460,7 +460,7 @@ def _execution_fixture(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="planned",
                 summary={},
                 graph=graph,
@@ -479,7 +479,7 @@ def _execution_fixture(
                 kind="reconcile",
                 state="queued",
                 actor="operator",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 targets=list(targets),
                 payload_digest=_digest({}),
                 payload={},
@@ -534,7 +534,7 @@ def test_prefetched_authority_is_fetched_before_locked_identity_check(tmp_path) 
         events.append("locked-check")
         return cached == {
             "reconciliation": reconciliation,
-            "commit": commit,
+            "authority_revision": commit,
             "plan_digest": plan_digest,
             "routes": routes,
         }
@@ -1332,12 +1332,12 @@ def _compensation_fixture(
     ]
     graph = {
         "schema_version": 1,
-        "base_commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A, NODE_B],
         "nodes": operations,
     }
     resolved = {
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "targets": [NODE_A, NODE_B],
         "placements": {},
         "routes": {},
@@ -1375,7 +1375,7 @@ def _compensation_fixture(
         session.add(
             Reconciliation(
                 id=reconciliation_id,
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 status="planned",
                 summary={},
                 graph=graph,
@@ -1394,7 +1394,7 @@ def _compensation_fixture(
                 kind="reconcile",
                 state="queued",
                 actor="operator",
-                base_commit=BASE_COMMIT,
+                authority_revision=BASE_COMMIT,
                 targets=[NODE_A, NODE_B],
                 payload_digest=_digest({}),
                 payload={},
@@ -1406,13 +1406,13 @@ def _compensation_fixture(
     queue = AgentJobService(
         sessions,
         clock=lambda: now,
-        commit_eligible=(
+        revision_eligible=(
             None
             if authority is None
             else lambda _commit: bool(authority["eligible"])
         ),
-        current_commit=(
-            None if authority is None else lambda: str(authority["commit"])
+        current_revision=(
+            None if authority is None else lambda: str(authority["authority_revision"])
         ),
     )
 
@@ -1427,13 +1427,13 @@ def _compensation_fixture(
         publisher=FakePublisher(),
         endpoint_resolver=endpoint,
         clock=lambda: now,
-        commit_eligible=(
+        revision_eligible=(
             None
             if authority is None
             else lambda _commit: bool(authority["eligible"])
         ),
-        current_commit=(
-            None if authority is None else lambda: str(authority["commit"])
+        current_revision=(
+            None if authority is None else lambda: str(authority["authority_revision"])
         ),
     )
     service.attach_job(reconciliation_id, job_id)
@@ -1457,7 +1457,7 @@ def _workload_result(action: str) -> dict[str, object]:
 def _continuous_authority() -> dict[str, object]:
     return {
         "eligible": True,
-        "commit": BASE_COMMIT,
+        "authority_revision": BASE_COMMIT,
         "address_fresh": True,
     }
 
@@ -1494,7 +1494,7 @@ def test_claim_rejects_non_current_agent_contract(
         )
 
 
-@pytest.mark.parametrize("authority_field", ("eligible", "commit", "address_fresh"))
+@pytest.mark.parametrize("authority_field", ("eligible", "authority_revision", "address_fresh"))
 def test_result_fails_closed_when_continuous_authority_is_lost(
     tmp_path,
     authority_field: str,
@@ -1508,7 +1508,7 @@ def test_result_fails_closed_when_continuous_authority_is_lost(
     claim = queue.claim(NODE_A, "serial-a", 30)
     assert claim is not None
     authority[authority_field] = (
-        "b" * 40 if authority_field == "commit" else False
+        "b"  * 64 if authority_field == "authority_revision" else False
     )
 
     queue.succeed(claim, _workload_result("start"))
@@ -1527,7 +1527,7 @@ def test_result_fails_closed_when_continuous_authority_is_lost(
     "lost_authority",
     (
         "eligible",
-        "commit",
+        "authority_revision",
         "address_fresh",
         "protocol_version",
         "capabilities",
@@ -1570,8 +1570,8 @@ def test_completed_owner_is_withdrawn_immediately_when_authority_is_lost(
             node.revoked_at = datetime(2026, 8, 5, tzinfo=UTC)
     if lost_authority in {"eligible", "address_fresh"}:
         authority[lost_authority] = False
-    elif lost_authority == "commit":
-        authority["commit"] = "b" * 40
+    elif lost_authority == "authority_revision":
+        authority["authority_revision"] = "b"  * 64
 
     assert service.tick() is True
 
@@ -1590,7 +1590,7 @@ def test_recipe_route_owner_is_not_executed_as_a_reconciliation_plan(tmp_path) -
         _execution_fixture(tmp_path)
     )
     graph = {
-        "base_commit": "recipe",
+        "authority_revision": "recipe",
         "nodes": [],
         "schema_version": 1,
         "targets": [],
@@ -1601,7 +1601,7 @@ def test_recipe_route_owner_is_not_executed_as_a_reconciliation_plan(tmp_path) -
         session.add(
             Reconciliation(
                 id=RECIPE_ROUTE_AUTHORITY_ID,
-                base_commit="recipe",
+                authority_revision="recipe",
                 status="succeeded",
                 summary={"authority": "recipe-routes"},
                 graph=graph,

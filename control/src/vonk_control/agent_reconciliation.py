@@ -107,7 +107,7 @@ class ReconciliationAuthorityInput:
     """Immutable identity and route-policy input safe to attest before locking."""
 
     reconciliation_id: str
-    base_commit: str
+    authority_revision: str
     plan_digest: str
     fleet_evidence_digest: str
     routes: tuple[PublishedRoute, ...]
@@ -160,7 +160,7 @@ def load_reconciliation_authority_input(
     )
     return ReconciliationAuthorityInput(
         reconciliation_id=reconciliation.id,
-        base_commit=reconciliation.base_commit,
+        authority_revision=reconciliation.authority_revision,
         plan_digest=AgentReconciliationService._plan_digest(reconciliation),
         fleet_evidence_digest=str(document["fleet_evidence_digest"]),
         routes=published,
@@ -315,8 +315,8 @@ class AgentReconciliationService:
         endpoint_resolver: Callable[[Session, str], tuple[str, datetime]],
         clock: Callable[[], datetime],
         publication_lease_seconds: int = 60,
-        commit_eligible: Callable[[str], bool] | None = None,
-        current_commit: Callable[[], str] | None = None,
+        revision_eligible: Callable[[str], bool] | None = None,
+        current_revision: Callable[[], str] | None = None,
         authority_prefetch: Callable[[str, str, str, tuple[PublishedRoute, ...]], None]
         | None = None,
         authority_check: Callable[
@@ -327,8 +327,8 @@ class AgentReconciliationService:
     ) -> None:
         if not 1 <= publication_lease_seconds <= 300:
             raise ValueError("reconciliation publication lease is invalid")
-        if (commit_eligible is None) != (current_commit is None):
-            raise ValueError("reconciliation commit authority is incomplete")
+        if (revision_eligible is None) != (current_revision is None):
+            raise ValueError("reconciliation authority is incomplete")
         if any(
             callback is not None
             for callback in (authority_prefetch, authority_check, authority_clear)
@@ -337,7 +337,7 @@ class AgentReconciliationService:
             for callback in (authority_prefetch, authority_check, authority_clear)
         ):
             raise ValueError("reconciliation prefetched authority is incomplete")
-        if authority_check is not None and commit_eligible is not None:
+        if authority_check is not None and revision_eligible is not None:
             raise ValueError("reconciliation authority modes are ambiguous")
         self._sessions = sessions
         self._agent_jobs = agent_jobs
@@ -345,8 +345,8 @@ class AgentReconciliationService:
         self._endpoint_resolver = endpoint_resolver
         self._clock = clock
         self._publication_lease_seconds = publication_lease_seconds
-        self._commit_eligible = commit_eligible
-        self._current_commit = current_commit
+        self._revision_eligible = revision_eligible
+        self._current_revision = current_revision
         self._authority_prefetch = authority_prefetch
         self._authority_check = authority_check
         self._authority_clear = authority_clear
@@ -363,8 +363,8 @@ class AgentReconciliationService:
             )
             if job.reconciliation_id not in {None, reconciliation.id}:
                 raise ValueError("job is attached to another reconciliation")
-            if job.base_commit != reconciliation.base_commit:
-                raise ValueError("reconciliation job base commit does not match")
+            if job.authority_revision != reconciliation.authority_revision:
+                raise ValueError("reconciliation job authority revision does not match")
             self._require_active_targets(session, graph)
             authority_reason = self._continuous_authority_reason(
                 session, reconciliation, graph, _document
@@ -421,7 +421,7 @@ class AgentReconciliationService:
                 )
             self._authority_prefetch(
                 snapshot.reconciliation_id,
-                snapshot.base_commit,
+                snapshot.authority_revision,
                 snapshot.plan_digest,
                 snapshot.routes,
             )
@@ -592,9 +592,9 @@ class AgentReconciliationService:
                 ):
                     return False
                 if phase == "planned":
-                    if job.base_commit != reconciliation.base_commit:
+                    if job.authority_revision != reconciliation.authority_revision:
                         raise ValueError(
-                            "reconciliation job base commit does not match"
+                            "reconciliation job authority revision does not match"
                         )
                     owner_id = session.scalar(
                         select(RoutePublicationOwner.reconciliation_id).where(
@@ -1615,7 +1615,7 @@ class AgentReconciliationService:
             try:
                 decision = self._authority_check(
                     reconciliation.id,
-                    reconciliation.base_commit,
+                    reconciliation.authority_revision,
                     self._plan_digest(reconciliation),
                     _published_authority_routes(
                         session,
@@ -1626,25 +1626,25 @@ class AgentReconciliationService:
                 if isinstance(decision, str):
                     if decision not in {
                         "fleet acceptance evidence changed since planning",
-                        "reconciliation commit is no longer current",
-                        "reconciliation commit is no longer eligible",
+                        "reconciliation authority revision is no longer current",
+                        "reconciliation authority revision is no longer eligible",
                     }:
                         return "reconciliation authority is invalid"
                     return decision
                 if decision is not True:
-                    return "reconciliation commit is no longer eligible"
+                    return "reconciliation authority revision is no longer eligible"
             except (OSError, RuntimeError, TypeError, ValueError):
-                return "reconciliation commit eligibility is unavailable"
-        elif self._commit_eligible is None or self._current_commit is None:
+                return "reconciliation authority revision eligibility is unavailable"
+        elif self._revision_eligible is None or self._current_revision is None:
             return None
         else:
             try:
-                if not self._commit_eligible(reconciliation.base_commit):
-                    return "reconciliation commit is no longer eligible"
-                if self._current_commit() != reconciliation.base_commit:
-                    return "reconciliation commit is no longer current"
+                if not self._revision_eligible(reconciliation.authority_revision):
+                    return "reconciliation authority revision is no longer eligible"
+                if self._current_revision() != reconciliation.authority_revision:
+                    return "reconciliation authority revision is no longer current"
             except (OSError, RuntimeError, TypeError, ValueError):
-                return "reconciliation commit eligibility is unavailable"
+                return "reconciliation authority revision eligibility is unavailable"
         protocol = document.get("agent_protocol_range")
         if (
             not isinstance(protocol, list)
@@ -1701,7 +1701,7 @@ class AgentReconciliationService:
     ) -> tuple[OperationGraph, Mapping[str, object]]:
         return validate_persisted_resolved_plan(
             reconciliation_id=reconciliation.id,
-            base_commit=reconciliation.base_commit,
+            authority_revision=reconciliation.authority_revision,
             graph_document=reconciliation.graph,
             graph_digest=reconciliation.graph_digest,
             plan_digest=reconciliation.plan_digest,
@@ -1778,7 +1778,7 @@ class AgentReconciliationService:
                 job.id,
                 node.node_id,
                 node.kind,
-                reconciliation.base_commit,
+                reconciliation.authority_revision,
                 payload,
                 operation_id=agent_operation_id,
             )
@@ -1838,7 +1838,7 @@ class AgentReconciliationService:
                 job.id,
                 node.node_id,
                 node.compensation_kind,
-                reconciliation.base_commit,
+                reconciliation.authority_revision,
                 payload,
                 operation_id=agent_operation_id,
             )
@@ -1901,7 +1901,7 @@ class AgentReconciliationService:
             routes,
             endpoints,
             self._clock() + timedelta(seconds=self._publication_lease_seconds),
-            reconciliation.base_commit,
+            reconciliation.authority_revision,
         )
 
     @staticmethod
@@ -1989,7 +1989,7 @@ class AgentReconciliationService:
             or operation.parent_job_id != job.id
             or operation.node_id != node.node_id
             or operation.kind != kind
-            or operation.base_commit != reconciliation.base_commit
+            or operation.authority_revision != reconciliation.authority_revision
             or operation.payload_digest != projection.expected_payload_digest
             or operation.payload != payload
             or message.job_id != job.id
@@ -2217,8 +2217,8 @@ def bind_reconciliation_result_consumer(
     presence: Any,
     clock: Callable[[], datetime],
     maximum_presence_age_seconds: int = 300,
-    commit_eligible: Callable[[str], bool] | None = None,
-    current_commit: Callable[[], str] | None = None,
+    revision_eligible: Callable[[str], bool] | None = None,
+    current_revision: Callable[[], str] | None = None,
     additional_result_consumer: Callable[[Session, Any, Any, AgentResult], None]
     | None = None,
 ) -> AgentReconciliationService:
@@ -2241,8 +2241,8 @@ def bind_reconciliation_result_consumer(
         publisher=None,
         endpoint_resolver=endpoint,
         clock=clock,
-        commit_eligible=commit_eligible,
-        current_commit=current_commit,
+        revision_eligible=revision_eligible,
+        current_revision=current_revision,
     )
     if additional_result_consumer is None:
         operations.set_result_consumer(service.consume_result)

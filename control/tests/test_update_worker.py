@@ -42,7 +42,7 @@ def _rollout(
                 state=state,
                 plan_digest=uuid.uuid4().hex * 2,
                 release_digest="1" * 64,
-                base_commit="a" * 40,
+                authority_revision="a"  * 64,
                 fleet_digest="2" * 64,
                 topology_digest="3" * 64,
                 agent_input_digest="4" * 64,

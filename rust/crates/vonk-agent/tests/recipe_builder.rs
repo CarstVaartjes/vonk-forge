@@ -487,8 +487,18 @@ fn docker(arguments: &[&str]) -> Output {
         .expect("the local Docker OCI integration fixture must be installed")
 }
 
+fn local_oci_integration_fixture_available() -> bool {
+    ["/usr/bin/containerd", "/usr/bin/ctr", "/usr/bin/docker"]
+        .iter()
+        .all(|path| Path::new(path).is_file())
+}
+
 #[test]
 fn faithful_oci_layout_imports_into_a_real_private_content_store() {
+    if !local_oci_integration_fixture_available() {
+        eprintln!("skipping local OCI integration fixture: containerd/ctr/docker unavailable");
+        return;
+    }
     let mut fixture = registry_fixture();
     let fixture_id = format!("{}-good", std::process::id());
     fixture.reference = format!(
@@ -594,6 +604,10 @@ fn faithful_oci_layout_imports_into_a_real_private_content_store() {
 
 #[test]
 fn real_private_content_store_rejects_absent_and_substituted_oci_content() {
+    if !local_oci_integration_fixture_available() {
+        eprintln!("skipping local OCI integration fixture: containerd/ctr/docker unavailable");
+        return;
+    }
     let store = PrivateContainerd::start();
     let archive_root = tempdir().unwrap();
     let absent = archive_root.path().join("absent.oci.tar");

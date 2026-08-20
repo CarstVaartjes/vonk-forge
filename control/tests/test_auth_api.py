@@ -168,7 +168,7 @@ def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None
     assert verifier not in serialized
     assert bearer not in serialized
     event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.base_commit, event.targets) == (
+    assert (event.actor, event.action, event.authority_revision, event.targets) == (
         "admin",
         "auth.login.succeeded",
         None,
@@ -283,7 +283,7 @@ def test_login_uses_generic_credential_failure_and_bounded_audit() -> None:
     assert "wrong password" not in serialized
     assert verifier not in serialized
     event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.base_commit, event.targets) == (
+    assert (event.actor, event.action, event.authority_revision, event.targets) == (
         "anonymous",
         "auth.login.failed",
         None,
@@ -304,7 +304,7 @@ def test_login_uses_generic_throttle_response_and_bounded_audit() -> None:
         (response.headers.items(), response.content, audits.list())
     )
     event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.base_commit, event.targets) == (
+    assert (event.actor, event.action, event.authority_revision, event.targets) == (
         "anonymous",
         "auth.login.throttled",
         None,
@@ -359,7 +359,7 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     assert "HttpOnly" not in cleared[1]
     assert "Max-Age=0" in cleared[1]
     event = audits.for_request(logout.headers["x-request-id"])
-    assert (event.actor, event.action, event.base_commit, event.targets) == (
+    assert (event.actor, event.action, event.authority_revision, event.targets) == (
         "admin",
         "auth.logout",
         None,

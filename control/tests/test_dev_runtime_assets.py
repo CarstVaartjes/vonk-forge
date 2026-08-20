@@ -567,8 +567,10 @@ def test_stage_development_assets_rejects_oversize_resource_before_reading(
 def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     tmp_path: Path,
 ) -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for the non-root Caddy entrypoint test")
+    if shutil.which("docker") is None or subprocess.run(
+        ["docker", "info"], capture_output=True
+    ).returncode != 0:
+        pytest.skip("Docker daemon is required for the non-root Caddy entrypoint test")
     package = importlib.resources.files(RESOURCE_PACKAGE)
     entrypoint = Path(os.fspath(package.joinpath("caddy-entrypoint.sh")))
     secrets_root = tmp_path / "secrets"
@@ -759,8 +761,10 @@ def _next_handoff_mode(
 def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_events(
     tmp_path: Path,
 ) -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for the Caddy hostname handoff test")
+    if shutil.which("docker") is None or subprocess.run(
+        ["docker", "info"], capture_output=True
+    ).returncode != 0:
+        pytest.skip("Docker daemon is required for the Caddy hostname handoff test")
     package = importlib.resources.files(RESOURCE_PACKAGE)
     package_root = Path(os.fspath(package))
     secrets_root = tmp_path / "secrets"
