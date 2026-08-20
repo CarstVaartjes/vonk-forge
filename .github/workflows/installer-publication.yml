@@ -143,7 +143,6 @@ jobs:
               )
               package_run_id=$TRIGGER_RUN_ID
               compose_run_id=$TRIGGER_RUN_ID
-              setup_run_id=$TRIGGER_RUN_ID
               compose_artifact="platform-build-${release_tag#v}"
               ;;
             *)
@@ -158,25 +157,23 @@ jobs:
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
 
-          if [[ "$channel" == dev ]]; then
-            setup_runs=$RUNNER_TEMP/installer-setup-runs.json
-            gh api --paginate \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
-              --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
-            mapfile -t setup_run_ids < <(
-              jq -r --arg sha "$SOURCE_SHA" '
-                .[] | select(
-                  .head_sha == $sha and .head_branch == "main" and
-                  .event == "push" and .status == "completed" and
-                  .conclusion == "success"
-                ) | .id
-              ' "$setup_runs"
-            )
-            test "${#setup_run_ids[@]}" -ge 1 || not_ready
-            setup_run_id=${setup_run_ids[0]}
-          fi
+          setup_runs=$RUNNER_TEMP/installer-setup-runs.json
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
+            --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
+          mapfile -t setup_run_ids < <(
+            jq -r --arg sha "$SOURCE_SHA" '
+              .[] | select(
+                .head_sha == $sha and .head_branch == "main" and
+                .event == "push" and .status == "completed" and
+                .conclusion == "success"
+              ) | .id
+            ' "$setup_runs"
+          )
+          test "${#setup_run_ids[@]}" -ge 1 || not_ready
+          setup_run_id=${setup_run_ids[0]}
 
           artifacts=$RUNNER_TEMP/accepted-artifacts.json
           gh api --paginate \

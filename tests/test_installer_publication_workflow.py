@@ -85,6 +85,19 @@ def test_publication_reuses_exact_package_and_compose_artifacts() -> None:
     assert "scripts/install-release-publication publish" in text
 
 
+def test_stable_publication_resolves_setup_artifacts_from_the_setup_workflow() -> None:
+    """Stable CI and native setup binaries are intentionally separate runs."""
+    text = WORKFLOW.read_text()
+    assert "setup_run_id=$TRIGGER_RUN_ID" not in text
+    assert (
+        "actions/workflows/installer-setups.yml/runs?event=push&status=completed"
+        in text
+    )
+    assert text.index("setup_runs=$RUNNER_TEMP/installer-setup-runs.json") < text.index(
+        '"setup_run_id=$setup_run_id"'
+    )
+
+
 def test_r2_publication_uses_explicit_least_privilege_inputs() -> None:
     text = WORKFLOW.read_text()
     for name in (
