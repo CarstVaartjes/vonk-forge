@@ -4,128 +4,33 @@
 
 ## Commits and scope
 
-- `1df4b496` — `feat: accept NAS installer candidates behaviorally`
-- This report is committed separately after it records that implementation SHA.
+- `1df4b496` — behavioral candidate acceptance foundation
+- `123a7d34` — original acceptance evidence report
+- `b0311e45` — NAS acceptance hardening fix round
+- `c77f3342` — route and workflow-to-authority gate coverage
 
-Implementation files:
+This report revision is committed separately. Only Task 13A paths were staged;
+unrelated worktree edits remain unstaged.
 
-- `.github/workflows/installer-publication.yml`
-- `scripts/install-release-publication`
-- `scripts/build-nas-compose-bundle`
-- `tests/acceptance/runtime.py`
-- `tests/acceptance/test_fresh_nas_install.py`
-- `tests/test_acceptance_runtime.py`
-- `tests/scripts/test_install_release_publication.py`
-- `tests/scripts/test_build_nas_compose_bundle.py`
-- `tests/test_installer_publication_workflow.py`
-- `docs/superpowers/specs/2026-08-20-fresh-install-product-design.md`
-- `docs/superpowers/plans/2026-08-20-fresh-install-product.md`
+## Current requirements mapping
 
-Unrelated dirty files in the worktree were not staged or committed.
-
-## Requirements mapping
-
-| Requirement | Evidence |
+| Requirement | Current evidence |
 | --- | --- |
-| Candidate artifacts precede acceptance and the pointer advances only after signed acceptance | Candidate, NAS/Spark acceptance, aggregate acceptance, and promote jobs form parsed dependency chain; publication helper tests exercise candidate, acceptance, and promotion receipts. |
-| NAS does not own Docker/Compose | NAS acceptance removes the Docker/Compose runtime version check. The design/plan state that Engine and Compose are NAS-owned; only CI parser fixtures are versioned. |
-| UGREEN plus lower Compose compatibility | CI downloads official standalone Compose v5.1.3 and v2.24.6 executables by versioned URL, verifies pinned SHA-256 values, and invokes both against generated default and Hermes bundles. |
-| Generated YAML NAS compatibility | The canonical payload now supplies top-level `name: vonk-forge` and `version: "3.9"`; parsed payload test confirms no include/build and pinned images remain. The only permitted parser output is Compose v5's known warning that the required `version` field is obsolete. |
-| Clean workstation and interactive wizard | PTY acceptance creates a constrained PATH without Docker, Git, SSH, sudo, or NAS tooling; it generates two clean default bundles and one Hermes bundle. |
-| Bundle, repeatability, secret protection, and upgrade preservation | Acceptance enforces the exact `docker-compose.yaml`, `.env`, `secrets/` contract, secure modes, no metadata secret leakage, repeatable release-controlled output, and reruns the first bundle in place to prove byte-for-byte site-secret preservation. |
-| One reference rollout, service/topology/route checks, and teardown | The candidate acceptance performs empty-volume `docker compose up -d --wait`, exact health/service checks for default and Hermes, TLS/database/Tailscale checks, and isolated `down --volumes --remove-orphans`. Parser fixtures are not used for rollouts. |
-| Behavioral workflow tests | Workflow tests load YAML and assert job dependencies, fixture env bindings, permissions, artifact requirements, report artifacts, and native platform matrix. Source-grep-only workflow assertions were removed. |
-| 1Password/key custody ruling | No 1Password/OIDC CI runtime dependency was added and protected GitHub environment execution copies remain. The design records the required future 1Password recoverable copy plus fingerprint-verified encrypted offline escrow, and that the current GitHub-only key must remain untouched until replacement custody passes end-to-end sign/verify. |
+| Candidate before promotion | Parsed workflow dependency graph keeps candidate publication before NAS/Spark acceptance, signed aggregate acceptance, and pointer promotion. |
+| NAS Docker boundary | NAS bootstrap path does not install, pin, configure, or require NAS Docker/Compose. CI uses isolated compatibility/reference fixtures only. |
+| YAML compatibility | Generated YAML omits top-level `name` and `version`, has no include/build/host bind input, and uses digest-pinned images. Every Compose parser diagnostic fails acceptance. |
+| Versioned fixtures | Official v5.1.3 and v2.24.6 Compose binaries are SHA-256 verified for config checks. The one CI-only Hermes-superset rollout uses checksum-verified Compose v5.1.3 against a digest-pinned Docker Engine 29.4.3 DIND service. |
+| Bundle and workstation contract | PTY path remains constrained; exact three-item bundle, modes, secret isolation, repeatability, and in-place site-secret preservation are asserted. |
+| Full rollout behavior | One empty-volume Hermes-superset rollout validates exact healthy service set, TLS, PostgreSQL/LiteLLM separation, Tailscale, authenticated Prometheus metrics, authenticated Grafana user, registry API, and LiteLLM readiness. Default/Hermes and parser fixture compatibility are config-only where no rollout is required. |
+| Gate authority | The workflow's parsed NAS gate JSON is accepted by the real authority together with Spark reports; removing a gate fails as incomplete. |
+| Key custody | Protected GitHub environment execution copies remain; no 1Password/OIDC CI runtime dependency or external-secret change was made. |
 
-## Red/green evidence
-
-1. `test_compose_compatibility_exercises_every_declared_parser_fixture` first failed because `assert_compose_compatibility` did not exist. It passed after the helper invoked every supplied executable with `-f docker-compose.yaml config --quiet`.
-2. Parsed workflow acceptance first failed with `KeyError: 'Download verified Compose parser fixtures'`. It passed after the workflow added the checksum-verified UGREEN and lower parser fixture step and paths.
-3. `test_payload_is_complete_self_contained_and_fresh_install_only` first failed with `KeyError: 'name'`. It passed after the canonical payload emitted required `name` and `version` fields.
-4. `test_compose_compatibility_allows_only_the_required_version_diagnostic` first failed because the helper rejected v5's required-version warning. It passed after accepting only that known diagnostic.
-5. `test_interactive_runner_can_allow_upgrade_prompts_to_be_unchanged` first failed with `TypeError` for the missing `require_all_prompts` option. It passed after the PTY helper gained the opt-out used only for the in-place upgrade preservation check.
-
-## Verification commands and outputs
-
-```text
-$ uv run pytest tests/test_acceptance_runtime.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py -q
-.............................................                            [100%]
-45 passed in 10.59s
-
-$ uvx --from ruff==0.16.1 ruff check --force-exclude tests/acceptance/runtime.py tests/acceptance/test_fresh_nas_install.py tests/test_acceptance_runtime.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py scripts/build-nas-compose-bundle
-All checks passed!
-
-$ git diff --check
-(exit 0; no output)
-
-$ uv run python -c '<parse installer-publication.yml and assert candidate acceptance topology>'
-workflow YAML parsed: candidate acceptance topology present
-
-$ docker-compose-v5.1.3 -f docker-compose.yaml config --quiet
-time="..." level=warning msg="... the attribute `version` is obsolete, it will be ignored ..."
-
-$ docker-compose-v2.24.6 -f docker-compose.yaml config --quiet
-(exit 0; no output)
-```
-
-The last two commands used an actual locally rendered, candidate-shaped payload
-with official release binaries fetched from Docker Compose's v5.1.3 and v2.24.6
-release URLs. SHA-256 verification succeeded before either parser ran. The
-version warning is expected because the NAS compatibility contract requires a
-top-level `version`; the helper rejects all other parser output.
-
-## CI-only/full-rollout gaps
-
-No actual candidate URL, protected canary secrets, Tailscale tailnet, R2
-publication credentials, or isolated CI Docker project are available locally.
-Consequently, the following are CI-only and were not claimed as locally run:
-
-- immutable candidate publication and unchanged-pointer observation;
-- the literal curl bootstrap against a published candidate;
-- real wizard execution and in-place upgrade against that candidate;
-- default/Hermes empty-volume rollouts, service health, PostgreSQL/LiteLLM,
-  controller TLS, Tailscale gateway/configurator, tailnet HTTPS, observability,
-  and registry route checks; and
-- signed aggregate acceptance and promotion.
-
-The workflow is arranged so the gate report is written only after the Python
-acceptance command succeeds under `set -euo pipefail`; aggregate acceptance and
-promotion remain downstream of those reports.
-
-## External 1Password/OIDC provisioning
-
-External key-custody work remains required. Create a replacement private key,
-store its canonical recoverable copy in 1Password, create encrypted offline
-escrow, prove both derive the tracked public fingerprint, and run end-to-end
-sign/verify before changing protected GitHub environment execution copies. The
-current GitHub-only key and all external secrets were left untouched. No
-1Password/OIDC runtime dependency was added to CI.
-
-## Self-review and concerns
-
-- Reviewed the staged Task 13A paths and kept unrelated web, Caddy, ingress,
-  runbook, and other worktree edits unstaged.
-- The acceptance helper deliberately permits only Compose v5's `version`
-  deprecation diagnostic; this is the compatibility trade-off imposed by the
-  required top-level version field.
-- The full canary acceptance cannot be validated without the protected external
-  infrastructure listed above. It must run successfully before promotion.
-
-## Historical fix round 1 correction
-
-The earlier top-level `name`/`version` addition and Compose-v5 warning exemption
-were incorrect. The payload now omits both fields and rejects every parser
-diagnostic. The CI-only reference rollout uses a digest-pinned Docker Engine
-29.4.3 DIND fixture and the already checksum-verified Compose 5.1.3 fixture;
-neither is an installer, bundle, environment, secret, prompt, or deployment
-input.
-
-### Fix round 1 verification
+## Current verification
 
 ```text
 $ uv run pytest tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py -q
-...............................................                          [100%]
-47 passed in 10.94s
+.................................................                        [100%]
+49 passed in 11.76s
 
 $ uvx --from ruff==0.16.1 ruff check --force-exclude <Task 13A Python paths>
 All checks passed!
@@ -134,20 +39,31 @@ $ git diff --check
 (exit 0; no output)
 ```
 
-This round removes the forbidden YAML fields, rejects all Compose diagnostics,
-adds the NAS acceptance gates to authority validation, limits the reference
-rollout to Hermes, hardens full writes/TLS cleanup, and pins a CI-only Docker
-29.4.3 DIND service paired with the Compose 5.1.3 reference fixture.
+## Red/green evidence
 
-### Blocking follow-up completion
+- The payload test failed when it required absent `name`/`version`; it passes
+  after their removal.
+- The compatibility test failed when parser stderr was allowed; it passes only
+  when every parser diagnostic is rejected.
+- The authority test failed when NAS reports contained gates outside the
+  authority set; it passes with the complete canonical set.
+- The parsed-workflow integration failed until the emitted NAS gate JSON was
+  provided; it passes for that exact JSON and rejects a removed gate.
+- The one-rollout test failed until Hermes became the sole reference rollout;
+  it now passes.
 
-The acceptance now constructs substantive LiteLLM readiness, authenticated
-Prometheus metrics, authenticated Grafana user, and registry API checks using
-mounted runtime secrets. The workflow's parsed NAS gate JSON is fed through the
-real acceptance authority, and a missing gate is rejected.
+## CI-only gap and self-review
 
-```text
-$ uv run pytest tests/test_fresh_nas_acceptance.py tests/scripts/test_install_release_publication.py::test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected -q
-...                                                                      [100%]
-3 passed in 0.72s
-```
+The published-candidate curl, protected canary secrets, tailnet access, R2,
+and actual DIND rollout are CI-only and were not run locally. The workflow is
+fail-closed: reports are produced after acceptance succeeds, aggregate signing
+requires the complete gate set, and promotion is downstream. External 1Password
+replacement key and fingerprint-verified encrypted escrow provisioning remain
+required; the current GitHub-only key was not changed.
+
+## Superseded historical record
+
+Earlier report revisions incorrectly described generated top-level `name` and
+`version` fields and an allowed Compose-v5 version diagnostic. Those were
+intermediate defects, not current product behavior; the current mapping and
+verification above supersede them.
