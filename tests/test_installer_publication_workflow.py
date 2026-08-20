@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 CI = ROOT / ".github/workflows/ci.yml"
 DEV_IMAGES = ROOT / ".github/workflows/dev-images.yml"
+SETUPS = ROOT / ".github/workflows/installer-setups.yml"
 
 
 def _workflow() -> dict[str, object]:
@@ -21,25 +22,42 @@ def test_publication_runs_only_after_accepted_workflows() -> None:
     assert set(triggers["workflows"]) == {
         "CI",
         "Development images",
+        "Installer setup programs",
         "Rust Vonk Forge agent development",
     }
     assert triggers["types"] == ["completed"]
     authority = workflow["jobs"]["authority"]
     assert "conclusion == 'success'" in authority["if"]
     publish = workflow["jobs"]["publish"]
-    assert set(publish["needs"]) == {"authority", "build-setup"}
+    assert set(publish["needs"]) == {"authority"}
     assert "needs.authority.result == 'success'" in publish["if"]
+    assert "needs.authority.outputs.ready == 'true'" in publish["if"]
+    assert "build-setup" not in workflow["jobs"]
     text = WORKFLOW.read_text()
     assert "refs/remotes/origin/main" in text
     assert "actions/workflows/agent-release.yml/runs" in text
     assert "actions/workflows/dev-images.yml/runs" in text
     assert "verify-release-tag-authority" in text
     assert 'status:"accepted"' in text
+    assert "ready=false" in text
+
+
+def test_publication_refreshes_both_signed_channels_before_expiry() -> None:
+    workflow = _workflow()
+    assert workflow["on"]["schedule"] == [{"cron": "17 3 * * *"}]
+    refresh = workflow["jobs"]["refresh"]
+    assert refresh["if"] == "github.event_name == 'schedule'"
+    assert {entry["channel"] for entry in refresh["strategy"]["matrix"]["include"]} == {
+        "dev",
+        "stable",
+    }
+    assert "environment: installer-${{ matrix.channel }}" in WORKFLOW.read_text()
+    assert "install-release-publication refresh" in WORKFLOW.read_text()
 
 
 def test_setup_build_matrix_is_complete_and_native() -> None:
-    workflow = _workflow()
-    matrix = workflow["jobs"]["build-setup"]["strategy"]["matrix"]["include"]
+    workflow = yaml.load(SETUPS.read_text(), Loader=yaml.BaseLoader)
+    matrix = workflow["jobs"]["build-and-test"]["strategy"]["matrix"]["include"]
     actual = {
         (entry["platform"], entry["runner"], entry["binaries"]) for entry in matrix
     }
@@ -50,6 +68,9 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         ("darwin-arm64", "macos-15", "vonk-nas-setup"),
     }
     assert all("target" not in entry for entry in matrix)
+    text = SETUPS.read_text()
+    assert "cargo test --locked --package" in text
+    assert "actions/upload-artifact@" in text
 
 
 def test_publication_reuses_exact_package_and_compose_artifacts() -> None:
@@ -57,6 +78,7 @@ def test_publication_reuses_exact_package_and_compose_artifacts() -> None:
     assert "actions/download-artifact@" in text
     assert "run-id: ${{ needs.authority.outputs.package_run_id }}" in text
     assert "run-id: ${{ needs.authority.outputs.compose_run_id }}" in text
+    assert "run-id: ${{ needs.authority.outputs.setup_run_id }}" in text
     assert "scripts/build-nas-compose-bundle" in text
     assert "--compose" in text
     assert "scripts/install-release-publication assemble" in text
@@ -71,6 +93,8 @@ def test_r2_publication_uses_explicit_least_privilege_inputs() -> None:
         "R2_SECRET_ACCESS_KEY",
         "R2_INSTALLER_PUBLIC_BUCKET",
         "INSTALLER_PUBLIC_ORIGIN",
+        "VONK_INSTALLER_RELEASE_PRIVATE_KEY",
+        "VONK_INSTALLER_RELEASE_KEY_FINGERPRINT",
     ):
         assert name in text
     assert "environment: installer-${{ needs.authority.outputs.channel }}" in text
@@ -92,7 +116,7 @@ def test_development_acceptance_publishes_exact_hermes_generation() -> None:
     assert "vonk-forge-hermes.oci.tar" in text
     assert "--target managed" in text
     assert (
-        'ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest'
+        "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest"
         in text
     )
     assert "subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes" in text

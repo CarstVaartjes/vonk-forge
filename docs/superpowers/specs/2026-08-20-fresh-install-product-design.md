@@ -22,6 +22,13 @@ The development channel exposes the identical no-argument workflows at
 artifact identities; they do not introduce flags, follow-up commands, or a
 different deployment model.
 
+These are two target-specific single-command installers, not a multi-command
+installation sequence. The NAS curl runs on the operator's workstation and
+creates the directory that will be uploaded to the NAS. The Spark curl runs on
+each Spark and leaves its agent installed, paired, started, and verified. A user
+never runs the Spark command to prepare the NAS, never runs the NAS command on
+the NAS, and never needs a second setup command after either curl completes.
+
 Each curl invocation completes its entire side of the setup. It may prompt for
 required choices and secrets through `/dev/tty`, but it must not finish by
 asking the operator to download another installer, change permissions, or run a
@@ -170,6 +177,13 @@ channel, download the manifest and artifact, verify release metadata before
 execution, and fail closed on mismatches. Stable releases promote already
 accepted artifacts rather than rebuilding them. Development and production
 therefore differ only in selected immutable artifact identities.
+
+The four public endpoint clients are release-independent and immutable once
+published. Each channel advances through one signed, expiring manifest object
+that names both immutable NAS and Spark bootstraps. Updating that one object is
+the only mutable publication operation, so readers cannot observe a mixed NAS
+and Spark generation. The immutable release JSON also carries a detached
+signature, and stable publication refuses semantic-version rollback.
 
 Publication is receipt-driven: tested artifacts are published first, a complete
 manifest is assembled from their accepted receipts, the manifest is verified,

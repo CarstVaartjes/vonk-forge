@@ -1,0 +1,130 @@
+#!/bin/sh
+set -eu
+umask 077
+
+kind='@VONK_KIND@'
+channel='@VONK_CHANNEL@'
+origin=${VONK_INSTALL_BASE_URL:-@VONK_ORIGIN@}
+
+fail() {
+    printf '%s\n' "vonk-forge ${kind} installer: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 0 ] || fail "this installer does not accept arguments"
+case "$origin" in https://*) ;; *) fail "the installer origin is invalid" ;; esac
+for required in curl openssl sed head tail date mktemp awk; do
+    command -v "$required" >/dev/null 2>&1 || fail "$required is required"
+done
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}-channel.XXXXXX") ||
+    fail "cannot create a temporary directory"
+cleanup() {
+    rm -rf -- "$temporary"
+}
+trap cleanup EXIT HUP INT TERM
+
+manifest="$temporary/current.manifest"
+claims="$temporary/current.claims"
+signature="$temporary/current.sig"
+public_key="$temporary/installer-public.pem"
+bootstrap="$temporary/release-bootstrap"
+release="$temporary/release.json"
+release_signature="$temporary/release.sig"
+
+cat >"$public_key" <<'VONK_INSTALLER_PUBLIC_KEY'
+@VONK_PUBLIC_KEY_PEM@VONK_INSTALLER_PUBLIC_KEY
+
+curl -fsSL --proto '=https' --tlsv1.2     "$origin/artifacts/$channel/current.manifest" -o "$manifest" ||
+    fail "cannot download the current release manifest"
+
+[ "$(sed -n '$=' "$manifest")" -eq 15 ] ||
+    fail "the current release manifest is invalid"
+head -n 14 "$manifest" >"$claims"
+signature_value=$(tail -n 1 "$manifest" | sed -n 's/^signature=//p')
+[ -n "$signature_value" ] ||
+    fail "the current release manifest is unsigned"
+printf '%s' "$signature_value" |
+    openssl base64 -d -A -out "$signature" 2>/dev/null ||
+    fail "the current release signature is invalid"
+openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$claims"     >/dev/null 2>&1 ||
+    fail "the current release signature is invalid"
+
+field() {
+    sed -n "$1{s/^[^=]*=//;p;}" "$claims"
+}
+[ "$(sed -n '1p' "$claims")" = 'schema_version=1' ] ||
+    fail "the current release manifest schema is unsupported"
+[ "$(sed -n '2p' "$claims")" = "channel=$channel" ] ||
+    fail "the current release channel is invalid"
+generation=$(field 3)
+version=$(field 4)
+source_sha=$(field 5)
+expires_at=$(field 6)
+release_path=$(field 7)
+release_sha256=$(field 8)
+release_signature_path=$(field 9)
+release_signature_sha256=$(field 10)
+nas_path=$(field 11)
+nas_sha256=$(field 12)
+spark_path=$(field 13)
+spark_sha256=$(field 14)
+
+case "$generation" in ''|*[!0-9a-f]*) fail "the release generation is invalid" ;; esac
+[ "${#generation}" -eq 64 ] || fail "the release generation is invalid"
+case "$source_sha" in ''|*[!0-9a-f]*) fail "the release source is invalid" ;; esac
+[ "${#source_sha}" -eq 40 ] || fail "the release source is invalid"
+case "$version" in ''|*[!A-Za-z0-9.+:~-]*) fail "the release version is invalid" ;; esac
+case "$expires_at" in ''|*[!0-9]*) fail "the release expiry is invalid" ;; esac
+[ "$expires_at" -gt "$(date +%s)" ] || fail "the current release manifest has expired"
+for digest in "$release_sha256" "$release_signature_sha256" "$nas_sha256" "$spark_sha256"; do
+    case "$digest" in ''|*[!0-9a-f]*) fail "a release digest is invalid" ;; esac
+    [ "${#digest}" -eq 64 ] || fail "a release digest is invalid"
+done
+release_prefix="artifacts/$channel/releases/$generation"
+[ "$release_path" = "$release_prefix/release.json" ] ||
+    fail "the release path is invalid"
+[ "$release_signature_path" = "$release_prefix/release.sig" ] ||
+    fail "the release signature path is invalid"
+[ "$nas_path" = "$release_prefix/bootstraps/nas" ] ||
+    fail "the NAS bootstrap path is invalid"
+[ "$spark_path" = "$release_prefix/bootstraps/spark" ] ||
+    fail "the Spark bootstrap path is invalid"
+
+curl -fsSL --proto '=https' --tlsv1.2 "$origin/$release_path" -o "$release" ||
+    fail "cannot download the immutable release manifest"
+curl -fsSL --proto '=https' --tlsv1.2 \
+    "$origin/$release_signature_path" -o "$release_signature" ||
+    fail "cannot download the immutable release signature"
+
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        openssl dgst -sha256 "$1" | awk '{print $NF}'
+    fi
+}
+[ "$(sha256 "$release")" = "$release_sha256" ] ||
+    fail "the immutable release manifest failed checksum verification"
+[ "$(sha256 "$release_signature")" = "$release_signature_sha256" ] ||
+    fail "the immutable release signature failed checksum verification"
+openssl base64 -d -A -in "$release_signature" -out "$signature" 2>/dev/null ||
+    fail "the immutable release signature is invalid"
+openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$release" \
+    >/dev/null 2>&1 ||
+    fail "the immutable release signature is invalid"
+
+case "$kind" in
+    nas) selected_path=$nas_path; selected_sha256=$nas_sha256 ;;
+    spark) selected_path=$spark_path; selected_sha256=$spark_sha256 ;;
+    *) fail "the installer kind is invalid" ;;
+esac
+curl -fsSL --proto '=https' --tlsv1.2 "$origin/$selected_path" -o "$bootstrap" ||
+    fail "cannot download the immutable release bootstrap"
+
+[ "$(sha256 "$bootstrap")" = "$selected_sha256" ] ||
+    fail "the immutable release bootstrap failed checksum verification"
+
+VONK_INSTALL_BASE_URL="$origin/$release_prefix" /bin/sh "$bootstrap"

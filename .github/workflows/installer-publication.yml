@@ -1,10 +1,13 @@
 name: Installer publication
 
 on:
+  schedule:
+    - cron: "17 3 * * *"
   workflow_run:
     workflows:
       - CI
       - Development images
+      - Installer setup programs
       - Rust Vonk Forge agent development
     types: [completed]
 
@@ -13,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vonk-forge-installer-${{ github.event.workflow_run.head_sha }}
+  group: vonk-forge-installer-${{ github.event.workflow_run.head_sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +26,8 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       (((github.event.workflow_run.name == 'Rust Vonk Forge agent development' ||
-         github.event.workflow_run.name == 'Development images') &&
+         github.event.workflow_run.name == 'Development images' ||
+         github.event.workflow_run.name == 'Installer setup programs') &&
        github.event.workflow_run.head_branch == 'main') ||
        github.event.workflow_run.name == 'CI')
     runs-on: ubuntu-24.04
@@ -31,6 +35,7 @@ jobs:
       actions: read
       contents: read
     outputs:
+      ready: ${{ steps.accept.outputs.ready }}
       channel: ${{ steps.accept.outputs.channel }}
       version: ${{ steps.accept.outputs.version }}
       source_sha: ${{ steps.accept.outputs.source_sha }}
@@ -42,6 +47,7 @@ jobs:
       arm64_package: ${{ steps.accept.outputs.arm64_package }}
       compose_run_id: ${{ steps.accept.outputs.compose_run_id }}
       compose_artifact: ${{ steps.accept.outputs.compose_artifact }}
+      setup_run_id: ${{ steps.accept.outputs.setup_run_id }}
     steps:
       - name: Check out the exact accepted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +66,10 @@ jobs:
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
+          not_ready() {
+            printf 'ready=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           git fetch --force --no-tags origin \
@@ -67,7 +77,7 @@ jobs:
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Rust Vonk Forge agent development'|'Development images')
+            'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
@@ -88,7 +98,7 @@ jobs:
                   ) | [.id, .run_number] | @tsv
                 ' "$package_runs"
               )
-              test "${#accepted_package_runs[@]}" -ge 1
+              test "${#accepted_package_runs[@]}" -ge 1 || not_ready
               read -r package_run_id package_run_number \
                 <<< "${accepted_package_runs[0]}"
               metadata=$(
@@ -110,7 +120,7 @@ jobs:
                   ) | .id
                 ' "$compose_runs"
               )
-              test "${#compose_run_ids[@]}" -ge 1
+              test "${#compose_run_ids[@]}" -ge 1 || not_ready
               compose_run_id=${compose_run_ids[0]}
               compose_artifact="vonk-forge-dev-compose-$SOURCE_SHA"
               ;;
@@ -133,6 +143,7 @@ jobs:
               )
               package_run_id=$TRIGGER_RUN_ID
               compose_run_id=$TRIGGER_RUN_ID
+              setup_run_id=$TRIGGER_RUN_ID
               compose_artifact="platform-build-${release_tag#v}"
               ;;
             *)
@@ -147,13 +158,33 @@ jobs:
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
 
+          if [[ "$channel" == dev ]]; then
+            setup_runs=$RUNNER_TEMP/installer-setup-runs.json
+            gh api --paginate \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
+              --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
+            mapfile -t setup_run_ids < <(
+              jq -r --arg sha "$SOURCE_SHA" '
+                .[] | select(
+                  .head_sha == $sha and .head_branch == "main" and
+                  .event == "push" and .status == "completed" and
+                  .conclusion == "success"
+                ) | .id
+              ' "$setup_runs"
+            )
+            test "${#setup_run_ids[@]}" -ge 1 || not_ready
+            setup_run_id=${setup_run_ids[0]}
+          fi
+
           artifacts=$RUNNER_TEMP/accepted-artifacts.json
           gh api --paginate \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$package_run_id/artifacts?per_page=100" \
             --jq '.artifacts[]' | jq -s . > "$artifacts"
-          test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
+          test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
           if [[ "$compose_run_id" != "$package_run_id" ]]; then
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \
@@ -161,9 +192,19 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/actions/runs/$compose_run_id/artifacts?per_page=100" \
               --jq '.artifacts[]' | jq -s . > "$artifacts"
           fi
-          test "$(jq --arg name "$compose_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
+          test "$(jq --arg name "$compose_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$setup_run_id/artifacts?per_page=100" \
+            --jq '.artifacts[]' | jq -s . > "$artifacts"
+          for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            setup_artifact="installer-setup-$SOURCE_SHA-$platform"
+            test "$(jq --arg name "$setup_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+          done
 
           printf '%s\n' \
+            "ready=true" \
             "channel=$channel" \
             "version=$version" \
             "source_sha=$SOURCE_SHA" \
@@ -175,80 +216,15 @@ jobs:
             "arm64_package=$arm64_package" \
             "compose_run_id=$compose_run_id" \
             "compose_artifact=$compose_artifact" \
+            "setup_run_id=$setup_run_id" \
             >> "$GITHUB_OUTPUT"
-
-  build-setup:
-    name: Build native setup (${{ matrix.platform }})
-    needs: [authority]
-    if: needs.authority.result == 'success'
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - platform: linux-amd64
-            runner: ubuntu-24.04
-            binaries: vonk-nas-setup vonk-spark-setup
-          - platform: linux-arm64
-            runner: ubuntu-24.04-arm
-            binaries: vonk-nas-setup vonk-spark-setup
-          - platform: darwin-amd64
-            runner: macos-15-intel
-            binaries: vonk-nas-setup
-          - platform: darwin-arm64
-            runner: macos-15
-            binaries: vonk-nas-setup
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - name: Check out the exact accepted source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.authority.outputs.source_sha }}
-
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          rustup toolchain install 1.97.1
-          rustup default 1.97.1
-
-      - name: Build exact native setup programs
-        shell: bash
-        env:
-          BINARIES: ${{ matrix.binaries }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          set -euo pipefail
-          case "$PLATFORM:$(uname -s):$(uname -m)" in
-            linux-amd64:Linux:x86_64|linux-arm64:Linux:aarch64|darwin-amd64:Darwin:x86_64|darwin-arm64:Darwin:arm64) ;;
-            *) echo "installer setup runner architecture does not match" >&2; exit 1 ;;
-          esac
-          output="$RUNNER_TEMP/setup/$PLATFORM"
-          install -d -m 0755 "$output"
-          for binary in $BINARIES; do
-            cargo build --locked --release --package "$binary" --bin "$binary"
-            install -m 0555 "target/release/$binary" "$output/$binary"
-          done
-          find "$output" -maxdepth 1 -type f -exec sha256sum {} + \
-            | LC_ALL=C sort > "$output/SHA256SUMS"
-
-      - name: Upload native setup programs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: installer-setup-${{ needs.authority.outputs.source_sha }}-${{ matrix.platform }}
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
-          path: ${{ runner.temp }}/setup
 
   publish:
     name: Publish complete ${{ needs.authority.outputs.channel }} installer generation
-    needs: [authority, build-setup]
-    if: needs.authority.result == 'success' && needs.build-setup.result == 'success'
+    needs: [authority]
+    if: >-
+      needs.authority.result == 'success' &&
+      needs.authority.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: installer-${{ needs.authority.outputs.channel }}
@@ -279,6 +255,8 @@ jobs:
           pattern: installer-setup-${{ needs.authority.outputs.source_sha }}-*
           path: ${{ runner.temp }}/setups
           merge-multiple: true
+          run-id: ${{ needs.authority.outputs.setup_run_id }}
+          github-token: ${{ github.token }}
 
       - name: Download exact accepted agent packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -306,9 +284,25 @@ jobs:
           AMD64_PACKAGE: ${{ needs.authority.outputs.amd64_package }}
           ARM64_PACKAGE: ${{ needs.authority.outputs.arm64_package }}
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
+          VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          signing_key=$RUNNER_TEMP/installer-release-private.pem
+          public_key=$RUNNER_TEMP/installer-release-public.pem
+          public_der=$RUNNER_TEMP/installer-release-public.der
+          trap 'rm -f "$signing_key" "$public_key" "$public_der"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
+          openssl pkey -in "$signing_key" -pubout -out "$public_key"
+          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
+          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+            "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
+          openssl pkey -pubin -in "$public_key" -text -noout \
+            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
+          expires_at=$(($(date +%s) + 604800))
           case "$CHANNEL" in
             dev) compose_name=docker-compose.pinned.yml ;;
             stable) compose_name=docker-compose.production.yml ;;
@@ -355,6 +349,9 @@ jobs:
             --source-sha "$SOURCE_SHA"
             --accepted-evidence "$evidence"
             --origin "$INSTALLER_PUBLIC_ORIGIN"
+            --expires-at "$expires_at"
+            --signing-key "$signing_key"
+            --signing-public-key "$public_key"
             --api-image "$api_image"
             --worker-image "$worker_image"
             --hermes-image "$hermes_image"
@@ -373,6 +370,8 @@ jobs:
           generation=$(sed -n 's/^generation=//p' "$RUNNER_TEMP/assembly.out")
           [[ "$generation" =~ ^[0-9a-f]{64}$ ]]
           printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
+          rm -f "$signing_key" "$public_key" "$public_der"
+          trap - EXIT
 
       - name: Install R2 publication client
         shell: bash
@@ -435,3 +434,69 @@ jobs:
           path: |
             ${{ runner.temp }}/installer-publication/publication-plan.json
             ${{ runner.temp }}/publication-receipt.jsonl
+
+  refresh:
+    name: Refresh signed ${{ matrix.channel }} installer manifest
+    if: github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: dev
+          - channel: stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: installer-${{ matrix.channel }}
+    concurrency:
+      group: vonk-forge-installer-r2-${{ matrix.channel }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Check out current publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install R2 publication client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes rclone
+
+      - name: Verify immutable generation and refresh signed pointer
+        shell: bash
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
+          VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
+          VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          signing_key=$RUNNER_TEMP/installer-release-private.pem
+          public_key=$RUNNER_TEMP/installer-release-public.pem
+          public_der=$RUNNER_TEMP/installer-release-public.der
+          trap 'rm -f "$signing_key" "$public_key" "$public_der"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
+          openssl pkey -in "$signing_key" -pubout -out "$public_key"
+          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
+          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+            "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
+          openssl pkey -pubin -in "$public_key" -text -noout \
+            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
+          scripts/install-release-publication refresh \
+            --channel "$CHANNEL" \
+            --expires-at "$(($(date +%s) + 604800))" \
+            --signing-key "$signing_key" \
+            --signing-public-key "$public_key" \
+            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET"

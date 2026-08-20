@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -180,6 +182,30 @@ def _validate_evidence(
         raise PublicationError("accepted evidence gates are incomplete")
 
 
+def _validate_agent_package(path: Path, version: str, architecture: str) -> None:
+    environment = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"}
+    observed: dict[str, str] = {}
+    for field in ("Package", "Version", "Architecture"):
+        result = subprocess.run(
+            ["/usr/bin/dpkg-deb", "--field", path, field],
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise PublicationError("agent package metadata is invalid")
+        observed[field] = result.stdout.strip()
+    if observed != {
+        "Package": "vonk-forge-agent",
+        "Version": version,
+        "Architecture": architecture,
+    }:
+        raise PublicationError("agent package metadata is inconsistent")
+
+
 def _record(content: bytes) -> dict[str, object]:
     return {"sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
 
@@ -243,6 +269,123 @@ def _render_bootstrap(
     return _safe_bytes(output, f"rendered {kind} bootstrap", 64 * 1024)
 
 
+def _signing_public_key(private_key: Path, public_key: Path) -> bytes:
+    expected = _safe_bytes(public_key, "installer signing public key", 16 * 1024)
+    private = _safe_bytes(private_key, "installer signing private key", 64 * 1024)
+    if b"PRIVATE KEY" not in private or b"PUBLIC KEY" not in expected:
+        raise PublicationError("installer signing key is invalid")
+    result = subprocess.run(
+        ["openssl", "pkey", "-in", private_key, "-pubout"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0 or result.stdout != expected:
+        raise PublicationError("installer signing keys do not match")
+    description = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-text", "-noout"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if description.returncode != 0 or not re.search(
+        r"Public-Key: \((?:2048|3072|4096) bit\)", description.stdout
+    ):
+        raise PublicationError(
+            "installer signing key must be RSA with at least 2048 bits"
+        )
+    return expected
+
+
+def _sign(private_key: Path, claims: bytes) -> str:
+    with tempfile.TemporaryDirectory(prefix=".installer-signature-") as directory:
+        root = Path(directory)
+        claims_path = root / "claims"
+        signature_path = root / "signature"
+        claims_path.write_bytes(claims)
+        result = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                private_key,
+                "-out",
+                signature_path,
+                claims_path,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise PublicationError("installer release signing failed")
+        signature = _safe_bytes(signature_path, "installer release signature", 1024)
+    return base64.b64encode(signature).decode("ascii")
+
+
+def _verify_signature(
+    public_key: bytes, claims: bytes, signature: bytes, label: str
+) -> None:
+    with tempfile.TemporaryDirectory(prefix=".installer-verification-") as directory:
+        root = Path(directory)
+        claims_path = root / "claims"
+        signature_path = root / "signature"
+        public_key_path = root / "public.pem"
+        claims_path.write_bytes(claims)
+        signature_path.write_bytes(signature)
+        public_key_path.write_bytes(public_key)
+        result = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-verify",
+                public_key_path,
+                "-signature",
+                signature_path,
+                claims_path,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        raise PublicationError(f"{label} signature is invalid")
+
+
+def _validate_expiry(expires_at: int) -> None:
+    now = int(time.time())
+    if not now < expires_at <= now + 31 * 24 * 60 * 60:
+        raise PublicationError("release expiry is not in the future validity window")
+
+
+def _render_channel_endpoint(
+    kind: str, channel: str, origin: str, public_key: bytes
+) -> bytes:
+    template = _safe_bytes(
+        ROOT / "install/channel", "channel endpoint template", 64 * 1024
+    )
+    try:
+        rendered = template.decode("ascii")
+        pem = public_key.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise PublicationError("installer endpoint input is not ASCII") from error
+    for placeholder, value in {
+        "@VONK_KIND@": kind,
+        "@VONK_CHANNEL@": channel,
+        "@VONK_ORIGIN@": origin,
+        "@VONK_PUBLIC_KEY_PEM@": pem,
+    }.items():
+        if rendered.count(placeholder) != 1:
+            raise PublicationError("channel endpoint template is invalid")
+        rendered = rendered.replace(placeholder, value)
+    if re.search(r"@[A-Z0-9_]+@", rendered):
+        raise PublicationError("channel endpoint template is unresolved")
+    return rendered.encode("ascii")
+
+
 def _install_object(objects: Path, key: str, content: bytes, mode: int = 0o644) -> None:
     if KEY.fullmatch(key) is None:
         raise PublicationError("publication object key is invalid")
@@ -258,6 +401,10 @@ def assemble(arguments: argparse.Namespace) -> str:
     if channel == "stable" and SEMVER.fullmatch(version) is None:
         raise PublicationError("stable version is invalid")
     origin = _validate_origin(arguments.origin)
+    _validate_expiry(arguments.expires_at)
+    signing_public_key = _signing_public_key(
+        arguments.signing_key, arguments.signing_public_key
+    )
     images = {
         "api": arguments.api_image,
         "worker": arguments.worker_image,
@@ -288,6 +435,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         architecture = platform.removeprefix("linux-")
         if path.name != f"vonk-forge-agent_{version}_{architecture}.deb":
             raise PublicationError(f"{platform} agent package filename is inconsistent")
+        _validate_agent_package(path, version, architecture)
         source_contents[f"package:{platform}"] = _safe_bytes(
             path, f"agent package {platform}"
         )
@@ -382,41 +530,58 @@ def assemble(arguments: argparse.Namespace) -> str:
         release_raw = _canonical(release)
         release_key = f"{immutable_prefix}/release.json"
         add_immutable(release_key, release_raw)
+        release_signature = (
+            _sign(arguments.signing_key, release_raw).encode("ascii") + b"\n"
+        )
+        release_signature_key = f"{immutable_prefix}/release.sig"
+        add_immutable(release_signature_key, release_signature)
 
         endpoint_prefix = "" if channel == "stable" else f"{channel}/"
         endpoints = {
-            f"{endpoint_prefix}nas": nas_bootstrap,
-            f"{endpoint_prefix}spark": spark_bootstrap,
+            f"{endpoint_prefix}nas": _render_channel_endpoint(
+                "nas", channel, origin, signing_public_key
+            ),
+            f"{endpoint_prefix}spark": _render_channel_endpoint(
+                "spark", channel, origin, signing_public_key
+            ),
         }
         for key, content in sorted(endpoints.items()):
             _install_object(objects, key, content, 0o755)
             entries.append(_object_entry(key, content, "endpoint"))
-        pointer = {
-            "bootstraps": {
-                kind: {"path": f"{endpoint_prefix}{kind}", **_record(content)}
-                for kind, content in (
-                    ("nas", nas_bootstrap),
-                    ("spark", spark_bootstrap),
-                )
-            },
-            "channel": channel,
-            "generation": generation,
-            "release": {"path": release_key, **_record(release_raw)},
-            "schema_version": 1,
-            "source_sha": source_sha,
-            "version": version,
-        }
-        pointer_raw = _canonical(pointer)
-        pointer_key = f"artifacts/{channel}/current.json"
+        claims = "".join(
+            (
+                "schema_version=1\n",
+                f"channel={channel}\n",
+                f"generation={generation}\n",
+                f"version={version}\n",
+                f"source_sha={source_sha}\n",
+                f"expires_at={arguments.expires_at}\n",
+                f"release_path={release_key}\n",
+                f"release_sha256={hashlib.sha256(release_raw).hexdigest()}\n",
+                f"release_signature_path={release_signature_key}\n",
+                f"release_signature_sha256={hashlib.sha256(release_signature).hexdigest()}\n",
+                f"nas_path={immutable_nas}\n",
+                f"nas_sha256={hashlib.sha256(nas_bootstrap).hexdigest()}\n",
+                f"spark_path={immutable_spark}\n",
+                f"spark_sha256={hashlib.sha256(spark_bootstrap).hexdigest()}\n",
+            )
+        ).encode("ascii")
+        pointer_raw = (
+            claims + f"signature={_sign(arguments.signing_key, claims)}\n".encode()
+        )
+        pointer_key = f"artifacts/{channel}/current.manifest"
         _install_object(objects, pointer_key, pointer_raw)
         entries.append(_object_entry(pointer_key, pointer_raw, "pointer"))
         plan = {
             "channel": channel,
             "generation": generation,
             "objects": entries,
+            "public_key_sha256": hashlib.sha256(signing_public_key).hexdigest(),
             "schema_version": 1,
+            "version": version,
         }
         _write(temporary / "publication-plan.json", _canonical(plan))
+        _write(temporary / "channel-public-key.pem", signing_public_key)
         os.replace(temporary, output)
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
@@ -426,16 +591,26 @@ def assemble(arguments: argparse.Namespace) -> str:
 
 def _load_plan(
     bundle: Path,
-) -> tuple[dict[str, Any], list[tuple[dict[str, Any], Path]]]:
+) -> tuple[dict[str, Any], list[tuple[dict[str, Any], Path]], bytes]:
     plan = _safe_json(bundle / "publication-plan.json", "publication plan")
     if (
-        set(plan) != {"channel", "generation", "objects", "schema_version"}
+        set(plan)
+        != {
+            "channel",
+            "generation",
+            "objects",
+            "public_key_sha256",
+            "schema_version",
+            "version",
+        }
         or plan.get("schema_version") != 1
     ):
         raise PublicationError("publication plan is invalid")
     if (
         plan.get("channel") not in {"dev", "stable"}
         or SHA256.fullmatch(str(plan.get("generation", ""))) is None
+        or SHA256.fullmatch(str(plan.get("public_key_sha256", ""))) is None
+        or VERSION.fullmatch(str(plan.get("version", ""))) is None
     ):
         raise PublicationError("publication plan is invalid")
     raw_entries = plan.get("objects")
@@ -479,7 +654,87 @@ def _load_plan(
         or sum(entry["phase"] == "pointer" for entry, _ in validated) != 1
     ):
         raise PublicationError("publication pointer is not final")
-    return plan, validated
+    public_key = _safe_bytes(
+        bundle / "channel-public-key.pem", "channel public key", 16 * 1024
+    )
+    if hashlib.sha256(public_key).hexdigest() != plan["public_key_sha256"]:
+        raise PublicationError("channel public key does not match the plan")
+    manifest_entry, manifest_path = validated[-1]
+    manifest = _parse_channel_manifest(
+        _safe_bytes(manifest_path, "current channel manifest", 64 * 1024),
+        public_key,
+    )
+    if (
+        manifest["channel"] != plan["channel"]
+        or manifest["generation"] != plan["generation"]
+        or manifest["version"] != plan["version"]
+        or manifest_entry["key"] != f"artifacts/{plan['channel']}/current.manifest"
+    ):
+        raise PublicationError("current channel manifest does not match the plan")
+    return plan, validated, public_key
+
+
+def _parse_channel_manifest(raw: bytes, public_key: bytes) -> dict[str, str]:
+    lines = raw.splitlines(keepends=True)
+    if len(lines) != 15 or not all(line.endswith(b"\n") for line in lines):
+        raise PublicationError("current channel manifest is invalid")
+    claims = b"".join(lines[:14])
+    try:
+        signature_line = lines[14].decode("ascii").strip()
+        signature = base64.b64decode(
+            signature_line.removeprefix("signature="), validate=True
+        )
+    except (UnicodeDecodeError, ValueError) as error:
+        raise PublicationError(
+            "current channel manifest signature is invalid"
+        ) from error
+    if not signature_line.startswith("signature=") or not signature:
+        raise PublicationError("current channel manifest signature is invalid")
+    _verify_signature(public_key, claims, signature, "current channel manifest")
+    names = (
+        "schema_version",
+        "channel",
+        "generation",
+        "version",
+        "source_sha",
+        "expires_at",
+        "release_path",
+        "release_sha256",
+        "release_signature_path",
+        "release_signature_sha256",
+        "nas_path",
+        "nas_sha256",
+        "spark_path",
+        "spark_sha256",
+    )
+    values: dict[str, str] = {}
+    for expected, line in zip(names, lines[:14], strict=True):
+        try:
+            name, value = line.decode("ascii").rstrip("\n").split("=", 1)
+        except (UnicodeDecodeError, ValueError) as error:
+            raise PublicationError("current channel manifest is invalid") from error
+        if name != expected or not value:
+            raise PublicationError("current channel manifest is invalid")
+        values[name] = value
+    if (
+        values["schema_version"] != "1"
+        or values["channel"] not in {"dev", "stable"}
+        or SHA256.fullmatch(values["generation"]) is None
+        or SOURCE_SHA.fullmatch(values["source_sha"]) is None
+        or VERSION.fullmatch(values["version"]) is None
+        or not values["expires_at"].isdigit()
+        or any(
+            SHA256.fullmatch(values[name]) is None
+            for name in (
+                "release_sha256",
+                "release_signature_sha256",
+                "nas_sha256",
+                "spark_sha256",
+            )
+        )
+    ):
+        raise PublicationError("current channel manifest is invalid")
+    return values
 
 
 def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None:
@@ -521,10 +776,29 @@ def _rclone_digest(remote: str, key: str) -> str | None:
     return digest.hexdigest()
 
 
+def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
+    process = subprocess.Popen(
+        ["rclone", "cat", f"{remote}/{key}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert process.stdout is not None
+    content = process.stdout.read(maximum + 1)
+    if len(content) > maximum:
+        process.kill()
+        process.wait()
+        raise PublicationError("published channel manifest is invalid")
+    if process.wait() != 0:
+        return None
+    if not content:
+        raise PublicationError("published channel manifest is invalid")
+    return content
+
+
 def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
     key = entry["key"]
     expected = entry["sha256"]
-    immutable = entry["phase"] == "immutable"
+    immutable = entry["phase"] != "pointer"
     observed = _rclone_digest(remote, key)
     if immutable and observed is not None:
         if observed != expected:
@@ -542,7 +816,7 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
 
 
 def publish(arguments: argparse.Namespace) -> None:
-    _, entries = _load_plan(arguments.bundle)
+    plan, entries, public_key = _load_plan(arguments.bundle)
     if (arguments.filesystem is None) == (arguments.rclone_remote is None):
         raise PublicationError("select exactly one publication destination")
     if arguments.filesystem is not None:
@@ -554,18 +828,166 @@ def publish(arguments: argparse.Namespace) -> None:
         remote = arguments.rclone_remote.rstrip("/")
         if not remote or any(character in remote for character in "\r\n\0"):
             raise PublicationError("R2 remote is invalid")
+    pointer_key = f"artifacts/{plan['channel']}/current.manifest"
+    if arguments.filesystem is not None:
+        current_path = arguments.filesystem / pointer_key
+        current_raw = (
+            _safe_bytes(current_path, "published channel manifest", 64 * 1024)
+            if current_path.exists()
+            else None
+        )
+    else:
+        current_raw = _rclone_bytes(remote, pointer_key, 64 * 1024)
+    if current_raw is not None:
+        current = _parse_channel_manifest(current_raw, public_key)
+        if current["channel"] != plan["channel"]:
+            raise PublicationError("published channel manifest is inconsistent")
+        if plan["channel"] == "stable":
+            current_version = tuple(int(part) for part in current["version"].split("."))
+            next_version = tuple(int(part) for part in plan["version"].split("."))
+            if current_version > next_version or (
+                current_version == next_version
+                and current["generation"] != plan["generation"]
+            ):
+                raise PublicationError(
+                    "refusing to regress or replace a stable release"
+                )
     for entry, source in entries:
         if arguments.filesystem is not None:
             _atomic_local_copy(
                 source,
                 arguments.filesystem / entry["key"],
-                entry["phase"] == "immutable",
+                entry["phase"] != "pointer",
             )
         else:
             _rclone_copy(source, remote, entry)
         print(
             json.dumps({"key": entry["key"], "phase": entry["phase"]}, sort_keys=True)
         )
+
+
+def _published_bytes(
+    filesystem: Path | None,
+    remote: str | None,
+    key: str,
+    maximum: int,
+    label: str,
+) -> bytes:
+    if filesystem is not None:
+        return _safe_bytes(filesystem / key, label, maximum)
+    assert remote is not None
+    content = _rclone_bytes(remote, key, maximum)
+    if content is None:
+        raise PublicationError(f"{label} is unavailable")
+    return content
+
+
+def refresh(arguments: argparse.Namespace) -> None:
+    _validate_expiry(arguments.expires_at)
+    public_key = _signing_public_key(
+        arguments.signing_key, arguments.signing_public_key
+    )
+    if arguments.filesystem is not None:
+        filesystem = arguments.filesystem
+        if filesystem.is_symlink() or not filesystem.is_dir():
+            raise PublicationError("filesystem destination is unsafe")
+        remote = None
+    else:
+        filesystem = None
+        remote = arguments.rclone_remote.rstrip("/")
+        if not remote or any(character in remote for character in "\r\n\0"):
+            raise PublicationError("R2 remote is invalid")
+
+    pointer_key = f"artifacts/{arguments.channel}/current.manifest"
+    current_raw = _published_bytes(
+        filesystem,
+        remote,
+        pointer_key,
+        64 * 1024,
+        "published channel manifest",
+    )
+    manifest = _parse_channel_manifest(current_raw, public_key)
+    if manifest["channel"] != arguments.channel:
+        raise PublicationError("published channel manifest is inconsistent")
+
+    objects = (
+        ("release_path", "release_sha256", 1024 * 1024, "release object"),
+        (
+            "release_signature_path",
+            "release_signature_sha256",
+            16 * 1024,
+            "release signature object",
+        ),
+        ("nas_path", "nas_sha256", 64 * 1024, "NAS bootstrap object"),
+        ("spark_path", "spark_sha256", 64 * 1024, "Spark bootstrap object"),
+    )
+    verified: dict[str, bytes] = {}
+    for path_field, digest_field, maximum, label in objects:
+        content = _published_bytes(
+            filesystem, remote, manifest[path_field], maximum, label
+        )
+        if hashlib.sha256(content).hexdigest() != manifest[digest_field]:
+            raise PublicationError(f"{label} digest is invalid")
+        verified[path_field] = content
+
+    try:
+        release_signature = base64.b64decode(
+            verified["release_signature_path"].strip(), validate=True
+        )
+    except ValueError as error:
+        raise PublicationError("release object signature is invalid") from error
+    _verify_signature(
+        public_key,
+        verified["release_path"],
+        release_signature,
+        "release object",
+    )
+    try:
+        release = json.loads(verified["release_path"])
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicationError("release object is invalid") from error
+    if (
+        not isinstance(release, dict)
+        or verified["release_path"] != _canonical(release)
+        or release.get("channel") != manifest["channel"]
+        or release.get("generation") != manifest["generation"]
+        or release.get("source_sha") != manifest["source_sha"]
+        or release.get("version") != manifest["version"]
+    ):
+        raise PublicationError("release object is inconsistent")
+
+    lines = current_raw.splitlines(keepends=True)
+    lines[5] = f"expires_at={arguments.expires_at}\n".encode("ascii")
+    claims = b"".join(lines[:14])
+    refreshed = claims + f"signature={_sign(arguments.signing_key, claims)}\n".encode()
+    _parse_channel_manifest(refreshed, public_key)
+
+    if filesystem is not None:
+        with tempfile.TemporaryDirectory(
+            prefix=".installer-refresh-", dir=filesystem
+        ) as directory:
+            source = Path(directory) / "current.manifest"
+            source.write_bytes(refreshed)
+            _atomic_local_copy(source, filesystem / pointer_key, False)
+    else:
+        with tempfile.TemporaryDirectory(prefix=".installer-refresh-") as directory:
+            source = Path(directory) / "current.manifest"
+            source.write_bytes(refreshed)
+            _rclone_copy(
+                source,
+                remote,
+                {
+                    "key": pointer_key,
+                    "phase": "pointer",
+                    "sha256": hashlib.sha256(refreshed).hexdigest(),
+                },
+            )
+    print(
+        json.dumps(
+            {"channel": arguments.channel, "phase": "pointer", "refreshed": True},
+            sort_keys=True,
+        )
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -577,6 +999,9 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--source-sha", required=True)
     build.add_argument("--accepted-evidence", type=Path, required=True)
     build.add_argument("--origin", required=True)
+    build.add_argument("--expires-at", required=True, type=int)
+    build.add_argument("--signing-key", required=True, type=Path)
+    build.add_argument("--signing-public-key", required=True, type=Path)
     build.add_argument("--api-image", required=True)
     build.add_argument("--worker-image", required=True)
     build.add_argument("--hermes-image", required=True)
@@ -590,6 +1015,14 @@ def parser() -> argparse.ArgumentParser:
     destinations = upload.add_mutually_exclusive_group(required=True)
     destinations.add_argument("--filesystem", type=Path)
     destinations.add_argument("--rclone-remote")
+    renewal = commands.add_parser("refresh")
+    renewal.add_argument("--channel", choices=("dev", "stable"), required=True)
+    renewal.add_argument("--expires-at", required=True, type=int)
+    renewal.add_argument("--signing-key", required=True, type=Path)
+    renewal.add_argument("--signing-public-key", required=True, type=Path)
+    renewal_destinations = renewal.add_mutually_exclusive_group(required=True)
+    renewal_destinations.add_argument("--filesystem", type=Path)
+    renewal_destinations.add_argument("--rclone-remote")
     return root
 
 
@@ -599,8 +1032,10 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.command == "assemble":
             generation = assemble(arguments)
             print(f"generation={generation}")
-        else:
+        elif arguments.command == "publish":
             publish(arguments)
+        else:
+            refresh(arguments)
     except (OSError, PublicationError) as error:
         print(f"install-release-publication: {error}", file=sys.stderr)
         return 2

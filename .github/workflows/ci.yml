@@ -18,6 +18,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  installer-setups:
+    name: Build accepted installer setup programs
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    uses: ./.github/workflows/installer-setups.yml
+
   lint:
     name: Ruff
     runs-on: ubuntu-latest

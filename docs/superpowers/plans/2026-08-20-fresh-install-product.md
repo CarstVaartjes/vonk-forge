@@ -14,6 +14,52 @@ installers. All legacy and alternate runtime paths are deleted.
 
 **Spec:** `docs/superpowers/specs/2026-08-20-fresh-install-product-design.md`
 
+## Product definition of done
+
+The entire program is complete only when a new operator can deploy Vonk Forge
+without a checkout, archive, helper command, or hand-edited configuration:
+
+| Target | Command location | Only installation command | Successful result |
+|---|---|---|---|
+| NAS bundle | Ordinary Linux/macOS workstation | `curl -fsSL https://install.vonkforge.ai/nas | sh` | `./vonk-forge` contains only `docker-compose.yaml`, `.env`, and `secrets/`, ready to drag onto the NAS and start in its Docker UI. |
+| Spark | The Spark itself | `curl -fsSL https://install.vonkforge.ai/spark | sh` | The direct Rust agent is installed or upgraded, paired when necessary, running, and verified. |
+
+The development channel has the exact same contract at `/dev/nas` and
+`/dev/spark`. The channel may select different immutable versions, but it may
+not change prompts, topology, defaults, paths, security, or lifecycle behavior.
+
+The curl bootstraps accept no required arguments or environment variables. They
+may prompt through `/dev/tty`; they must download and verify their complete
+payload, perform all work for that target, and either produce the successful
+result above or exit with a precise, actionable error. Documentation may
+explain how to use the resulting NAS directory or administer a running system,
+but it must never introduce another installation path.
+
+## End-to-end execution order
+
+1. Establish one fresh-only runtime model: PostgreSQL authority, Step CA PKI,
+   one production-shaped Compose topology, and Hermes as the sole option.
+2. Remove every alternate or legacy path: runtime Git, Python Spark, built-in
+   CA, A/B supervisor, controller-driven updater, migrations, helper services,
+   overlays, and obsolete installer documentation.
+3. Make the NAS setup executable generate the exact upload directory safely on
+   Linux and macOS, including every required secret and site-local choice.
+4. Make the Spark setup executable install or upgrade the verified direct Rust
+   package, pair securely, and prove the running identity to the controller.
+5. Build all images, packages, and setup executables once in required CI; test
+   those exact artifacts with real PostgreSQL and clean Docker Compose.
+6. Publish NAS and Spark together through one signed, expiring, atomic channel
+   manifest; stable promotion reuses accepted artifacts and forbids rollback.
+7. Exercise the literal development curl commands from clean hosts, deploy the
+   generated NAS directory, run a real Spark lifecycle, and repeat the curls to
+   prove upgrades and interruption recovery.
+8. Review the whole repository, merge only with all required checks green,
+   publish stable, exercise both literal stable curls, and generate `/mnt/z`
+   exclusively from the published NAS command.
+
+No phase is accepted solely because unit tests pass. The final gate is the
+published-command experience on clean, production-shaped systems.
+
 ## Program invariants
 
 - Development and production differ only in immutable artifact identities.
