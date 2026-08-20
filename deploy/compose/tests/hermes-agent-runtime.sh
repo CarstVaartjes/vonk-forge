@@ -121,7 +121,7 @@ if docker exec "${container_id}" sh -c 'touch /etc/must-remain-read-only' 2>/dev
 fi
 
 networks="$(docker inspect --format '{{json .NetworkSettings.Networks}}' "${container_id}")"
-jq -e '(keys | sort) == (["'"${project}"'_hermes-egress", "'"${project}"'_hermes-inference", "'"${project}"'_tailnet-hermes-edge"] | sort)' \
+jq -e '(keys | sort) == (["'"${project}"'_hermes-inference", "'"${project}"'_tailnet-hermes-edge"] | sort)' \
     <<<"${networks}" >/dev/null || fail "Hermes joined an unexpected network"
 
 "${compose[@]}" up -d --no-deps --force-recreate hermes-agent

@@ -46,6 +46,20 @@ OBSOLETE_NODE_INSTALLERS = (
     "nodes/policy/default.json",
 )
 
+OBSOLETE_RELEASE_PATHS = (
+    "release/platform/0.1.0.input.json",
+    "schemas/control-deployment-bundle.schema.json",
+    "schemas/platform-release-manifest.schema.json",
+    "scripts/build-control-deployment-bundle",
+    "scripts/build-platform-manifest",
+    "scripts/collect-platform-artifact-evidence",
+    "scripts/publish-control-deployment-bundle",
+    "src/cluster_profiles/deployment_bundle.py",
+    "src/cluster_profiles/platform_release.py",
+    "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
+    "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
+)
+
 
 class _UnexpectedClient:
     def __getattr__(self, name: str) -> object:
@@ -92,6 +106,26 @@ def test_no_manual_node_installation_path_remains() -> None:
     """The Spark curl and direct Rust package own the complete node lifecycle."""
     for relative in OBSOLETE_NODE_INSTALLERS:
         assert not (ROOT / relative).exists(), relative
+
+
+def test_no_alternate_platform_release_path_remains() -> None:
+    """The signed curl channel is the sole platform installation authority."""
+    for relative in OBSOLETE_RELEASE_PATHS:
+        assert not (ROOT / relative).exists(), relative
+
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    metadata = (ROOT / "scripts/container-release-metadata").read_text()
+    for obsolete in (
+        "control-deployment",
+        "platform-release.json",
+        "publish-control-deployment-bundle",
+        "setup-oras",
+        "VONK_ORAS_BIN",
+        "deployment_bundle_repository",
+        "platform_channel",
+    ):
+        assert obsolete not in workflow
+        assert obsolete not in metadata
 
 
 def test_control_wheel_has_no_offline_updater_entrypoint_or_modules(

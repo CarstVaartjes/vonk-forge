@@ -26,17 +26,11 @@ def _copy(tmp_path: Path) -> Path:
         "Cargo.toml",
         "Cargo.lock",
         "pyproject.toml",
-        "schemas/control-deployment-bundle.schema.json",
-        "schemas/platform-release-manifest.schema.json",
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "schemas/global/catalog-entity-v1.schema.json",
         "schemas/global/recipe-v1.schema.json",
         "schemas/global/harness-evidence-v1.schema.json",
-        "src/cluster_profiles/deployment_bundle.py",
-        "src/cluster_profiles/platform_release.py",
-        "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
-        "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
         "agent_protocol/pyproject.toml",
         ".dockerignore",
         "agent_protocol/uv.lock",
@@ -69,7 +63,6 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
-        "deploy/compose/bin/harden-hermes-egress",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",
@@ -79,12 +72,8 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/registry/config.yml",
         "deploy/compose/step-ca/ca.json",
         "deploy/compose/trust/litellm-cosign.pub",
-        "scripts/build-control-deployment-bundle",
-        "scripts/publish-control-deployment-bundle",
         "scripts/build-agent-deb",
         "scripts/build-agent-package-evidence",
-        "scripts/build-platform-manifest",
-        "scripts/collect-platform-artifact-evidence",
         "scripts/container-release-metadata",
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
@@ -184,24 +173,6 @@ def test_verifier_accepts_write_manifest_alias(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert '"ok":true' in result.stdout
-
-
-def test_supply_chain_manifest_binds_deployment_bundle_publisher(
-    tmp_path: Path,
-) -> None:
-    repository = _copy(tmp_path)
-    publisher = repository / "scripts/publish-control-deployment-bundle"
-    publisher.write_bytes(publisher.read_bytes() + b"\n# drift\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
 @pytest.mark.parametrize(
@@ -360,32 +331,6 @@ def test_supply_chain_manifest_binds_recipe_authority_edges(
     assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
-@pytest.mark.parametrize(
-    "path",
-    (
-        "src/cluster_profiles/platform_release.py",
-        "schemas/platform-release-manifest.schema.json",
-        "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
-    ),
-)
-def test_supply_chain_manifest_binds_platform_parser_and_both_schemas(
-    tmp_path: Path, path: str
-) -> None:
-    repository = _copy(tmp_path)
-    candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
-
-
 def test_verifier_does_not_require_cluster_profiles_to_be_installed(
     tmp_path: Path,
 ) -> None:
@@ -399,32 +344,6 @@ def test_verifier_does_not_require_cluster_profiles_to_be_installed(
     )
 
     assert result.returncode == 0, result.stderr
-
-
-def test_supply_chain_manifest_binds_the_canonical_deployment_bundle(
-    tmp_path: Path,
-) -> None:
-    from cluster_profiles.deployment_bundle import build_deployment_bundle
-
-    repository = _copy(tmp_path)
-    manifest = json.loads((repository / "inventory/sbom/manifest.json").read_bytes())
-    bundle = build_deployment_bundle(repository / "deploy/compose")
-
-    assert (
-        manifest["control_deployment_bundle_sha256"]
-        == hashlib.sha256(bundle).hexdigest()
-    )
-
-    alerts = repository / "deploy/compose/prometheus/alerts.yaml"
-    alerts.write_text(alerts.read_text() + "\n# drift\n")
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
 def test_verifier_rejects_floating_image(tmp_path: Path) -> None:

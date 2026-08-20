@@ -40,11 +40,6 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
             f"dev-sha-{SHA}"
         ),
         "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
-        (
-            "deployment_bundle_repository="
-            "ghcr.io/carstvaartjes/vonk-forge-control-deployment"
-        ),
-        "platform_channel=stable",
     ]
 
 

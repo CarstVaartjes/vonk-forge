@@ -32,8 +32,6 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
-"src/cluster_profiles/schemas/platform-release-manifest.schema.json" = "cluster_profiles/schemas/platform-release-manifest.schema.json"
-"src/cluster_profiles/schemas/control-deployment-bundle.schema.json" = "cluster_profiles/schemas/control-deployment-bundle.schema.json"
 
 [tool.ruff]
 required-version = "==0.16.1"

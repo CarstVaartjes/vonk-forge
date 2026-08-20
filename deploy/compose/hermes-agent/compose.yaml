@@ -48,7 +48,6 @@ services:
     networks:
       - tailnet-hermes-edge
       - hermes-inference
-      - hermes-egress
     depends_on:
       caddy:
         condition: service_healthy
@@ -78,7 +77,6 @@ networks:
     internal: true
   hermes-inference:
     internal: true
-  hermes-egress: {}
 
 volumes:
   hermes-data: {}

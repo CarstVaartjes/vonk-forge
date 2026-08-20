@@ -23,75 +23,25 @@ administrator credential. Install a repository credential only when required,
 scope it to the necessary repositories and actions, and store it under
 `/opt/data` with owner-only permissions.
 
-## Prepare persistent paths and the API key
+## Prepare Hermes
 
-Create the three writable trees and a separate secret file for the official
-release runtime UID/GID `1100:1100`:
+Run the NAS curl installer and select Hermes when prompted. The installer asks
+for the exact HTTPS dashboard origin and creates the API key, immutable image
+selection, and persistent named volumes inside the upload directory. There is
+no host preparation, privileged helper, firewall script, or separate setup
+container.
 
-```bash
-sudo install -d -m 0700 -o 1100 -g 1100 \
-  /srv/vonk-forge/hermes/data \
-  /srv/vonk-forge/hermes/workspaces \
-  /srv/vonk-forge/hermes/cache
-sudo install -d -m 0700 -o root -g root /srv/vonk-forge/secrets
-sudo sh -c 'umask 077; openssl rand -base64 32 | tr "+/" "-_" | tr -d "=\n" > /srv/vonk-forge/secrets/hermes-api-key; printf "\n" >> /srv/vonk-forge/secrets/hermes-api-key'
-sudo chown root:root /srv/vonk-forge/secrets/hermes-api-key
-sudo chmod 0400 /srv/vonk-forge/secrets/hermes-api-key
-```
-
-Set these non-secret paths and values in the host-local `.env`:
-
-```dotenv
-HERMES_UID=1100
-HERMES_GID=1100
-HERMES_DATA_ROOT=/srv/vonk-forge/hermes
-HERMES_API_KEY_FILE=/srv/vonk-forge/secrets/hermes-api-key
-HERMES_DASHBOARD_ORIGIN=https://EXACT-SVC-HERMES-DASHBOARD-URL
-```
-
-GitHub Actions fixes the UID/GID when it builds the published Hermes wrapper;
-official releases require `1100:1100`. They are not freely selectable runtime
-settings, and operators must not rebuild an official release to change them.
-The wrapper's fixed identity lets the upstream supervisor run without editing
-`/etc/passwd` on the read-only root. The external API key file must remain
-root-owned mode `0400`; the supervisor has no reason to grant it to the
-unprivileged Hermes user because PID 1 injects only the value.
-
-The origin is the one exact HTTPS origin shown by Tailscale. Do not use `*`,
-HTTP, or a fallback list.
-
-## Apply the one-off host egress boundary
-
-Compose networks do not replace a host firewall. The hardening program is part
-of the downloaded deployment bundle. After Docker has created the networks,
-run the bundle-local program from the project directory, review the plan,
-apply it once, and verify it:
-
-```bash
-hardener="./bin/harden-hermes-egress"
-export COMPOSE_PROJECT_NAME=vonk-forge-control
-export VONK_MANAGEMENT_CIDRS=10.0.0.0/24
-export VONK_DIRECT_FABRIC_CIDRS=192.168.100.0/24,192.168.101.0/24
-sudo --preserve-env=COMPOSE_PROJECT_NAME,VONK_MANAGEMENT_CIDRS,VONK_DIRECT_FABRIC_CIDRS \
-  "$hardener" --check
-sudo --preserve-env=COMPOSE_PROJECT_NAME,VONK_MANAGEMENT_CIDRS,VONK_DIRECT_FABRIC_CIDRS \
-  "$hardener" --apply
-sudo --preserve-env=COMPOSE_PROJECT_NAME,VONK_MANAGEMENT_CIDRS,VONK_DIRECT_FABRIC_CIDRS \
-  "$hardener" --verify
-```
-
-The owned chain denies direct access from Hermes to GPU node management,
-direct-fabric, link-local metadata, and sibling project networks. Docker DNS
-and ordinary Internet tools remain available. The default action is the
-non-mutating `--check`.
+Hermes has no general network egress. Its only networks are the internal
+dashboard/API path to the Tailscale gateway and the internal inference path to
+Caddy. The origin must be the one exact HTTPS origin shown by Tailscale; do not
+use `*`, HTTP, or a fallback list.
 
 ## Enable Hermes
 
 Provision a dedicated LiteLLM client key for Hermes; never use the LiteLLM
-master key. Run the NAS preparation command again, select Hermes when prompted,
-and replace the upload directory on the NAS. The generated bundle contains the
-immutable Hermes image, its dedicated key, and its persistent named volumes;
-there is no setup container or separate mutation step.
+master key. Re-run the NAS curl installer, select Hermes, and replace the upload
+directory on the NAS. The generated directory contains the immutable Hermes
+image, its dedicated keys, and its persistent named volumes.
 
 Resolve, map, and install the exact recipe revision in the browser Library
 workflow. Start it under a temporary alias, run its source, placement, health,
@@ -160,11 +110,11 @@ acceptance checks.
 ## Backup and recovery
 
 Use the NAS platform's supported encrypted volume backup for Hermes `data` and
-`workspaces`; cache is disposable. Back up the external API-key file and
-Tailscale state/OAuth files with the same snapshot. Restore those volumes and
-files before starting Compose. Fresh GPU node presence and a new LiteLLM lease
-are required; restored routes do not become live merely because they existed
-in a backup.
+`workspaces`; cache is disposable. Back up the generated `secrets` directory
+and Tailscale state with the same snapshot. Restore those volumes and files
+before starting Compose. Fresh GPU node presence and a new LiteLLM lease are
+required; restored routes do not become live merely because they existed in a
+backup.
 
 If Tailscale state is lost, the scoped OAuth client performs unattended tagged
 re-enrollment. Verify the replacement and revoke the orphan. Loss of Hermes

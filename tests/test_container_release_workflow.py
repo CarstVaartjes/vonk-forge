@@ -184,11 +184,6 @@ def test_release_metadata_is_tag_only_and_read_only() -> None:
         "worker_dev_source",
     ):
         assert f"{output}: ${{{{ steps.release.outputs.{output} }}}}" in metadata
-    assert (
-        "deployment_bundle_repository: "
-        "${{ steps.release.outputs.deployment_bundle_repository }}"
-    ) in metadata
-    assert "platform_channel: ${{ steps.release.outputs.platform_channel }}" in metadata
     assert "vars.VONK_PLATFORM_RELEASES_ENABLED == 'true'" in metadata
 
 
@@ -232,7 +227,6 @@ def test_each_protected_production_mutation_revalidates_exact_tag_authority() ->
             "Promote accepted API image",
             "Promote accepted worker image",
             "Build and push Hermes image",
-            "Publish immutable deployment bundle",
         ),
         "release-manifest": ("Create public GitHub Release",),
     }
@@ -323,7 +317,6 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
     for asset in (
         "vonk-forge-images.env",
         "vonk-forge-images.env.sha256",
-        "platform-release.json",
     ):
         assert asset in evidence
     for asset in ("vonk-forge-images.env", "vonk-forge-images.env.sha256"):
@@ -349,31 +342,30 @@ def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
     assert "PRIVATE" not in text
 
 
-def test_platform_manifest_binds_actual_build_outputs_and_attestations() -> None:
+def test_production_compose_binds_actual_digest_pinned_build_outputs() -> None:
     builder = job("publish-images")
-    build = workflow_step("publish-images", "Build canonical platform release")
+    build = workflow_step("publish-images", "Render canonical production Compose")
 
-    assert "scripts/collect-platform-artifact-evidence" in builder
+    assert "scripts/render-production-compose" in build
     assert "steps.api.outputs.digest" in build
     assert "steps.worker.outputs.digest" in build
     assert "steps.hermes.outputs.digest" in build
-    assert "docker buildx imagetools inspect" in build
-    for name in ("api", "worker", "hermes"):
-        assert f"--artifact-evidence release-output/{name}-evidence.json" in build
-    assert "scripts/build-platform-manifest" in build
+    assert "docker-compose.production.yml" in build
+    assert "control-deployment" not in builder
+    assert "platform-release.json" not in builder
 
 
-def test_release_attaches_exact_platform_bundle_evidence() -> None:
+def test_release_attaches_canonical_production_compose() -> None:
     manifest = job("release-manifest")
     assert "Download platform publication evidence" in manifest
     release = workflow_step("release-manifest", "Create public GitHub Release")
-    for name in (
+    assert "docker-compose.production.yml" in release
+    for obsolete in (
         "control-deployment-descriptor.json",
-        "docker-compose.production.yml",
         "bundle-publication.json",
         "platform-release.json",
     ):
-        assert name in release
+        assert obsolete not in release
 
 
 def test_release_chain_is_default_off_and_dependency_gated() -> None:
@@ -383,7 +375,7 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
 
     assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in metadata
     assert (
-        "needs: [validate-release-images, release-metadata, build-agent-package]"
+        "needs: [validate-release-images, release-metadata]"
         in publisher
     )
     assert (
@@ -429,8 +421,8 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     ):
         assert forbidden not in package
     assert "build-agent-package" in manifest.split("needs:", 1)[1].splitlines()[0]
-    assert "agent-package-evidence" in job("publish-images")
-    assert "vonk-forge-agent_" in job("publish-images")
+    assert "release-output/agent-package/$ARM64_PACKAGE" in manifest
+    assert "release-output/agent-package/$AMD64_PACKAGE" in manifest
 
 
 def test_public_release_requires_native_amd64_package_lifecycle() -> None:
@@ -443,7 +435,7 @@ def test_public_release_requires_native_amd64_package_lifecycle() -> None:
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
     assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
-    assert "tests/nodes/test_upgrade_vonk_agent.sh" in lifecycle
+    assert "dpkg --remove vonk-forge-agent" in lifecycle
     assert "native-amd64-agent-lifecycle" in job("release-manifest").split(
         "needs:", 1
     )[1].splitlines()[0]
@@ -523,7 +515,7 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
         in validator
     )
     assert (
-        "needs: [validate-release-images, release-metadata, build-agent-package]"
+        "needs: [validate-release-images, release-metadata]"
         in publisher
     )
     assert "packages: write" not in validator

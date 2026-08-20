@@ -23,11 +23,6 @@ PACKAGES = (
     ("worker_image", "ghcr.io/carstvaartjes/vonk-forge-worker"),
     ("hermes_image", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
 )
-DEPLOYMENT_BUNDLE_REPOSITORY = (
-    "ghcr.io/carstvaartjes/vonk-forge-control-deployment"
-)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) != 3:
@@ -57,8 +52,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name, image in PACKAGES[:2]:
         print(f"{name.removesuffix('_image')}_dev_source={image}:dev-sha-{commit}")
     print(f"{PACKAGES[2][0]}={PACKAGES[2][1]}")
-    print(f"deployment_bundle_repository={DEPLOYMENT_BUNDLE_REPOSITORY}")
-    print("platform_channel=stable")
     return 0
 
 

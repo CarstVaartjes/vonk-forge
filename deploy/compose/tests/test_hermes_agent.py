@@ -67,7 +67,6 @@ def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
     )
     assert "build" not in service
     assert set(service["networks"]) == {
-        "hermes-egress",
         "hermes-inference",
         "tailnet-hermes-edge",
     }

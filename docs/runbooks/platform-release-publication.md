@@ -2,8 +2,9 @@
 
 Vonk Forge publishes one immutable release from a signed tag. The release contains
 digest-pinned API and worker images, the rendered production Compose file, a
-content-addressed control deployment bundle, and native `arm64` and `amd64`
-Spark agent packages with checksums, SBOMs, provenance, and Sigstore bundles.
+digest-pinned optional Hermes image, and native `arm64` and `amd64` Spark agent
+packages with checksums, SBOMs, provenance, and Sigstore bundles. A signed
+installer-channel manifest binds those assets to the stable curl endpoints.
 
 Operators prepare a NAS upgrade by rerunning the same stable installer from the
 directory containing the existing bundle:
@@ -25,27 +26,19 @@ The release workflow:
 
 1. validates the signed release tag;
 2. promotes the exact tested API and worker images;
-3. builds and publishes the OCI deployment bundle;
+3. renders the digest-pinned production Compose file;
 4. builds and verifies both native agent packages;
 5. creates an immutable GitHub Release containing the Compose and package assets;
-6. advances image aliases only after verifying that release evidence.
-
-The deployment bundle publisher has only OCI-registry authority. It validates the
-canonical release manifest and bundle descriptors before uploading the exact
-config, layer, and manifest blobs.
+6. publishes the signed installer-channel manifest and setup binaries; and
+7. advances image aliases only after verifying the release assets.
 
 ## Local verification
 
 ```sh
-uv run --frozen scripts/build-control-deployment-bundle \
-  --source-root deploy/compose \
-  --output control-deployment.tar
-
-uv run --frozen scripts/publish-control-deployment-bundle describe \
-  --bundle control-deployment.tar \
-  --repository ghcr.io/OWNER/vonk-forge-control-deployment
+scripts/verify-supply-chain --json
+uv run pytest -q tests/test_installer_publication_workflow.py
 ```
 
-Publication itself is performed by CI with a trusted `oras` executable and
-registry credentials. Operators should consume release assets rather than
-rebuilding or selecting an alternate control generation on the NAS.
+Publication is performed by CI. Operators consume the stable or development
+curl endpoint; there is no second bundle registry, local build, or alternate
+control generation to select.

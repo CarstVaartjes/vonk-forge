@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import re
 import shlex
@@ -13,8 +12,6 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-import types
-from dataclasses import dataclass
 from pathlib import Path
 
 IMAGE = re.compile(r"^[^\s@]+(?::[^\s@]+)?@sha256:[0-9a-f]{64}$")
@@ -30,53 +27,6 @@ def canonical(value: object) -> bytes:
 
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
-
-
-def control_deployment_bundle(root: Path) -> bytes:
-    path = root / "src/cluster_profiles/deployment_bundle.py"
-    spec = importlib.util.spec_from_file_location(
-        "cluster_profiles.deployment_bundle",
-        path,
-    )
-    if spec is None or spec.loader is None:
-        raise ValueError("deployment bundle module cannot be loaded")
-    package = types.ModuleType("cluster_profiles")
-    package.__path__ = [str(root / "src/cluster_profiles")]
-    platform_release = types.ModuleType("cluster_profiles.platform_release")
-
-    @dataclass(frozen=True)
-    class OciDeploymentBundle:
-        reference: str
-        manifest_digest: str
-        manifest_size: int
-        manifest_media_type: str
-        layer_digest: str
-        layer_size: int
-        layer_media_type: str
-
-    platform_release.OciDeploymentBundle = OciDeploymentBundle
-    module = importlib.util.module_from_spec(spec)
-    previous = {
-        name: sys.modules.get(name)
-        for name in (
-            "cluster_profiles",
-            "cluster_profiles.platform_release",
-            spec.name,
-        )
-    }
-    sys.modules["cluster_profiles"] = package
-    sys.modules["cluster_profiles.platform_release"] = platform_release
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-        builder = module.build_deployment_bundle
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = value
-    return builder(root / "deploy/compose")
 
 
 def uv_lock_packages(lock: bytes) -> list[dict[str, str]]:
@@ -363,14 +313,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         ".github/workflows/workload-artifacts.yml",
         ".github/release-allowed-signers",
         ".github/dependabot.yml",
-        "schemas/control-deployment-bundle.schema.json",
         "schemas/install-release-manifest.schema.json",
-        "schemas/platform-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
-        "src/cluster_profiles/deployment_bundle.py",
-        "src/cluster_profiles/platform_release.py",
-        "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
-        "src/cluster_profiles/schemas/platform-release-manifest.schema.json",
         "agent_protocol/pyproject.toml",
         "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
         ".dockerignore", "control/web/package-lock.json", "control/Dockerfile",
@@ -387,7 +331,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
-        "deploy/compose/bin/harden-hermes-egress",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/bootstrap-config.json",
         "deploy/compose/litellm/config_supervisor.py",
@@ -397,10 +340,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/registry/config.yml",
         "deploy/compose/step-ca/ca.json",
         "deploy/compose/trust/litellm-cosign.pub",
-        "scripts/build-control-deployment-bundle",
-        "scripts/publish-control-deployment-bundle",
-        "scripts/build-platform-manifest",
-        "scripts/collect-platform-artifact-evidence",
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",
@@ -422,7 +361,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     input_paths += workload_package_inputs(root)
     input_paths += rust_package_inputs(root)
     input_paths += recipe_catalog_inputs(root)
-    deployment_bundle = control_deployment_bundle(root)
     manifest = {
         "schema_version": 2,
         "inputs": {path: digest((root / path).read_bytes()) for path in input_paths},
@@ -430,7 +368,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "protocol_wheel_sha256": wheel_sha256,
         "image_lock_sha256": digest((root / "deploy/compose/images.lock.json").read_bytes()),
         "signature_key_sha256": digest((root / "deploy/compose/trust/litellm-cosign.pub").read_bytes()),
-        "control_deployment_bundle_sha256": digest(deployment_bundle),
     }
     return sboms, wheel, manifest
 
