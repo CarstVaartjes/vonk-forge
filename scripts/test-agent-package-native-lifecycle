@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export LC_ALL=C
+
+usage() {
+  printf 'Usage: %s ARCHITECTURE CURRENT_DEB NEXT_DEB CURRENT_VERSION NEXT_VERSION\n' \
+    "$0" >&2
+}
+
+if (( $# != 5 )); then
+  usage
+  exit 2
+fi
+
+architecture=$1
+current_package=$2
+next_package=$3
+current_version=$4
+next_version=$5
+
+case "$architecture" in
+  linux-amd64)
+    debian_architecture=amd64
+    expected_machine=x86_64
+    ;;
+  linux-arm64)
+    debian_architecture=arm64
+    expected_machine=aarch64
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
+package_version='[0-9]+\.[0-9]+\.[0-9]+([~+.-][A-Za-z0-9.+~:-]+)?'
+if [[ ! "$current_version" =~ ^$package_version$ ]] \
+  || [[ ! "$next_version" =~ ^$package_version$ ]]; then
+  printf '%s\n' 'native lifecycle package version is invalid' >&2
+  exit 2
+fi
+current_semantic=${current_version%%~*}
+current_semantic=${current_semantic%%+*}
+next_semantic=${next_version%%~*}
+next_semantic=${next_semantic%%+*}
+if [[ "$current_semantic" != "$next_semantic" ]]; then
+  printf '%s\n' 'native lifecycle package semantic versions disagree' >&2
+  exit 2
+fi
+
+for package in "$current_package" "$next_package"; do
+  if [[ "$package" != /* || ! -f "$package" || -L "$package" ]]; then
+    printf 'native lifecycle package path is unsafe: %s\n' "$package" >&2
+    exit 2
+  fi
+done
+if [[ "${current_package##*/}" != "vonk-forge-agent_${current_version}_${debian_architecture}.deb" ]] \
+  || [[ "${next_package##*/}" != "vonk-forge-agent_${next_version}_${debian_architecture}.deb" ]]; then
+  printf '%s\n' 'native lifecycle package filename is invalid' >&2
+  exit 2
+fi
+
+if (( EUID != 0 )) && [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
+  printf '%s\n' 'native package lifecycle must run as root' >&2
+  exit 1
+fi
+
+root=${VONK_AGENT_LIFECYCLE_ROOT:-}
+path() {
+  if [[ -n "$root" ]]; then
+    printf '%s%s' "$root" "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+agent=${VONK_AGENT_LIFECYCLE_AGENT:-$(path /usr/lib/vonk-forge/vonk-agent)}
+dpkg=${VONK_AGENT_LIFECYCLE_DPKG:-/usr/bin/dpkg}
+dpkg_deb=${VONK_AGENT_LIFECYCLE_DPKG_DEB:-/usr/bin/dpkg-deb}
+dpkg_query=${VONK_AGENT_LIFECYCLE_DPKG_QUERY:-/usr/bin/dpkg-query}
+runuser=${VONK_AGENT_LIFECYCLE_RUNUSER:-/usr/sbin/runuser}
+systemd_analyze=${VONK_AGENT_LIFECYCLE_SYSTEMD_ANALYZE:-/usr/bin/systemd-analyze}
+verify=${VONK_AGENT_LIFECYCLE_VERIFY:-$(cd "$(dirname "$0")" && pwd)/verify-agent-deb}
+machine=${VONK_AGENT_LIFECYCLE_MACHINE:-$(uname -m)}
+
+for required in "$dpkg" "$dpkg_deb" "$dpkg_query" "$runuser" \
+  "$systemd_analyze" "$verify" /usr/bin/openssl /usr/bin/sha256sum; do
+  if [[ ! -x "$required" ]]; then
+    printf 'native lifecycle executable is unavailable: %s\n' "$required" >&2
+    exit 1
+  fi
+done
+if [[ "$machine" != "$expected_machine" ]]; then
+  printf 'native lifecycle architecture mismatch: expected %s, got %s\n' \
+    "$expected_machine" "$machine" >&2
+  exit 1
+fi
+
+for package in "$current_package" "$next_package"; do
+  "$verify" --json "$package" >/dev/null
+  test "$("$dpkg_deb" --field "$package" Architecture)" = "$debian_architecture"
+done
+test "$("$dpkg_deb" --field "$current_package" Version)" = "$current_version"
+test "$("$dpkg_deb" --field "$next_package" Version)" = "$next_version"
+
+temporary=$(mktemp -d)
+trap 'rm -rf -- "$temporary"' EXIT
+downgrade_log=${VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG:-$temporary/downgrade.log}
+
+env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package"
+test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$current_version"
+test -x "$agent"
+test "$("$agent" --version)" = "vonk-agent $current_semantic"
+
+"$systemd_analyze" verify \
+  "$(path /lib/systemd/system/vonk-forge-agent.service)" \
+  "$(path /lib/systemd/system/vonk-forge-docker-firewall.service)" \
+  "$(path /lib/systemd/system/vonk-forge-package-helper.service)"
+
+config=$(path /etc/vonk-forge-agent/agent.toml)
+ca_path=$(path /etc/vonk-forge-agent/controller-ca.pem)
+data_dir=$(path /var/lib/vonk-forge-agent)
+credentials="$data_dir/credentials"
+runtime_dir=$(path /run/vonk-forge-agent)
+install -d -m 0700 "$data_dir" "$data_dir/.config" "$credentials" "$runtime_dir"
+
+node_id=spk_00000000000000000000000000000000
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+  -subj /CN=vonk-lifecycle-ca \
+  -keyout "$temporary/ca-key.pem" -out "$temporary/ca.pem" >/dev/null 2>&1
+/usr/bin/openssl genpkey -algorithm ED25519 \
+  -out "$temporary/private-key.pem" >/dev/null 2>&1
+/usr/bin/openssl req -new -key "$temporary/private-key.pem" \
+  -subj "/CN=$node_id" -out "$temporary/identity.csr" >/dev/null 2>&1
+/usr/bin/openssl x509 -req -days 1 -in "$temporary/identity.csr" \
+  -CA "$temporary/ca.pem" -CAkey "$temporary/ca-key.pem" -CAcreateserial \
+  -out "$temporary/certificate.pem" >/dev/null 2>&1
+ca_digest=$(
+  /usr/bin/openssl x509 -in "$temporary/ca.pem" -outform DER \
+    | /usr/bin/sha256sum \
+    | cut -d' ' -f1
+)
+install -m 0644 "$temporary/ca.pem" "$ca_path"
+install -m 0600 "$temporary/private-key.pem" "$credentials/private-key.pem"
+install -m 0600 "$temporary/certificate.pem" "$credentials/certificate.pem"
+install -m 0600 "$temporary/ca.pem" "$credentials/chain.pem"
+sed -i \
+  -e 's|^controller_url = .*$|controller_url = "https://127.0.0.1:9/"|' \
+  -e "s|^ca_sha256 = .*$|ca_sha256 = \"$ca_digest\"|" \
+  "$config"
+printf '\n# lifecycle-preserved\n' >> "$config"
+install -m 0600 /dev/null "$data_dir/lifecycle-preserved"
+
+if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
+  chown -R vonk-agent:vonk-agent "$data_dir" "$runtime_dir"
+  getent passwd vonk-agent >/dev/null
+  awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
+    /etc/subuid
+  awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
+    /etc/subgid
+fi
+
+"$runuser" -u vonk-agent -- env \
+  -u SUDO_USER -u SUDO_UID -u SUDO_GID \
+  HOME="$data_dir" \
+  XDG_DATA_HOME="$data_dir" \
+  XDG_CONFIG_HOME="$data_dir/.config" \
+  XDG_RUNTIME_DIR="$runtime_dir" \
+  CONTAINERS_STORAGE_CONF=$(path /etc/vonk-forge-agent/containers-storage.conf) \
+  sh -c 'cd / && exec podman info --format "{{.Host.Security.Rootless}}"' \
+  | grep -Fx true >/dev/null
+
+env SYSTEMD_OFFLINE=1 "$dpkg" --unpack "$next_package"
+[[ "$("$dpkg_query" -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = iU* ]]
+env SYSTEMD_OFFLINE=1 "$dpkg" --configure -a
+test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$next_version"
+grep -Fx '# lifecycle-preserved' "$config" >/dev/null
+test -f "$data_dir/lifecycle-preserved"
+test "$("$agent" --version)" = "vonk-agent $next_semantic"
+self_test=$("$agent" --config "$config" self-test)
+grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
+grep -F '"semantic_version":"'"$next_semantic"'"' <<< "$self_test" >/dev/null
+grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+
+if env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package" \
+  >"$downgrade_log" 2>&1; then
+  printf '%s\n' 'native lifecycle downgrade unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -F 'refusing downgrade' "$downgrade_log" >/dev/null
+
+env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
+test -f "$config"
+test -f "$data_dir/lifecycle-preserved"
+env SYSTEMD_OFFLINE=1 "$dpkg" -i "$next_package"
+test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$next_version"
+grep -Fx '# lifecycle-preserved' "$config" >/dev/null
+test -f "$data_dir/lifecycle-preserved"
+test "$("$agent" --version)" = "vonk-agent $next_semantic"
+self_test=$("$agent" --config "$config" self-test)
+grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
+grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
+
+printf 'native %s package lifecycle: PASS\n' "$architecture"

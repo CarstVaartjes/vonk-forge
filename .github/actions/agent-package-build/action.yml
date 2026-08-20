@@ -55,6 +55,12 @@ outputs:
   artifact_name:
     description: Immutable Actions artifact name
     value: ${{ steps.accepted.outputs.artifact_name }}
+  amd64_lifecycle_package:
+    description: Short-lived next-version AMD64 package filename for native lifecycle acceptance
+    value: ${{ steps.accepted.outputs.amd64_lifecycle_package }}
+  amd64_lifecycle_artifact_name:
+    description: Short-lived AMD64 lifecycle Actions artifact name
+    value: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}
 
 runs:
   using: composite
@@ -109,8 +115,15 @@ runs:
           "channel=$CHANNEL" \
           "snapshot=$CHANNEL-$VERSION")
         test "$actual" = "$expected"
-        printf 'version=%s\narm64_package=%s\namd64_package=%s\nartifact_name=%s\n' \
-          "$VERSION" "$ARM64_PACKAGE" "$AMD64_PACKAGE" "$ARTIFACT_NAME" \
+        amd64_lifecycle_package="vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
+        amd64_lifecycle_artifact_name="${ARTIFACT_NAME}-amd64-lifecycle"
+        printf '%s\n' \
+          "version=$VERSION" \
+          "arm64_package=$ARM64_PACKAGE" \
+          "amd64_package=$AMD64_PACKAGE" \
+          "artifact_name=$ARTIFACT_NAME" \
+          "amd64_lifecycle_package=$amd64_lifecycle_package" \
+          "amd64_lifecycle_artifact_name=$amd64_lifecycle_artifact_name" \
           >> "$GITHUB_OUTPUT"
 
     - name: Install pinned Rust toolchain
@@ -272,52 +285,23 @@ runs:
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \
           packaging/bin/vonk-agent-upgrade \
+          scripts/test-agent-package-native-lifecycle \
           tests/scripts/test_docker_firewall.sh \
+          tests/nodes/test_agent_package_native_lifecycle.sh \
           tests/nodes/test_upgrade_vonk_agent.sh
         sudo tests/scripts/test_docker_firewall.sh
+        tests/nodes/test_agent_package_native_lifecycle.sh
         tests/nodes/test_upgrade_vonk_agent.sh
-        package="dist/vonk-forge-agent_${VERSION}_arm64.deb"
-        sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
-        sudo systemd-analyze verify \
-          /lib/systemd/system/vonk-forge-agent.service \
-          /lib/systemd/system/vonk-forge-docker-firewall.service \
-          /lib/systemd/system/vonk-forge-package-helper.service
-        systemd-analyze security --offline=yes --no-pager \
-          vonk-forge-docker-firewall.service \
-          vonk-forge-package-helper.service \
-          > dist/vonk-forge-package-systemd-security.txt
-        test "$(grep -Fc 'Overall exposure level' \
-          dist/vonk-forge-package-systemd-security.txt)" = 2
-        getent passwd vonk-agent >/dev/null
-        sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
-          /etc/subuid
-        sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
-          /etc/subgid
-        test "$(stat -c %a /var/lib/vonk-forge-agent)" = 700
-        test -x /usr/lib/vonk-forge/vonk-agent
-        sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
-          /run/vonk-forge-agent
-        sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
-          /var/lib/vonk-forge-agent/.config
-        sudo -H -u vonk-agent env \
-          -u SUDO_USER -u SUDO_UID -u SUDO_GID \
-          HOME=/var/lib/vonk-forge-agent \
-          XDG_DATA_HOME=/var/lib/vonk-forge-agent \
-          XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config \
-          XDG_RUNTIME_DIR=/run/vonk-forge-agent \
-          CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
-          sh -c 'cd / && exec podman info --format "{{.Host.Security.Rootless}}"' \
-          | grep -Fx true >/dev/null
-        printf '\n# lifecycle-preserved\n' \
-          | sudo tee -a /etc/vonk-forge-agent/agent.toml >/dev/null
-        sudo install -o vonk-agent -g vonk-agent -m 0600 /dev/null \
-          /var/lib/vonk-forge-agent/lifecycle-preserved
 
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
         arm64_build_digest="sha256:$(
           printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
             "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
+        amd64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
         )"
         scripts/build-agent-deb \
           --version "$NEXT_VERSION" \
@@ -327,42 +311,41 @@ runs:
           --binaries-dir target/aarch64-unknown-linux-gnu/release \
           --source-date-epoch "$epoch" \
           --output-dir lifecycle
+        scripts/build-agent-deb \
+          --version "$NEXT_VERSION" \
+          --architecture linux-amd64 \
+          --build-digest "$amd64_build_digest" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --binaries-dir target/x86_64-unknown-linux-gnu/release \
+          --source-date-epoch "$epoch" \
+          --output-dir lifecycle
+        scripts/verify-agent-deb --json \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+        scripts/verify-agent-deb --json \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
-
-        sudo env SYSTEMD_OFFLINE=1 dpkg --unpack \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
-        [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = iU* ]]
-        sudo env SYSTEMD_OFFLINE=1 dpkg --configure -a
-        test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$NEXT_VERSION"
-        grep -Fx '# lifecycle-preserved' \
-          /etc/vonk-forge-agent/agent.toml >/dev/null
-        test -x /usr/lib/vonk-forge/vonk-agent
-        test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
-          "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
-
-        downgrade_log=$RUNNER_TEMP/downgrade.log
-        if sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package" \
-          >"$downgrade_log" 2>&1; then
-          echo "downgrade unexpectedly succeeded" >&2
-          exit 1
-        fi
-        grep -F 'refusing downgrade' "$downgrade_log" >/dev/null
-        echo "refused downgrade"
-
-        sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
-        test -f /etc/vonk-forge-agent/agent.toml
-        sudo test -f /var/lib/vonk-forge-agent/lifecycle-preserved
-        sudo env SYSTEMD_OFFLINE=1 dpkg -i \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
-        grep -Fx '# lifecycle-preserved' \
-          /etc/vonk-forge-agent/agent.toml >/dev/null
-        sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
+        sudo scripts/test-agent-package-native-lifecycle \
+          linux-arm64 \
+          "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
+          "$(realpath "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb")" \
+          "$VERSION" "$NEXT_VERSION"
 
     - name: Remove protected agent key
       if: ${{ always() }}
       shell: bash
       run: rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
+
+    - name: Upload short-lived AMD64 lifecycle package
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+        path: |
+          lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb
+          lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2

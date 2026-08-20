@@ -19,6 +19,12 @@ EXPECTED_ACTION_OUTPUTS = {
     "arm64_package": "${{ steps.accepted.outputs.arm64_package }}",
     "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
+    "amd64_lifecycle_package": (
+        "${{ steps.accepted.outputs.amd64_lifecycle_package }}"
+    ),
+    "amd64_lifecycle_artifact_name": (
+        "${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}"
+    ),
 }
 
 
@@ -320,7 +326,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
     assert "cargo build" not in text
-    assert text.count("scripts/build-agent-deb") >= 3
+    assert text.count("scripts/build-agent-deb") >= 6
     assert "NEXT_VERSION: ${{ inputs.next_version }}" in text
     assert 'IFS=. read -r major minor patch <<< "$VERSION"' not in text
     assert "cmp --silent" in text
@@ -329,6 +335,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in text
     assert "cargo test --workspace --locked" in text
     assert "scripts/verify-agent-systemd" in text
+    assert "scripts/test-agent-package-native-lifecycle" in text
     for architecture in ("linux-arm64", "linux-amd64"):
         assert f"--architecture {architecture}" in text
     for architecture in ("arm64", "amd64"):
@@ -336,15 +343,6 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "vonk-agent-supervisor" not in text
     assert "/var/lib/vonk-forge/slots" not in text
     assert "/var/lib/vonk-forge/supervisor" not in text
-    for expected in (
-        "dpkg -i",
-        "dpkg --remove vonk-forge-agent",
-        "refused downgrade",
-        "/etc/vonk-forge-agent/agent.toml",
-        "/var/lib/vonk-forge-agent",
-        "SYSTEMD_OFFLINE=1",
-    ):
-        assert expected in text
     assert "curl " not in text
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
@@ -374,31 +372,25 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         text,
         lifecycle_name,
     )
-    lifecycle_lines = lifecycle.splitlines()
-    final_build = lifecycle_lines.index("  --output-dir lifecycle")
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert lifecycle_lines[final_build + 1] == immediate_cleanup
-    assert lifecycle_lines[final_build + 2] == (
-        'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"'
-    )
-    first_upgrade = lifecycle_lines.index(
-        "sudo env SYSTEMD_OFFLINE=1 dpkg --unpack \\", final_build + 3
-    )
-    assert lifecycle_lines[first_upgrade + 1] == (
-        '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
-    )
-    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in "\n".join(
-        lifecycle_lines[final_build + 3 :]
-    )
+    assert lifecycle.count("scripts/build-agent-deb") == 2
+    assert "--architecture linux-arm64" in lifecycle
+    assert "--architecture linux-amd64" in lifecycle
+    final_build = lifecycle.rindex("scripts/build-agent-deb")
+    cleanup = lifecycle.index(immediate_cleanup)
+    helper = lifecycle.rindex("sudo scripts/test-agent-package-native-lifecycle")
+    assert final_build < cleanup < helper
+    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in lifecycle[helper:]
     assert immediate_cleanup in fallback
     assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
     assert step_names[lifecycle_index : lifecycle_index + 3] == [
         lifecycle_name,
         fallback_name,
-        cosign_name,
+        "Upload short-lived AMD64 lifecycle package",
     ]
+    assert step_names[lifecycle_index + 3] == cosign_name
     assert text.count(immediate_cleanup) == 2
 
 
@@ -454,11 +446,21 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
 def test_reusable_agent_package_build_uploads_one_immutable_release_set() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert text.count("actions/upload-artifact@") == 1
-    assert "name: ${{ inputs.artifact_name }}" in text
-    assert "overwrite: false" in text
-    assert "if-no-files-found: error" in text
-    assert "path: dist/*" in text
+    assert text.count("actions/upload-artifact@") == 2
+    accepted = workflow_step(text, "Upload exact package release set")
+    lifecycle = workflow_step(text, "Upload short-lived AMD64 lifecycle package")
+
+    assert "name: ${{ inputs.artifact_name }}" in accepted
+    assert "retention-days: 30" in accepted
+    assert "path: dist/*" in accepted
+    assert "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
+    assert "retention-days: 1" in lifecycle
+    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
+    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
+    assert "dist/" not in lifecycle
+    for step in (accepted, lifecycle):
+        assert "overwrite: false" in step
+        assert "if-no-files-found: error" in step
 
 
 def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:

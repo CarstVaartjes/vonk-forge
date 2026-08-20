@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+helper="$repo_root/scripts/test-agent-package-native-lifecycle"
+test_root="$(mktemp -d)"
+trap 'rm -rf -- "$test_root"' EXIT
+
+root="$test_root/root"
+bin="$test_root/bin"
+log="$test_root/actions.log"
+state="$test_root/package-state"
+version_state="$test_root/package-version"
+mkdir -p "$bin" "$root/etc/vonk-forge-agent" \
+  "$root/usr/lib/vonk-forge" "$root/var/lib/vonk-forge-agent"
+: > "$log"
+printf 'absent\n' > "$state"
+printf '0.0.0\n' > "$version_state"
+
+current="$test_root/vonk-forge-agent_0.1.0_amd64.deb"
+next="$test_root/vonk-forge-agent_0.1.0+lifecycle.1_amd64.deb"
+: > "$current"
+: > "$current.sha256"
+: > "$next"
+: > "$next.sha256"
+
+cat > "$root/etc/vonk-forge-agent/agent.toml" <<'CONFIG'
+enrollment_url = "https://enroll.vonkforge.invalid/"
+controller_url = "https://controller.vonkforge.invalid/"
+ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
+ca_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+data_dir = "/var/lib/vonk-forge-agent"
+node_id = "spk_00000000000000000000000000000000"
+poll_min_seconds = 2
+poll_max_seconds = 60
+CONFIG
+
+cat > "$root/usr/lib/vonk-forge/vonk-agent" <<'AGENT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'agent %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+case "${1:-}" in
+  --version) printf 'vonk-agent 0.1.0\n' ;;
+  --config)
+    [[ "${3:-}" == self-test ]]
+    printf '%s\n' '{"semantic_version":"0.1.0","build_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","binary_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","architecture":"linux-amd64","self_test_passed":true}'
+    ;;
+  *) exit 2 ;;
+esac
+AGENT
+chmod +x "$root/usr/lib/vonk-forge/vonk-agent"
+
+cat > "$bin/verify-agent-deb" <<'VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'verify %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+VERIFY
+
+cat > "$bin/dpkg-deb" <<'DPKG_DEB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == --field ]]
+package=$2
+field=$3
+case "$field" in
+  Architecture) printf 'amd64\n' ;;
+  Version)
+    name=${package##*/}
+    version=${name#vonk-forge-agent_}
+    printf '%s\n' "${version%_amd64.deb}"
+    ;;
+  *) exit 2 ;;
+esac
+DPKG_DEB
+
+cat > "$bin/dpkg-query" <<'DPKG_QUERY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'query %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+case "$*" in
+  *'${db:Status-Abbrev}'*) cat "${LIFECYCLE_STATE:?}" ;;
+  *'${Version}'*) cat "${LIFECYCLE_VERSION_STATE:?}" ;;
+  *) exit 2 ;;
+esac
+DPKG_QUERY
+
+cat > "$bin/dpkg" <<'DPKG'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'dpkg %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+case "${1:-}" in
+  -i|--install)
+    package=${2##*/}
+    candidate=${package#vonk-forge-agent_}
+    candidate=${candidate%_amd64.deb}
+    installed=$(cat "${LIFECYCLE_VERSION_STATE:?}")
+    if [[ "$installed" == 0.1.0+lifecycle.1 && "$candidate" == 0.1.0 ]]; then
+      printf '%s\n' 'vonk-forge-agent: refusing downgrade' >&2
+      exit 1
+    fi
+    printf '%s\n' "$candidate" > "${LIFECYCLE_VERSION_STATE:?}"
+    printf 'ii \n' > "${LIFECYCLE_STATE:?}"
+    ;;
+  --unpack)
+    printf '0.1.0+lifecycle.1\n' > "${LIFECYCLE_VERSION_STATE:?}"
+    printf 'iU \n' > "${LIFECYCLE_STATE:?}"
+    ;;
+  --configure) printf 'ii \n' > "${LIFECYCLE_STATE:?}" ;;
+  --remove) printf 'absent\n' > "${LIFECYCLE_STATE:?}" ;;
+  *) exit 2 ;;
+esac
+DPKG
+
+cat > "$bin/systemd-analyze" <<'SYSTEMD'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'systemd-analyze %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+SYSTEMD
+
+cat > "$bin/runuser" <<'RUNUSER'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'runuser %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
+printf 'true\n'
+RUNUSER
+chmod +x "$bin"/*
+
+env \
+  LIFECYCLE_ACTION_LOG="$log" \
+  LIFECYCLE_STATE="$state" \
+  LIFECYCLE_VERSION_STATE="$version_state" \
+  VONK_AGENT_LIFECYCLE_AGENT="$root/usr/lib/vonk-forge/vonk-agent" \
+  VONK_AGENT_LIFECYCLE_DPKG="$bin/dpkg" \
+  VONK_AGENT_LIFECYCLE_DPKG_DEB="$bin/dpkg-deb" \
+  VONK_AGENT_LIFECYCLE_DPKG_QUERY="$bin/dpkg-query" \
+  VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG="$test_root/downgrade.log" \
+  VONK_AGENT_LIFECYCLE_MACHINE=x86_64 \
+  VONK_AGENT_LIFECYCLE_ROOT="$root" \
+  VONK_AGENT_LIFECYCLE_RUNUSER="$bin/runuser" \
+  VONK_AGENT_LIFECYCLE_SYSTEMD_ANALYZE="$bin/systemd-analyze" \
+  VONK_AGENT_LIFECYCLE_TEST_MODE=1 \
+  VONK_AGENT_LIFECYCLE_VERIFY="$bin/verify-agent-deb" \
+  "$helper" linux-amd64 "$current" "$next" 0.1.0 0.1.0+lifecycle.1
+
+test "$(grep -Fc 'verify --json' "$log")" = 2
+grep -Fxq "dpkg -i $current" "$log"
+grep -Fxq "dpkg --unpack $next" "$log"
+grep -Fxq 'dpkg --configure -a' "$log"
+grep -Fxq "dpkg -i $next" "$log"
+test "$(grep -Fc 'dpkg --remove vonk-forge-agent' "$log")" = 2
+test "$(grep -Fc 'agent --config ' "$log")" = 2
+grep -Fq 'refusing downgrade' "$test_root/downgrade.log"
+grep -Fxq '# lifecycle-preserved' "$root/etc/vonk-forge-agent/agent.toml"
+test -f "$root/var/lib/vonk-forge-agent/lifecycle-preserved"
+test "$(cat "$state")" = absent
+
+printf 'native direct-package lifecycle helper: PASS\n'
