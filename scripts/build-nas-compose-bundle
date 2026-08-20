@@ -164,9 +164,18 @@ def _validate_embedded_configs(document: dict[str, Any]) -> None:
 
 
 def _required_value(
-    env: str, prompt: str, default: str | None = None
+    env: str,
+    prompt: str,
+    default: str | None = None,
+    *,
+    validation: str,
 ) -> dict[str, object]:
-    return {"env": env, "prompt": prompt, "default": default}
+    return {
+        "env": env,
+        "prompt": prompt,
+        "default": default,
+        "validation": validation,
+    }
 
 
 def _payload(document: dict[str, Any]) -> dict[str, object]:
@@ -181,19 +190,44 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
             {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
         ],
         "required_values": [
-            _required_value("NAS_LAN_IP", "Reserved NAS LAN IP"),
-            _required_value("VONK_MANAGEMENT_CIDRS", "Trusted Spark management CIDRs"),
-            _required_value("VONK_DIRECT_FABRIC_CIDRS", "Direct GPU fabric CIDRs", ""),
-            _required_value("VONK_CONTROL_HOSTNAME", "Control hostname"),
-            _required_value("VONK_AGENT_ENROLL_HOSTNAME", "Agent enrollment hostname"),
-            _required_value("VONK_AGENT_HOSTNAME", "Agent controller hostname"),
-            _required_value("VONK_REGISTRY_HOSTNAME", "Registry hostname"),
+            _required_value(
+                "NAS_LAN_IP", "Reserved NAS LAN IP", validation="ipv4"
+            ),
+            _required_value(
+                "VONK_MANAGEMENT_CIDRS",
+                "Trusted Spark management CIDRs",
+                validation="cidr_list",
+            ),
+            _required_value(
+                "VONK_DIRECT_FABRIC_CIDRS",
+                "Direct GPU fabric CIDRs",
+                "",
+                validation="optional_cidr_list",
+            ),
+            _required_value(
+                "VONK_CONTROL_HOSTNAME", "Control hostname", validation="hostname"
+            ),
+            _required_value(
+                "VONK_AGENT_ENROLL_HOSTNAME",
+                "Agent enrollment hostname",
+                validation="hostname",
+            ),
+            _required_value(
+                "VONK_AGENT_HOSTNAME",
+                "Agent controller hostname",
+                validation="hostname",
+            ),
+            _required_value(
+                "VONK_REGISTRY_HOSTNAME",
+                "Registry hostname",
+                validation="hostname",
+            ),
         ],
         "secrets": [
             {
                 "file": "admin-password",
                 "prompt": "Vonk Forge administrator password",
-                "generate_bytes": None,
+                "generate_bytes": 24,
             },
             {
                 "file": "tailscale-oauth-client-id",
@@ -297,7 +331,9 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
             "disabled_value": "",
             "required_values": [
                 _required_value(
-                    "HERMES_DASHBOARD_ORIGIN", "Hermes dashboard HTTPS origin"
+                    "HERMES_DASHBOARD_ORIGIN",
+                    "Hermes dashboard HTTPS origin",
+                    validation="https_origin",
                 )
             ],
             "secrets": [],

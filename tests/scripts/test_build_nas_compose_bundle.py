@@ -92,12 +92,32 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "VONK_AGENT_HOSTNAME",
         "VONK_REGISTRY_HOSTNAME",
     }
+    validators = {
+        item["env"]: item["validation"] for item in payload["required_values"]
+    }
+    assert validators == {
+        "NAS_LAN_IP": "ipv4",
+        "VONK_MANAGEMENT_CIDRS": "cidr_list",
+        "VONK_DIRECT_FABRIC_CIDRS": "optional_cidr_list",
+        "VONK_CONTROL_HOSTNAME": "hostname",
+        "VONK_AGENT_ENROLL_HOSTNAME": "hostname",
+        "VONK_AGENT_HOSTNAME": "hostname",
+        "VONK_REGISTRY_HOSTNAME": "hostname",
+    }
     assert {item["file"] for item in payload["secrets"]} == {
         "admin-password",
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",
     }
+    secret_prompts = {item["file"]: item for item in payload["secrets"]}
+    assert secret_prompts["admin-password"]["generate_bytes"] == 24
+    for external in (
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+        "litellm-upstream-key",
+    ):
+        assert secret_prompts[external]["generate_bytes"] is None
     generated = payload["generated_secrets"]
     assert {item["file"] for item in generated["random_text"]} == {
         "postgres-password",
@@ -130,6 +150,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
                 "env": "HERMES_DASHBOARD_ORIGIN",
                 "prompt": "Hermes dashboard HTTPS origin",
                 "default": None,
+                "validation": "https_origin",
             }
         ],
         "secrets": [],

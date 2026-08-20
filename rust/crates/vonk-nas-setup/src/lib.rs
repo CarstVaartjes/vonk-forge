@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -181,6 +182,20 @@ struct RequiredValuePrompt {
     env: String,
     prompt: String,
     default: Option<String>,
+    #[serde(default)]
+    validation: RequiredValueValidation,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RequiredValueValidation {
+    #[default]
+    NonEmpty,
+    Ipv4,
+    CidrList,
+    OptionalCidrList,
+    Hostname,
+    HttpsOrigin,
 }
 
 #[derive(Debug, Deserialize)]
@@ -403,6 +418,16 @@ fn validate_prompts<'a>(
                 value.env
             )));
         }
+        if value
+            .default
+            .as_deref()
+            .is_some_and(|default| !valid_required_value(default, &value.validation))
+        {
+            return Err(SetupError::InvalidPayload(format!(
+                "default for {} does not satisfy its validator",
+                value.env
+            )));
+        }
         if !environment.insert(&value.env) {
             return Err(SetupError::InvalidPayload(format!(
                 "duplicate environment key {}",
@@ -466,6 +491,70 @@ fn validate_env_name(name: &str) -> Result<(), SetupError> {
         )));
     }
     Ok(())
+}
+
+fn valid_required_value(value: &str, validation: &RequiredValueValidation) -> bool {
+    if value.contains(['\0', '\r', '\n']) {
+        return false;
+    }
+    match validation {
+        RequiredValueValidation::NonEmpty => !value.is_empty(),
+        RequiredValueValidation::Ipv4 => value.parse::<Ipv4Addr>().is_ok(),
+        RequiredValueValidation::CidrList => valid_cidr_list(value, false),
+        RequiredValueValidation::OptionalCidrList => valid_cidr_list(value, true),
+        RequiredValueValidation::Hostname => valid_hostname(value),
+        RequiredValueValidation::HttpsOrigin => valid_https_origin(value),
+    }
+}
+
+fn valid_cidr_list(value: &str, allow_empty: bool) -> bool {
+    if value.is_empty() {
+        return allow_empty;
+    }
+    value.split(',').all(|item| {
+        let item = item.trim();
+        let Some((address, prefix)) = item.split_once('/') else {
+            return false;
+        };
+        if address.is_empty() || prefix.is_empty() || prefix.contains('/') {
+            return false;
+        }
+        let Ok(address) = address.parse::<IpAddr>() else {
+            return false;
+        };
+        let Ok(prefix) = prefix.parse::<u8>() else {
+            return false;
+        };
+        prefix <= if address.is_ipv4() { 32 } else { 128 }
+    })
+}
+
+fn valid_hostname(value: &str) -> bool {
+    if value.is_empty() || value.len() > 253 || value.starts_with('.') || value.ends_with('.') {
+        return false;
+    }
+    value.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    })
+}
+
+fn valid_https_origin(value: &str) -> bool {
+    let Ok(origin) = url::Url::parse(value) else {
+        return false;
+    };
+    origin.scheme() == "https"
+        && origin.host_str().is_some()
+        && origin.username().is_empty()
+        && origin.password().is_none()
+        && origin.path() == "/"
+        && origin.query().is_none()
+        && origin.fragment().is_none()
 }
 
 fn validate_secret_name(name: &str) -> Result<(), SetupError> {
@@ -567,13 +656,20 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         };
         loop {
             let value = self.line(&label)?;
-            if !value.is_empty() {
-                return Ok(value);
+            let selected = if value.is_empty() {
+                if let Some(default) = &prompt.default {
+                    default.clone()
+                } else {
+                    writeln!(self.writer, "A value is required.")?;
+                    continue;
+                }
+            } else {
+                value
+            };
+            if valid_required_value(&selected, &prompt.validation) {
+                return Ok(selected);
             }
-            if let Some(default) = &prompt.default {
-                return Ok(default.clone());
-            }
-            writeln!(self.writer, "A value is required.")?;
+            writeln!(self.writer, "The value is invalid.")?;
         }
     }
 

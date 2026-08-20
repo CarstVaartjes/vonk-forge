@@ -340,6 +340,65 @@ fn prompts_retry_invalid_required_values_and_confirmation() {
 }
 
 #[test]
+fn typed_site_values_reject_invalid_addresses_cidrs_hostnames_and_origins() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [
+            {"env": "NAS_LAN_IP", "prompt": "NAS IP", "validation": "ipv4"},
+            {"env": "VONK_MANAGEMENT_CIDRS", "prompt": "Management CIDRs", "validation": "cidr_list"},
+            {"env": "VONK_DIRECT_FABRIC_CIDRS", "prompt": "Fabric CIDRs", "default": "", "validation": "optional_cidr_list"},
+            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
+          ],
+          "secrets": [],
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": "",
+            "required_values": [
+              {"env": "HERMES_DASHBOARD_ORIGIN", "prompt": "Dashboard", "validation": "https_origin"}
+            ],
+            "secrets": []
+          }
+        }"#,
+    )
+    .expect("valid typed payload");
+    let temporary = tempdir().expect("temporary directory");
+    let input = Cursor::new(
+        b"not-an-ip\n192.168.1.231\n192.168.1.0/99\n192.168.1.0/24,100.64.0.0/10\n\nhttps://bad/path\ncontrol.example.test\nyes\nhttp://dashboard.example.test\nhttps://dashboard.example.test\n".to_vec(),
+    );
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("invalid typed values are retried");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "NAS_LAN_IP=192.168.1.231\n\
+VONK_MANAGEMENT_CIDRS=\"192.168.1.0/24,100.64.0.0/10\"\n\
+VONK_DIRECT_FABRIC_CIDRS=\n\
+VONK_CONTROL_HOSTNAME=control.example.test\n\
+COMPOSE_PROFILES=hermes\n\
+HERMES_DASHBOARD_ORIGIN=https://dashboard.example.test\n"
+    );
+    assert!(
+        String::from_utf8(output)
+            .expect("UTF-8 prompts")
+            .matches("The value is invalid.")
+            .count()
+            >= 4
+    );
+}
+
+#[test]
 fn manually_entered_secret_is_never_written_to_prompt_output() {
     let temporary = tempdir().expect("temporary directory");
     let input = Cursor::new(b"forge.example.test\nsuper-secret-answer\nno\n".to_vec());
