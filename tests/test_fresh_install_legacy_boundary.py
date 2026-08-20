@@ -34,6 +34,18 @@ OBSOLETE_DEVELOPMENT_INSTALLERS = (
     "deploy/compose/compose.dev.yaml",
 )
 
+OBSOLETE_NODE_INSTALLERS = (
+    "nodes/bin/apply-node-policy",
+    "nodes/bin/collect-inventory",
+    "nodes/bin/configure-direct-fabric",
+    "nodes/bin/disable-earlyoom",
+    "nodes/bin/inspect-node-identity",
+    "nodes/bin/install-ssh-hardening",
+    "nodes/bin/rollback-direct-fabric",
+    "nodes/etc/ssh/sshd_config.d/90-vonk-admin.conf",
+    "nodes/policy/default.json",
+)
+
 
 class _UnexpectedClient:
     def __getattr__(self, name: str) -> object:
@@ -74,6 +86,12 @@ def test_no_alternate_development_installer_or_compose_overlay_remains() -> None
         path.is_file() and "__pycache__" not in path.parts
         for path in resources.rglob("*")
     )
+
+
+def test_no_manual_node_installation_path_remains() -> None:
+    """The Spark curl and direct Rust package own the complete node lifecycle."""
+    for relative in OBSOLETE_NODE_INSTALLERS:
+        assert not (ROOT / relative).exists(), relative
 
 
 def test_control_wheel_has_no_offline_updater_entrypoint_or_modules(
