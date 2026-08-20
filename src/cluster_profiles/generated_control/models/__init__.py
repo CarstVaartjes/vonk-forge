@@ -33,10 +33,10 @@ from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
 from .freshness_policy import FreshnessPolicy
+from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .get_platform_update_response_update_status_api_v1_updates_rollout_id_get import GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet
 from .get_platform_update_skew_response_update_skew_api_v1_updates_skew_get import GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet
-from .get_repository_response_repository_view_api_v1_repository_get import GetRepositoryResponseRepositoryViewApiV1RepositoryGet
 from .global_import_preview_request import GlobalImportPreviewRequest
 from .global_import_request import GlobalImportRequest
 from .global_revision_response import GlobalRevisionResponse
@@ -264,10 +264,10 @@ __all__ = (
     "FleetStatusResponse",
     "ForkRecipeRequest",
     "FreshnessPolicy",
+    "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
     "GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet",
     "GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet",
-    "GetRepositoryResponseRepositoryViewApiV1RepositoryGet",
     "GlobalImportPreviewRequest",
     "GlobalImportRequest",
     "GlobalRevisionResponse",

@@ -1000,6 +1000,11 @@
       "FleetSnapshot": {
         "additionalProperties": false,
         "properties": {
+          "authority_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Revision",
+            "type": "string"
+          },
           "event_cursor": {
             "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
@@ -1019,11 +1024,6 @@
             "title": "Nodes",
             "type": "array"
           },
-          "repository_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Repository Commit",
-            "type": "string"
-          },
           "schema_version": {
             "const": 1,
             "default": 1,
@@ -1034,7 +1034,7 @@
         "required": [
           "event_cursor",
           "generated_at",
-          "repository_commit",
+          "authority_revision",
           "nodes"
         ],
         "title": "FleetSnapshot",
@@ -1043,9 +1043,9 @@
       "FleetStatusResponse": {
         "additionalProperties": false,
         "properties": {
-          "commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Commit",
+          "authority_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Revision",
             "type": "string"
           },
           "evidence_digest": {
@@ -1062,7 +1062,7 @@
           }
         },
         "required": [
-          "commit",
+          "authority_revision",
           "nodes",
           "evidence_digest"
         ],
@@ -1678,10 +1678,10 @@
       "JobDetailResponse": {
         "additionalProperties": false,
         "properties": {
-          "base_commit": {
+          "authority_revision": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Base Commit",
+            "title": "Authority Revision",
             "type": "string"
           },
           "current_attempt": {
@@ -1791,7 +1791,7 @@
           "id",
           "state",
           "kind",
-          "base_commit",
+          "authority_revision",
           "targets",
           "target_total",
           "current_attempt",
@@ -4122,9 +4122,9 @@
       "ProposalRequest": {
         "additionalProperties": false,
         "properties": {
-          "base_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Base Commit",
+          "base_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Revision",
             "type": "string"
           },
           "changes": {
@@ -4138,7 +4138,7 @@
           }
         },
         "required": [
-          "base_commit",
+          "base_revision",
           "changes"
         ],
         "title": "ProposalRequest",
@@ -8335,6 +8335,59 @@
         "summary": "Session"
       }
     },
+    "/api/v1/authority": {
+      "get": {
+        "operationId": "getAuthority",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Authority View Api V1 Authority Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Authority View"
+      }
+    },
     "/api/v1/catalog/entities": {
       "get": {
         "operationId": "listCatalogEntities",
@@ -11779,59 +11832,6 @@
           }
         ],
         "summary": "Preview Uninstall"
-      }
-    },
-    "/api/v1/repository": {
-      "get": {
-        "operationId": "getRepository",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "commit",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Commit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Repository View Api V1 Repository Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Repository View"
       }
     },
     "/api/v1/updates": {

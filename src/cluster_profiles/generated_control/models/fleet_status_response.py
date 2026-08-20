@@ -23,12 +23,12 @@ T = TypeVar("T", bound="FleetStatusResponse")
 class FleetStatusResponse:
     """
         Attributes:
-            commit (str):
+            authority_revision (str):
             evidence_digest (str):
             nodes (list['NodeStatus']):
      """
 
-    commit: str
+    authority_revision: str
     evidence_digest: str
     nodes: list['NodeStatus']
 
@@ -38,7 +38,7 @@ class FleetStatusResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.node_status import NodeStatus
-        commit = self.commit
+        authority_revision = self.authority_revision
 
         evidence_digest = self.evidence_digest
 
@@ -53,7 +53,7 @@ class FleetStatusResponse:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "commit": commit,
+            "authority_revision": authority_revision,
             "evidence_digest": evidence_digest,
             "nodes": nodes,
         })
@@ -66,7 +66,7 @@ class FleetStatusResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.node_status import NodeStatus
         d = dict(src_dict)
-        commit = d.pop("commit")
+        authority_revision = d.pop("authority_revision")
 
         evidence_digest = d.pop("evidence_digest")
 
@@ -81,7 +81,7 @@ class FleetStatusResponse:
 
 
         fleet_status_response = cls(
-            commit=commit,
+            authority_revision=authority_revision,
             evidence_digest=evidence_digest,
             nodes=nodes,
         )
