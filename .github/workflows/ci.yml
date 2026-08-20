@@ -223,6 +223,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+      - name: Pull PostgreSQL test image
+        run: docker pull postgres:16
       - name: Run complete control suite
         shell: bash
         env:
