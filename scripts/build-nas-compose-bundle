@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""Build the canonical NAS installer payload from one rendered Compose release."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+MAX_COMPOSE_BYTES = 32 * 1024 * 1024
+PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
+SERVICES = {
+    "tailscale-gateway",
+    "tailscale-configurator",
+    "hermes-agent",
+    "postgres",
+    "control-api",
+    "control-worker",
+    "step-ca",
+    "litellm",
+    "prometheus",
+    "grafana",
+    "caddy",
+    "registry",
+}
+SECRET_FILES = {
+    "tailscale-oauth-client-id": "tailscale-oauth-client-id",
+    "tailscale-oauth-client-secret": "tailscale-oauth-client-secret",
+    "hermes-api-key": "hermes-api-key",
+    "database-url": "database-url",
+    "postgres-password": "postgres-password",
+    "litellm-database-password": "litellm-database-password",
+    "token-signing-key": "token-signing-key",
+    "metrics-token": "metrics-token",
+    "litellm-master-key": "litellm-master-key",
+    "litellm-upstream-key": "litellm-upstream-key",
+    "litellm-database-url": "litellm-database-url",
+    "grafana-admin-password": "grafana-admin-password",
+    "agent-client-ca": "agent-client-ca",
+    "agent-intermediate-certificate": "agent-intermediate-certificate",
+    "controller-ca": "controller-ca.pem",
+    "controller-server-certificate": "controller-server-certificate",
+    "controller-server-key": "controller-server-key",
+    "agent-proxy-auth": "agent-proxy-auth",
+    "worker-api-token": "worker-api-token",
+    "package-helper-grant-private-key": "package-helper-grant-private-key.pem",
+    "package-helper-receipt-private-key": "package-helper-receipt-private-key.pem",
+    "host-runtime-grant-private-key": "host-runtime-grant-private-key.pem",
+    "agent-ca-credential": "agent-ca-credential",
+    "agent-ca-provisioner-public-jwk": "agent-ca-provisioner-public-jwk",
+    "step-ca-root-certificate": "step-ca-root-certificate",
+    "step-ca-intermediate-key": "step-ca/intermediate-key",
+    "step-ca-password": "step-ca-password",
+}
+
+
+class BundleError(ValueError):
+    """The rendered release cannot become a NAS installer payload."""
+
+
+def _mapping(value: object, name: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise BundleError(f"Compose {name} must be a mapping")
+    return value
+
+
+def _read_compose(path: Path) -> dict[str, Any]:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise BundleError("Compose input is unavailable") from error
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_COMPOSE_BYTES:
+        raise BundleError("Compose input must be a bounded regular non-symlink file")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise BundleError("Compose input is unreadable or malformed") from error
+    return _mapping(document, "document")
+
+
+def _volume_source(volume: object) -> str | None:
+    if isinstance(volume, str):
+        fields = volume.split(":", 2)
+        return fields[0] if len(fields) > 1 else None
+    if isinstance(volume, dict) and volume.get("type") == "bind":
+        source = volume.get("source")
+        return source if isinstance(source, str) else ""
+    return None
+
+
+def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
+    if "include" in document or "name" in document:
+        raise BundleError(
+            "Compose must be flattened and must not declare a project name"
+        )
+    services = _mapping(document.get("services"), "services")
+    if set(services) != SERVICES:
+        raise BundleError(
+            "Compose service topology is not the canonical fresh-install graph"
+        )
+    for name, raw_service in services.items():
+        service = _mapping(raw_service, f"service {name}")
+        image = service.get("image")
+        if not isinstance(image, str) or PINNED_IMAGE.fullmatch(image) is None:
+            raise BundleError(
+                f"Compose service {name} does not use a digest-pinned image"
+            )
+        if any(key in service for key in ("build", "extends", "env_file")):
+            raise BundleError(
+                f"Compose service {name} depends on external build or env input"
+            )
+        if service.get("privileged") is True or service.get("network_mode") == "host":
+            raise BundleError(f"Compose service {name} has an unsafe host privilege")
+        profiles = service.get("profiles", [])
+        if profiles and (name != "hermes-agent" or profiles != ["hermes"]):
+            raise BundleError("Hermes must be the only optional Compose service")
+        volumes = service.get("volumes", [])
+        if not isinstance(volumes, list):
+            raise BundleError(f"Compose service {name} volumes are invalid")
+        for volume in volumes:
+            source = _volume_source(volume)
+            if (
+                source is not None
+                and (source.startswith((".", "/", "~")) or "/" in source)
+                and not (
+                    name == "step-ca" and source.startswith("${STEP_CA_CONFIG_FILE:")
+                )
+            ):
+                raise BundleError(
+                    f"Compose service {name} still contains a host bind mount"
+                )
+    if services["hermes-agent"].get("profiles") != ["hermes"]:
+        raise BundleError("Hermes must remain opt-in through its Compose profile")
+    return services
+
+
+def _materialize_relative_secret_paths(
+    document: dict[str, Any], services: dict[str, Any]
+) -> None:
+    secrets = _mapping(document.get("secrets"), "secrets")
+    if set(secrets) != set(SECRET_FILES):
+        raise BundleError("Compose secret topology is not canonical")
+    for name, relative in SECRET_FILES.items():
+        secret = _mapping(secrets[name], f"secret {name}")
+        if set(secret) != {"file"} or not isinstance(secret["file"], str):
+            raise BundleError(f"Compose secret {name} must be one file-backed secret")
+        secret["file"] = f"./secrets/{relative}"
+
+    step_ca = services["step-ca"]
+    rewritten = []
+    replacements = 0
+    for volume in step_ca.get("volumes", []):
+        if isinstance(volume, str) and volume.startswith("${STEP_CA_CONFIG_FILE:"):
+            if not volume.endswith("}:/home/step/config/ca.json:ro"):
+                raise BundleError("Step CA configuration mount is malformed")
+            rewritten.append("./secrets/step-ca/ca.json:/home/step/config/ca.json:ro")
+            replacements += 1
+        else:
+            rewritten.append(volume)
+    if replacements != 1:
+        raise BundleError("Step CA must have exactly one generated configuration mount")
+    step_ca["volumes"] = rewritten
+
+
+def _validate_embedded_configs(document: dict[str, Any]) -> None:
+    configs = _mapping(document.get("configs"), "configs")
+    if not configs:
+        raise BundleError("Compose has no embedded runtime assets")
+    for name, raw_config in configs.items():
+        config = _mapping(raw_config, f"config {name}")
+        if set(config) != {"content"} or not isinstance(config["content"], str):
+            raise BundleError(f"Compose config {name} is not embedded")
+
+
+def _required_value(
+    env: str, prompt: str, default: str | None = None
+) -> dict[str, object]:
+    return {"env": env, "prompt": prompt, "default": default}
+
+
+def _payload(document: dict[str, Any]) -> dict[str, object]:
+    services = _validate_services(document)
+    _validate_embedded_configs(document)
+    _materialize_relative_secret_paths(document, services)
+    compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+    return {
+        "schema_version": 2,
+        "docker_compose_yaml": compose,
+        "internal_values": [
+            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
+        ],
+        "required_values": [
+            _required_value("NAS_LAN_IP", "Reserved NAS LAN IP"),
+            _required_value("VONK_MANAGEMENT_CIDRS", "Trusted Spark management CIDRs"),
+            _required_value("VONK_DIRECT_FABRIC_CIDRS", "Direct GPU fabric CIDRs", ""),
+            _required_value("VONK_CONTROL_HOSTNAME", "Control hostname"),
+            _required_value("VONK_AGENT_ENROLL_HOSTNAME", "Agent enrollment hostname"),
+            _required_value("VONK_AGENT_HOSTNAME", "Agent controller hostname"),
+            _required_value("VONK_REGISTRY_HOSTNAME", "Registry hostname"),
+        ],
+        "secrets": [
+            {
+                "file": "tailscale-oauth-client-id",
+                "prompt": "Tailscale OAuth client ID",
+                "generate_bytes": None,
+            },
+            {
+                "file": "tailscale-oauth-client-secret",
+                "prompt": "Tailscale OAuth client secret",
+                "generate_bytes": None,
+            },
+            {
+                "file": "litellm-upstream-key",
+                "prompt": "LiteLLM upstream provider API key",
+                "generate_bytes": None,
+            },
+        ],
+        "generated_secrets": {
+            "random_text": [
+                {"file": name, "prompt": prompt, "bytes": 32}
+                for name, prompt in (
+                    ("postgres-password", "PostgreSQL control password"),
+                    ("litellm-database-password", "LiteLLM database password"),
+                    ("token-signing-key", "Controller token-signing key"),
+                    ("metrics-token", "Prometheus metrics token"),
+                    ("litellm-master-key", "LiteLLM administrator key"),
+                    ("grafana-admin-password", "Grafana administrator password"),
+                    ("agent-proxy-auth", "Internal agent proxy token"),
+                    ("worker-api-token", "Internal worker API token"),
+                    ("hermes-api-key", "Hermes API key"),
+                )
+            ],
+            "ed25519_pkcs8_pem": [
+                {"file": name, "prompt": prompt}
+                for name, prompt in (
+                    (
+                        "package-helper-grant-private-key.pem",
+                        "Workload package grant Ed25519 key",
+                    ),
+                    (
+                        "package-helper-receipt-private-key.pem",
+                        "Workload receipt Ed25519 key",
+                    ),
+                    (
+                        "host-runtime-grant-private-key.pem",
+                        "Host runtime grant Ed25519 key",
+                    ),
+                )
+            ],
+            "postgres_urls": [
+                {
+                    "file": "database-url",
+                    "password_file": "postgres-password",
+                    "scheme": "postgresql+psycopg",
+                    "username": "control",
+                    "host": "postgres",
+                    "port": 5432,
+                    "database": "control",
+                },
+                {
+                    "file": "litellm-database-url",
+                    "password_file": "litellm-database-password",
+                    "scheme": "postgresql",
+                    "username": "litellm",
+                    "host": "postgres",
+                    "port": 5432,
+                    "database": "litellm",
+                },
+            ],
+        },
+        "step_ca_controller": {
+            "prompt": "Step CA/controller PKI",
+            "hostname_envs": [
+                "VONK_CONTROL_HOSTNAME",
+                "VONK_AGENT_ENROLL_HOSTNAME",
+                "VONK_AGENT_HOSTNAME",
+                "VONK_REGISTRY_HOSTNAME",
+            ],
+            "provisioner_name": "vonk-forge-agent",
+            "kid_env": "AGENT_CA_PROVISIONER_KID",
+            "password_bytes": 32,
+            "files": {
+                "root_certificate": "step-ca/root-certificate",
+                "intermediate_certificate": "step-ca/intermediate-certificate",
+                "intermediate_private_key": "step-ca/intermediate-key",
+                "controller_ca_certificate": "controller-ca.pem",
+                "controller_server_certificate": "controller-server-certificate",
+                "controller_server_private_key": "controller-server-key",
+                "agent_client_ca_certificate": "agent-client-ca",
+                "agent_root_certificate": "step-ca-root-certificate",
+                "provisioner_private_jwk": "agent-ca-credential",
+                "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
+                "ca_config": "step-ca/ca.json",
+                "password": "step-ca-password",
+            },
+        },
+        "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable the optional Hermes agent?",
+            "enabled_value": "hermes",
+            "disabled_value": "",
+            "required_values": [
+                _required_value(
+                    "HERMES_DASHBOARD_ORIGIN", "Hermes dashboard HTTPS origin"
+                )
+            ],
+            "secrets": [],
+        },
+    }
+
+
+def build(compose: Path, output: Path) -> str:
+    if not output.parent.is_dir() or output.exists() or output.is_symlink():
+        raise BundleError("output must be a new file in an existing directory")
+    document = _read_compose(compose)
+    content = (
+        json.dumps(_payload(document), sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.", dir=output.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(0o644)
+        os.link(temporary, output)
+        directory = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except FileExistsError as error:
+        raise BundleError("output already exists") from error
+    finally:
+        temporary.unlink(missing_ok=True)
+    return hashlib.sha256(content).hexdigest()
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compose", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    return parser.parse_args()
+
+
+def main() -> None:
+    arguments = _arguments()
+    try:
+        digest = build(arguments.compose, arguments.output)
+    except (BundleError, OSError) as error:
+        print(f"build-nas-compose-bundle: {error}", file=sys.stderr)
+        raise SystemExit(2) from error
+    print(f"sha256:{digest}")
+
+
+if __name__ == "__main__":
+    main()
