@@ -73,6 +73,11 @@ jobs:
             control/tests/test_settings.py
           scripts/verify-public-image-inputs
 
+      - name: Set up ARM64 emulation
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -114,7 +119,7 @@ jobs:
           docker buildx build \
             --file control/Dockerfile \
             --target api \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             --output "type=oci,dest=$api_archive" \
             --sbom=true \
             --provenance=mode=max \
@@ -123,7 +128,7 @@ jobs:
           docker buildx build \
             --file deploy/compose/hermes-agent/Dockerfile \
             --target managed \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             --output "type=oci,dest=$hermes_archive" \
             --sbom=true \
             --provenance=mode=max \
@@ -132,7 +137,7 @@ jobs:
           docker buildx build \
             --file control/Dockerfile \
             --target worker \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             --output "type=oci,dest=$worker_archive" \
             --sbom=true \
             --provenance=mode=max \
@@ -478,6 +483,16 @@ jobs:
             observed=$(skopeo inspect --format '{{.Digest}}' \
               "docker://$image:${IMMUTABLE_TAG}")
             [[ "$observed" == "$digest" ]]
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .Manifest }}' \
+              | jq -e '
+                  ([.manifests[]? | select(
+                    .platform.os == "linux"
+                    and (.platform.architecture == "amd64"
+                         or .platform.architecture == "arm64")
+                  ) | .platform.architecture] | unique | sort)
+                  == ["amd64", "arm64"]
+                ' >/dev/null
             skopeo inspect --config "docker://$image@$digest" \
               | jq -e --arg revision "$GITHUB_SHA" \
                 '.config.Labels["org.opencontainers.image.revision"] == $revision' \

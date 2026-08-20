@@ -70,6 +70,11 @@ def development_step_run(step_name: str) -> str:
     return "\n".join(run_lines)
 
 
+def write_executable(path: Path, body: str) -> None:
+    path.write_text(f"#!/usr/bin/env bash\nset -euo pipefail\n{body}\n")
+    path.chmod(0o755)
+
+
 def release_expressions() -> dict[str, str]:
     digest = f"sha256:{'a' * 64}"
     return {
@@ -159,6 +164,68 @@ esac
         f"worker_digest={digest}",
         f"hermes_digest={digest}",
     ]
+
+
+def test_development_images_build_supported_linux_architectures(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker_log = tmp_path / "docker.log"
+    write_executable(
+        fake_bin / "docker",
+        'printf "%s\\n" "$*" >> "$DOCKER_LOG"',
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", development_step_run("Build exact OCI archives")],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "DOCKER_LOG": str(docker_log),
+            "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_SHA": "a" * 40,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    builds = docker_log.read_text().splitlines()
+    assert len(builds) == 3
+    assert all(line.startswith("buildx build ") for line in builds)
+    assert all("--platform linux/amd64,linux/arm64" in line for line in builds)
+    assert all("--output type=oci,dest=" in line for line in builds)
+
+
+def test_development_images_enable_arm64_emulation_before_building() -> None:
+    text = DEV_WORKFLOW.read_text()
+    setup = (
+        "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 "
+        "# v4.2.0"
+    )
+
+    assert setup in text
+    assert text.index(setup) < text.index("docker/setup-buildx-action@")
+    assert text.index(setup) < text.index("- name: Build exact OCI archives")
+    qemu = text[text.index(setup) : text.index("- name: Build exact OCI archives")]
+    assert "platforms: arm64" in qemu
+
+
+def test_development_image_publication_requires_both_platforms() -> None:
+    verification = development_step_run(
+        "Verify immutable manifests and attestations"
+    )
+
+    assert "--format '{{ json .Manifest }}'" in verification
+    assert '.platform.os == "linux"' in verification
+    assert '.platform.architecture == "amd64"' in verification
+    assert '.platform.architecture == "arm64"' in verification
+    assert '== ["amd64", "arm64"]' in verification
 
 
 def rendered_step_run(job_name: str, step_name: str) -> str:
