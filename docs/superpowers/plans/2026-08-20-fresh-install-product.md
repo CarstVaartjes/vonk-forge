@@ -17,6 +17,14 @@ installers. All legacy and alternate runtime paths are deleted.
 ## Program invariants
 
 - Development and production differ only in immutable artifact identities.
+- Each side has exactly one stable, no-argument entry point:
+  `curl -fsSL https://install.vonkforge.ai/nas | sh` and
+  `curl -fsSL https://install.vonkforge.ai/spark | sh`.
+- Each curl command resolves and verifies every artifact it needs, performs the
+  complete workflow, and exits with either a usable result or a specific error;
+  it never prints a required follow-up setup command.
+- Re-running the same curl command is the supported upgrade path. There is no
+  separate upgrade command or installer download step.
 - The NAS output contains `docker-compose.yaml`, `.env`, and `secrets/` only.
 - NAS preparation requires no Docker, root, Git, SSH, or NAS access.
 - Spark installation invokes privilege only after artifact verification.
@@ -173,11 +181,17 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: release workflows and artifact metadata
 
 - [ ] Build a secret-free canonical template containing no runtime subfolders.
+- [ ] Make the executable require no command-line arguments: resolve its
+      verified payload automatically, use the current directory as the output
+      parent, and infer fresh install versus upgrade from `./vonk-forge`.
 - [ ] Generate/import every required secret and coherent Step CA/controller PKI.
 - [ ] Prompt through `/dev/tty`, hide secret input, and reject symlinks or unsafe
       existing files.
 - [ ] Produce exactly `docker-compose.yaml`, `.env`, and `secrets/`.
-- [ ] Preserve site-local values during an explicit local upgrade.
+- [ ] Preserve site-local values when the same command detects and upgrades an
+      existing local bundle.
+- [ ] Reconcile newly required release inputs during upgrade without replacing
+      existing site identity or secret values.
 - [ ] Prove operation without Docker, sudo, Git, SSH, or network access after
       artifacts have been downloaded.
 
@@ -188,9 +202,12 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: GitHub Pages/release publication workflow
 - Test: bootstrap shell tests and end-to-end artifact verification
 
-- [ ] Resolve channel/version and supported workstation platform.
+- [ ] With no arguments or environment setup, prompt for channel and optional
+      exact version, then resolve the supported workstation platform.
 - [ ] Download and verify the signed manifest and setup executable.
 - [ ] Execute as the caller and preserve interactive `/dev/tty` input.
+- [ ] Complete by creating or upgrading `./vonk-forge`; do not require a second
+      command, manually supplied payload, checksum file, or extracted archive.
 - [ ] Fail closed on unsupported systems, stale manifests, digest mismatches, or
       missing signatures.
 - [ ] Publish at `https://install.vonkforge.ai/nas`.
@@ -202,10 +219,15 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: Debian repository/release workflows
 - Test: amd64 and arm64 package installation/upgrade tests
 
-- [ ] Resolve and verify an immutable package before privilege escalation.
+- [ ] With no arguments or environment setup, prompt for channel and optional
+      exact version and resolve and verify an immutable package before
+      privilege escalation.
 - [ ] Invoke sudo only for package/repository installation and service control.
 - [ ] Pair on first install and verify controller-observed identity.
 - [ ] Upgrade directly on subsequent runs while preserving identity.
+- [ ] Complete first install or upgrade, pairing when needed, service start, and
+      local/controller verification in this one invocation; print no required
+      follow-up command.
 - [ ] Publish at `https://install.vonkforge.ai/spark`.
 
 ### Task 12: Make release publication atomic and required
@@ -230,7 +252,10 @@ installers. All legacy and alternate runtime paths are deleted.
 - Create: `tests/acceptance/test_spark_lifecycle.py`
 - Create: CI and canary environment definitions
 
-- [ ] Generate the NAS directory from the published curl path.
+- [ ] Invoke each literal no-argument curl command in a clean shell and reject
+      any flow that needs a second setup command or unpublished input.
+- [ ] Generate the NAS directory from the published curl path in an ordinary
+      non-root workstation environment without Docker, Git, SSH, or NAS access.
 - [ ] Start an empty Docker 29.4.3 / Compose 5.1.3 project and require every
       service healthy with no warnings or exited containers.
 - [ ] Verify PostgreSQL, LiteLLM, controller TLS, Tailscale browser URL,
