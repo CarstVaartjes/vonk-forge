@@ -82,7 +82,7 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    secrets: [package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - workload-tuf-publication:/workload-tuf
@@ -142,7 +142,6 @@ services:
     user: "1000:1000"
     secrets: []
     volumes:
-      - ${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}:/home/step/config/ca.json:ro
       - step-ca-data:/home/step
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
@@ -349,6 +348,8 @@ secrets:
     file: "${STEP_CA_INTERMEDIATE_KEY_FILE:?set encrypted step-ca intermediate signing key secret file}"
   step-ca-password:
     file: "${STEP_CA_PASSWORD_FILE:?set step-ca password secret file}"
+  step-ca-config:
+    file: "${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}"
 
 networks:
   ingress: {}

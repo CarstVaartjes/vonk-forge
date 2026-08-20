@@ -153,9 +153,12 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         secret["file"].startswith("./secrets/") and "${" not in secret["file"]
         for secret in compose["secrets"].values()
     )
-    assert (
-        "./secrets/step-ca/ca.json:/home/step/config/ca.json:ro"
-        in compose["services"]["step-ca"]["volumes"]
+    assert compose["secrets"]["step-ca-config"]["file"] == (
+        "./secrets/step-ca/ca.json"
+    )
+    assert all(
+        "STEP_CA_CONFIG_FILE" not in str(volume)
+        for volume in compose["services"]["step-ca"]["volumes"]
     )
     assert "control-secret-init" not in compose_text
     assert "/repository" not in compose_text

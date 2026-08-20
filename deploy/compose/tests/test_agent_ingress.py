@@ -954,7 +954,16 @@ def test_step_ca_waits_for_api_staged_secrets_without_a_dependency_cycle() -> No
     assert "step-ca" not in rendered["services"]["control-api"].get("depends_on", {})
     targets = {volume["target"]: volume for volume in service["volumes"]}
     assert targets["/home/step"]["source"] == "step-ca-data"
+    assert targets["/run/vonk-normalized-secrets"]["source"] == (
+        "normalized-private-keys"
+    )
+    assert targets["/run/vonk-normalized-secrets"]["read_only"] is True
     assert "/home/step/db" not in targets
+    assert all(volume.get("type") != "bind" for volume in service["volumes"])
+    assert "step-ca-config" in {
+        secret["source"]
+        for secret in rendered["services"]["control-api"]["secrets"]
+    }
     assert "https://step-ca:9000" in service["healthcheck"]["test"]
     assert "https://127.0.0.1:9000" not in service["healthcheck"]["test"]
 

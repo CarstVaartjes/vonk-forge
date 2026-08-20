@@ -60,6 +60,7 @@ SECRET_FILES = {
     "step-ca-root-certificate": "step-ca-root-certificate",
     "step-ca-intermediate-key": "step-ca/intermediate-key",
     "step-ca-password": "step-ca-password",
+    "step-ca-config": "step-ca/ca.json",
 }
 
 
@@ -131,9 +132,6 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
             if (
                 source is not None
                 and (source.startswith((".", "/", "~")) or "/" in source)
-                and not (
-                    name == "step-ca" and source.startswith("${STEP_CA_CONFIG_FILE:")
-                )
             ):
                 raise BundleError(
                     f"Compose service {name} still contains a host bind mount"
@@ -143,9 +141,7 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
     return services
 
 
-def _materialize_relative_secret_paths(
-    document: dict[str, Any], services: dict[str, Any]
-) -> None:
+def _materialize_relative_secret_paths(document: dict[str, Any]) -> None:
     secrets = _mapping(document.get("secrets"), "secrets")
     if set(secrets) != set(SECRET_FILES):
         raise BundleError("Compose secret topology is not canonical")
@@ -154,21 +150,6 @@ def _materialize_relative_secret_paths(
         if set(secret) != {"file"} or not isinstance(secret["file"], str):
             raise BundleError(f"Compose secret {name} must be one file-backed secret")
         secret["file"] = f"./secrets/{relative}"
-
-    step_ca = services["step-ca"]
-    rewritten = []
-    replacements = 0
-    for volume in step_ca.get("volumes", []):
-        if isinstance(volume, str) and volume.startswith("${STEP_CA_CONFIG_FILE:"):
-            if not volume.endswith("}:/home/step/config/ca.json:ro"):
-                raise BundleError("Step CA configuration mount is malformed")
-            rewritten.append("./secrets/step-ca/ca.json:/home/step/config/ca.json:ro")
-            replacements += 1
-        else:
-            rewritten.append(volume)
-    if replacements != 1:
-        raise BundleError("Step CA must have exactly one generated configuration mount")
-    step_ca["volumes"] = rewritten
 
 
 def _validate_embedded_configs(document: dict[str, Any]) -> None:
@@ -188,9 +169,9 @@ def _required_value(
 
 
 def _payload(document: dict[str, Any]) -> dict[str, object]:
-    services = _validate_services(document)
+    _validate_services(document)
     _validate_embedded_configs(document)
-    _materialize_relative_secret_paths(document, services)
+    _materialize_relative_secret_paths(document)
     compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     return {
         "schema_version": 2,

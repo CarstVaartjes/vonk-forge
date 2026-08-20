@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 
 import pytest
+from vonk_control import runtime_init
 from vonk_control.runtime_init import (
     RuntimeSecretError,
     SharedRuntimePaths,
     prepare_shared_volumes,
+    stage_compose_secrets,
     stage_private_key,
 )
 
@@ -47,6 +49,37 @@ def test_staged_api_private_key_is_owned_by_the_api_and_private(
     )
 
     assert destination.stat().st_mode & 0o777 == 0o400
+
+
+def test_compose_secret_staging_gives_step_ca_its_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staged: list[tuple[Path, Path, int, int, int]] = []
+
+    def record(
+        source: Path,
+        destination: Path,
+        *,
+        owner_uid: int = 0,
+        owner_gid: int = 0,
+        mode: int = 0o444,
+    ) -> Path:
+        staged.append((source, destination, owner_uid, owner_gid, mode))
+        return destination
+
+    monkeypatch.setattr(runtime_init, "stage_private_key", record)
+    source = tmp_path / "source"
+    destination = tmp_path / "normalized"
+
+    stage_compose_secrets(source, destination)
+
+    assert (
+        source / "step-ca-config",
+        destination / "step-ca" / "ca.json",
+        1000,
+        1000,
+        0o400,
+    ) in staged
 
 
 def test_shared_volume_preparation_preserves_each_consumer_boundary(

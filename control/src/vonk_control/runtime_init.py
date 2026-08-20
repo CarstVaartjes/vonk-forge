@@ -198,6 +198,13 @@ def stage_compose_secrets(
                 owner_gid=1000,
                 mode=0o400,
             )
+    stage_private_key(
+        source_root / "step-ca-config",
+        destination_root / "step-ca" / "ca.json",
+        owner_uid=1000,
+        owner_gid=1000,
+        mode=0o400,
+    )
 
 
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
