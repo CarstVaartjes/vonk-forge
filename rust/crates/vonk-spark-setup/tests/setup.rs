@@ -160,13 +160,20 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
         sudo[0]
             .args
             .iter()
-            .any(|argument| argument.ends_with("vonk-agent-upgrade"))
+            .any(|argument| argument == "/usr/bin/dpkg")
     );
     assert!(
         sudo[0]
             .args
             .iter()
             .any(|argument| argument.ends_with("vonk-forge-agent_1.0.0_amd64.deb"))
+    );
+    assert!(
+        sudo.iter().all(|command| !command
+            .args
+            .iter()
+            .any(|argument| argument.ends_with("vonk-agent-upgrade"))),
+        "a fresh install cannot invoke a helper that is not installed yet"
     );
     assert!(sudo.iter().any(|command| {
         command
@@ -311,23 +318,29 @@ fn packaged_placeholder_configuration_retries_the_fresh_pairing_flow() {
 
     assert!(result.is_ok(), "{result:?}");
     assert!(runner.commands[0].program.ends_with("curl"));
-    let pair = runner
-        .commands
-        .iter()
-        .position(|command| command.args.iter().any(|argument| argument == "pair"))
-        .unwrap();
-    let upgrade = runner
+    let install = runner
         .commands
         .iter()
         .position(|command| {
             command
                 .args
                 .iter()
-                .any(|argument| argument.ends_with("vonk-agent-upgrade"))
+                .any(|argument| argument == "/usr/bin/dpkg")
         })
         .unwrap();
+    let pair = runner
+        .commands
+        .iter()
+        .position(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
     assert!(
-        pair < upgrade,
-        "an interrupted stock install must pair before its retry upgrade"
+        install < pair,
+        "an interrupted stock install must install the verified package before pairing"
     );
+    assert!(runner.commands.iter().all(|command| {
+        !command
+            .args
+            .iter()
+            .any(|argument| argument.ends_with("vonk-agent-upgrade"))
+    }));
 }

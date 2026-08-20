@@ -43,7 +43,7 @@ trap cleanup EXIT HUP INT TERM
 
 artifact="$temporary/vonk-${kind}-setup"
 url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
-package="$temporary/vonk-forge-agent.deb"
+package="$temporary/vonk-forge-agent_0.0.0_${architecture}.deb"
 package_url="$base_url/$kind/current/$platform-$architecture/vonk-forge-agent.deb"
 
 curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$artifact" || fail "cannot download the setup program"

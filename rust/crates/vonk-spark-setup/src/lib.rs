@@ -180,8 +180,9 @@ pub fn run_setup(
             )),
         )
         .map(|_| ()),
-        InstallState::Fresh => fresh_setup(request, paths, prompt, runner, &staged, true),
-        InstallState::Placeholder => fresh_setup(request, paths, prompt, runner, &staged, false),
+        InstallState::Fresh | InstallState::Placeholder => {
+            fresh_setup(request, paths, prompt, runner, &staged)
+        }
     }
 }
 
@@ -191,7 +192,6 @@ fn fresh_setup(
     prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
-    install_before_pair: bool,
 ) -> Result<(), SetupError> {
     let enrollment = required_origin(prompt, "Enrollment URL")?;
     let controller = required_origin(prompt, "Controller URL")?;
@@ -225,9 +225,7 @@ fn fresh_setup(
     .stdout;
     verify_ca(&ca, &ca_sha256)?;
 
-    if install_before_pair {
-        install_package(request, paths, runner, staged)?;
-    }
+    install_fresh_package(runner, staged)?;
 
     let config = GeneratedConfig {
         enrollment_url: enrollment,
@@ -266,9 +264,6 @@ fn fresh_setup(
     )
     .with_stdin(format!("{pairing_token}\n").into_bytes());
     run_checked(runner, sudo(pair))?;
-    if !install_before_pair {
-        return install_package(request, paths, runner, staged);
-    }
     run_checked(
         runner,
         sudo(Command::new(
@@ -290,21 +285,15 @@ fn fresh_setup(
     verify_sustained_readiness(paths, runner)
 }
 
-fn install_package(
-    request: &SetupRequest,
-    paths: &InstallPaths,
+fn install_fresh_package(
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
     run_checked(
         runner,
         sudo(Command::new(
-            &paths.upgrade,
-            [
-                "install-local".to_owned(),
-                staged.path().display().to_string(),
-                request.expected_sha256.clone(),
-            ],
+            "/usr/bin/dpkg",
+            ["--install".to_owned(), staged.path().display().to_string()],
         )),
     )
     .map(|_| ())
