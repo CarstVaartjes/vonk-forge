@@ -123,7 +123,6 @@ if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
     if [ -n "${2:-}" ]; then
         deb-systemd-invoke restart vonk-forge-agent.service >/dev/null
-        systemctl --system is-active --quiet vonk-forge-agent.service
         /usr/lib/vonk-forge/vonk-agent \
             --config /etc/vonk-forge-agent/agent.toml self-test >/dev/null
     fi

@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/agent-apt-state"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-PACKAGE_SHA = hashlib.sha256(b"package bytes").hexdigest()
+PACKAGE_BYTES = {"amd64": b"amd64 package bytes", "arm64": b"arm64 package bytes"}
 
 
 def load_state_module() -> ModuleType:
@@ -121,36 +121,72 @@ class FakeR2:
             self.objects[key] = data
 
 
-def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, str]:
+def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, object]:
     return {
         "channel": "dev",
         "distribution": "dev",
-        "package": f"vonk-forge-agent_{version}_arm64.deb",
-        "package_sha256": PACKAGE_SHA,
+        "packages": {
+            architecture: {
+                "filename": f"vonk-forge-agent_{version}_{architecture}.deb",
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for architecture, content in PACKAGE_BYTES.items()
+        },
         "snapshot": f"dev-{version}",
         "source_sha": SHA,
         "version": version,
     }
 
 
-def bundles(tmp_path: Path, publication: dict[str, str]) -> tuple[bytes, bytes]:
+def test_publication_receipt_binds_both_architecture_packages() -> None:
+    state = load_state_module()
+    version = "0.1.0~dev.1786300000+g0123456789ab"
+    publication = {
+        "channel": "dev",
+        "distribution": "dev",
+        "packages": {
+            "amd64": {
+                "filename": f"vonk-forge-agent_{version}_amd64.deb",
+                "sha256": "a" * 64,
+            },
+            "arm64": {
+                "filename": f"vonk-forge-agent_{version}_arm64.deb",
+                "sha256": "b" * 64,
+            },
+        },
+        "snapshot": f"dev-{version}",
+        "source_sha": SHA,
+        "version": version,
+    }
+
+    assert state._validate_receipt(publication) == publication
+
+
+def bundles(tmp_path: Path, publication: dict[str, object]) -> tuple[bytes, bytes]:
     state = load_state_module()
     aptly = tmp_path / "aptly"
     aptly.mkdir()
     (aptly / "db").write_bytes(b"trusted aptly database")
     public = tmp_path / "public"
-    (public / "dists/dev/main/binary-arm64").mkdir(parents=True)
-    (public / "dists/dev/main/binary-arm64/Packages").write_bytes(b"package index")
-    (public / "dists/dev/main/binary-arm64/Packages.gz").write_bytes(
-        b"compressed package index"
-    )
+    for architecture in PACKAGE_BYTES:
+        index = public / f"dists/dev/main/binary-{architecture}"
+        index.mkdir(parents=True)
+        (index / "Packages").write_bytes(f"{architecture} package index".encode())
+        (index / "Packages.gz").write_bytes(
+            f"compressed {architecture} package index".encode()
+        )
     (public / "dists/dev/Release").write_bytes(b"release metadata")
     (public / "dists/dev/Release.gpg").write_bytes(b"detached signature")
     (public / "dists/dev/InRelease").write_bytes(b"signed-at-t1")
     (public / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
-    package = public / "pool/main/v/vonk-forge-agent" / publication["package"]
-    package.parent.mkdir(parents=True)
-    package.write_bytes(b"package bytes")
+    package_root = public / "pool/main/v/vonk-forge-agent"
+    package_root.mkdir(parents=True)
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    for architecture, content in PACKAGE_BYTES.items():
+        package = packages[architecture]
+        assert isinstance(package, dict)
+        (package_root / package["filename"]).write_bytes(content)
     return (
         state.build_bundle(aptly, "state", publication),
         state.build_bundle(public, "public", publication),
@@ -386,9 +422,14 @@ def test_equal_replay_publishes_persisted_public_bytes_without_regeneration(
     (regenerated / "dists/dev/Release.gpg").write_bytes(b"detached signature at t2")
     (regenerated / "dists/dev/InRelease").write_bytes(b"signed-at-t2")
     (regenerated / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
-    package = regenerated / "pool/main/v/vonk-forge-agent" / publication["package"]
-    package.parent.mkdir(parents=True)
-    package.write_bytes(b"package bytes")
+    package_root = regenerated / "pool/main/v/vonk-forge-agent"
+    package_root.mkdir(parents=True)
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    for architecture, content in PACKAGE_BYTES.items():
+        package = packages[architecture]
+        assert isinstance(package, dict)
+        (package_root / package["filename"]).write_bytes(content)
     assert state.build_bundle(regenerated, "public", publication) != public_bundle
 
     state.publish_committed(private, public, publication)
@@ -422,7 +463,11 @@ def test_public_failure_does_not_advance_latest_and_exact_retry_completes(
 def test_public_bundle_binds_the_exact_verified_package_hash(tmp_path: Path) -> None:
     state = load_state_module()
     publication = receipt()
-    publication["package_sha256"] = "b" * 64
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    arm64 = packages["arm64"]
+    assert isinstance(arm64, dict)
+    arm64["sha256"] = "b" * 64
 
     with pytest.raises(state.StateError, match="public package hash"):
         bundles(tmp_path, publication)

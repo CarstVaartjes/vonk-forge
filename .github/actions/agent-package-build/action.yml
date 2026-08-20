@@ -1,5 +1,5 @@
-name: Native agent package acceptance
-description: Build, lifecycle-test, sign, attest, and upload one accepted package
+name: ARM64-native agent package build and acceptance
+description: Build, sign, attest, and upload AMD64 and ARM64 packages with native ARM64 lifecycle acceptance
 
 inputs:
   channel:
@@ -14,8 +14,11 @@ inputs:
   next_version:
     description: Next version used by lifecycle upgrade checks
     required: true
-  package:
-    description: Exact Debian package filename
+  arm64_package:
+    description: Exact ARM64 Debian package filename
+    required: true
+  amd64_package:
+    description: Exact AMD64 Debian package filename
     required: true
   artifact_name:
     description: Immutable GitHub Actions artifact name
@@ -43,9 +46,12 @@ outputs:
   version:
     description: Accepted Debian package version
     value: ${{ steps.accepted.outputs.version }}
-  package:
-    description: Accepted Debian package filename
-    value: ${{ steps.accepted.outputs.package }}
+  arm64_package:
+    description: Accepted ARM64 Debian package filename
+    value: ${{ steps.accepted.outputs.arm64_package }}
+  amd64_package:
+    description: Accepted AMD64 Debian package filename
+    value: ${{ steps.accepted.outputs.amd64_package }}
   artifact_name:
     description: Immutable Actions artifact name
     value: ${{ steps.accepted.outputs.artifact_name }}
@@ -67,7 +73,8 @@ runs:
       env:
         ARTIFACT_NAME: ${{ inputs.artifact_name }}
         CHANNEL: ${{ inputs.channel }}
-        PACKAGE: ${{ inputs.package }}
+        ARM64_PACKAGE: ${{ inputs.arm64_package }}
+        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
         NEXT_VERSION: ${{ inputs.next_version }}
@@ -96,13 +103,15 @@ runs:
         actual=$(printf '%s\n' \
           "version=$VERSION" \
           "next_version=$NEXT_VERSION" \
-          "package=$PACKAGE" \
+          "arm64_package=$ARM64_PACKAGE" \
+          "amd64_package=$AMD64_PACKAGE" \
           "artifact_name=$ARTIFACT_NAME" \
           "channel=$CHANNEL" \
           "snapshot=$CHANNEL-$VERSION")
         test "$actual" = "$expected"
-        printf 'version=%s\npackage=%s\nartifact_name=%s\n' \
-          "$VERSION" "$PACKAGE" "$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+        printf 'version=%s\narm64_package=%s\namd64_package=%s\nartifact_name=%s\n' \
+          "$VERSION" "$ARM64_PACKAGE" "$AMD64_PACKAGE" "$ARTIFACT_NAME" \
+          >> "$GITHUB_OUTPUT"
 
     - name: Install pinned Rust toolchain
       shell: bash
@@ -391,7 +400,6 @@ runs:
       shell: bash
       env:
         CHANNEL: ${{ inputs.channel }}
-        PACKAGE: ${{ inputs.package }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
@@ -446,7 +454,12 @@ runs:
     - name: Attest package provenance
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
       with:
-        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_*.deb
+        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.deb
+
+    - name: Attest amd64 package provenance
+      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      with:
+        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.deb
 
     - name: Revalidate source before SBOM attestation
       shell: bash
@@ -480,7 +493,7 @@ runs:
     - name: Attest package SBOM
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
       with:
-        subject-path: dist/${{ inputs.package }}
+        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.deb
         sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.sbom.spdx.json
 
     - name: Attest amd64 package SBOM

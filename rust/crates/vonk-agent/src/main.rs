@@ -12,7 +12,7 @@ use url::Url;
 use vonk_agent::{
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
-    executor::{LoopError, RecipeExecutor, run_once},
+    executor::{LoopError, RecipeExecutor, run_once_with_claim_hook},
     inventory::InventoryCollector,
     oci::OciRuntime,
     pair::{EnrollmentOutcome, collect_evidence, pair},
@@ -243,22 +243,25 @@ async fn run_control_lane(
                     ObservationFailureAction::Stop => return Err(LoopError::Client(error)),
                 },
             }
-            run_once(
+            run_once_with_claim_hook(
                 &client,
                 &mut state,
                 &executor,
                 &capabilities,
                 wait_seconds,
                 Some(&runtime_identity),
+                || {
+                    publish_current(
+                        Path::new("/run/vonk-forge-agent/readiness.json"),
+                        &runtime_identity,
+                    )
+                    .map_err(|error| LoopError::Readiness(error.to_string()))
+                },
             )
             .await
         };
         match operation.await {
             Ok(()) => {
-                publish_current(
-                    Path::new("/run/vonk-forge-agent/readiness.json"),
-                    &runtime_identity,
-                )?;
                 failures = 0;
             }
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>

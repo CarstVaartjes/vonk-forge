@@ -11,7 +11,7 @@ fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
         semantic_version: "0.1.0".to_owned(),
         build_digest: format!("sha256:{}", build.to_string().repeat(64)),
         binary_digest: binary.to_string().repeat(64),
-        architecture: "linux-x86_64".to_owned(),
+        architecture: "linux-amd64".to_owned(),
         self_test_passed: true,
     }
 }

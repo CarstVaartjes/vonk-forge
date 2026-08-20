@@ -54,13 +54,24 @@ cat > "$bin/dpkg" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'dpkg %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
-[[ "$*" == '--configure -a' ]]
+case "$*" in
+  '--configure -a') ;;
+  '--install '*)
+    "${WRITE_UPGRADED_AGENT:?}" "${UPGRADED_VERSION:-1.1.0}" "${UPGRADED_HEALTH:-yes}"
+    ;;
+  *) exit 2 ;;
+esac
 FAKE
 cat > "$bin/dpkg-query" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'dpkg-query %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
-printf '%s\n' "${PACKAGE_VERSION:-1.1.0+build.7}"
+if [[ "$*" == *'${db:Status-Status}'* ]]; then
+  [[ "${PACKAGE_NOT_INSTALLED:-no}" != yes ]]
+  printf 'installed\n'
+else
+  printf '%s\n' "${PACKAGE_VERSION:-1.1.0+build.7}"
+fi
 FAKE
 cat > "$bin/systemctl" <<'FAKE'
 #!/usr/bin/env bash
@@ -114,14 +125,14 @@ common_environment=(
 
 # There is intentionally no old agent: package repair must happen before the
 # wrapper requires the atomically installed replacement.
-env "${common_environment[@]}" "$script" > "$test_root/output"
+env "${common_environment[@]}" "$script" apt > "$test_root/output"
 
 test "$(sed -n '/apt-get --fix-broken install --yes/=' "$log")" -lt \
   "$(sed -n '/apt-get install --only-upgrade --yes/=' "$log")"
 test "$(sed -n '/dpkg --configure -a/=' "$log")" -lt \
   "$(sed -n '/apt-get install --only-upgrade --yes/=' "$log")"
 grep -Fxq 'apt-get update' "$log"
-grep -Fxq 'systemctl restart vonk-forge-agent.service' "$log"
+! grep -Fq 'systemctl restart' "$log"
 test "$(grep -Fc 'systemctl is-active --quiet vonk-forge-agent.service' "$log")" = 3
 test "$(grep -Fc 'agent --config ' "$log")" = 4
 grep -Fq ' self-test' "$log"
@@ -130,7 +141,7 @@ grep -Fq 'upgrade complete: vonk-agent 1.1.0 is healthy' "$test_root/output"
 ! grep -Eiq 'supervisor|slot|activate|bootstrap' "$log" "$test_root/output"
 
 if env "${common_environment[@]}" UPGRADED_HEALTH=no \
-  "$script" > "$test_root/unhealthy-output" 2>&1
+  "$script" apt > "$test_root/unhealthy-output" 2>&1
 then
   printf '%s\n' 'upgrade accepted an agent without controller readiness' >&2
   exit 1
@@ -141,7 +152,7 @@ grep -Fq 'controller readiness receipt was not sustained' \
 
 : > "$test_root/systemctl-state"
 if env "${common_environment[@]}" CHURN_PID=yes \
-  "$script" > "$test_root/churn-output" 2>&1
+  "$script" apt > "$test_root/churn-output" 2>&1
 then
   printf '%s\n' 'upgrade accepted health across different service processes' >&2
   exit 1
@@ -149,12 +160,81 @@ fi
 grep -Fq 'controller readiness receipt was not sustained' "$test_root/churn-output"
 
 if env "${common_environment[@]}" PACKAGE_VERSION=1.2.0 \
-  "$script" > "$test_root/version-output" 2>&1
+  "$script" apt > "$test_root/version-output" 2>&1
 then
   printf '%s\n' 'upgrade accepted a package/binary semantic mismatch' >&2
   exit 1
 fi
 grep -Fq 'does not match package semantic version 1.2.0' \
   "$test_root/version-output"
+
+# The curl-installer trust boundary is explicit: download and signature
+# verification happen as the caller, then this root phase accepts only a local
+# package and performs no network or package-index repair.
+: > "$log"
+local_package="$test_root/vonk-forge-agent_1.1.0_arm64.deb"
+: > "$local_package"
+local_sha256=$(sha256sum "$local_package" | cut -d' ' -f1)
+env "${common_environment[@]}" "$script" install-local "$local_package" \
+  "$local_sha256" \
+  > "$test_root/local-output"
+grep -Fxq "dpkg --install $local_package" "$log"
+test "$(sed -n '/dpkg --configure -a/=' "$log")" -lt \
+  "$(sed -n '/dpkg --install/=' "$log")"
+! grep -Eq '^apt-get ' "$log"
+grep -Fq 'upgrade complete: vonk-agent 1.1.0 is healthy' \
+  "$test_root/local-output"
+
+# Controller unavailability is reported only after dpkg has successfully
+# installed/configured the verified package, so package-manager state remains
+# repairable and is never poisoned by a maintainer-script network gate.
+: > "$log"
+if env "${common_environment[@]}" UPGRADED_HEALTH=no \
+  "$script" install-local "$local_package" "$local_sha256" \
+  > "$test_root/local-controller-down-output" 2>&1
+then
+  printf '%s\n' 'local upgrade accepted unavailable controller readiness' >&2
+  exit 1
+fi
+grep -Fxq "dpkg --install $local_package" "$log"
+test "$(UPGRADE_ACTION_LOG="$log" \
+  "$root/usr/lib/vonk-forge/vonk-agent" --version)" = \
+  'vonk-agent 1.1.0'
+grep -Fq 'controller readiness receipt was not sustained' \
+  "$test_root/local-controller-down-output"
+
+if env "${common_environment[@]}" "$script" install-local \
+  'https://packages.invalid/agent.deb' "$local_sha256" \
+  > "$test_root/url-output" 2>&1
+then
+  printf '%s\n' 'local install accepted a network URL' >&2
+  exit 1
+fi
+grep -Fq 'local package' "$test_root/url-output"
+
+if env "${common_environment[@]}" "$script" install-local "$local_package" \
+  "$(printf 'f%.0s' {1..64})" > "$test_root/digest-output" 2>&1
+then
+  printf '%s\n' 'local install accepted bytes outside the caller-verified digest' >&2
+  exit 1
+fi
+grep -Fq 'SHA-256 changed' "$test_root/digest-output"
+
+: > "$log"
+env "${common_environment[@]}" PACKAGE_NOT_INSTALLED=yes \
+  "$script" install-local "$local_package" "$local_sha256" \
+  > "$test_root/fresh-output"
+grep -Fq 'pair the agent before starting the service' "$test_root/fresh-output"
+! grep -Eq '^systemctl ' "$log"
+! grep -Fq 'self-test' "$log"
+! grep -Fq 'verify-readiness' "$log"
+
+if env "${common_environment[@]}" "$script" > "$test_root/usage-output" 2>&1
+then
+  printf '%s\n' 'upgrade wrapper accepted an ambiguous default mode' >&2
+  exit 1
+fi
+grep -Fq 'install-local' "$test_root/usage-output"
+grep -Fq 'apt' "$test_root/usage-output"
 
 printf 'vonk-agent direct upgrade wrapper: PASS\n'

@@ -46,7 +46,8 @@ def test_development_metadata_emits_canonical_debian_outputs() -> None:
     assert result.stdout.splitlines() == [
         "version=0.1.0~dev.417+g0123456789ab",
         "next_version=0.1.0~dev.418+g0123456789ab",
-        "package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
+        "arm64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
+        "amd64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_amd64.deb",
         f"artifact_name=vonk-agent-development-{SHA}",
         "channel=dev",
         "snapshot=dev-0.1.0~dev.417+g0123456789ab",
@@ -60,7 +61,8 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
     assert result.stdout.splitlines() == [
         "version=0.1.0",
         "next_version=0.1.0+lifecycle.1",
-        "package=vonk-forge-agent_0.1.0_arm64.deb",
+        "arm64_package=vonk-forge-agent_0.1.0_arm64.deb",
+        "amd64_package=vonk-forge-agent_0.1.0_amd64.deb",
         f"artifact_name=vonk-agent-production-{SHA}",
         "channel=stable",
         "snapshot=stable-0.1.0",

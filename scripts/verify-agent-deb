@@ -224,13 +224,22 @@ def _verify_control(control: Path) -> None:
         "usermod --add-subgids",
         "deb-systemd-helper enable vonk-forge-agent.service",
         "deb-systemd-invoke restart vonk-forge-agent.service",
-        "systemctl --system is-active --quiet vonk-forge-agent.service",
         "--config /etc/vonk-forge-agent/agent.toml self-test",
         "daemon-reload",
     ):
         if required not in postinst:
             raise VerificationError("postinst lifecycle is incomplete")
-    if "supervisor" in postinst or "/var/lib/vonk-forge/slots" in postinst:
+    if any(
+        forbidden in postinst
+        for forbidden in (
+            "supervisor",
+            "/var/lib/vonk-forge/slots",
+            "verify-readiness",
+            "readiness.json",
+            "--property MainPID",
+            " is-active ",
+        )
+    ):
         raise VerificationError("postinst contains obsolete agent lifecycle state")
     preinst = (control / "preinst").read_text(encoding="utf-8")
     for required in ("dpkg --compare-versions", "refusing downgrade"):

@@ -174,6 +174,23 @@ def main(argv: list[str] | None = None) -> int:
                 raise BuildError("release evidence locators overlap")
             seen_locators.add(locator)
             _bind_agent_package(release_input, evidence)
+        expected_agent_package_locators = {
+            "agent_packages.linux-arm64",
+            "agent_packages.linux-amd64",
+        }
+        declared_agent_package_locators = {
+            f"agent_packages.{item.get('architecture')}"
+            for item in release_input.get("agent_packages", [])
+            if isinstance(item, dict)
+        }
+        evidence_agent_package_locators = {
+            locator for locator in seen_locators if locator.startswith("agent_packages.")
+        }
+        if declared_agent_package_locators and (
+            declared_agent_package_locators != expected_agent_package_locators
+            or evidence_agent_package_locators != expected_agent_package_locators
+        ):
+            raise BuildError("release requires CI evidence for both agent package architectures")
         document = release_input | {"deployment_bundle": bundle}
         raw = _canonical(document)
         try:

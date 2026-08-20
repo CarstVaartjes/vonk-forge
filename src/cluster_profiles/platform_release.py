@@ -16,7 +16,6 @@ from jsonschema import ValidationError, validators
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _DIGEST = re.compile(r"sha256:([0-9a-f]{64})\Z")
-_RAW_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _VERSIONED_TARGET = re.compile(
     r"platform/releases/"
     r"(?P<version>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))/"
@@ -69,16 +68,6 @@ class DebianPackage:
 
 
 @dataclass(frozen=True)
-class ArchitectureArtifact:
-    architecture: str
-    artifact: Artifact
-    payload_name: str
-    payload_sha256: str
-    payload_size: int
-    protocol: ProtocolRange | None = None
-
-
-@dataclass(frozen=True)
 class ControlRelease:
     config_version: int
     protocol: ProtocolRange
@@ -89,9 +78,7 @@ class ControlRelease:
 
 @dataclass(frozen=True)
 class DatabaseRelease:
-    expand_revision: str
-    contract_revision: str | None
-    predecessor_compatible: bool
+    revision: str
 
 
 @dataclass(frozen=True)
@@ -106,70 +93,13 @@ class OciDeploymentBundle:
 
 
 @dataclass(frozen=True)
-class AuthorizedPredecessor:
-    target_name: str
-    target_sha256: str
-    release_digest: str
-    build_digest: str
-    deployment_bundle_digest: str
-
-
-@dataclass(frozen=True)
-class PlatformIdentity:
-    platform_version: str
-    platform_target_name: str
-    platform_target_sha256: str
-    release_digest: str
-    build_digest: str
-    deployment_bundle_digest: str
-    architecture: str
-    control_api_protocol: int
-    agent_protocol: int
-
-    def __post_init__(self) -> None:
-        _semantic_version(self.platform_version)
-        target = _VERSIONED_TARGET.fullmatch(self.platform_target_name)
-        if (
-            target is None
-            or _RAW_DIGEST.fullmatch(self.platform_target_sha256) is None
-            or target.group("version") != self.platform_version
-            or target.group("sha256") != self.platform_target_sha256
-        ):
-            raise PlatformReleaseError("platform target identity is invalid")
-        _prefixed_digest(self.release_digest, "release digest")
-        _prefixed_digest(self.build_digest, "build digest")
-        _prefixed_digest(self.deployment_bundle_digest, "deployment bundle digest")
-        if self.architecture not in {"linux-arm64", "linux-x86_64"}:
-            raise PlatformReleaseError("platform architecture is invalid")
-        for value in (self.control_api_protocol, self.agent_protocol):
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 1 <= value <= 65535
-            ):
-                raise PlatformReleaseError("platform protocol version is invalid")
-
-
-@dataclass(frozen=True)
-class CompatibilityReport:
-    compatible: bool
-    update_recommended: bool
-    reasons: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class PlatformRelease:
     platform_version: str
     build_digest: str
-    host_updater_abi: ProtocolRange
     deployment_bundle: OciDeploymentBundle
     control: ControlRelease
     database: DatabaseRelease
-    agents: tuple[ArchitectureArtifact, ...]
     agent_packages: tuple[DebianPackage, ...]
-    supervisors: tuple[ArchitectureArtifact, ...]
-    tooling: tuple[ArchitectureArtifact, ...]
-    predecessors: tuple[AuthorizedPredecessor, ...]
     digest: str
 
     @classmethod
@@ -209,27 +139,10 @@ class PlatformRelease:
         platform_version = _semantic_version(document["platform_version"])
         control_document = document["control"]
         database_document = document["database"]
-        agents = _architecture_artifacts(document["agents"], require_protocol=True)
-        supervisors = _architecture_artifacts(
-            document["supervisors"], require_protocol=False
-        )
-        tooling = _architecture_artifacts(document["tooling"], require_protocol=False)
         control_protocol = _protocol(control_document["protocol"])
-        if (
-            database_document["contract_revision"] is not None
-            and not database_document["predecessor_compatible"]
-        ):
-            raise PlatformReleaseError(
-                "contract migration is not predecessor compatible"
-            )
-        host_updater_abi = _protocol(document["host_updater_abi"])
         deployment_bundle = _deployment_bundle(document["deployment_bundle"])
-        predecessors = _predecessors(
-            document["rollback"]["predecessors"],
-            platform_version=platform_version,
-        )
         agent_packages = _debian_packages(
-            document.get("agent_packages", []), platform_version=platform_version
+            document["agent_packages"], platform_version=platform_version
         )
         canonical = (
             json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
@@ -238,7 +151,6 @@ class PlatformRelease:
         return cls(
             platform_version=platform_version,
             build_digest=_prefixed_digest(document["build_digest"], "build digest"),
-            host_updater_abi=host_updater_abi,
             deployment_bundle=deployment_bundle,
             control=ControlRelease(
                 config_version=control_document["config_version"],
@@ -248,23 +160,11 @@ class PlatformRelease:
                 assets=tuple(_artifact(item) for item in control_document["assets"]),
             ),
             database=DatabaseRelease(
-                expand_revision=database_document["expand_revision"],
-                contract_revision=database_document["contract_revision"],
-                predecessor_compatible=database_document["predecessor_compatible"],
+                revision=database_document["revision"],
             ),
-            agents=agents,
             agent_packages=agent_packages,
-            supervisors=supervisors,
-            tooling=tooling,
-            predecessors=predecessors,
             digest="sha256:" + hashlib.sha256(canonical).hexdigest(),
         )
-
-    def agent_for(self, architecture: str) -> ArchitectureArtifact:
-        for artifact in self.agents:
-            if artifact.architecture == architecture:
-                return artifact
-        raise PlatformReleaseError("agent architecture is not published")
 
     def validate_target_identity(self, target_name: str, target_sha256: str) -> None:
         """Bind this parsed release to its independently TUF-verified target bytes."""
@@ -282,45 +182,6 @@ class PlatformRelease:
         ):
             raise PlatformReleaseError("platform release target identity is invalid")
 
-    def compatibility(self, current: PlatformIdentity) -> CompatibilityReport:
-        reasons: list[str] = []
-        agent = next(
-            (item for item in self.agents if item.architecture == current.architecture),
-            None,
-        )
-        if agent is None:
-            reasons.append("architecture-not-published")
-        elif agent.protocol is not None and not agent.protocol.contains(
-            current.agent_protocol
-        ):
-            reasons.append("agent-protocol-incompatible")
-        if not self.control.protocol.contains(current.control_api_protocol):
-            reasons.append("control-protocol-incompatible")
-        if current.build_digest != self.build_digest:
-            exact_predecessor = next(
-                (
-                    predecessor
-                    for predecessor in self.predecessors
-                    if predecessor.target_name == current.platform_target_name
-                    and predecessor.target_sha256 == current.platform_target_sha256
-                    and predecessor.release_digest == current.release_digest
-                    and predecessor.build_digest == current.build_digest
-                    and predecessor.deployment_bundle_digest
-                    == current.deployment_bundle_digest
-                ),
-                None,
-            )
-            if exact_predecessor is None:
-                reasons.append("predecessor-not-recovery-compatible")
-        if _semantic_tuple(current.platform_version) > _semantic_tuple(
-            self.platform_version
-        ):
-            reasons.append("platform-downgrade-forbidden")
-        return CompatibilityReport(
-            compatible=not reasons,
-            update_recommended=current.build_digest != self.build_digest,
-            reasons=tuple(reasons),
-        )
 
 
 def _schema() -> dict[str, Any]:
@@ -364,13 +225,18 @@ def _debian_packages(
 ) -> tuple[DebianPackage, ...]:
     seen: set[str] = set()
     result: list[DebianPackage] = []
+    package_architectures = {"linux-amd64": "amd64", "linux-arm64": "arm64"}
     for document in documents:
         architecture = document["architecture"]
         if architecture in seen:
             raise PlatformReleaseError("agent package architectures overlap")
         if document["version"] != platform_version:
             raise PlatformReleaseError("agent package version disagrees with platform")
-        if not document["filename"].endswith(".deb"):
+        expected_filename = (
+            f"vonk-forge-agent_{platform_version}_"
+            f"{package_architectures[architecture]}.deb"
+        )
+        if document["name"] != "vonk-forge-agent" or document["filename"] != expected_filename:
             raise PlatformReleaseError("agent package filename is invalid")
         seen.add(architecture)
         result.append(
@@ -410,69 +276,6 @@ def _deployment_bundle(document: dict[str, Any]) -> OciDeploymentBundle:
     )
 
 
-def _predecessors(
-    documents: list[dict[str, Any]], *, platform_version: str
-) -> tuple[AuthorizedPredecessor, ...]:
-    seen_targets: set[str] = set()
-    seen_target_digests: set[str] = set()
-    result: list[AuthorizedPredecessor] = []
-    for document in documents:
-        target_name = document["target_name"]
-        target_sha256 = document["target_sha256"]
-        match = _VERSIONED_TARGET.fullmatch(target_name)
-        if (
-            match is None
-            or match.group("sha256") != target_sha256
-            or _semantic_tuple(match.group("version"))
-            >= _semantic_tuple(platform_version)
-        ):
-            raise PlatformReleaseError("predecessor target identity is invalid")
-        if target_name in seen_targets or target_sha256 in seen_target_digests:
-            raise PlatformReleaseError("predecessor targets overlap")
-        seen_targets.add(target_name)
-        seen_target_digests.add(target_sha256)
-        result.append(
-            AuthorizedPredecessor(
-                target_name=target_name,
-                target_sha256=target_sha256,
-                release_digest=_prefixed_digest(
-                    document["release_digest"], "predecessor release digest"
-                ),
-                build_digest=_prefixed_digest(
-                    document["build_digest"], "predecessor build digest"
-                ),
-                deployment_bundle_digest=_prefixed_digest(
-                    document["deployment_bundle_digest"],
-                    "predecessor deployment bundle digest",
-                ),
-            )
-        )
-    return tuple(result)
-
-
-def _architecture_artifacts(
-    documents: list[dict[str, Any]], *, require_protocol: bool
-) -> tuple[ArchitectureArtifact, ...]:
-    seen: set[str] = set()
-    result: list[ArchitectureArtifact] = []
-    for document in documents:
-        architecture = document["architecture"]
-        if architecture in seen:
-            raise PlatformReleaseError("architecture entries overlap")
-        seen.add(architecture)
-        result.append(
-            ArchitectureArtifact(
-                architecture=architecture,
-                artifact=_artifact(document["artifact"]),
-                payload_name=document["payload"]["name"],
-                payload_sha256=document["payload"]["sha256"],
-                payload_size=document["payload"]["size"],
-                protocol=_protocol(document["protocol"]) if require_protocol else None,
-            )
-        )
-    return tuple(result)
-
-
 def _protocol(document: dict[str, int]) -> ProtocolRange:
     value = ProtocolRange(document["minimum"], document["maximum"])
     if value.minimum > value.maximum:
@@ -484,13 +287,6 @@ def _semantic_version(value: str) -> str:
     if not isinstance(value, str) or _SEMVER.fullmatch(value) is None:
         raise PlatformReleaseError("semantic version is invalid")
     return value
-
-
-def _semantic_tuple(value: str) -> tuple[int, int, int]:
-    match = _SEMVER.fullmatch(value)
-    if match is None:
-        raise PlatformReleaseError("semantic version is invalid")
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
 
 def _prefixed_digest(value: str, label: str) -> str:

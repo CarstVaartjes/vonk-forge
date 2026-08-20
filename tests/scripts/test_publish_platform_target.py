@@ -82,7 +82,6 @@ def _release(bundle: dict[str, object]) -> dict[str, object]:
         "schema_version": 2,
         "platform_version": "1.2.0",
         "build_digest": f"sha256:{SHA_A}",
-        "host_updater_abi": {"minimum": 2, "maximum": 3},
         "deployment_bundle": bundle,
         "control": {
             "config_version": 3,
@@ -94,55 +93,32 @@ def _release(bundle: dict[str, object]) -> dict[str, object]:
             "assets": [_artifact("web", SHA_C)],
         },
         "database": {
-            "expand_revision": "0012_control_process_heartbeats",
-            "contract_revision": None,
-            "predecessor_compatible": True,
+            "revision": "0001_fleet_library_baseline",
         },
-        "agents": [
+        "agent_packages": [
             {
                 "architecture": "linux-arm64",
-                "protocol": {"minimum": 1, "maximum": 2},
-                "artifact": _artifact("agent-linux-arm64", SHA_A),
-                "payload": {
-                    "name": "vonk-agent",
-                    "sha256": SHA_B,
-                    "size": 4096,
-                },
-            }
-        ],
-        "supervisors": [
+                "name": "vonk-forge-agent",
+                "version": "1.2.0",
+                "filename": "vonk-forge-agent_1.2.0_arm64.deb",
+                "sha256": SHA_A,
+                "size": 4096,
+                "sbom_sha256": SHA_B,
+                "provenance_sha256": SHA_C,
+                "sigstore_bundle_sha256": SHA_D,
+            },
             {
-                "architecture": "linux-arm64",
-                "artifact": _artifact("supervisor-linux-arm64", SHA_B),
-                "payload": {
-                    "name": "vonk-agent-supervisor",
-                    "sha256": SHA_C,
-                    "size": 8192,
-                },
-            }
+                "architecture": "linux-amd64",
+                "name": "vonk-forge-agent",
+                "version": "1.2.0",
+                "filename": "vonk-forge-agent_1.2.0_amd64.deb",
+                "sha256": SHA_B,
+                "size": 4096,
+                "sbom_sha256": SHA_C,
+                "provenance_sha256": SHA_D,
+                "sigstore_bundle_sha256": SHA_E,
+            },
         ],
-        "tooling": [
-            {
-                "architecture": "linux-arm64",
-                "artifact": _artifact("tooling-linux-arm64", SHA_C),
-                "payload": {
-                    "name": "vonk-forge-tooling",
-                    "sha256": SHA_D,
-                    "size": 16384,
-                },
-            }
-        ],
-        "rollback": {
-            "predecessors": [
-                {
-                    "target_name": f"platform/releases/1.1.0/{SHA_B}.json",
-                    "target_sha256": SHA_B,
-                    "release_digest": f"sha256:{SHA_C}",
-                    "build_digest": f"sha256:{SHA_B}",
-                    "deployment_bundle_digest": f"sha256:{SHA_D}",
-                }
-            ]
-        },
     }
 
 
@@ -354,8 +330,6 @@ def test_publish_orders_exact_bundle_target_and_discovery_channel(
         target_sha256,
         "--target-file",
         entries[3]["argv"][6],
-        "--retain-target",
-        f"platform/releases/1.1.0/{SHA_B}.json",
     ]
     assert entries[4]["document"] == channel_document
     assert "VONK_PLATFORM_TUF_ROOT_KEY" not in entries[0]["env_keys"]

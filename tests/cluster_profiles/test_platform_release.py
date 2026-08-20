@@ -24,7 +24,6 @@ from tuf.ngclient import FetcherInterface
 
 from cluster_profiles import platform_release as platform_release_module
 from cluster_profiles.platform_release import (
-    PlatformIdentity,
     PlatformRelease,
     PlatformReleaseError,
 )
@@ -48,8 +47,20 @@ def _artifact(name: str, digest: str) -> dict[str, object]:
     }
 
 
-def _payload(name: str, digest: str, size: int = 4096) -> dict[str, object]:
-    return {"name": name, "sha256": digest, "size": size}
+def _agent_package(
+    architecture: str, deb_architecture: str, digest: str
+) -> dict[str, object]:
+    return {
+        "architecture": architecture,
+        "name": "vonk-forge-agent",
+        "version": "1.2.0",
+        "filename": f"vonk-forge-agent_1.2.0_{deb_architecture}.deb",
+        "sha256": digest,
+        "size": 4096,
+        "sbom_sha256": SHA_B,
+        "provenance_sha256": SHA_C,
+        "sigstore_bundle_sha256": SHA_D,
+    }
 
 
 def _manifest() -> dict[str, object]:
@@ -57,7 +68,6 @@ def _manifest() -> dict[str, object]:
         "schema_version": 2,
         "platform_version": "1.2.0",
         "build_digest": f"sha256:{SHA_A}",
-        "host_updater_abi": {"minimum": 2, "maximum": 3},
         "deployment_bundle": {
             "reference": (
                 f"ghcr.io/example/vonk-forge/control-deployment@sha256:{SHA_A}"
@@ -79,43 +89,12 @@ def _manifest() -> dict[str, object]:
             "assets": [_artifact("web", SHA_C)],
         },
         "database": {
-            "expand_revision": "0010_update_rollouts",
-            "contract_revision": None,
-            "predecessor_compatible": True,
+            "revision": "0001_fleet_library_baseline",
         },
-        "agents": [
-            {
-                "architecture": "linux-arm64",
-                "protocol": {"minimum": 1, "maximum": 2},
-                "artifact": _artifact("agent-linux-arm64", SHA_A),
-                "payload": _payload("vonk-agent", SHA_B),
-            }
+        "agent_packages": [
+            _agent_package("linux-arm64", "arm64", SHA_A),
+            _agent_package("linux-amd64", "amd64", SHA_B),
         ],
-        "supervisors": [
-            {
-                "architecture": "linux-arm64",
-                "artifact": _artifact("supervisor-linux-arm64", SHA_B),
-                "payload": _payload("vonk-agent-supervisor", SHA_C, 8192),
-            }
-        ],
-        "tooling": [
-            {
-                "architecture": "linux-arm64",
-                "artifact": _artifact("tooling-linux-arm64", SHA_C),
-                "payload": _payload("vonk-forge-tooling", SHA_D, 16384),
-            }
-        ],
-        "rollback": {
-            "predecessors": [
-                {
-                    "target_name": f"platform/releases/1.1.0/{SHA_B}.json",
-                    "target_sha256": SHA_B,
-                    "release_digest": f"sha256:{SHA_C}",
-                    "build_digest": f"sha256:{SHA_B}",
-                    "deployment_bundle_digest": f"sha256:{SHA_D}",
-                }
-            ],
-        },
     }
 
 
@@ -132,12 +111,66 @@ def test_platform_release_loads_strict_typed_contract(tmp_path: Path) -> None:
 
     assert release.platform_version == "1.2.0"
     assert release.build_digest == f"sha256:{SHA_A}"
-    assert release.host_updater_abi.minimum == 2
-    assert release.host_updater_abi.maximum == 3
     assert release.control.config_version == 3
-    assert release.agent_for("linux-arm64").protocol.minimum == 1
+    assert {package.architecture for package in release.agent_packages} == {
+        "linux-amd64",
+        "linux-arm64",
+    }
     assert release.digest.startswith("sha256:")
     assert len(release.digest) == 71
+
+
+def test_platform_release_rejects_legacy_supervisor_metadata() -> None:
+    document = _manifest()
+    document["supervisors"] = []
+
+    with pytest.raises(PlatformReleaseError, match="supervisors"):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("host_updater_abi", {"minimum": 2, "maximum": 3}),
+        ("agents", []),
+        ("tooling", []),
+        ("rollback", {"predecessors": []}),
+    ],
+)
+def test_platform_release_rejects_obsolete_host_rollout_metadata(
+    field: str, value: object
+) -> None:
+    document = _manifest()
+    document[field] = value
+
+    with pytest.raises(PlatformReleaseError, match=field):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("expand_revision", "0001_fleet_library_baseline"),
+        ("contract_revision", None),
+        ("predecessor_compatible", True),
+    ],
+)
+def test_platform_release_rejects_migration_compatibility_metadata(
+    field: str, value: object
+) -> None:
+    document = _manifest()
+    document["database"][field] = value  # type: ignore[index]
+
+    with pytest.raises(PlatformReleaseError, match=field):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
+
+
+def test_platform_release_requires_public_agent_package_metadata() -> None:
+    document = _manifest()
+    del document["agent_packages"]
+
+    with pytest.raises(PlatformReleaseError, match="agent_packages"):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
 
 
 def test_platform_release_reuses_checked_schema_and_rejects_invalid_manifest(
@@ -194,7 +227,18 @@ def test_platform_release_exposes_version_bound_agent_debian_package() -> None:
             "sbom_sha256": SHA_B,
             "provenance_sha256": SHA_C,
             "sigstore_bundle_sha256": SHA_D,
-        }
+        },
+        {
+            "architecture": "linux-amd64",
+            "name": "vonk-forge-agent",
+            "version": "1.2.0",
+            "filename": "vonk-forge-agent_1.2.0_amd64.deb",
+            "sha256": SHA_B,
+            "size": 4096,
+            "sbom_sha256": SHA_C,
+            "provenance_sha256": SHA_D,
+            "sigstore_bundle_sha256": SHA_E,
+        },
     ]
 
     release = PlatformRelease.from_bytes(
@@ -204,9 +248,41 @@ def test_platform_release_exposes_version_bound_agent_debian_package() -> None:
     assert release.agent_packages[0].architecture == "linux-arm64"
     assert release.agent_packages[0].version == release.platform_version
     assert release.agent_packages[0].filename.endswith("_arm64.deb")
+    assert release.agent_packages[1].architecture == "linux-amd64"
+    assert release.agent_packages[1].filename.endswith("_amd64.deb")
 
 
-def test_platform_release_loads_exact_oci_bundle_and_predecessor_contract() -> None:
+def test_platform_release_requires_both_exact_agent_package_architectures() -> None:
+    document = _manifest()
+    document["agent_packages"] = [
+        {
+            "architecture": "linux-arm64",
+            "name": "vonk-forge-agent",
+            "version": "1.2.0",
+            "filename": "vonk-forge-agent_1.2.0_arm64.deb",
+            "sha256": SHA_A,
+            "size": 4096,
+            "sbom_sha256": SHA_B,
+            "provenance_sha256": SHA_C,
+            "sigstore_bundle_sha256": SHA_D,
+        }
+    ]
+
+    with pytest.raises(PlatformReleaseError, match="agent_packages"):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
+
+    document["agent_packages"].append(
+        {
+            **document["agent_packages"][0],
+            "architecture": "linux-amd64",
+            "filename": "vonk-forge-agent_1.2.0_arm64.deb",
+        }
+    )
+    with pytest.raises(PlatformReleaseError, match="filename"):
+        PlatformRelease.from_bytes(json.dumps(document).encode())
+
+
+def test_platform_release_loads_exact_oci_bundle_contract() -> None:
     release = PlatformRelease.from_bytes(
         (json.dumps(_manifest(), sort_keys=True, separators=(",", ":")) + "\n").encode()
     )
@@ -219,15 +295,6 @@ def test_platform_release_loads_exact_oci_bundle_and_predecessor_contract() -> N
         layer_digest=f"sha256:{SHA_B}",
         layer_size=1048576,
         layer_media_type="application/vnd.vonk-forge.control-deployment.v1.tar",
-    )
-    assert release.predecessors == (
-        platform_release_module.AuthorizedPredecessor(
-            target_name=f"platform/releases/1.1.0/{SHA_B}.json",
-            target_sha256=SHA_B,
-            release_digest=f"sha256:{SHA_C}",
-            build_digest=f"sha256:{SHA_B}",
-            deployment_bundle_digest=f"sha256:{SHA_D}",
-        ),
     )
 
 
@@ -266,21 +333,6 @@ def test_target_name_sha_is_tuf_byte_digest_not_manifest_self_reference() -> Non
         __import__("hashlib").sha256(first).digest()
         != __import__("hashlib").sha256(second).digest()
     )
-
-
-def test_architecture_artifact_keeps_oci_and_installed_payload_metadata_distinct() -> (
-    None
-):
-    raw = (json.dumps(_manifest(), sort_keys=True) + "\n").encode()
-
-    agent = PlatformRelease.from_bytes(raw).agent_for("linux-arm64")
-
-    assert agent.artifact.name == "agent-linux-arm64"
-    assert agent.artifact.sha256 == SHA_A
-    assert agent.artifact.size == 1024
-    assert agent.payload_name == "vonk-agent"
-    assert agent.payload_sha256 == SHA_B
-    assert agent.payload_size == 4096
 
 
 @pytest.mark.parametrize(
@@ -322,17 +374,17 @@ def test_platform_release_digest_is_canonical_under_object_key_reordering(
     assert first.digest == second.digest
 
 
-def test_platform_release_digest_binds_installed_payload_metadata(
+def test_platform_release_digest_binds_agent_package_metadata(
     tmp_path: Path,
 ) -> None:
     original = _manifest()
     changed = copy.deepcopy(original)
-    changed["agents"][0]["payload"]["sha256"] = SHA_C  # type: ignore[index]
+    changed["agent_packages"][0]["sha256"] = SHA_E  # type: ignore[index]
 
     first = PlatformRelease.load(_write(tmp_path, original, "first.json"))
     second = PlatformRelease.load(_write(tmp_path, changed, "second.json"))
 
-    assert first.agents[0].artifact == second.agents[0].artifact
+    assert first.agent_packages[1] == second.agent_packages[1]
     assert first.digest != second.digest
 
 
@@ -343,7 +395,6 @@ def test_platform_release_digest_binds_installed_payload_metadata(
         lambda d: d.update(platform_version="v1.2"),
         lambda d: d.update(build_digest=SHA_A),
         lambda d: d.update(schema_version=1),
-        lambda d: d["host_updater_abi"].update(minimum=4, maximum=3),  # type: ignore[index,union-attr]
         lambda d: d["deployment_bundle"].update(  # type: ignore[index,union-attr]
             reference=f"ghcr.io/example/bundle@sha256:{SHA_C}"
         ),
@@ -361,43 +412,12 @@ def test_platform_release_digest_binds_installed_payload_metadata(
             sbom_sha256=None
         ),
         lambda d: d["control"].update(protocol={"minimum": 3, "maximum": 2}),  # type: ignore[union-attr]
-        lambda d: d["agents"].append(copy.deepcopy(d["agents"][0])),  # type: ignore[union-attr,index]
-        lambda d: d["agents"][0].pop("payload"),  # type: ignore[index,union-attr]
-        lambda d: d["supervisors"][0].pop("payload"),  # type: ignore[index,union-attr]
-        lambda d: d["tooling"][0].pop("payload"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].pop("name"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].pop("sha256"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].pop("size"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].update(extra=True),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].update(name="Vonk Forge Agent"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].update(sha256=f"sha256:{SHA_B}"),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].update(size=63),  # type: ignore[index,union-attr]
-        lambda d: d["agents"][0]["payload"].update(size=268435457),  # type: ignore[index,union-attr]
-        lambda d: d["database"].update(  # type: ignore[union-attr]
-            contract_revision="0012_contract", predecessor_compatible=False
-        ),
-        lambda d: d["rollback"].update(  # type: ignore[union-attr]
-            compatible_predecessor_builds=[f"sha256:{SHA_B}"]
-        ),
-        lambda d: d["rollback"]["predecessors"][0].update(  # type: ignore[index]
-            target_name="platform-release.json"
-        ),
-        lambda d: d["rollback"]["predecessors"][0].update(  # type: ignore[index]
-            target_name=f"platform/releases/1.1.0/{SHA_C}.json"
-        ),
-        lambda d: d["rollback"]["predecessors"].append(  # type: ignore[index,union-attr]
-            {
-                **copy.deepcopy(d["rollback"]["predecessors"][0]),  # type: ignore[index]
-                "build_digest": f"sha256:{SHA_E}",
-            }
-        ),
     ],
     ids=[
         "unknown-field",
         "invalid-semver",
         "invalid-build-digest",
         "legacy-schema-version",
-        "invalid-host-updater-abi-range",
         "bundle-reference-manifest-digest-mismatch",
         "bundle-reference-parent-traversal",
         "artifact-reference-empty-component",
@@ -405,23 +425,6 @@ def test_platform_release_digest_binds_installed_payload_metadata(
         "floating-image",
         "missing-sbom",
         "invalid-protocol-range",
-        "overlapping-architecture",
-        "agent-missing-payload",
-        "supervisor-missing-payload",
-        "tooling-missing-payload",
-        "payload-missing-name",
-        "payload-missing-sha256",
-        "payload-missing-size",
-        "payload-unknown-field",
-        "payload-invalid-name",
-        "payload-prefixed-digest",
-        "payload-too-small",
-        "payload-exceeds-supervisor-limit",
-        "destructive-migration-without-predecessor-compatibility",
-        "legacy-compatible-build-only-rollback",
-        "predecessor-target-alias",
-        "predecessor-target-name-sha-disagreement",
-        "duplicate-predecessor-target",
     ],
 )
 def test_platform_release_rejects_unsafe_or_ambiguous_inputs(
@@ -440,116 +443,6 @@ def test_artifact_reference_digest_must_match_bound_sha256(tmp_path: Path) -> No
 
     with pytest.raises(PlatformReleaseError, match="reference digest"):
         PlatformRelease.load(_write(tmp_path, document))
-
-
-def test_compatibility_requires_architecture_protocol_overlap_and_rollback(
-    tmp_path: Path,
-) -> None:
-    release = PlatformRelease.load(_write(tmp_path, _manifest()))
-    compatible = PlatformIdentity(
-        platform_version="1.1.0",
-        platform_target_name=f"platform/releases/1.1.0/{SHA_B}.json",
-        platform_target_sha256=SHA_B,
-        release_digest=f"sha256:{SHA_C}",
-        build_digest=f"sha256:{SHA_B}",
-        deployment_bundle_digest=f"sha256:{SHA_D}",
-        architecture="linux-arm64",
-        control_api_protocol=2,
-        agent_protocol=1,
-    )
-
-    report = release.compatibility(compatible)
-
-    assert report.compatible is True
-    assert report.update_recommended is True
-    assert report.reasons == ()
-
-    incompatible = PlatformIdentity(
-        platform_version="1.1.0",
-        platform_target_name=f"platform/releases/1.1.0/{SHA_C}.json",
-        platform_target_sha256=SHA_C,
-        release_digest=f"sha256:{SHA_C}",
-        build_digest=f"sha256:{SHA_C}",
-        deployment_bundle_digest=f"sha256:{SHA_D}",
-        architecture="linux-x86_64",
-        control_api_protocol=1,
-        agent_protocol=7,
-    )
-    rejected = release.compatibility(incompatible)
-    assert rejected.compatible is False
-    assert set(rejected.reasons) == {
-        "architecture-not-published",
-        "control-protocol-incompatible",
-        "predecessor-not-recovery-compatible",
-    }
-
-
-@pytest.mark.parametrize(
-    "changes",
-    (
-        {
-            "platform_version": "1.0.0",
-            "platform_target_name": f"platform/releases/1.0.0/{SHA_B}.json",
-        },
-        {
-            "platform_target_name": f"platform/releases/1.1.0/{SHA_E}.json",
-            "platform_target_sha256": SHA_E,
-        },
-        {"release_digest": f"sha256:{SHA_E}"},
-        {"deployment_bundle_digest": f"sha256:{SHA_E}"},
-    ),
-    ids=("version", "target", "release", "bundle"),
-)
-def test_compatibility_requires_one_complete_exact_predecessor_descriptor(
-    tmp_path: Path, changes: dict[str, str]
-) -> None:
-    release = PlatformRelease.load(_write(tmp_path, _manifest()))
-    identity = {
-        "platform_version": "1.1.0",
-        "platform_target_name": f"platform/releases/1.1.0/{SHA_B}.json",
-        "platform_target_sha256": SHA_B,
-        "release_digest": f"sha256:{SHA_C}",
-        "build_digest": f"sha256:{SHA_B}",
-        "deployment_bundle_digest": f"sha256:{SHA_D}",
-        "architecture": "linux-arm64",
-        "control_api_protocol": 2,
-        "agent_protocol": 1,
-    }
-    identity.update(changes)
-
-    report = release.compatibility(PlatformIdentity(**identity))
-
-    assert report.compatible is False
-    assert "predecessor-not-recovery-compatible" in report.reasons
-
-
-def test_initial_platform_release_allows_no_predecessor(tmp_path: Path) -> None:
-    document = _manifest()
-    document["rollback"]["predecessors"] = []  # type: ignore[index]
-
-    release = PlatformRelease.load(_write(tmp_path, document))
-
-    assert release.predecessors == ()
-
-
-def test_same_build_is_current_and_not_an_update(tmp_path: Path) -> None:
-    release = PlatformRelease.load(_write(tmp_path, _manifest()))
-    current = PlatformIdentity(
-        platform_version="1.2.0",
-        platform_target_name=f"platform/releases/1.2.0/{SHA_E}.json",
-        platform_target_sha256=SHA_E,
-        release_digest=release.digest,
-        build_digest=f"sha256:{SHA_A}",
-        deployment_bundle_digest=release.deployment_bundle.manifest_digest,
-        architecture="linux-arm64",
-        control_api_protocol=2,
-        agent_protocol=1,
-    )
-
-    report = release.compatibility(current)
-
-    assert report.compatible is True
-    assert report.update_recommended is False
 
 
 class _RepositoryFetcher(FetcherInterface):

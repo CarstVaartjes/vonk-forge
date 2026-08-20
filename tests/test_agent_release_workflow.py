@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import re
 import struct
@@ -17,7 +16,8 @@ APT_STATE = ROOT / "scripts/agent-apt-state"
 
 EXPECTED_ACTION_OUTPUTS = {
     "version": "${{ steps.accepted.outputs.version }}",
-    "package": "${{ steps.accepted.outputs.package }}",
+    "arm64_package": "${{ steps.accepted.outputs.arm64_package }}",
+    "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
 }
 
@@ -144,28 +144,13 @@ def run_key_authority(
 
 
 def signing_key_id(private_key: Path, tmp_path: Path) -> str:
-    artifact = tmp_path / "vonk-agent"
-    raw = bytearray(256)
-    raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
-    struct.pack_into("<H", raw, 18, 183)
-    artifact.write_bytes(raw)
-    result = subprocess.run(
-        [
-            ROOT / "scripts/sign-agent-release",
-            "--artifact",
-            artifact,
-            "--private-key",
-            private_key,
-            "--output",
-            tmp_path / "signed",
-        ],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)["key_id"]
+    public_der = public_spki(private_key)
+    assert public_der.startswith(bytes.fromhex("302a300506032b6570032100"))
+    return hashlib.sha256(public_der[-32:]).hexdigest()
+
+
+def test_slot_manifest_signer_is_absent() -> None:
+    assert not (ROOT / "scripts/sign-agent-release").exists()
 
 
 def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
@@ -238,7 +223,8 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
         "publication_sequence",
         "version",
         "next_version",
-        "package",
+        "arm64_package",
+        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -366,6 +352,16 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cosign sign-blob --yes --bundle" in text
     assert "agent-release\\.yml@refs/heads/main" in text
     assert "ci\\.yml@refs/tags/v" in text
+
+
+def test_package_build_outputs_and_attestations_name_both_architectures() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+    for architecture in ("arm64", "amd64"):
+        assert re.search(rf"^  {architecture}_package:\n", text, re.MULTILINE)
+        package = f"vonk-forge-agent_${{{{ inputs.version }}}}_{architecture}.deb"
+        assert f"subject-path: dist/{package}" in text
+        assert f"sbom-path: dist/{package[:-4]}.sbom.spdx.json" in text
+    assert "subject-path: dist/vonk-forge-agent_${{ inputs.version }}_*.deb" not in text
 
 
 def assert_agent_key_cleanup_contract(text: str) -> None:
@@ -511,18 +507,39 @@ def test_development_agent_workflow_binds_both_literal_environment_boundaries() 
     assert "source_sha: ${{ github.sha }}" in text
     assert "tag_name: ''" in text
     assert "tag_oid: ''" in text
-    assert "needs: [package-metadata, build-test-sign]" in text
+    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
+    for architecture in ("arm64", "amd64"):
+        assert (
+            f"{architecture}_package: "
+            f"${{{{ needs.build-test-sign.outputs.{architecture}_package }}}}" in text
+        )
     assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
     assert "apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}" in text
     assert "r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}" in text
     assert "secrets:" not in text
     for forbidden in (
         "scripts/build-agent-deb",
-        "dpkg -i",
         "cosign sign-blob",
     ):
         assert forbidden not in text
+
+
+def test_development_publication_requires_native_amd64_lifecycle() -> None:
+    text = WORKFLOW.read_text()
+    lifecycle = text.split("\n  native-amd64-lifecycle:\n", 1)[1].split(
+        "\n  publish-apt:\n", 1
+    )[0]
+
+    assert "needs: [package-metadata, build-test-sign]" in lifecycle
+    assert "runs-on: ubuntu-24.04" in lifecycle
+    assert "actions/download-artifact@" in lifecycle
+    assert 'test "$(uname -m)" = x86_64' in lifecycle
+    assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
+    assert 'dpkg -i "$package"' in lifecycle
+    assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
+    assert "tests/nodes/test_upgrade_vonk_agent.sh" in lifecycle
+    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
 
 
 def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
@@ -548,7 +565,8 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     for input_name in (
         "channel",
         "version",
-        "package",
+        "arm64_package",
+        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -582,6 +600,20 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     assert "environment: apt-release" in production
     assert "group: vonk-forge-agent-apt-dev" in development
     assert "group: vonk-forge-agent-apt-stable" in production
+
+
+def test_apt_publisher_verifies_and_indexes_both_architectures_as_one_release() -> None:
+    verify = apt_step("Verify exact downloaded package")
+    generation = apt_step("Generate missing aptly state or public tree")
+
+    for architecture in ("arm64", "amd64"):
+        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in verify
+    assert '.architecture == $architecture' in verify
+    assert 'for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"' in generation
+    assert 'repo add "$REPOSITORY" "dist/$package"' in generation
+    assert 'binary-$architecture/Packages' in generation
+    assert 'architectures:["amd64","arm64"]' in generation
+    assert "-architectures=amd64,arm64" in generation
 
 
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:

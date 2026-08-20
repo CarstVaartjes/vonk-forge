@@ -486,7 +486,8 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
     )
     assert (
         "needs: [release-metadata, publish-images, build-agent-package, "
-        "attest-host-updater, publish-platform-target]" in manifest
+        "native-amd64-agent-lifecycle, attest-host-updater, "
+        "publish-platform-target]" in manifest
     )
 
 
@@ -503,7 +504,13 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
     assert "channel: stable" in package
     assert "publication_sequence: '0'" in package
-    for input_name in ("version", "next_version", "package", "artifact_name"):
+    for input_name in (
+        "version",
+        "next_version",
+        "arm64_package",
+        "amd64_package",
+        "artifact_name",
+    ):
         assert (
             f"{input_name}: ${{{{ needs.release-metadata.outputs.{input_name} }}}}"
             in package
@@ -525,18 +532,34 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert "vonk-forge-agent_" in job("publish-images")
 
 
+def test_public_release_requires_native_amd64_package_lifecycle() -> None:
+    lifecycle = job("native-amd64-agent-lifecycle")
+
+    assert "needs: [release-metadata, build-agent-package]" in lifecycle
+    assert "runs-on: ubuntu-24.04" in lifecycle
+    assert "actions/download-artifact@" in lifecycle
+    assert 'test "$(uname -m)" = x86_64' in lifecycle
+    assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
+    assert 'dpkg -i "$package"' in lifecycle
+    assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
+    assert "tests/nodes/test_upgrade_vonk_agent.sh" in lifecycle
+    assert "native-amd64-agent-lifecycle" in job("release-manifest").split(
+        "needs:", 1
+    )[1].splitlines()[0]
+    assert "native-amd64-agent-lifecycle" in job("publish-apt").split(
+        "needs:", 1
+    )[1].splitlines()[0]
+
+
 def test_tag_release_attaches_agent_package_to_public_release() -> None:
     release = workflow_step("release-manifest", "Create public GitHub Release")
 
-    assert "PACKAGE: ${{ needs.build-agent-package.outputs.package }}" in release
+    assert "ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}" in release
+    assert "AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}" in release
     assert "VERSION: ${{ needs.build-agent-package.outputs.version }}" in release
     for asset in (
-        '"release-output/agent-package/$PACKAGE"',
-        '"release-output/agent-package/${PACKAGE}.sha256"',
-        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.cdx.json"',
-        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.spdx.json"',
-        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.provenance.json"',
-        '"release-output/agent-package/${PACKAGE}.sigstore.json"',
+        '"release-output/agent-package/$ARM64_PACKAGE"',
+        '"release-output/agent-package/$AMD64_PACKAGE"',
         '"release-output/agent-package/vonk-forge-systemd-security.json"',
     ):
         assert asset in release
@@ -547,12 +570,16 @@ def test_tag_release_attaches_agent_package_to_public_release() -> None:
 def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     apt = job("publish-apt")
 
-    assert "needs: [release-metadata, build-agent-package, release-manifest]" in apt
+    assert (
+        "needs: [release-metadata, build-agent-package, "
+        "native-amd64-agent-lifecycle, release-manifest]" in apt
+    )
     assert "if: needs.release-manifest.result == 'success'" in apt
     assert "uses: ./.github/actions/agent-apt-publish" in apt
     assert "channel: stable" in apt
     assert "version: ${{ needs.build-agent-package.outputs.version }}" in apt
-    assert "package: ${{ needs.build-agent-package.outputs.package }}" in apt
+    assert "arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}" in apt
+    assert "amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}" in apt
     assert (
         "artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}" in apt
     )
@@ -590,7 +617,8 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
     manifest = job("release-manifest")
 
     assert (
-        "needs: [lint, generated-clients, test, release-metadata, build-agent-package]"
+        "needs: [lint, generated-clients, test, release-metadata, "
+        "build-agent-package, native-amd64-agent-lifecycle]"
         in validator
     )
     assert (
@@ -901,7 +929,8 @@ def test_final_job_creates_checksum_protected_public_release_asset() -> None:
     assert "release-manifest:" in text
     assert (
         "needs: [release-metadata, publish-images, build-agent-package, "
-        "attest-host-updater, publish-platform-target]" in text
+        "native-amd64-agent-lifecycle, attest-host-updater, "
+        "publish-platform-target]" in text
     )
     assert "vonk-forge-images.env" in text
     assert "sha256sum" in text

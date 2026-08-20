@@ -83,7 +83,8 @@ def metadata(arguments: Sequence[str]) -> list[str]:
     return [
         f"version={package_version}",
         f"next_version={next_version}",
-        f"package=vonk-forge-agent_{package_version}_arm64.deb",
+        f"arm64_package=vonk-forge-agent_{package_version}_arm64.deb",
+        f"amd64_package=vonk-forge-agent_{package_version}_amd64.deb",
         f"artifact_name={artifact_name}",
         f"channel={channel}",
         f"snapshot={channel}-{package_version}",

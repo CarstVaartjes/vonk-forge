@@ -1,5 +1,5 @@
 name: Isolated agent apt publication
-description: Verify and publish one accepted agent package to an isolated apt channel
+description: Verify and publish accepted AMD64 and ARM64 agent packages to an isolated apt channel
 
 inputs:
   channel:
@@ -8,8 +8,11 @@ inputs:
   version:
     description: Exact accepted Debian package version
     required: true
-  package:
-    description: Exact accepted Debian package filename
+  arm64_package:
+    description: Exact accepted ARM64 Debian package filename
+    required: true
+  amd64_package:
+    description: Exact accepted AMD64 Debian package filename
     required: true
   artifact_name:
     description: Immutable accepted package artifact name
@@ -66,7 +69,8 @@ runs:
       shell: bash
       env:
         CHANNEL: ${{ inputs.channel }}
-        PACKAGE: ${{ inputs.package }}
+        ARM64_PACKAGE: ${{ inputs.arm64_package }}
+        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         SOURCE_SHA: ${{ inputs.source_sha }}
         VERSION: ${{ inputs.version }}
@@ -81,10 +85,8 @@ runs:
             ;;
         esac
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        expected_package="vonk-forge-agent_${VERSION}_arm64.deb"
-        test "$PACKAGE" = "$expected_package"
-        test -f "dist/$PACKAGE" && test ! -L "dist/$PACKAGE"
-        test -f "dist/${PACKAGE}.sha256" && test ! -L "dist/${PACKAGE}.sha256"
+        test "$ARM64_PACKAGE" = "vonk-forge-agent_${VERSION}_arm64.deb"
+        test "$AMD64_PACKAGE" = "vonk-forge-agent_${VERSION}_amd64.deb"
         metadata=$(scripts/agent-apt-metadata "$CHANNEL" "$VERSION")
         while IFS='=' read -r name value; do
           case "$name" in
@@ -97,25 +99,42 @@ runs:
               ;;
           esac
         done <<< "$metadata"
-        verification=$(scripts/verify-agent-deb --json "dist/$PACKAGE")
-        jq -e \
-          --arg version "$VERSION" \
-          '.ok == true and .version == $version and
-           .package == "vonk-forge-agent" and .architecture == "arm64"' \
-          <<< "$verification" >/dev/null
-        test "$(dpkg-deb --field "dist/$PACKAGE" Version)" = "$VERSION"
-        evidence_dir="$RUNNER_TEMP/agent-package-evidence"
-        install -d -m 0700 "$evidence_dir"
-        dpkg-deb --extract "dist/$PACKAGE" "$evidence_dir"
-        jq -e \
-          --arg source_sha "$SOURCE_SHA" \
-          '.predicate.buildDefinition.resolvedDependencies | length == 1 and
-           .[0].digest.gitCommit == $source_sha' \
-          "$evidence_dir/usr/share/doc/vonk-forge-agent/provenance.json" \
-          >/dev/null
-        package_sha256=$(sha256sum "dist/$PACKAGE" | cut -d' ' -f1)
-        test "$package_sha256" = "$(jq -r .sha256 <<< "$verification")"
-        printf 'package_sha256=%s\n' "$package_sha256" >> "$GITHUB_OUTPUT"
+        packages_json='{}'
+        for architecture in arm64 amd64; do
+          case "$architecture" in
+            arm64) package=$ARM64_PACKAGE ;;
+            amd64) package=$AMD64_PACKAGE ;;
+          esac
+          test -f "dist/$package" && test ! -L "dist/$package"
+          test -f "dist/${package}.sha256" && test ! -L "dist/${package}.sha256"
+          verification=$(scripts/verify-agent-deb --json "dist/$package")
+          jq -e \
+            --arg version "$VERSION" \
+            --arg architecture "$architecture" \
+            '.ok == true and .version == $version and
+             .package == "vonk-forge-agent" and .architecture == $architecture' \
+            <<< "$verification" >/dev/null
+          test "$(dpkg-deb --field "dist/$package" Version)" = "$VERSION"
+          evidence_dir="$RUNNER_TEMP/agent-package-evidence-$architecture"
+          install -d -m 0700 "$evidence_dir"
+          dpkg-deb --extract "dist/$package" "$evidence_dir"
+          jq -e \
+            --arg source_sha "$SOURCE_SHA" \
+            '.predicate.buildDefinition.resolvedDependencies | length == 1 and
+             .[0].digest.gitCommit == $source_sha' \
+            "$evidence_dir/usr/share/doc/vonk-forge-agent/provenance.json" \
+            >/dev/null
+          package_sha256=$(sha256sum "dist/$package" | cut -d' ' -f1)
+          test "$package_sha256" = "$(jq -r .sha256 <<< "$verification")"
+          packages_json=$(jq -S -c \
+            --arg architecture "$architecture" \
+            --arg filename "$package" \
+            --arg sha256 "$package_sha256" \
+            '. + {($architecture): {filename:$filename, sha256:$sha256}}' \
+            <<< "$packages_json")
+        done
+        test "$(jq 'length' <<< "$packages_json")" = 2
+        printf 'packages_json=%s\n' "$packages_json" >> "$GITHUB_OUTPUT"
 
     - name: Install apt repository tooling
       shell: bash
@@ -162,8 +181,7 @@ runs:
       env:
         CHANNEL: ${{ inputs.channel }}
         DISTRIBUTION: ${{ steps.package.outputs.distribution }}
-        PACKAGE: ${{ inputs.package }}
-        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
         RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
@@ -252,7 +270,8 @@ runs:
         FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
         HAS_STATE: ${{ steps.state.outputs.has_state }}
         KEYRING: ${{ steps.package.outputs.keyring }}
-        PACKAGE: ${{ inputs.package }}
+        ARM64_PACKAGE: ${{ inputs.arm64_package }}
+        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         REPOSITORY: ${{ steps.package.outputs.repository }}
         RESTORED: ${{ steps.state.outputs.restored }}
         SNAPSHOT: ${{ steps.package.outputs.snapshot }}
@@ -265,7 +284,7 @@ runs:
         jq -n \
           --arg root "$work/aptly" \
           --arg publish "$work/public" \
-          '{rootDir:$root, architectures:["arm64"],
+          '{rootDir:$root, architectures:["amd64","arm64"],
             dependencyFollowSuggests:false, dependencyFollowRecommends:false,
             FileSystemPublishEndpoints:{r2:{rootDir:$publish,linkMethod:"copy"}}}' \
           > "$config"
@@ -274,7 +293,9 @@ runs:
             aptly -config="$config" repo create \
               -distribution="$DISTRIBUTION" -component=main "$REPOSITORY"
           fi
-          aptly -config="$config" repo add "$REPOSITORY" "dist/$PACKAGE"
+          for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"; do
+            aptly -config="$config" repo add "$REPOSITORY" "dist/$package"
+          done
           aptly -config="$config" snapshot create "$SNAPSHOT" \
             from repo "$REPOSITORY"
         fi
@@ -288,7 +309,7 @@ runs:
             "$DISTRIBUTION" filesystem:r2: "$SNAPSHOT"
         else
           aptly -config="$config" publish snapshot "${common[@]}" \
-            -acquire-by-hash -architectures=arm64 -distribution="$DISTRIBUTION" \
+            -acquire-by-hash -architectures=amd64,arm64 -distribution="$DISTRIBUTION" \
             -component=main \
             "$SNAPSHOT" filesystem:r2:
         fi
@@ -333,14 +354,16 @@ runs:
           done <<< "$index_entries"
         fi
         test "$checked_indexes" -gt 0
+        for architecture in amd64 arm64; do
+          test -s "$distribution_root/main/binary-$architecture/Packages"
+        done
 
     - name: Build any missing immutable bundles
       shell: bash
       env:
         CHANNEL: ${{ inputs.channel }}
         DISTRIBUTION: ${{ steps.package.outputs.distribution }}
-        PACKAGE: ${{ inputs.package }}
-        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         SNAPSHOT: ${{ steps.package.outputs.snapshot }}
         SOURCE_SHA: ${{ inputs.source_sha }}
         VERSION: ${{ inputs.version }}
@@ -385,8 +408,7 @@ runs:
       env:
         CHANNEL: ${{ inputs.channel }}
         DISTRIBUTION: ${{ steps.package.outputs.distribution }}
-        PACKAGE: ${{ inputs.package }}
-        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
         RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
@@ -438,8 +460,7 @@ runs:
       env:
         CHANNEL: ${{ inputs.channel }}
         DISTRIBUTION: ${{ steps.package.outputs.distribution }}
-        PACKAGE: ${{ inputs.package }}
-        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
         RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"

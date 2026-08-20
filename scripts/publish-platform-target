@@ -438,9 +438,7 @@ def _publish(
                     "--target-file",
                     target_path,
                 ]
-                retained_targets = [item.target_name for item in release.predecessors]
-                for predecessor in retained_targets:
-                    tuf_command.extend(("--retain-target", predecessor))
+                retained_targets: list[str] = []
                 tuf_receipt = _run(
                     tuf_publisher,
                     tuple(tuf_command),

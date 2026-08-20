@@ -67,7 +67,7 @@ impl AgentRuntimeIdentity {
             architecture: if cfg!(target_arch = "aarch64") {
                 "linux-arm64".to_owned()
             } else {
-                "linux-x86_64".to_owned()
+                "linux-amd64".to_owned()
             },
             self_test_passed: false,
         })

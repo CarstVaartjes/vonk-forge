@@ -23,7 +23,26 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     descriptor_path = tmp_path / "bundle-descriptor.json"
     source.write_bytes(_canonical(release))
     descriptor_path.write_bytes(_canonical(descriptor))
+    for package in release["agent_packages"]:
+        architecture = package["architecture"]
+        evidence = {
+            "package": package,
+            "locator": f"agent_packages.{architecture}",
+            "schema_version": 1,
+        }
+        (tmp_path / f"{architecture}-package-evidence.json").write_bytes(
+            _canonical(evidence)
+        )
     return source, descriptor_path, descriptor
+
+
+def _default_agent_evidence(tmp_path: Path) -> tuple[str, ...]:
+    return (
+        "--agent-package-evidence",
+        str(tmp_path / "linux-arm64-package-evidence.json"),
+        "--agent-package-evidence",
+        str(tmp_path / "linux-amd64-package-evidence.json"),
+    )
 
 
 def _run(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -45,6 +64,7 @@ def test_builder_assembles_and_writes_canonical_v2_manifest(tmp_path: Path) -> N
         str(source),
         "--bundle-descriptor",
         str(descriptor_path),
+        *_default_agent_evidence(tmp_path),
         "--version",
         "1.2.0",
         "--output",
@@ -143,6 +163,7 @@ def test_builder_replaces_review_input_artifact_with_ci_evidence(
         str(descriptor_path),
         "--artifact-evidence",
         str(evidence_path),
+        *_default_agent_evidence(tmp_path),
         "--version",
         "1.2.0",
         "--output",
@@ -156,7 +177,7 @@ def test_builder_replaces_review_input_artifact_with_ci_evidence(
     )
 
 
-def test_builder_replaces_review_input_agent_package_with_ci_evidence(
+def test_builder_rejects_single_architecture_agent_package_release_input(
     tmp_path: Path,
 ) -> None:
     source, descriptor_path, _ = _inputs(tmp_path)
@@ -207,5 +228,72 @@ def test_builder_replaces_review_input_agent_package_with_ci_evidence(
         str(output),
     )
 
-    assert result.returncode == 0, result.stderr
-    assert json.loads(output.read_bytes())["agent_packages"] == [evidence["package"]]
+    assert result.returncode == 2
+    assert "both agent package architectures" in result.stderr
+    assert not output.exists()
+
+
+def test_builder_requires_ci_evidence_for_both_agent_package_architectures(
+    tmp_path: Path,
+) -> None:
+    source, descriptor_path, _ = _inputs(tmp_path)
+    source_document = json.loads(source.read_bytes())
+    packages = []
+    evidence_paths = []
+    for architecture, deb_architecture, digest in (
+        ("linux-arm64", "arm64", "a"),
+        ("linux-amd64", "amd64", "b"),
+    ):
+        package = {
+            "architecture": architecture,
+            "name": "vonk-forge-agent",
+            "version": "1.2.0",
+            "filename": f"vonk-forge-agent_1.2.0_{deb_architecture}.deb",
+            "sha256": "0" * 64,
+            "size": 4096,
+            "sbom_sha256": "1" * 64,
+            "provenance_sha256": "2" * 64,
+            "sigstore_bundle_sha256": "3" * 64,
+        }
+        packages.append(package)
+        evidence = {
+            "package": package | {"sha256": digest * 64},
+            "locator": f"agent_packages.{architecture}",
+            "schema_version": 1,
+        }
+        evidence_path = tmp_path / f"{deb_architecture}-evidence.json"
+        evidence_path.write_bytes(_canonical(evidence))
+        evidence_paths.append(evidence_path)
+    source_document["agent_packages"] = packages
+    source.write_bytes(_canonical(source_document))
+
+    missing = _run(
+        "--input",
+        str(source),
+        "--bundle-descriptor",
+        str(descriptor_path),
+        "--agent-package-evidence",
+        str(evidence_paths[0]),
+        "--version",
+        "1.2.0",
+        "--output",
+        str(tmp_path / "missing.json"),
+    )
+    assert missing.returncode == 2
+    assert "both agent package architectures" in missing.stderr
+
+    complete = _run(
+        "--input",
+        str(source),
+        "--bundle-descriptor",
+        str(descriptor_path),
+        "--agent-package-evidence",
+        str(evidence_paths[0]),
+        "--agent-package-evidence",
+        str(evidence_paths[1]),
+        "--version",
+        "1.2.0",
+        "--output",
+        str(tmp_path / "complete.json"),
+    )
+    assert complete.returncode == 0, complete.stderr

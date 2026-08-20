@@ -216,6 +216,25 @@ def test_package_manages_the_rootless_podman_user_manager() -> None:
     assert "/usr/bin/loginctl disable-linger vonk-agent" in prerm
 
 
+def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure() -> None:
+    postinst = POSTINST.read_text()
+
+    assert 'if [ -n "${2:-}" ]' in postinst
+    upgrade_guard = postinst.index('if [ -n "${2:-}" ]')
+    assert postinst.index("deb-systemd-invoke restart", upgrade_guard) > upgrade_guard
+    assert postinst.index("self-test", upgrade_guard) > upgrade_guard
+    for forbidden in (
+        "verify-readiness",
+        "MainPID",
+        "is-active",
+        "readiness.json",
+        "/usr/bin/sleep",
+        "curl",
+        "wget",
+    ):
+        assert forbidden not in postinst
+
+
 @pytest.mark.parametrize(
     "package_version",
     (

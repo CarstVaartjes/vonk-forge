@@ -2,27 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vonk-forge.invalid/schemas/platform-update-manifest.schema.json",
   "title": "Vonk Forge platform update manifest",
-  "$comment": "Schema-only validation is not authorization. Consumers MUST use PlatformRelease.from_bytes so cross-field digest, range, architecture, predecessor, and target-identity invariants are enforced.",
+  "$comment": "Schema-only validation is not authorization. Consumers MUST use PlatformRelease.from_bytes so cross-field digest, range, package, and target-identity invariants are enforced.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "platform_version",
     "build_digest",
-    "host_updater_abi",
     "deployment_bundle",
     "control",
     "database",
-    "agents",
-    "supervisors",
-    "tooling",
-    "rollback"
+    "agent_packages"
   ],
   "properties": {
     "schema_version": {"const": 2},
     "platform_version": {"$ref": "#/$defs/semanticVersion"},
     "build_digest": {"$ref": "#/$defs/prefixedDigest"},
-    "host_updater_abi": {"$ref": "#/$defs/protocolRange"},
     "deployment_bundle": {"$ref": "#/$defs/ociDeploymentBundle"},
     "control": {
       "type": "object",
@@ -51,36 +46,12 @@
     "database": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["expand_revision", "contract_revision", "predecessor_compatible"],
+      "required": ["revision"],
       "properties": {
-        "expand_revision": {"$ref": "#/$defs/token"},
-        "contract_revision": {
-          "oneOf": [
-            {"type": "null"},
-            {"$ref": "#/$defs/token"}
-          ]
-        },
-        "predecessor_compatible": {"type": "boolean"}
+        "revision": {"$ref": "#/$defs/token"}
       }
     },
-    "agents": {"$ref": "#/$defs/architectureArtifactsWithProtocol"},
-    "agent_packages": {"$ref": "#/$defs/debianPackages"},
-    "supervisors": {"$ref": "#/$defs/architectureArtifacts"},
-    "tooling": {"$ref": "#/$defs/architectureArtifacts"},
-    "rollback": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["predecessors"],
-      "properties": {
-        "predecessors": {
-          "type": "array",
-          "minItems": 0,
-          "maxItems": 64,
-          "uniqueItems": true,
-          "items": {"$ref": "#/$defs/authorizedPredecessor"}
-        }
-      }
-    }
+    "agent_packages": {"$ref": "#/$defs/debianPackages"}
   },
   "$defs": {
     "semanticVersion": {
@@ -95,17 +66,13 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
-    "versionedPlatformTarget": {
-      "type": "string",
-      "pattern": "^platform/releases/(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)/[0-9a-f]{64}\\.json$"
-    },
     "token": {
       "type": "string",
       "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
     },
     "architecture": {
       "type": "string",
-      "enum": ["linux-arm64", "linux-x86_64"]
+      "enum": ["linux-amd64", "linux-arm64"]
     },
     "protocolRange": {
       "type": "object",
@@ -142,24 +109,6 @@
         "layer_media_type": {"const": "application/vnd.vonk-forge.control-deployment.v1.tar"}
       }
     },
-    "authorizedPredecessor": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "target_name",
-        "target_sha256",
-        "release_digest",
-        "build_digest",
-        "deployment_bundle_digest"
-      ],
-      "properties": {
-        "target_name": {"$ref": "#/$defs/versionedPlatformTarget"},
-        "target_sha256": {"$ref": "#/$defs/digest"},
-        "release_digest": {"$ref": "#/$defs/prefixedDigest"},
-        "build_digest": {"$ref": "#/$defs/prefixedDigest"},
-        "deployment_bundle_digest": {"$ref": "#/$defs/prefixedDigest"}
-      }
-    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
@@ -183,49 +132,6 @@
         "sbom_sha256": {"$ref": "#/$defs/digest"},
         "provenance_sha256": {"$ref": "#/$defs/digest"}
       }
-    },
-    "architectureArtifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["architecture", "artifact", "payload"],
-      "properties": {
-        "architecture": {"$ref": "#/$defs/architecture"},
-        "artifact": {"$ref": "#/$defs/artifact"},
-        "payload": {"$ref": "#/$defs/payload"}
-      }
-    },
-    "architectureArtifactWithProtocol": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["architecture", "protocol", "artifact", "payload"],
-      "properties": {
-        "architecture": {"$ref": "#/$defs/architecture"},
-        "protocol": {"$ref": "#/$defs/protocolRange"},
-        "artifact": {"$ref": "#/$defs/artifact"},
-        "payload": {"$ref": "#/$defs/payload"}
-      }
-    },
-    "payload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "sha256", "size"],
-      "properties": {
-        "name": {"$ref": "#/$defs/token"},
-        "sha256": {"$ref": "#/$defs/digest"},
-        "size": {"type": "integer", "minimum": 64, "maximum": 268435456}
-      }
-    },
-    "architectureArtifacts": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 16,
-      "items": {"$ref": "#/$defs/architectureArtifact"}
-    },
-    "architectureArtifactsWithProtocol": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 16,
-      "items": {"$ref": "#/$defs/architectureArtifactWithProtocol"}
     },
     "debianPackage": {
       "type": "object",
@@ -259,8 +165,20 @@
     },
     "debianPackages": {
       "type": "array",
-      "minItems": 1,
-      "maxItems": 16,
+      "minItems": 2,
+      "maxItems": 2,
+      "allOf": [
+        {
+          "contains": {"properties": {"architecture": {"const": "linux-arm64"}}},
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {"properties": {"architecture": {"const": "linux-amd64"}}},
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ],
       "items": {"$ref": "#/$defs/debianPackage"}
     }
   }

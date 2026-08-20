@@ -18,7 +18,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         if cfg!(target_arch = "aarch64") {
             "linux-arm64"
         } else {
-            "linux-x86_64"
+            "linux-amd64"
         }
     );
     assert_eq!(
