@@ -14,7 +14,7 @@ use pkcs8::LineEnding;
 use rand_core::OsRng;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
-    KeyPair, KeyUsagePurpose, PKCS_ED25519,
+    Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const CONTROLLER_CERTIFICATE_VALIDITY_DAYS: i64 = 397;
+const CONTROLLER_CERTIFICATE_RENEWAL_THRESHOLD_DAYS: i64 = 30;
 
 #[derive(Debug, Error)]
 pub enum SetupError {
@@ -1058,22 +1060,8 @@ fn generate_pki<G: SecretGenerator>(
 
     let controller_key = KeyPair::generate_for(&PKCS_ED25519)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let mut controller_params = CertificateParams::new(hostnames.clone()).map_err(|error| {
-        SetupError::InvalidPayload(format!("invalid controller hostname: {error}"))
-    })?;
-    let now = time::OffsetDateTime::now_utc();
-    controller_params.not_before = now - time::Duration::hours(1);
-    controller_params.not_after = now + time::Duration::days(397);
-    controller_params
-        .distinguished_name
-        .push(DnType::CommonName, hostnames[0].clone());
-    controller_params
-        .key_usages
-        .push(KeyUsagePurpose::DigitalSignature);
-    controller_params
-        .extended_key_usages
-        .push(ExtendedKeyUsagePurpose::ServerAuth);
-    controller_params.use_authority_key_identifier_extension = true;
+    let controller_params =
+        controller_certificate_params(&hostnames, time::OffsetDateTime::now_utc())?;
     let controller_certificate = controller_params
         .signed_by(&controller_key, &intermediate)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
@@ -1122,6 +1110,26 @@ fn generate_pki<G: SecretGenerator>(
             (files.password.clone(), password),
         ],
     })
+}
+
+fn controller_certificate_params(
+    hostnames: &[String],
+    now: time::OffsetDateTime,
+) -> Result<CertificateParams, SetupError> {
+    let mut params = CertificateParams::new(hostnames.to_vec()).map_err(|error| {
+        SetupError::InvalidPayload(format!("invalid controller hostname: {error}"))
+    })?;
+    params.not_before = now - time::Duration::hours(1);
+    params.not_after = now + time::Duration::days(CONTROLLER_CERTIFICATE_VALIDITY_DAYS);
+    params
+        .distinguished_name
+        .push(DnType::CommonName, hostnames[0].clone());
+    params.key_usages.push(KeyUsagePurpose::DigitalSignature);
+    params
+        .extended_key_usages
+        .push(ExtendedKeyUsagePurpose::ServerAuth);
+    params.use_authority_key_identifier_extension = true;
+    Ok(params)
 }
 
 fn ca_certificate_params(
@@ -1279,6 +1287,42 @@ fn validate_pki_material(
     environment: &[(String, String)],
     files: &[(String, String)],
 ) -> Result<String, SetupError> {
+    let validated = validate_pki_material_at(
+        request,
+        environment,
+        files,
+        time::OffsetDateTime::now_utc(),
+        false,
+    )?;
+    Ok(validated.kid)
+}
+
+struct ValidatedPkiMaterial {
+    kid: String,
+    controller_needs_renewal: bool,
+}
+
+fn validate_upgrade_pki_material(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    files: &[(String, String)],
+) -> Result<ValidatedPkiMaterial, SetupError> {
+    validate_pki_material_at(
+        request,
+        environment,
+        files,
+        time::OffsetDateTime::now_utc(),
+        true,
+    )
+}
+
+fn validate_pki_material_at(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    files: &[(String, String)],
+    now: time::OffsetDateTime,
+    allow_expired_controller: bool,
+) -> Result<ValidatedPkiMaterial, SetupError> {
     let value = |name: &str| {
         files
             .iter()
@@ -1291,12 +1335,23 @@ fn validate_pki_material(
     let root_pem = value(&paths.root_certificate)?;
     let intermediate_pem = value(&paths.intermediate_certificate)?;
     let server_pem = value(&paths.controller_server_certificate)?;
-    let (_, root_block) = x509_parser::pem::parse_x509_pem(root_pem.as_bytes())
+    let (root_trailing, root_block) = x509_parser::pem::parse_x509_pem(root_pem.as_bytes())
         .map_err(|_| invalid_pki("root certificate is not valid PEM"))?;
-    let (_, intermediate_block) = x509_parser::pem::parse_x509_pem(intermediate_pem.as_bytes())
-        .map_err(|_| invalid_pki("intermediate certificate is not valid PEM"))?;
-    let (_, server_block) = x509_parser::pem::parse_x509_pem(server_pem.as_bytes())
+    let (intermediate_trailing, intermediate_block) =
+        x509_parser::pem::parse_x509_pem(intermediate_pem.as_bytes())
+            .map_err(|_| invalid_pki("intermediate certificate is not valid PEM"))?;
+    let (server_chain, server_block) = x509_parser::pem::parse_x509_pem(server_pem.as_bytes())
         .map_err(|_| invalid_pki("controller certificate is not valid PEM"))?;
+    let (server_trailing, bundled_intermediate_block) =
+        x509_parser::pem::parse_x509_pem(server_chain)
+            .map_err(|_| invalid_pki("controller certificate chain has no intermediate"))?;
+    if !root_trailing.iter().all(u8::is_ascii_whitespace)
+        || !intermediate_trailing.iter().all(u8::is_ascii_whitespace)
+        || !server_trailing.iter().all(u8::is_ascii_whitespace)
+        || bundled_intermediate_block.contents != intermediate_block.contents
+    {
+        return Err(invalid_pki("certificate chain is inconsistent"));
+    }
     let (_, root) = x509_parser::parse_x509_certificate(&root_block.contents)
         .map_err(|_| invalid_pki("root certificate is not valid X.509"))?;
     let (_, intermediate) = x509_parser::parse_x509_certificate(&intermediate_block.contents)
@@ -1311,12 +1366,6 @@ fn validate_pki_material(
     server
         .verify_signature(Some(intermediate.public_key()))
         .map_err(|_| invalid_pki("controller certificate is not signed by the intermediate"))?;
-    if !root.validity().is_valid()
-        || !intermediate.validity().is_valid()
-        || !server.validity().is_valid()
-    {
-        return Err(invalid_pki("certificate is outside its validity period"));
-    }
 
     let expected_hostnames = pki_hostnames(request, environment)?;
     let actual_hostnames = server
@@ -1380,7 +1429,27 @@ fn validate_pki_material(
             "Step CA configuration does not describe the imported authority",
         ));
     }
-    Ok(public.kid)
+
+    let now_asn1 = x509_parser::time::ASN1Time::new(now);
+    if !root.validity().is_valid_at(now_asn1) || !intermediate.validity().is_valid_at(now_asn1) {
+        return Err(invalid_pki("CA certificate is outside its validity period"));
+    }
+    if server.validity().not_before > now_asn1 {
+        return Err(invalid_pki("controller certificate is not valid yet"));
+    }
+    let controller_expired = server.validity().not_after < now_asn1;
+    if controller_expired && !allow_expired_controller {
+        return Err(invalid_pki(
+            "controller certificate is outside its validity period",
+        ));
+    }
+    let renewal_deadline =
+        now + time::Duration::days(CONTROLLER_CERTIFICATE_RENEWAL_THRESHOLD_DAYS);
+    Ok(ValidatedPkiMaterial {
+        kid: public.kid,
+        controller_needs_renewal: server.validity().not_after.timestamp()
+            <= renewal_deadline.unix_timestamp(),
+    })
 }
 
 fn validate_es256_jwks(public: &PublicJwk, private: &PrivateJwk) -> Result<(), SetupError> {
@@ -1430,6 +1499,73 @@ fn invalid_pki(message: &str) -> SetupError {
     SetupError::InvalidSecretMaterial(format!("Step CA/controller PKI {message}"))
 }
 
+struct ControllerLeafReplacement {
+    certificate_path: String,
+    certificate: String,
+    private_key_path: String,
+    private_key: String,
+}
+
+fn renew_controller_leaf(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    files: &[(String, String)],
+) -> Result<ControllerLeafReplacement, SetupError> {
+    let value = |name: &str| {
+        files
+            .iter()
+            .find_map(|(path, value)| (path == name).then_some(value.as_str()))
+            .ok_or_else(|| {
+                SetupError::InvalidSecretMaterial(format!("PKI member {name} is missing"))
+            })
+    };
+    let paths = &request.files;
+    let password = value(&paths.password)?.trim_end_matches(['\r', '\n']);
+    let intermediate_signing_key = ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
+        value(&paths.intermediate_private_key)?,
+        password.as_bytes(),
+    )
+    .map_err(|_| invalid_pki("intermediate private key cannot be decrypted"))?;
+    let intermediate_der = intermediate_signing_key
+        .to_pkcs8_der()
+        .map_err(|_| invalid_pki("intermediate private key cannot be represented"))?;
+    let intermediate_key = KeyPair::try_from(intermediate_der.as_bytes())
+        .map_err(|_| invalid_pki("intermediate private key cannot be represented"))?;
+    let intermediate_pem = value(&paths.intermediate_certificate)?;
+    let issuer = Issuer::from_ca_cert_pem(intermediate_pem, intermediate_key)
+        .map_err(|_| invalid_pki("intermediate certificate cannot issue a controller leaf"))?;
+    let hostnames = pki_hostnames(request, environment)?;
+    let controller_key = KeyPair::generate_for(&PKCS_ED25519)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let controller_params =
+        controller_certificate_params(&hostnames, time::OffsetDateTime::now_utc())?;
+    let controller_certificate = controller_params
+        .signed_by(&controller_key, &issuer)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let replacement = ControllerLeafReplacement {
+        certificate_path: paths.controller_server_certificate.clone(),
+        certificate: format!("{}{}", controller_certificate.pem(), intermediate_pem),
+        private_key_path: paths.controller_server_private_key.clone(),
+        private_key: controller_key.serialize_pem(),
+    };
+
+    let mut candidate = files.to_vec();
+    for (path, content) in [
+        (&replacement.certificate_path, &replacement.certificate),
+        (&replacement.private_key_path, &replacement.private_key),
+    ] {
+        let (_, existing) = candidate
+            .iter_mut()
+            .find(|(candidate_path, _)| candidate_path == path)
+            .ok_or_else(|| {
+                SetupError::InvalidSecretMaterial(format!("PKI member {path} is missing"))
+            })?;
+        *existing = content.clone();
+    }
+    validate_pki_material(request, environment, &candidate)?;
+    Ok(replacement)
+}
+
 fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     bundle: &Path,
@@ -1442,6 +1578,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         set_environment_value(&mut environment, &internal.env, internal.value.clone());
     }
     let mut new_secrets = Vec::new();
+    let mut controller_leaf_replacement = None;
     for required in &payload.required_values {
         if environment_value(&environment, &required.env).is_none() {
             environment.push((required.env.clone(), prompt.required(required)?));
@@ -1486,8 +1623,12 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                             .map(|content| (file.to_owned(), content))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let kid = validate_pki_material(request, &environment, &files)?;
-                set_environment_value(&mut environment, &request.kid_env, kid);
+                let validated = validate_upgrade_pki_material(request, &environment, &files)?;
+                set_environment_value(&mut environment, &request.kid_env, validated.kid);
+                if validated.controller_needs_renewal {
+                    controller_leaf_replacement =
+                        Some(renew_controller_leaf(request, &environment, &files)?);
+                }
             }
             _ => {
                 return Err(SetupError::InvalidSecretMaterial(
@@ -1543,6 +1684,9 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     for (name, value) in new_secrets {
         let content = secret_file_content(value);
         write_secret_file(&bundle.join("secrets"), &name, &content)?;
+    }
+    if let Some(replacement) = controller_leaf_replacement {
+        atomic_replace_controller_leaf(&bundle.join("secrets"), replacement)?;
     }
     atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
     atomic_replace(
@@ -1928,8 +2072,7 @@ fn write_new_file(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
     Ok(())
 }
 
-fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
-    require_regular_file(path)?;
+fn stage_replacement(path: &Path, content: &[u8], mode: u32) -> Result<PathBuf, SetupError> {
     let parent = path.parent().expect("file has parent");
     let file_name = path
         .file_name()
@@ -1941,6 +2084,62 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
         STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     write_new_file(&temporary, content, mode)?;
+    Ok(temporary)
+}
+
+fn atomic_replace_controller_leaf(
+    secret_root: &Path,
+    replacement: ControllerLeafReplacement,
+) -> Result<(), SetupError> {
+    let certificate_path = secret_root.join(&replacement.certificate_path);
+    let private_key_path = secret_root.join(&replacement.private_key_path);
+    require_regular_file(&certificate_path)?;
+    require_regular_file(&private_key_path)?;
+    let parent = certificate_path.parent().expect("certificate has parent");
+    if certificate_path == private_key_path
+        || private_key_path.parent().expect("private key has parent") != parent
+    {
+        return Err(SetupError::UnsafeDestination(
+            "controller certificate and key replacements must be distinct files in one directory"
+                .to_owned(),
+        ));
+    }
+
+    let old_certificate = fs::read(&certificate_path)?;
+    let certificate_content = secret_file_content(replacement.certificate);
+    let private_key_content = secret_file_content(replacement.private_key);
+    let staged_certificate = stage_replacement(&certificate_path, &certificate_content, 0o600)?;
+    let staged_private_key = match stage_replacement(&private_key_path, &private_key_content, 0o600)
+    {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = fs::remove_file(staged_certificate);
+            return Err(error);
+        }
+    };
+
+    if let Err(error) = fs::rename(&staged_certificate, &certificate_path) {
+        let _ = fs::remove_file(staged_certificate);
+        let _ = fs::remove_file(staged_private_key);
+        return Err(error.into());
+    }
+    if let Err(error) = fs::rename(&staged_private_key, &private_key_path) {
+        let _ = fs::remove_file(staged_private_key);
+        if let Err(rollback_error) = atomic_replace(&certificate_path, &old_certificate, 0o600) {
+            return Err(SetupError::UnsafeDestination(format!(
+                "controller certificate/key replacement failed ({error}) and certificate rollback failed ({rollback_error})"
+            )));
+        }
+        return Err(error.into());
+    }
+    sync_directory(parent)?;
+    Ok(())
+}
+
+fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
+    require_regular_file(path)?;
+    let parent = path.parent().expect("file has parent");
+    let temporary = stage_replacement(path, content, mode)?;
     match fs::rename(&temporary, path) {
         Ok(()) => {
             sync_directory(parent)?;

@@ -1,11 +1,15 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 
 use base64ct::{Base64UrlUnpadded, Encoding};
-use ed25519_dalek::pkcs8::DecodePrivateKey;
+use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use rcgen::{KeyPair, PKCS_ED25519};
+use rcgen::{
+    CertificateParams, DnType, ExtendedKeyUsagePurpose, Issuer, KeyPair, KeyUsagePurpose,
+    PKCS_ED25519,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -174,6 +178,337 @@ fn parse_certificate(pem: &[u8]) -> x509_parser::certificate::X509Certificate<'s
     let leaked = Box::leak(pem.contents.into_boxed_slice());
     let (_, certificate) = x509_parser::parse_x509_certificate(leaked).expect("X.509 certificate");
     certificate
+}
+
+fn install_pki_bundle(output_root: &Path) -> PathBuf {
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(
+        Cursor::new(
+            b"control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n\n"
+                .to_vec(),
+        ),
+        &mut output,
+    );
+    prepare(
+        &pki_payload(),
+        SetupRequest::install(output_root),
+        &mut prompt,
+        &SequenceGenerator::new(["step-ca-password"]),
+    )
+    .expect("generated PKI bundle")
+    .root
+}
+
+fn replace_controller_leaf(
+    secrets: &Path,
+    not_before: time::OffsetDateTime,
+    not_after: time::OffsetDateTime,
+) {
+    let password =
+        std::fs::read_to_string(secrets.join("step-ca-password")).expect("Step CA password");
+    let encrypted_intermediate = std::fs::read_to_string(secrets.join("step-ca/intermediate-key"))
+        .expect("encrypted intermediate key");
+    let intermediate_signing_key = ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
+        &encrypted_intermediate,
+        password.trim().as_bytes(),
+    )
+    .expect("decrypted intermediate key");
+    let intermediate_der = intermediate_signing_key
+        .to_pkcs8_der()
+        .expect("intermediate PKCS#8 DER");
+    let intermediate_key =
+        KeyPair::try_from(intermediate_der.as_bytes()).expect("rcgen intermediate key");
+    let intermediate_pem =
+        std::fs::read_to_string(secrets.join("step-ca/intermediate-certificate"))
+            .expect("intermediate certificate");
+    let issuer =
+        Issuer::from_ca_cert_pem(&intermediate_pem, intermediate_key).expect("intermediate issuer");
+
+    let controller_key = KeyPair::generate_for(&PKCS_ED25519).expect("controller key");
+    let mut params = CertificateParams::new(vec![
+        "control.example.test".to_owned(),
+        "enroll.example.test".to_owned(),
+        "agents.example.test".to_owned(),
+        "registry.example.test".to_owned(),
+    ])
+    .expect("controller certificate parameters");
+    params.not_before = not_before;
+    params.not_after = not_after;
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "control.example.test");
+    params.key_usages.push(KeyUsagePurpose::DigitalSignature);
+    params
+        .extended_key_usages
+        .push(ExtendedKeyUsagePurpose::ServerAuth);
+    params.use_authority_key_identifier_extension = true;
+    let controller_certificate = params
+        .signed_by(&controller_key, &issuer)
+        .expect("controller certificate");
+
+    std::fs::write(
+        secrets.join("controller-server-certificate"),
+        format!("{}{}", controller_certificate.pem(), intermediate_pem),
+    )
+    .expect("replace controller certificate");
+    std::fs::write(
+        secrets.join("controller-server-key"),
+        controller_key.serialize_pem(),
+    )
+    .expect("replace controller key");
+}
+
+fn upgrade_pki_bundle(output_root: &Path) -> Result<(), vonk_nas_setup::SetupError> {
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    prepare(
+        &pki_payload(),
+        SetupRequest::upgrade(output_root),
+        &mut prompt,
+        &SequenceGenerator::new([]),
+    )?;
+    assert!(output.is_empty(), "PKI renewal must not prompt");
+    Ok(())
+}
+
+fn authority_snapshot(secrets: &Path) -> Vec<(&'static str, Vec<u8>)> {
+    [
+        "step-ca/root-certificate",
+        "step-ca/intermediate-certificate",
+        "step-ca/intermediate-key",
+        "agent-ca-credential",
+        "agent-ca-provisioner-public-jwk",
+        "step-ca/ca.json",
+        "step-ca-password",
+    ]
+    .into_iter()
+    .map(|path| {
+        (
+            path,
+            std::fs::read(secrets.join(path))
+                .unwrap_or_else(|error| panic!("snapshot {path}: {error}")),
+        )
+    })
+    .collect()
+}
+
+fn assert_controller_pair_is_current_and_coherent(secrets: &Path) {
+    let certificate_bytes =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("controller cert");
+    let (chain_bytes, _) =
+        x509_parser::pem::parse_x509_pem(&certificate_bytes).expect("controller certificate PEM");
+    let (trailing, bundled_intermediate_pem) =
+        x509_parser::pem::parse_x509_pem(chain_bytes).expect("bundled intermediate PEM");
+    assert!(
+        trailing.iter().all(u8::is_ascii_whitespace),
+        "controller chain must contain only the leaf and intermediate"
+    );
+    let certificate = parse_certificate(&certificate_bytes);
+    let intermediate_bytes =
+        std::fs::read(secrets.join("step-ca/intermediate-certificate")).expect("intermediate cert");
+    let (_, expected_intermediate_pem) =
+        x509_parser::pem::parse_x509_pem(&intermediate_bytes).expect("preserved intermediate PEM");
+    let intermediate = parse_certificate(&intermediate_bytes);
+    assert_eq!(
+        bundled_intermediate_pem.contents, expected_intermediate_pem.contents,
+        "bundled chain must contain the preserved intermediate"
+    );
+    certificate
+        .verify_signature(Some(intermediate.public_key()))
+        .expect("controller certificate signed by preserved intermediate");
+    assert!(certificate.validity().is_valid());
+    let remaining_seconds = certificate.validity().not_after.timestamp()
+        - time::OffsetDateTime::now_utc().unix_timestamp();
+    assert!(
+        (396 * 24 * 60 * 60..=397 * 24 * 60 * 60).contains(&remaining_seconds),
+        "renewed controller certificate must have 397-day validity"
+    );
+    let sans = certificate
+        .subject_alternative_name()
+        .expect("SAN extension")
+        .expect("SAN present")
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sans,
+        [
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test"
+        ]
+    );
+    let key_pem =
+        std::fs::read_to_string(secrets.join("controller-server-key")).expect("controller key");
+    let key = KeyPair::from_pem(&key_pem).expect("controller PKCS#8 key");
+    assert!(key.is_compatible(&PKCS_ED25519));
+    assert_eq!(
+        key.public_key_raw(),
+        certificate.public_key().subject_public_key.data.as_ref()
+    );
+}
+
+#[test]
+fn upgrade_renews_controller_leaf_with_29_days_remaining_and_preserves_authority() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = install_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let now = time::OffsetDateTime::now_utc();
+    replace_controller_leaf(
+        &secrets,
+        now - time::Duration::hours(1),
+        now + time::Duration::days(29),
+    );
+    let old_certificate =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("old cert");
+    let old_key = std::fs::read(secrets.join("controller-server-key")).expect("old key");
+    let authority_before = authority_snapshot(&secrets);
+    let environment_before = std::fs::read(bundle.join(".env")).expect("environment before");
+    #[cfg(unix)]
+    let old_inodes = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            std::fs::metadata(secrets.join("controller-server-certificate"))
+                .expect("old cert metadata")
+                .ino(),
+            std::fs::metadata(secrets.join("controller-server-key"))
+                .expect("old key metadata")
+                .ino(),
+        )
+    };
+
+    upgrade_pki_bundle(temporary.path()).expect("near-expiry controller leaf renewed");
+
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("renewed cert"),
+        old_certificate
+    );
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-key")).expect("renewed key"),
+        old_key
+    );
+    assert_eq!(authority_snapshot(&secrets), authority_before);
+    assert_eq!(
+        std::fs::read(bundle.join(".env")).expect("environment after"),
+        environment_before
+    );
+    assert_controller_pair_is_current_and_coherent(&secrets);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        for (path, old_inode) in [
+            ("controller-server-certificate", old_inodes.0),
+            ("controller-server-key", old_inodes.1),
+        ] {
+            let metadata = std::fs::metadata(secrets.join(path)).expect("renewed metadata");
+            assert_ne!(
+                metadata.ino(),
+                old_inode,
+                "{path} must be staged and renamed"
+            );
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600, "{path} mode");
+        }
+    }
+}
+
+#[test]
+fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = install_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let now = time::OffsetDateTime::now_utc();
+    replace_controller_leaf(
+        &secrets,
+        now - time::Duration::hours(1),
+        now + time::Duration::days(31),
+    );
+    let certificate_before =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert before");
+    let key_before = std::fs::read(secrets.join("controller-server-key")).expect("key before");
+
+    upgrade_pki_bundle(temporary.path()).expect("healthy controller leaf accepted");
+
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert after"),
+        certificate_before
+    );
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-key")).expect("key after"),
+        key_before
+    );
+}
+
+#[test]
+fn upgrade_recovers_an_expired_controller_leaf_without_rotating_authority() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = install_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let now = time::OffsetDateTime::now_utc();
+    replace_controller_leaf(
+        &secrets,
+        now - time::Duration::days(397),
+        now - time::Duration::days(1),
+    );
+    let old_certificate =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("expired cert");
+    let old_key = std::fs::read(secrets.join("controller-server-key")).expect("expired key");
+    let authority_before = authority_snapshot(&secrets);
+
+    upgrade_pki_bundle(temporary.path()).expect("expired controller leaf recovered");
+
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("renewed cert"),
+        old_certificate
+    );
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-key")).expect("renewed key"),
+        old_key
+    );
+    assert_eq!(authority_snapshot(&secrets), authority_before);
+    assert_controller_pair_is_current_and_coherent(&secrets);
+}
+
+#[test]
+fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = install_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let now = time::OffsetDateTime::now_utc();
+    replace_controller_leaf(
+        &secrets,
+        now - time::Duration::days(397),
+        now - time::Duration::days(1),
+    );
+    std::fs::write(
+        secrets.join("controller-server-key"),
+        KeyPair::generate_for(&PKCS_ED25519)
+            .expect("unrelated key")
+            .serialize_pem(),
+    )
+    .expect("corrupt controller key");
+    let certificate_before =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert before");
+    let key_before = std::fs::read(secrets.join("controller-server-key")).expect("key before");
+
+    let error = upgrade_pki_bundle(temporary.path())
+        .expect_err("expired controller leaf with mismatched key rejected");
+
+    assert!(error.to_string().contains("private key does not match"));
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert after"),
+        certificate_before
+    );
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-key")).expect("key after"),
+        key_before
+    );
 }
 
 #[test]
