@@ -25,6 +25,7 @@ impl RecordingRunner {
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
                 CommandOutput::success(b"4242\n".to_vec()),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
@@ -160,10 +161,11 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
         sudo[0]
             .args
             .iter()
-            .any(|argument| argument == "/usr/bin/dpkg")
+            .any(|argument| argument == "/usr/bin/apt-get")
     );
+    assert!(sudo[0].args.iter().any(|argument| argument == "update"));
     assert!(
-        sudo[0]
+        sudo[1]
             .args
             .iter()
             .any(|argument| argument.ends_with("vonk-forge-agent_1.0.0_amd64.deb"))
@@ -325,7 +327,7 @@ fn packaged_placeholder_configuration_retries_the_fresh_pairing_flow() {
             command
                 .args
                 .iter()
-                .any(|argument| argument == "/usr/bin/dpkg")
+                .any(|argument| argument.ends_with("vonk-forge-agent_1.0.0_amd64.deb"))
         })
         .unwrap();
     let pair = runner

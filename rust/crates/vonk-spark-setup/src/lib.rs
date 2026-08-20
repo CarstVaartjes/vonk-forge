@@ -289,11 +289,17 @@ fn install_fresh_package(
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
+    run_checked(runner, sudo(Command::new("/usr/bin/apt-get", ["update"])))?;
     run_checked(
         runner,
         sudo(Command::new(
-            "/usr/bin/dpkg",
-            ["--install".to_owned(), staged.path().display().to_string()],
+            "/usr/bin/apt-get",
+            [
+                "install".to_owned(),
+                "--yes".to_owned(),
+                "--no-install-recommends".to_owned(),
+                staged.path().display().to_string(),
+            ],
         )),
     )
     .map(|_| ())
