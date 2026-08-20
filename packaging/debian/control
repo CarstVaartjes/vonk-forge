@@ -2,7 +2,7 @@ Package: vonk-forge-agent
 Version: @VERSION@
 Section: admin
 Priority: optional
-Architecture: arm64
+Architecture: @ARCHITECTURE@
 Maintainer: Vonk Forge <release@vonkforge.ai>
 Depends: acl, adduser, ca-certificates, curl, fuse-overlayfs, init-system-helpers, iproute2, iptables, openssl, podman (>= 4.9), slirp4netns, systemd, uidmap, util-linux
 Homepage: https://vonkforge.ai

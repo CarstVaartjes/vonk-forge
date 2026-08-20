@@ -17,8 +17,10 @@ use vonk_agent::{
     oci::OciRuntime,
     pair::{EnrollmentOutcome, collect_evidence, pair},
     process::SystemProcessRunner,
+    readiness::{publish_current, verify_current},
     rotation::rotate_if_due,
     runtime_identity::AgentRuntimeIdentity,
+    self_test,
     state::{StateStore, backoff_delay},
     telemetry::{
         SystemFileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
@@ -39,6 +41,14 @@ struct Cli {
 enum Command {
     Run,
     SelfTest,
+    VerifyReadiness {
+        #[arg(long, default_value = "/run/vonk-forge-agent/readiness.json")]
+        receipt: PathBuf,
+        #[arg(long)]
+        pid: u32,
+        #[arg(long, default_value_t = 90)]
+        max_age_seconds: u64,
+    },
     Pair {
         #[arg(long)]
         enrollment: Url,
@@ -55,7 +65,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
         Command::SelfTest => {
-            AgentRuntimeIdentity::from_current_executable()?;
+            let config = AgentConfig::load(&cli.config)?;
+            let identity = self_test::run(
+                &config,
+                &std::env::current_exe()?,
+                Path::new("/run/vonk-forge-agent"),
+            )?;
+            println!("{}", serde_json::to_string(&identity)?);
+        }
+        Command::VerifyReadiness {
+            receipt,
+            pid,
+            max_age_seconds,
+        } => {
+            let config = AgentConfig::load(&cli.config)?;
+            let identity = self_test::run(
+                &config,
+                &std::env::current_exe()?,
+                Path::new("/run/vonk-forge-agent"),
+            )?;
+            verify_current(
+                &receipt,
+                &identity,
+                pid,
+                std::time::Duration::from_secs(max_age_seconds),
+            )?;
         }
         Command::Pair {
             enrollment,
@@ -97,7 +131,11 @@ async fn pair_agent(
 }
 
 async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let runtime_identity = AgentRuntimeIdentity::from_current_executable()?;
+    let runtime_identity = self_test::run(
+        config,
+        &std::env::current_exe()?,
+        Path::new("/run/vonk-forge-agent"),
+    )?;
     rotate_if_due(config).await?;
     let client = AgentHttpClient::from_config(config)?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
@@ -216,7 +254,13 @@ async fn run_control_lane(
             .await
         };
         match operation.await {
-            Ok(()) => failures = 0,
+            Ok(()) => {
+                publish_current(
+                    Path::new("/run/vonk-forge-agent/readiness.json"),
+                    &runtime_identity,
+                )?;
+                failures = 0;
+            }
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
                 failures = failures.saturating_add(1);

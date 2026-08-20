@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs;
+use std::process::Command;
 
 use vonk_agent::runtime_identity::AgentRuntimeIdentity;
 
@@ -24,11 +25,13 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         identity.binary_digest,
         "b34766f06d9295426db46931bbe384c8cf4860dd0c87a39e128f9d1d420a1da9"
     );
-    assert_eq!(
+    assert!(identity.build_digest.starts_with("sha256:"));
+    assert_eq!(identity.build_digest.len(), 71);
+    assert_ne!(
         identity.build_digest,
-        "sha256:b34766f06d9295426db46931bbe384c8cf4860dd0c87a39e128f9d1d420a1da9"
+        format!("sha256:{}", identity.binary_digest)
     );
-    assert!(identity.self_test_passed);
+    assert!(!identity.self_test_passed);
     let fields = serde_json::to_value(&identity).unwrap();
     assert_eq!(
         fields
@@ -45,6 +48,19 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
             "semantic_version",
         ])
     );
+}
+
+#[test]
+fn self_test_rejects_missing_configuration_instead_of_hashing_only_the_binary() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing-agent.toml");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_vonk-agent"))
+        .args(["--config", missing.to_str().unwrap(), "self-test"])
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
 }
 
 #[test]

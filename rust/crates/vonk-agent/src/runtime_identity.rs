@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 use rustix::fs::{Mode, OFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -17,13 +17,20 @@ pub enum RuntimeIdentityError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[used]
+static BUILD_DIGEST_MARKER: &str =
+    concat!("VONK_AGENT_BUILD_DIGEST=", env!("VONK_AGENT_BUILD_DIGEST"));
+#[used]
+static SEMANTIC_VERSION_MARKER: &str =
+    concat!("VONK_AGENT_SEMANTIC_VERSION=", env!("CARGO_PKG_VERSION"));
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AgentRuntimeIdentity {
-    pub semantic_version: &'static str,
+    pub semantic_version: String,
     pub build_digest: String,
     pub binary_digest: String,
-    pub architecture: &'static str,
+    pub architecture: String,
     pub self_test_passed: bool,
 }
 
@@ -54,15 +61,20 @@ impl AgentRuntimeIdentity {
         }
         let binary_digest = hex::encode(Sha256::digest(raw));
         Ok(Self {
-            semantic_version: env!("CARGO_PKG_VERSION"),
-            build_digest: format!("sha256:{binary_digest}"),
+            semantic_version: env!("CARGO_PKG_VERSION").to_owned(),
+            build_digest: env!("VONK_AGENT_BUILD_DIGEST").to_owned(),
             binary_digest,
             architecture: if cfg!(target_arch = "aarch64") {
-                "linux-arm64"
+                "linux-arm64".to_owned()
             } else {
-                "linux-x86_64"
+                "linux-x86_64".to_owned()
             },
-            self_test_passed: true,
+            self_test_passed: false,
         })
+    }
+
+    pub fn mark_self_test_passed(mut self) -> Self {
+        self.self_test_passed = true;
+        self
     }
 }

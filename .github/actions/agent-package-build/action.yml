@@ -109,9 +109,13 @@ runs:
       run: |
         set -euo pipefail
         test "$(uname -m)" = aarch64
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          binutils-x86-64-linux-gnu gcc-x86-64-linux-gnu
         rustup set profile minimal
         rustup toolchain install 1.97.1 --component clippy,rustfmt
         rustup default 1.97.1
+        rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
 
     - name: Revalidate protected package source authority
       shell: bash
@@ -180,22 +184,55 @@ runs:
       run: |
         set -euo pipefail
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+        arm64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
+        amd64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
         scripts/build-agent-deb \
           --version "$VERSION" \
+          --architecture linux-arm64 \
+          --build-digest "$arm64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
           --source-date-epoch "$epoch" \
           --output-dir dist
         scripts/build-agent-deb \
           --version "$VERSION" \
+          --architecture linux-arm64 \
+          --build-digest "$arm64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
           --binaries-dir target/aarch64-unknown-linux-gnu/release \
+          --source-date-epoch "$epoch" \
+          --output-dir reproducible
+        scripts/build-agent-deb \
+          --version "$VERSION" \
+          --architecture linux-amd64 \
+          --build-digest "$amd64_build_digest" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --source-date-epoch "$epoch" \
+          --output-dir dist
+        scripts/build-agent-deb \
+          --version "$VERSION" \
+          --architecture linux-amd64 \
+          --build-digest "$amd64_build_digest" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --binaries-dir target/x86_64-unknown-linux-gnu/release \
           --source-date-epoch "$epoch" \
           --output-dir reproducible
         cmp --silent \
           "dist/vonk-forge-agent_${VERSION}_arm64.deb" \
           "reproducible/vonk-forge-agent_${VERSION}_arm64.deb"
-        scripts/verify-agent-deb --json \
-          "dist/vonk-forge-agent_${VERSION}_arm64.deb"
+        cmp --silent \
+          "dist/vonk-forge-agent_${VERSION}_amd64.deb" \
+          "reproducible/vonk-forge-agent_${VERSION}_amd64.deb"
+        for architecture in arm64 amd64; do
+          scripts/verify-agent-deb --json \
+            "dist/vonk-forge-agent_${VERSION}_${architecture}.deb"
+        done
 
     - name: Run Rust and packaging security gates
       shell: bash
@@ -226,11 +263,14 @@ runs:
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \
           packaging/bin/vonk-agent-upgrade \
-          tests/scripts/test_docker_firewall.sh
+          tests/scripts/test_docker_firewall.sh \
+          tests/nodes/test_upgrade_vonk_agent.sh
         sudo tests/scripts/test_docker_firewall.sh
+        tests/nodes/test_upgrade_vonk_agent.sh
         package="dist/vonk-forge-agent_${VERSION}_arm64.deb"
         sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
         sudo systemd-analyze verify \
+          /lib/systemd/system/vonk-forge-agent.service \
           /lib/systemd/system/vonk-forge-docker-firewall.service \
           /lib/systemd/system/vonk-forge-package-helper.service
         systemd-analyze security --offline=yes --no-pager \
@@ -245,8 +285,7 @@ runs:
         sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
           /etc/subgid
         test "$(stat -c %a /var/lib/vonk-forge-agent)" = 700
-        current_target=$(sudo readlink /var/lib/vonk-forge/supervisor/current)
-        test "$(basename "$current_target")" = a
+        test -x /usr/lib/vonk-forge/vonk-agent
         sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
           /run/vonk-forge-agent
         sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
@@ -266,8 +305,15 @@ runs:
           /var/lib/vonk-forge-agent/lifecycle-preserved
 
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+        arm64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
         scripts/build-agent-deb \
           --version "$NEXT_VERSION" \
+          --architecture linux-arm64 \
+          --build-digest "$arm64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
           --binaries-dir target/aarch64-unknown-linux-gnu/release \
           --source-date-epoch "$epoch" \
@@ -275,48 +321,16 @@ runs:
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
 
-        stable_state="$RUNNER_TEMP/vonk-supervisor-stable.json"
-        sudo cp /var/lib/vonk-forge/supervisor/state.json "$stable_state"
-        supervisor_before=$(
-          sha256sum /usr/lib/vonk-forge/vonk-agent-supervisor \
-            | cut -d' ' -f1
-        )
-        sudo python3 - <<'PY'
-        import json
-        from pathlib import Path
-
-        path = Path("/var/lib/vonk-forge/supervisor/state.json")
-        state = json.loads(path.read_bytes())
-        state["status"] = "pending"
-        state["previous_slot"] = "b"
-        state["previous_artifact_sha256"] = "0" * 64
-        state["activation_deadline"] = 4_102_444_800
-        path.write_text(json.dumps(state, sort_keys=True, separators=(",", ":")))
-        PY
-        pending_log="$RUNNER_TEMP/pending-upgrade.log"
-        if sudo env SYSTEMD_OFFLINE=1 dpkg -i \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb" \
-          >"$pending_log" 2>&1; then
-          echo "upgrade over pending supervisor state unexpectedly succeeded" >&2
-          exit 1
-        fi
-        grep -F 'supervisor state is not stable' "$pending_log" >/dev/null
-        test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$VERSION"
-        supervisor_after=$(
-          sha256sum /usr/lib/vonk-forge/vonk-agent-supervisor \
-            | cut -d' ' -f1
-        )
-        test "$supervisor_before" = "$supervisor_after"
-        test ! -e /var/lib/vonk-forge/slots/b/vonk-agent
-        sudo cp "$stable_state" /var/lib/vonk-forge/supervisor/state.json
-        sudo chmod 0644 /var/lib/vonk-forge/supervisor/state.json
-
-        sudo env SYSTEMD_OFFLINE=1 dpkg -i \
+        sudo env SYSTEMD_OFFLINE=1 dpkg --unpack \
           "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+        [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = iU* ]]
+        sudo env SYSTEMD_OFFLINE=1 dpkg --configure -a
+        test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$NEXT_VERSION"
         grep -Fx '# lifecycle-preserved' \
           /etc/vonk-forge-agent/agent.toml >/dev/null
-        test -x /var/lib/vonk-forge/slots/b/vonk-agent
-        test "$(basename "$(sudo readlink /var/lib/vonk-forge/supervisor/current)")" = a
+        test -x /usr/lib/vonk-forge/vonk-agent
+        test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
+          "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
 
         downgrade_log=$RUNNER_TEMP/downgrade.log
         if sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package" \
@@ -381,8 +395,6 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        cosign sign-blob --yes --bundle \
-          "dist/${PACKAGE}.sigstore.json" "dist/$PACKAGE"
         case "$CHANNEL" in
           dev)
             identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/agent-release\.yml@refs/heads/main$"
@@ -391,11 +403,16 @@ runs:
             identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/tags/v${VERSION//./\\.}$"
             ;;
         esac
-        cosign verify-blob \
-          --bundle "dist/${PACKAGE}.sigstore.json" \
-          --certificate-identity-regexp "$identity" \
-          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          "dist/$PACKAGE"
+        for architecture in arm64 amd64; do
+          package="vonk-forge-agent_${VERSION}_${architecture}.deb"
+          cosign sign-blob --yes --bundle \
+            "dist/${package}.sigstore.json" "dist/$package"
+          cosign verify-blob \
+            --bundle "dist/${package}.sigstore.json" \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "dist/$package"
+        done
 
     - name: Revalidate source before provenance attestation
       shell: bash
@@ -429,7 +446,7 @@ runs:
     - name: Attest package provenance
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
       with:
-        subject-path: dist/${{ inputs.package }}
+        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_*.deb
 
     - name: Revalidate source before SBOM attestation
       shell: bash
@@ -465,6 +482,12 @@ runs:
       with:
         subject-path: dist/${{ inputs.package }}
         sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.sbom.spdx.json
+
+    - name: Attest amd64 package SBOM
+      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      with:
+        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.deb
+        sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.sbom.spdx.json
 
     - name: Revalidate source before artifact publication
       shell: bash

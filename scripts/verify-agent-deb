@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fail-closed verifier for a Vonk Forge ARM64 Debian release package."""
+"""Fail-closed verifier for a Vonk Forge Debian release package."""
 
 from __future__ import annotations
 
@@ -54,9 +54,10 @@ SEMVER_TEXT = (
     r"(?:0|[1-9][0-9]*)"
 )
 PACKAGE_VERSION = re.compile(
-    rf"(?:{SEMVER_TEXT}|"
+    rf"(?:{SEMVER_TEXT}|{SEMVER_TEXT}\+lifecycle\.1|"
     rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
+ARCHITECTURES = {"arm64": 183, "amd64": 62}
 
 
 class VerificationError(RuntimeError):
@@ -99,8 +100,8 @@ def verify(deb: Path) -> dict[str, object]:
     }
     if fields["Package"] != PACKAGE:
         raise VerificationError("package identity is invalid")
-    if fields["Architecture"] != "arm64":
-        raise VerificationError("package architecture is not arm64")
+    if fields["Architecture"] not in ARCHITECTURES:
+        raise VerificationError("package architecture is unsupported")
     if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
     for dependency in ("acl", "iproute2", "iptables", "podman", "uidmap"):
@@ -124,9 +125,9 @@ def verify(deb: Path) -> dict[str, object]:
         members = _members(deb)
         _verify_members(members)
         _verify_control(control)
-        _verify_payload(payload, control)
+        _verify_payload(payload, control, fields["Architecture"])
         _verify_agent_signature(payload)
-        _verify_evidence(payload, fields["Version"])
+        _verify_evidence(payload, fields["Version"], fields["Architecture"])
 
     checksum_path = deb.with_suffix(deb.suffix + ".sha256")
     try:
@@ -145,7 +146,7 @@ def verify(deb: Path) -> dict[str, object]:
     if expected != [actual, deb.name]:
         raise VerificationError("release SHA-256 sidecar is invalid")
     return {
-        "architecture": "arm64",
+        "architecture": fields["Architecture"],
         "package": PACKAGE,
         "sha256": actual,
         "version": fields["Version"],
@@ -224,7 +225,7 @@ def _verify_control(control: Path) -> None:
         "deb-systemd-helper enable vonk-forge-agent.service",
         "deb-systemd-invoke restart vonk-forge-agent.service",
         "systemctl --system is-active --quiet vonk-forge-agent.service",
-        "/usr/lib/vonk-forge/vonk-agent self-test",
+        "--config /etc/vonk-forge-agent/agent.toml self-test",
         "daemon-reload",
     ):
         if required not in postinst:
@@ -239,16 +240,16 @@ def _verify_control(control: Path) -> None:
         raise VerificationError("postinst has an undeclared interpreter dependency")
 
 
-def _verify_payload(payload: Path, control: Path) -> None:
+def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
     for name in REQUIRED_ELF:
         path = payload / name
         raw = path.read_bytes()[:64]
         if (
             len(raw) != 64
             or raw[:7] != b"\x7fELF\x02\x01\x01"
-            or struct.unpack_from("<H", raw, 18)[0] != 183
+            or struct.unpack_from("<H", raw, 18)[0] != ARCHITECTURES[architecture]
         ):
-            raise VerificationError(f"binary is not AArch64 ELF: {name}")
+            raise VerificationError(f"binary architecture is invalid: {name}")
     units = {
         name: (payload / f"lib/systemd/system/{name}").read_text(encoding="utf-8")
         for name in (
@@ -409,7 +410,7 @@ def _verify_agent_signature(payload: Path) -> None:
         )
 
 
-def _verify_evidence(payload: Path, version: str) -> None:
+def _verify_evidence(payload: Path, version: str, architecture: str) -> None:
     documents = {
         name: json.loads(
             (payload / f"usr/share/doc/vonk-forge-agent/{name}").read_text(
@@ -464,11 +465,34 @@ def _verify_evidence(payload: Path, version: str) -> None:
         for item in subject
         if isinstance(item, dict) and isinstance(item.get("digest"), dict)
     }
+    external = (
+        documents["provenance.json"]
+        .get("predicate", {})
+        .get("buildDefinition", {})
+        .get("externalParameters", {})
+    )
+    expected_runtime_architecture = {
+        "arm64": "linux-arm64",
+        "amd64": "linux-amd64",
+    }[architecture]
+    build_digest = external.get("build_digest") if isinstance(external, dict) else None
+    agent_raw = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
+    semantic_match = re.match(SEMVER_TEXT, version)
+    semantic_version = semantic_match.group(0) if semantic_match is not None else None
     if (
         cyclone != expected
         or spdx != expected
         or provenance != expected
         or version not in json.dumps(documents)
+        or not isinstance(external, dict)
+        or external.get("architecture") != expected_runtime_architecture
+        or not isinstance(build_digest, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", build_digest) is None
+        or f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode() not in agent_raw
+        or semantic_version is None
+        or f"VONK_AGENT_SEMANTIC_VERSION={semantic_version}".encode()
+        not in agent_raw
+        or build_digest == f"sha256:{expected['vonk-agent']}"
     ):
         raise VerificationError("package provenance is invalid")
 

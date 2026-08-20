@@ -52,8 +52,7 @@ def publication_sequence(release: str, value: str) -> int:
 
 
 def stable_next_version(version: str) -> str:
-    major, minor, patch = version.split(".")
-    return f"{major}.{minor}.{int(patch) + 1}"
+    return f"{version}+lifecycle.1"
 
 
 def metadata(arguments: Sequence[str]) -> list[str]:

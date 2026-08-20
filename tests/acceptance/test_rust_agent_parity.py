@@ -32,8 +32,8 @@ def test_agent_outcome_matrix_has_executable_owners() -> None:
             "test_install_is_digest_bound_idempotent_and_gang_complete",
         ),
         "update-rollback": (
-            "rust/crates/vonk-agent-supervisor/tests/rollback.rs",
-            "readiness_timeout_rolls_back_to_freshly_verified_previous_slot",
+            "tests/nodes/test_upgrade_vonk_agent.sh",
+            "controller readiness receipt was not sustained",
         ),
         "audit": (
             "control/tests/test_agent_api.py",
@@ -58,17 +58,16 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
         assert f'"{retired}"' not in main
 
     package_builder = _source("scripts/build-agent-deb")
-    assert 'BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor")' in package_builder
+    assert 'BINARIES = ("vonk-agent", "vonk-agent-helper")' in package_builder
     assert "vonk_agent" not in package_builder
 
 
 def test_debian_package_is_the_only_agent_installer_authority() -> None:
     package_builder = _source("scripts/build-agent-deb")
-    for binary in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
+    for binary in ("vonk-agent", "vonk-agent-helper"):
         assert binary in package_builder
     for unit in (
         "vonk-forge-agent.service",
-        "vonk-forge-agent-supervisor.service",
         "vonk-forge-docker-firewall.service",
         "vonk-forge-package-helper.service",
         "vonk-forge-package-helper.socket",

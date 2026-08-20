@@ -3,9 +3,22 @@ set -eu
 
 new_version='@VERSION@'
 
-if [ "${1:-}" = upgrade ] && [ -n "${2:-}" ]; then
-    if dpkg --compare-versions "$new_version" lt "$2"; then
-        echo "vonk-forge-agent: refusing downgrade from $2 to $new_version" >&2
+case "${1:-}" in
+install|upgrade)
+    old_version=${2:-}
+    ;;
+abort-upgrade)
+    # The old package's abort path must remain available to dpkg recovery.
+    old_version=
+    ;;
+*)
+    old_version=
+    ;;
+esac
+
+if [ -n "$old_version" ]; then
+    if dpkg --compare-versions "$new_version" lt "$old_version"; then
+        echo "vonk-forge-agent: refusing downgrade from $old_version to $new_version" >&2
         exit 1
     fi
 fi

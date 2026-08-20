@@ -169,12 +169,17 @@ def signing_key_id(private_key: Path, tmp_path: Path) -> str:
 
 
 def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
+    build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
-        raw = bytearray(256)
+    for name in ("vonk-agent", "vonk-agent-helper"):
+        raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
+        marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
+        raw[128 : 128 + len(marker)] = marker
+        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+        raw[256 : 256 + len(semantic_marker)] = semantic_marker
         (binaries / name).write_bytes(raw)
         (binaries / name).chmod(0o555)
     private_key = tmp_path / "release.pem"
@@ -186,6 +191,10 @@ def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
             ROOT / "scripts/build-agent-deb",
             "--version",
             "0.1.0",
+            "--architecture",
+            "linux-arm64",
+            "--build-digest",
+            build_digest,
             "--release-private-key",
             private_key,
             "--binaries-dir",
@@ -334,6 +343,13 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in text
     assert "cargo test --workspace --locked" in text
     assert "scripts/verify-agent-systemd" in text
+    for architecture in ("linux-arm64", "linux-amd64"):
+        assert f"--architecture {architecture}" in text
+    for architecture in ("arm64", "amd64"):
+        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in text
+    assert "vonk-agent-supervisor" not in text
+    assert "/var/lib/vonk-forge/slots" not in text
+    assert "/var/lib/vonk-forge/supervisor" not in text
     for expected in (
         "dpkg -i",
         "dpkg --remove vonk-forge-agent",
@@ -372,7 +388,7 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"'
     )
     first_upgrade = lifecycle_lines.index(
-        "sudo env SYSTEMD_OFFLINE=1 dpkg -i \\", final_build + 3
+        "sudo env SYSTEMD_OFFLINE=1 dpkg --unpack \\", final_build + 3
     )
     assert lifecycle_lines[first_upgrade + 1] == (
         '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'

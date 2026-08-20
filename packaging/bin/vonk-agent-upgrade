@@ -22,10 +22,17 @@ path() {
 }
 
 apt_get="${VONK_AGENT_UPGRADE_APT_GET:-/usr/bin/apt-get}"
+dpkg="${VONK_AGENT_UPGRADE_DPKG:-/usr/bin/dpkg}"
+dpkg_query="${VONK_AGENT_UPGRADE_DPKG_QUERY:-/usr/bin/dpkg-query}"
 agent="${VONK_AGENT_UPGRADE_AGENT:-$(path /usr/lib/vonk-forge/vonk-agent)}"
 systemctl="${VONK_AGENT_UPGRADE_SYSTEMCTL:-/usr/bin/systemctl}"
+config="${VONK_AGENT_UPGRADE_CONFIG:-$(path /etc/vonk-forge-agent/agent.toml)}"
+receipt="${VONK_AGENT_UPGRADE_RECEIPT:-$(path /run/vonk-forge-agent/readiness.json)}"
+attempts="${VONK_AGENT_UPGRADE_ATTEMPTS:-30}"
+sustained_required="${VONK_AGENT_UPGRADE_SUSTAINED:-3}"
+interval_seconds="${VONK_AGENT_UPGRADE_INTERVAL_SECONDS:-2}"
 
-for required in "$apt_get" "$agent" "$systemctl"; do
+for required in "$apt_get" "$dpkg" "$dpkg_query" "$systemctl"; do
   if [[ ! -x "$required" ]]; then
     printf 'required executable is unavailable: %s\n' "$required" >&2
     exit 1
@@ -34,6 +41,8 @@ done
 
 printf '%s\n' 'Updating the Vonk Forge agent package...'
 "$apt_get" update
+"$apt_get" --fix-broken install --yes
+"$dpkg" --configure -a
 "$apt_get" install --only-upgrade --yes vonk-forge-agent
 
 if [[ ! -x "$agent" ]]; then
@@ -41,12 +50,64 @@ if [[ ! -x "$agent" ]]; then
   exit 1
 fi
 "$systemctl" restart vonk-forge-agent.service
-"$systemctl" is-active --quiet vonk-forge-agent.service
-"$agent" self-test
 version="$("$agent" --version)"
 if [[ ! "$version" =~ ^vonk-agent\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   printf 'installed agent version is invalid: %s\n' "$version" >&2
   exit 1
 fi
+binary_semantic="${version#vonk-agent }"
+package_version="$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)"
+if [[ ! "$package_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)([~+.-].*)?$ ]]; then
+  printf 'installed package version is invalid: %s\n' "$package_version" >&2
+  exit 1
+fi
+package_semantic="${BASH_REMATCH[1]}"
+if [[ "$binary_semantic" != "$package_semantic" ]]; then
+  printf 'installed agent %s does not match package semantic version %s\n' \
+    "$binary_semantic" "$package_semantic" >&2
+  exit 1
+fi
+"$agent" --config "$config" self-test >/dev/null
 
-printf 'upgrade complete: %s is healthy\n' "$version"
+if [[ ! "$attempts" =~ ^[1-9][0-9]*$ ]] \
+  || [[ ! "$sustained_required" =~ ^[1-9][0-9]*$ ]] \
+  || [[ ! "$interval_seconds" =~ ^[0-9]+$ ]] \
+  || (( sustained_required > attempts )); then
+  printf '%s\n' 'upgrade health policy is invalid' >&2
+  exit 1
+fi
+
+sustained=0
+sustained_pid=
+for (( attempt = 1; attempt <= attempts; attempt++ )); do
+  if "$systemctl" is-active --quiet vonk-forge-agent.service; then
+    main_pid="$(
+      "$systemctl" show --property MainPID --value vonk-forge-agent.service
+    )"
+    if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] \
+      && "$agent" --config "$config" verify-readiness \
+        --receipt "$receipt" --pid "$main_pid" --max-age-seconds 90; then
+      if [[ -n "$sustained_pid" && "$main_pid" != "$sustained_pid" ]]; then
+        sustained=0
+      fi
+      sustained_pid="$main_pid"
+      (( sustained += 1 ))
+      if (( sustained >= sustained_required )); then
+        printf 'upgrade complete: %s is healthy\n' "$version"
+        exit 0
+      fi
+    else
+      sustained=0
+      sustained_pid=
+    fi
+  else
+    sustained=0
+    sustained_pid=
+  fi
+  if (( attempt < attempts )); then
+    sleep "$interval_seconds"
+  fi
+done
+
+printf '%s\n' 'controller readiness receipt was not sustained' >&2
+exit 1

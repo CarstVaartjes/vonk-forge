@@ -2,7 +2,8 @@
 set -eu
 
 package_version='@VERSION@'
-agent_semver=${package_version%%~dev.*}
+agent_semver=${package_version%%~*}
+agent_semver=${agent_semver%%+*}
 
 if [ "${1:-}" != configure ]; then
     exit 0
@@ -117,13 +118,14 @@ deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
 fi
+[ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ]
 if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
     if [ -n "${2:-}" ]; then
         deb-systemd-invoke restart vonk-forge-agent.service >/dev/null
         systemctl --system is-active --quiet vonk-forge-agent.service
-        [ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ]
-        /usr/lib/vonk-forge/vonk-agent self-test
+        /usr/lib/vonk-forge/vonk-agent \
+            --config /etc/vonk-forge-agent/agent.toml self-test >/dev/null
     fi
 fi
 

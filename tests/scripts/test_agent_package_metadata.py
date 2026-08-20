@@ -59,7 +59,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "version=0.1.0",
-        "next_version=0.1.1",
+        "next_version=0.1.0+lifecycle.1",
         "package=vonk-forge-agent_0.1.0_arm64.deb",
         f"artifact_name=vonk-agent-production-{SHA}",
         "channel=stable",
