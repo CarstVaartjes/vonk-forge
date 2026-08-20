@@ -47,6 +47,8 @@ def _run_bootstrap(
     release_manifest.write_text('{"schema_version":1}\n')
     release_signature = tmp_path / "release.sig"
     release_signature.write_text("signed-release\n")
+    setup_signature = tmp_path / "vonk-spark-setup.sig"
+    setup_signature.write_text("signed-setup\n")
     rendered = tmp_path / f"install-{kind}"
     source = (ROOT / "install" / kind).read_text()
     for placeholder in (
@@ -77,7 +79,7 @@ def _run_bootstrap(
         "curl",
         'destination=\nurl=\nwhile [ "$#" -gt 0 ]; do\n'
         '  case "$1" in -o) destination=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac\n'
-        'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *.deb) source=$VONK_TEST_PACKAGE ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
+        'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *.deb) source=$VONK_TEST_PACKAGE ;; *.sig) source=$VONK_TEST_SETUP_SIGNATURE ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
         'cp "$source" "$destination"\n',
     )
     forbidden = tmp_path / "forbidden-tools"
@@ -97,6 +99,7 @@ def _run_bootstrap(
         "VONK_TEST_PACKAGE": str(package),
         "VONK_TEST_PAYLOAD": str(payload),
         "VONK_TEST_RECEIPT": str(receipt),
+        "VONK_TEST_SETUP_SIGNATURE": str(setup_signature),
         "VONK_TEST_FORBIDDEN": str(forbidden),
         "VONK_INSTALL_RELEASE_MANIFEST": str(release_manifest),
         "VONK_INSTALL_RELEASE_SIGNATURE": str(release_signature),
@@ -140,12 +143,14 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
     assert invocation[0] == expected_arguments
     if kind == "spark":
-        assert invocation[2:] == [
+        assert invocation[2:6] == [
             "--release-manifest",
             str(tmp_path / "release.json"),
             "--release-signature",
             str(tmp_path / "release.sig"),
         ]
+        assert invocation[6] == "--setup-signature"
+        assert Path(invocation[7]).name == "vonk-spark-setup.sig"
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"
     assert not forbidden.exists()

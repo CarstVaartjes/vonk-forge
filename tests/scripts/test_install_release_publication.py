@@ -184,7 +184,8 @@ def _assemble(tmp_path: Path, inputs: dict[str, object]) -> Path:
 def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     tmp_path: Path,
 ) -> None:
-    publication = _assemble(tmp_path, _inputs(tmp_path))
+    inputs = _inputs(tmp_path)
+    publication = _assemble(tmp_path, inputs)
     plan = json.loads((publication / "publication-plan.json").read_text())
 
     assert plan["schema_version"] == 1
@@ -201,13 +202,53 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
             key.endswith(f"/nas/current/{platform}/vonk-nas-setup") for key in keys
         )
     for platform in SPARK_PLATFORMS:
-        assert any(
-            key.endswith(f"/spark/current/{platform}/vonk-spark-setup") for key in keys
+        setup_key = next(
+            key
+            for key in keys
+            if key.endswith(f"/spark/current/{platform}/vonk-spark-setup")
         )
+        setup_signature_key = f"{setup_key}.sig"
+        assert setup_signature_key in keys
         assert any(
             key.endswith(f"/spark/current/{platform}/vonk-forge-agent.deb")
             for key in keys
         )
+        release = json.loads(
+            next(
+                (publication / "objects").glob(
+                    f"artifacts/stable/releases/{plan['generation']}/release.json"
+                )
+            ).read_text()
+        )
+        signature = publication / "objects" / setup_signature_key
+        signature_record = release["artifacts"][
+            f"spark-setup-signature-{platform}"
+        ]
+        assert signature_record == {
+            "path": setup_signature_key,
+            "sha256": hashlib.sha256(signature.read_bytes()).hexdigest(),
+            "size": signature.stat().st_size,
+        }
+        raw_signature = tmp_path / f"{platform}.setup.raw.sig"
+        raw_signature.write_bytes(
+            base64.b64decode(signature.read_bytes().strip(), validate=True)
+        )
+        verification = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-verify",
+                inputs["signing_public_key"],
+                "-signature",
+                raw_signature,
+                inputs["spark"][platform],
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert verification.returncode == 0, verification.stderr
     assert {
         entry["key"] for entry in plan["objects"] if entry["phase"] == "endpoint"
     } == {

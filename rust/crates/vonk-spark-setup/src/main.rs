@@ -22,6 +22,8 @@ struct Cli {
     release_manifest: Option<PathBuf>,
     #[arg(long, hide = true)]
     release_signature: Option<PathBuf>,
+    #[arg(long, hide = true)]
+    setup_signature: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<InternalCommand>,
 }
@@ -61,6 +63,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("signed release manifest is required")?,
         cli.release_signature
             .ok_or("signed release signature is required")?,
+        cli.setup_signature
+            .ok_or("signed setup signature is required")?,
         std::env::current_exe()?,
     )?;
     validate_system_host(&request)?;

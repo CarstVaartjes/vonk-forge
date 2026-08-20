@@ -32,17 +32,6 @@ const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
 const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
 const INSTALLER_RELEASE_PUBLIC_KEY: &[u8] =
     include_bytes!("../../../../install/installer-release-public.pem");
-const ROOT_HANDOFF: &str = r#"
-umask 077
-root=$(/usr/bin/mktemp -d /var/tmp/vonk-spark-setup.XXXXXX)
-trap '/bin/rm -rf -- "$root"' EXIT HUP INT TERM
-setup=$root/vonk-spark-setup
-package=$root/vonk-forge-agent.deb
-/usr/bin/install -o root -g root -m 0700 -- "$1" "$setup"
-/usr/bin/install -o root -g root -m 0600 -- "$2" "$package"
-"$setup" __apply
-"#;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     pub program: PathBuf,
@@ -112,6 +101,7 @@ pub struct SetupRequest {
     package: PathBuf,
     release_manifest: PathBuf,
     release_signature: PathBuf,
+    setup_signature: PathBuf,
     executable: PathBuf,
 }
 
@@ -139,8 +129,21 @@ impl ReleaseAuthority {
     }
 
     fn verify(&self, manifest: &[u8], encoded_signature: &[u8]) -> Result<(), SetupError> {
-        if manifest.is_empty()
-            || manifest.len() > MAX_RELEASE_BYTES
+        self.verify_bounded(manifest, encoded_signature, MAX_RELEASE_BYTES)
+    }
+
+    fn verify_setup(&self, setup: &[u8], encoded_signature: &[u8]) -> Result<(), SetupError> {
+        self.verify_bounded(setup, encoded_signature, 64 * 1024 * 1024)
+    }
+
+    fn verify_bounded(
+        &self,
+        payload: &[u8],
+        encoded_signature: &[u8],
+        maximum_payload: usize,
+    ) -> Result<(), SetupError> {
+        if payload.is_empty()
+            || payload.len() > maximum_payload
             || encoded_signature.is_empty()
             || encoded_signature.len() > MAX_RELEASE_SIGNATURE_BYTES
             || !encoded_signature.ends_with(b"\n")
@@ -150,11 +153,11 @@ impl ReleaseAuthority {
         }
         let directory = secure_tempdir("vonk-spark-release.")?;
         let key = directory.path().join("release-public.pem");
-        let claims = directory.path().join("release.json");
+        let claims = directory.path().join("signed-payload");
         let encoded_signature_path = directory.path().join("release.sig.b64");
         let signature_path = directory.path().join("release.sig");
         fs::write(&key, &self.public_key_pem).map_err(SetupError::PrivilegedWrite)?;
-        fs::write(&claims, manifest).map_err(SetupError::PrivilegedWrite)?;
+        fs::write(&claims, payload).map_err(SetupError::PrivilegedWrite)?;
         fs::write(&encoded_signature_path, encoded_signature)
             .map_err(SetupError::PrivilegedWrite)?;
         let decoded = ProcessCommand::new("/usr/bin/openssl")
@@ -320,13 +323,17 @@ struct VerifiedRelease {
     signature: Vec<u8>,
     package: ReleaseArtifact,
     setup: ReleaseArtifact,
+    setup_signature: ReleaseArtifact,
     version: String,
     architecture: String,
 }
 
 pub struct PreparedSetup {
     executable: PathBuf,
+    setup_signature: PathBuf,
     sudo: PathBuf,
+    staging_root: PathBuf,
+    required_owner: Option<u32>,
     staged: StagedPackage,
     frame: Vec<u8>,
 }
@@ -346,11 +353,13 @@ impl SetupRequest {
         package: PathBuf,
         release_manifest: PathBuf,
         release_signature: PathBuf,
+        setup_signature: PathBuf,
         executable: PathBuf,
     ) -> Result<Self, SetupError> {
         if !package.is_absolute()
             || !release_manifest.is_absolute()
             || !release_signature.is_absolute()
+            || !setup_signature.is_absolute()
             || !executable.is_absolute()
         {
             return Err(SetupError::UnsafeInput(
@@ -361,6 +370,7 @@ impl SetupRequest {
             package,
             release_manifest,
             release_signature,
+            setup_signature,
             executable,
         })
     }
@@ -370,19 +380,73 @@ pub fn handoff_to_root(
     prepared: &PreparedSetup,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    handoff_to_root_with_authority(prepared, runner, &ReleaseAuthority::canonical())
+}
+
+pub fn handoff_to_root_with_authority(
+    prepared: &PreparedSetup,
+    runner: &mut dyn CommandRunner,
+    authority: &ReleaseAuthority,
+) -> Result<(), SetupError> {
+    let root_handoff = root_handoff_script(prepared, authority)?;
     let command = Command::new(
         &prepared.sudo,
         [
             "/bin/sh".to_owned(),
             "-ceu".to_owned(),
-            ROOT_HANDOFF.to_owned(),
+            root_handoff,
             "vonk-spark-root-handoff".to_owned(),
             prepared.executable.display().to_string(),
             prepared.staged.path().display().to_string(),
+            prepared.setup_signature.display().to_string(),
         ],
     )
     .with_stdin(prepared.frame.clone());
     run_checked(runner, command).map(|_| ())
+}
+
+fn root_handoff_script(
+    prepared: &PreparedSetup,
+    authority: &ReleaseAuthority,
+) -> Result<String, SetupError> {
+    let staging_root = prepared
+        .staging_root
+        .to_str()
+        .filter(|value| value.starts_with('/') && !value.contains(['\n', '\r', '\0']))
+        .ok_or(SetupError::PrivilegedInput)?;
+    let staging_root = staging_root.replace('\'', "'\\''");
+    let install_owner = if prepared.required_owner == Some(0) {
+        "-o root -g root "
+    } else {
+        ""
+    };
+    let public_key =
+        std::str::from_utf8(&authority.public_key_pem).map_err(|_| SetupError::ReleaseSignature)?;
+    if public_key.contains("VONK_INSTALLER_RELEASE_PUBLIC_KEY") {
+        return Err(SetupError::ReleaseSignature);
+    }
+    Ok(format!(
+        r#"umask 077
+root=$(/usr/bin/mktemp -d '{staging_root}/vonk-spark-setup.XXXXXX')
+trap '/bin/rm -rf -- "$root"' EXIT HUP INT TERM
+setup=$root/vonk-spark-setup
+package=$root/vonk-forge-agent.deb
+encoded_signature=$root/vonk-spark-setup.sig
+signature=$root/vonk-spark-setup.raw.sig
+public_key=$root/installer-release-public.pem
+/usr/bin/install {install_owner}-m 0700 -- "$1" "$setup"
+/usr/bin/install {install_owner}-m 0600 -- "$3" "$encoded_signature"
+/usr/bin/cat > "$public_key" <<'VONK_INSTALLER_RELEASE_PUBLIC_KEY'
+{public_key}VONK_INSTALLER_RELEASE_PUBLIC_KEY
+[ "$(/usr/bin/stat -c %s "$encoded_signature")" -le {MAX_RELEASE_SIGNATURE_BYTES} ]
+/usr/bin/openssl base64 -d -A -in "$encoded_signature" -out "$signature" >/dev/null 2>&1
+[ "$(/usr/bin/stat -c %s "$signature")" -gt 0 ]
+[ "$(/usr/bin/stat -c %s "$signature")" -le 1024 ]
+/usr/bin/openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$setup" >/dev/null 2>&1
+/usr/bin/install {install_owner}-m 0600 -- "$2" "$package"
+"$setup" __apply
+"#
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -466,6 +530,7 @@ pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
         "/bin/rm",
         "/bin/sh",
         "/usr/bin/apt-get",
+        "/usr/bin/cat",
         "/usr/bin/curl",
         "/usr/bin/dpkg-deb",
         "/usr/bin/install",
@@ -473,6 +538,7 @@ pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
         "/usr/bin/openssl",
         "/usr/bin/setpriv",
         "/usr/bin/sha256sum",
+        "/usr/bin/stat",
         "/usr/bin/sudo",
         "/usr/bin/systemctl",
     ] {
@@ -589,7 +655,10 @@ pub fn prepare_setup_with_authority(
     };
     Ok(PreparedSetup {
         executable: request.executable.clone(),
+        setup_signature: request.setup_signature.clone(),
         sudo: paths.sudo.clone(),
+        staging_root: paths.staging_root.clone(),
+        required_owner: paths.required_owner,
         staged,
         frame: encode_apply_frame(&envelope)?,
     })
@@ -682,7 +751,19 @@ fn verified_release_from_files(
 ) -> Result<VerifiedRelease, SetupError> {
     let manifest = read_bounded_regular(&request.release_manifest, MAX_RELEASE_BYTES)?;
     let signature = read_bounded_regular(&request.release_signature, MAX_RELEASE_SIGNATURE_BYTES)?;
-    verified_release(manifest, signature, authority)
+    let release = verified_release(manifest, signature, authority)?;
+    let setup_signature =
+        read_bounded_regular(&request.setup_signature, MAX_RELEASE_SIGNATURE_BYTES)?;
+    verify_release_artifact_size(&request.setup_signature, release.setup_signature.size)?;
+    verify_regular_file_digest(
+        &request.setup_signature,
+        &release.setup_signature.sha256,
+        MAX_RELEASE_SIGNATURE_BYTES as u64,
+    )
+    .map_err(|_| SetupError::ReleaseSignature)?;
+    let setup = read_bounded_regular(&request.executable, 64 * 1024 * 1024)?;
+    authority.verify_setup(&setup, &setup_signature)?;
+    Ok(release)
 }
 
 fn verified_release(
@@ -722,18 +803,27 @@ fn verified_release(
         .get(&format!("spark-setup-{platform}"))
         .cloned()
         .ok_or(SetupError::ReleaseSignature)?;
+    let setup_signature = document
+        .artifacts
+        .get(&format!("spark-setup-signature-{platform}"))
+        .cloned()
+        .ok_or(SetupError::ReleaseSignature)?;
     let prefix = format!(
         "artifacts/{}/releases/{}/spark/current/{platform}/",
         document.channel, document.generation
     );
     if package.path != format!("{prefix}vonk-forge-agent.deb")
         || setup.path != format!("{prefix}vonk-spark-setup")
+        || setup_signature.path != format!("{prefix}vonk-spark-setup.sig")
         || !valid_sha256(&package.sha256)
         || !valid_sha256(&setup.sha256)
+        || !valid_sha256(&setup_signature.sha256)
         || package.size < 68
         || package.size > MAX_PACKAGE_BYTES
         || setup.size == 0
         || setup.size > 64 * 1024 * 1024
+        || setup_signature.size == 0
+        || setup_signature.size > MAX_RELEASE_SIGNATURE_BYTES as u64
     {
         return Err(SetupError::ReleaseSignature);
     }
@@ -742,6 +832,7 @@ fn verified_release(
         signature,
         package,
         setup,
+        setup_signature,
         version: document.version,
         architecture: architecture.to_owned(),
     })

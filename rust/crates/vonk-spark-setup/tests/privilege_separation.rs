@@ -20,6 +20,7 @@ struct SignedRelease {
     authority: ReleaseAuthority,
     manifest: PathBuf,
     signature: PathBuf,
+    setup_signature: PathBuf,
 }
 
 fn signed_release(
@@ -59,6 +60,36 @@ fn signed_release(
     let manifest = root.join("release.json");
     let package_raw = fs::read(package).unwrap();
     let setup_raw = fs::read(executable).unwrap();
+    let setup_raw_signature = root.join("vonk-spark-setup.raw.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256", "-sign"])
+            .arg(&private_key)
+            .args(["-out"])
+            .arg(&setup_raw_signature)
+            .arg(executable)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let setup_signature = root.join("vonk-spark-setup.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["base64", "-A", "-in"])
+            .arg(&setup_raw_signature)
+            .args(["-out"])
+            .arg(&setup_signature)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&setup_signature)
+        .unwrap()
+        .write_all(b"\n")
+        .unwrap();
+    let setup_signature_raw = fs::read(&setup_signature).unwrap();
     let release = serde_json::json!({
         "artifacts": {
             "agent-package-linux-amd64": {
@@ -70,6 +101,11 @@ fn signed_release(
                 "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-spark-setup",
                 "sha256": hex::encode(Sha256::digest(&setup_raw)),
                 "size": setup_raw.len(),
+            },
+            "spark-setup-signature-linux-amd64": {
+                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-spark-setup.sig",
+                "sha256": hex::encode(Sha256::digest(&setup_signature_raw)),
+                "size": setup_signature_raw.len(),
             }
         },
         "bootstraps": {
@@ -129,6 +165,7 @@ fn signed_release(
         authority: ReleaseAuthority::from_pem(fs::read(public_key).unwrap()).unwrap(),
         manifest,
         signature,
+        setup_signature,
     }
 }
 
@@ -273,6 +310,7 @@ fn signed_request(root: &std::path::Path) -> (SetupRequest, ReleaseAuthority) {
         package_path,
         signed.manifest,
         signed.signature,
+        signed.setup_signature,
         executable,
     )
     .unwrap();
@@ -310,8 +348,14 @@ fn request_for_package(root: &std::path::Path, package_path: PathBuf) -> SetupRe
     let executable = root.join("vonk-spark-setup");
     fs::write(&executable, b"verified setup executable").unwrap();
     let signed = signed_release(root, &package_path, &executable);
-    SetupRequest::from_signed_release(package_path, signed.manifest, signed.signature, executable)
-        .unwrap()
+    SetupRequest::from_signed_release(
+        package_path,
+        signed.manifest,
+        signed.signature,
+        signed.setup_signature,
+        executable,
+    )
+    .unwrap()
 }
 
 fn test_authority(paths: &InstallPaths) -> ReleaseAuthority {
@@ -518,6 +562,40 @@ fn root_apply_rejects_an_attacker_signed_release_and_non_session_execution() {
         &attacker_authority,
     );
     assert!(matches!(outside_session, Err(SetupError::PrivilegedInput)));
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn setup_signature_must_match_the_signed_release_before_prompt_or_sudo() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    let executable = temporary.path().join("vonk-spark-setup");
+    fs::write(&executable, b"verified setup executable").unwrap();
+    let signed = signed_release(temporary.path(), &package_path, &executable);
+    fs::write(&signed.setup_signature, b"not the published signature\n").unwrap();
+    let request = SetupRequest::from_signed_release(
+        package_path,
+        signed.manifest,
+        signed.signature,
+        signed.setup_signature,
+        executable,
+    )
+    .unwrap();
+    let mut runner = RecordingRunner::default();
+
+    let result = prepare_setup_with_authority(
+        &request,
+        &install_paths,
+        &mut NoPrompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+        &signed.authority,
+    );
+
+    assert!(matches!(result, Err(SetupError::ReleaseSignature)));
     assert!(runner.commands.is_empty());
 }
 

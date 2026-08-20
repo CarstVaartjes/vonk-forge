@@ -493,6 +493,15 @@ def assemble(arguments: argparse.Namespace) -> str:
                 "path": setup_key,
                 **_record(setup_content),
             }
+            setup_signature_key = f"{setup_key}.sig"
+            setup_signature = (
+                _sign(arguments.signing_key, setup_content).encode("ascii") + b"\n"
+            )
+            add_immutable(setup_signature_key, setup_signature)
+            release_artifacts[f"spark-setup-signature-{platform}"] = {
+                "path": setup_signature_key,
+                **_record(setup_signature),
+            }
             package_key = (
                 f"{immutable_prefix}/spark/current/{platform}/vonk-forge-agent.deb"
             )

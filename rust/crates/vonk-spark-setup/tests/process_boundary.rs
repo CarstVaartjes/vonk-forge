@@ -12,7 +12,7 @@ use tempfile::tempdir;
 use vonk_spark_setup::{
     CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, ReleaseAuthority,
     SetupRequest, SystemCommandRunner, TtyPrompt, apply_setup_from_with_authority, handoff_to_root,
-    prepare_setup_with_authority,
+    handoff_to_root_with_authority, prepare_setup_with_authority,
 };
 
 const HELPER_ROOT: &str = "VONK_SPARK_PROCESS_HELPER_ROOT";
@@ -100,10 +100,17 @@ fn package(path: &Path) {
 }
 
 fn signed_request(root: &Path) -> (SetupRequest, ReleaseAuthority) {
+    signed_request_with_setup(root, b"process-boundary setup executable")
+}
+
+fn signed_request_with_setup(
+    root: &Path,
+    setup_contents: &[u8],
+) -> (SetupRequest, ReleaseAuthority) {
     let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
     package(&package_path);
     let executable = root.join("vonk-spark-setup");
-    fs::write(&executable, b"process-boundary setup executable").unwrap();
+    fs::write(&executable, setup_contents).unwrap();
     let private_key = root.join("test-private.pem");
     let public_key = root.join("test-public.pem");
     assert!(
@@ -134,6 +141,37 @@ fn signed_request(root: &Path) -> (SetupRequest, ReleaseAuthority) {
             .unwrap()
             .success()
     );
+    let setup_raw_signature = root.join("setup.raw.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256", "-sign"])
+            .arg(&private_key)
+            .args(["-out"])
+            .arg(&setup_raw_signature)
+            .arg(&executable)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let setup_signature = root.join("vonk-spark-setup.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["base64", "-A", "-in"])
+            .arg(&setup_raw_signature)
+            .args(["-out"])
+            .arg(&setup_signature)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&setup_signature)
+        .unwrap()
+        .write_all(b"\n")
+        .unwrap();
     let generation = "a".repeat(64);
     let manifest = root.join("release.json");
     let release = serde_json::json!({
@@ -147,6 +185,11 @@ fn signed_request(root: &Path) -> (SetupRequest, ReleaseAuthority) {
                 "path": format!("artifacts/stable/releases/{generation}/spark/current/linux-amd64/vonk-spark-setup"),
                 "sha256": hex::encode(Sha256::digest(fs::read(&executable).unwrap())),
                 "size": fs::metadata(&executable).unwrap().len(),
+            },
+            "spark-setup-signature-linux-amd64": {
+                "path": format!("artifacts/stable/releases/{generation}/spark/current/linux-amd64/vonk-spark-setup.sig"),
+                "sha256": hex::encode(Sha256::digest(fs::read(&setup_signature).unwrap())),
+                "size": fs::metadata(&setup_signature).unwrap().len(),
             }
         },
         "bootstraps": {"spark": {"path": "immutable", "sha256": "b".repeat(64), "size": 1}},
@@ -193,8 +236,14 @@ fn signed_request(root: &Path) -> (SetupRequest, ReleaseAuthority) {
         .unwrap()
         .write_all(b"\n")
         .unwrap();
-    let request =
-        SetupRequest::from_signed_release(package_path, manifest, signature, executable).unwrap();
+    let request = SetupRequest::from_signed_release(
+        package_path,
+        manifest,
+        signature,
+        setup_signature,
+        executable,
+    )
+    .unwrap();
     let authority = ReleaseAuthority::from_pem(fs::read(public_key).unwrap()).unwrap();
     (request, authority)
 }
@@ -398,6 +447,91 @@ fn canonical_release_anchor_has_the_audited_identity() {
         .unwrap();
     assert!(description.status.success());
     assert!(String::from_utf8_lossy(&description.stdout).contains("4096 bit"));
+}
+
+fn install_executing_sudo(paths: &InstallPaths) {
+    fs::create_dir_all(&paths.staging_root).unwrap();
+    fs::write(&paths.sudo, "#!/bin/sh\nset -eu\nexec \"$@\"\n").unwrap();
+    fs::set_permissions(&paths.sudo, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[test]
+fn generated_root_handoff_executes_only_the_verified_staged_setup_with_argument_free_apply() {
+    let temporary = tempdir().unwrap();
+    let paths = install_paths(temporary.path());
+    configured_upgrade(&paths);
+    install_executing_sudo(&paths);
+    let receipt = temporary.path().join("verified-setup");
+    let setup = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\0' \"$0\" \"$@\" > '{}.argv'\nenv -0 > '{}.env'\ncat > '{}.stdin'\n",
+        receipt.display(),
+        receipt.display(),
+        receipt.display(),
+    );
+    let (request, authority) = signed_request_with_setup(temporary.path(), setup.as_bytes());
+    let mut no_commands = NoCommands;
+    let prepared = prepare_setup_with_authority(
+        &request,
+        &paths,
+        &mut TtyPrompt::new(),
+        &mut no_commands,
+        CallerIdentity::unprivileged(rustix::process::geteuid().as_raw()),
+        &authority,
+    )
+    .unwrap();
+
+    handoff_to_root_with_authority(&prepared, &mut SystemCommandRunner, &authority).unwrap();
+
+    let argv = fs::read(format!("{}.argv", receipt.display())).unwrap();
+    let arguments = argv
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(arguments.len(), 2);
+    assert!(arguments[0].ends_with(b"/vonk-spark-setup"));
+    assert_eq!(arguments[1], b"__apply");
+    let environment = fs::read(format!("{}.env", receipt.display())).unwrap();
+    assert!(
+        !environment
+            .windows(TOKEN.len())
+            .any(|part| part == TOKEN.as_bytes())
+    );
+    let stdin = fs::read(format!("{}.stdin", receipt.display())).unwrap();
+    assert!(stdin.starts_with(b"VONK-SPARK-APPLY-V1\0"));
+}
+
+#[test]
+fn generated_root_handoff_rejects_post_prepare_setup_replacement_before_payload_execution() {
+    let temporary = tempdir().unwrap();
+    let paths = install_paths(temporary.path());
+    configured_upgrade(&paths);
+    install_executing_sudo(&paths);
+    let payload_marker = temporary.path().join("replacement-executed");
+    let (request, authority) =
+        signed_request_with_setup(temporary.path(), b"#!/bin/sh\nset -eu\nexit 0\n");
+    let mut no_commands = NoCommands;
+    let prepared = prepare_setup_with_authority(
+        &request,
+        &paths,
+        &mut TtyPrompt::new(),
+        &mut no_commands,
+        CallerIdentity::unprivileged(rustix::process::geteuid().as_raw()),
+        &authority,
+    )
+    .unwrap();
+    fs::write(
+        prepared.executable_path(),
+        format!(
+            "#!/bin/sh\nset -eu\nprintf executed > '{}'\n",
+            payload_marker.display()
+        ),
+    )
+    .unwrap();
+
+    let result = handoff_to_root_with_authority(&prepared, &mut SystemCommandRunner, &authority);
+
+    assert!(result.is_err());
+    assert!(!payload_marker.exists());
 }
 
 fn caller_bound_frame(uid: u32) -> Vec<u8> {
