@@ -1,5 +1,6 @@
 use std::{
     fs,
+    future::Future,
     io::{BufReader, Cursor},
     path::Path,
     time::Duration,
@@ -37,6 +38,8 @@ pub enum PairingError {
     Transport(#[from] reqwest::Error),
     #[error("controller rejected pairing")]
     Rejected,
+    #[error("timed out waiting for pairing approval")]
+    ApprovalTimeout,
     #[error("controller pairing response is invalid")]
     Response,
     #[error("issued certificate is not bound to this node and key")]
@@ -89,6 +92,29 @@ pub struct IssuedResponse {
 pub enum EnrollmentOutcome {
     Pending(EnrollmentResponse),
     Issued,
+}
+
+pub async fn complete_pairing_with<F, Fut, O>(
+    max_attempts: usize,
+    retry_interval: Duration,
+    mut attempt: F,
+    mut observe_pending: O,
+) -> Result<(), PairingError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<EnrollmentOutcome, PairingError>>,
+    O: FnMut(&EnrollmentResponse),
+{
+    for attempt_number in 0..max_attempts {
+        match attempt().await? {
+            EnrollmentOutcome::Issued => return Ok(()),
+            EnrollmentOutcome::Pending(pending) => observe_pending(&pending),
+        }
+        if attempt_number + 1 < max_attempts {
+            tokio::time::sleep(retry_interval).await;
+        }
+    }
+    Err(PairingError::ApprovalTimeout)
 }
 
 pub async fn pair(

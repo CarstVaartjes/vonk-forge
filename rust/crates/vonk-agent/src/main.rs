@@ -15,7 +15,7 @@ use vonk_agent::{
     executor::{LoopError, RecipeExecutor, run_once_with_claim_hook},
     inventory::InventoryCollector,
     oci::OciRuntime,
-    pair::{EnrollmentOutcome, collect_evidence, pair},
+    pair::{collect_evidence, complete_pairing_with, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
     rotation::rotate_if_due,
@@ -121,12 +121,22 @@ async fn pair_agent(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
     let evidence = collect_evidence(&executable)?;
-    match pair(config, enrollment, token, ca_sha256, evidence).await? {
-        EnrollmentOutcome::Pending(pending) => {
-            println!("pairing {} is {}", pending.id, pending.state);
-        }
-        EnrollmentOutcome::Issued => println!("paired {}", config.node_id),
-    }
+    complete_pairing_with(
+        180,
+        std::time::Duration::from_secs(5),
+        || {
+            let evidence = evidence.clone();
+            async move { pair(config, enrollment, token, ca_sha256, evidence).await }
+        },
+        |pending| {
+            println!(
+                "pairing {} is {}; waiting for approval",
+                pending.id, pending.state
+            )
+        },
+    )
+    .await?;
+    println!("paired {}", config.node_id);
     Ok(())
 }
 
