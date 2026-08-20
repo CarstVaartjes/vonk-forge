@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
-import uuid
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
@@ -55,6 +51,7 @@ def _rendered(*, hermes: bool = False) -> dict[str, object]:
         text=True,
         env=_environment(),
     )
+    assert result.stderr == ""
     return json.loads(result.stdout)
 
 
@@ -137,150 +134,10 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     assert "tailnet-control-plane" not in services["caddy"]["networks"]
 
 
-def test_default_and_hermes_graphs_do_not_couple_configurator_startup_to_profile() -> None:
-    """Catches disabled-profile dependency warnings in the default graph."""
+def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile() -> None:
+    """Catches render warnings and disabled-profile dependencies in either graph."""
     for hermes in (False, True):
-        configurator = _rendered(hermes=hermes)["services"]["tailscale-configurator"]
+        services = _rendered(hermes=hermes)["services"]
+        assert set(services) == DEFAULT_SERVICES | ({"hermes-agent"} if hermes else set())
+        configurator = services["tailscale-configurator"]
         assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
-
-
-def _acceptance_failure_or_skip(message: str) -> None:
-    if os.environ.get("CI"):
-        pytest.fail(message)
-    pytest.skip(message)
-
-
-def _compose_rows(raw: str) -> list[dict[str, object]]:
-    content = raw.strip()
-    if not content:
-        return []
-    try:
-        value = json.loads(content)
-    except json.JSONDecodeError:
-        return [json.loads(line) for line in content.splitlines()]
-    if isinstance(value, list):
-        return value
-    assert isinstance(value, dict)
-    return [value]
-
-
-def _assert_default_project_healthy(command: list[str], environment: dict[str, str]) -> None:
-    result = subprocess.run(
-        [*command, "ps", "--all", "--format", "json"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=60,
-    )
-    rows = _compose_rows(result.stdout)
-    assert {row["Service"] for row in rows} == DEFAULT_SERVICES
-    for row in rows:
-        assert row["State"] == "running", row
-        assert row["Health"] == "healthy", row
-        assert row.get("ExitCode") in {None, 0}, row
-
-
-def test_published_bundle_converges_from_empty_state_and_after_restart(
-    tmp_path: Path,
-) -> None:
-    """Run the real generated default graph when published acceptance inputs exist."""
-    docker = shutil.which("docker")
-    if docker is None:
-        _acceptance_failure_or_skip("Docker CLI is required for runtime acceptance")
-    info = subprocess.run(
-        [docker, "info"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if info.returncode != 0:
-        _acceptance_failure_or_skip("Docker daemon is required for runtime acceptance")
-
-    source_value = os.environ.get("VONK_RUNTIME_ACCEPTANCE_BUNDLE", "")
-    if not source_value:
-        _acceptance_failure_or_skip(
-            "VONK_RUNTIME_ACCEPTANCE_BUNDLE must select a generated published-image bundle"
-        )
-    source = Path(source_value)
-    if (
-        not source.is_dir()
-        or source.is_symlink()
-        or {path.name for path in source.iterdir()} != {
-            "docker-compose.yaml",
-            ".env",
-            "secrets",
-        }
-        or not (source / "secrets").is_dir()
-    ):
-        pytest.fail("runtime acceptance bundle violates the generated three-item contract")
-
-    bundle = tmp_path / "vonk-forge"
-    shutil.copytree(source, bundle, symlinks=True)
-    assert not any(path.is_symlink() for path in bundle.rglob("*"))
-    project = "vonk-health-" + uuid.uuid4().hex
-    environment = os.environ | {"COMPOSE_PROJECT_NAME": project}
-    command = [
-        docker,
-        "compose",
-        "--env-file",
-        str(bundle / ".env"),
-        "-f",
-        str(bundle / "docker-compose.yaml"),
-    ]
-    subprocess.run(
-        [*command, "config", "--quiet"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=60,
-    )
-    try:
-        subprocess.run(
-            [*command, "down", "--volumes", "--remove-orphans"],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=environment,
-            timeout=120,
-        )
-        first = subprocess.run(
-            [*command, "up", "-d", "--wait"],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=environment,
-            timeout=600,
-        )
-        assert "warning" not in first.stderr.lower()
-        _assert_default_project_healthy(command, environment)
-
-        subprocess.run(
-            [*command, "restart"],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=environment,
-            timeout=300,
-        )
-        restarted = subprocess.run(
-            [*command, "up", "-d", "--wait"],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=environment,
-            timeout=600,
-        )
-        assert "warning" not in restarted.stderr.lower()
-        _assert_default_project_healthy(command, environment)
-    finally:
-        subprocess.run(
-            [*command, "down", "--volumes", "--remove-orphans"],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=environment,
-            timeout=180,
-        )

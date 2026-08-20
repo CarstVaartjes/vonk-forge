@@ -155,7 +155,7 @@ jobs:
           deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
           deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
           deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
-          deploy/compose/tests/test_runtime_health_contract.py::test_hermes_dependency_is_optional_but_healthy_when_profile_is_selected
+          deploy/compose/tests/test_runtime_health_contract.py::test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile
       - name: Run required PKI and TLS container integration
         env:
           CI: "true"

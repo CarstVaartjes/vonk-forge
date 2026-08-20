@@ -80,7 +80,8 @@ services:
     healthcheck:
       test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /usr/local/bin/configure-tailscale"]
       interval: 15s
-      timeout: 5s
+      # Two sequential Hermes probes are each bounded to 3s.
+      timeout: 8s
       retries: 12
 
 secrets:

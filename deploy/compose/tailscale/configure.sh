@@ -16,6 +16,8 @@ hermes_map_version_first='{"version":"0.0.1","services":{"svc:hermes-api":{"endp
 
 scratch_root=${TMPDIR:-/tmp}
 runtime_dir=$(mktemp -d "${scratch_root%/}/vonk-tailscale.XXXXXX")
+empty_service_map=${runtime_dir}/empty-service-map.json
+printf '%s\n' '{"version":"0.0.1","services":{}}' >"${empty_service_map}"
 cleanup() {
     case "${runtime_dir:-}" in
         "${scratch_root%/}"/vonk-tailscale.*)
@@ -101,16 +103,29 @@ configure_services() {
     # Configuration-file import currently infers the listener protocol from the
     # HTTP upstream and can create plaintext HTTP on port 443. Express the
     # listener protocol explicitly through the CLI instead.
-    # Reset the complete map so undeclared services or endpoints cannot survive
-    # reconciliation from an earlier gateway configuration.
-    ts serve reset
+    if [ "${include_hermes}" = "0" ]; then
+        # Tailscale v1.98.8 stores Serve config and AdvertiseServices
+        # independently. Drain first so stale advertised preferences are
+        # withdrawn even if their config is already absent, then clear any
+        # remaining Hermes handlers.
+        ts serve drain svc:hermes-api
+        if grep -Fq 'svc:hermes-api' "${runtime_dir}/tailscale-serve-config.compact"; then
+            ts serve clear svc:hermes-api
+        fi
+        ts serve drain svc:hermes-dashboard
+        if grep -Fq 'svc:hermes-dashboard' "${runtime_dir}/tailscale-serve-config.compact"; then
+            ts serve clear svc:hermes-dashboard
+        fi
+    fi
+
+    # Applying an empty all-services file clears both the complete Serve map
+    # and AdvertiseServices. Re-add endpoints through the CLI so port 443 is
+    # explicitly HTTPS; each CLI configuration also advertises that service.
+    ts serve set-config --all "${empty_service_map}"
     ts serve --service=svc:vonk-forge --https=443 http://caddy:8080
-    ts serve advertise svc:vonk-forge
     if [ "${include_hermes}" = "1" ]; then
         ts serve --service=svc:hermes-api --https=443 http://hermes-agent:8642
         ts serve --service=svc:hermes-dashboard --https=443 http://hermes-agent:9119
-        ts serve advertise svc:hermes-api
-        ts serve advertise svc:hermes-dashboard
     fi
 }
 

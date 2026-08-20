@@ -44,7 +44,7 @@ HERMES_MAP = {
 
 
 def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
-    state = tmp_path / "service-map.json"
+    state = tmp_path / "tailscale-state.json"
     calls = tmp_path / "tailscale-calls.log"
     fake = tmp_path / "tailscale"
     fake.write_text(
@@ -55,30 +55,60 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "args = [arg for arg in sys.argv[1:] if not arg.startswith('--socket=')]\n"
         "with calls.open('a', encoding='utf-8') as stream:\n"
         "    stream.write(' '.join(args) + '\\n')\n"
+        "def empty_state():\n"
+        "    return {'config': {'version': '0.0.1', 'services': {}}, 'advertised': []}\n"
         "def load():\n"
         "    if not state.exists():\n"
-        "        return {'version': '0.0.1', 'services': {}}\n"
+        "        return empty_state()\n"
         "    return json.loads(state.read_text(encoding='utf-8'))\n"
         "def save(value):\n"
         "    temporary = state.with_name(state.name + '.' + str(os.getpid()))\n"
         "    temporary.write_text(json.dumps(value, sort_keys=True, separators=(',', ':')), encoding='utf-8')\n"
         "    temporary.replace(state)\n"
         "if args == ['status', '--json']:\n"
-        '    print(\'{"Self":{"CapMap":{"services/vonk-forge":[]}}}\')\n'
+        "    print(json.dumps({'Self': {'CapMap': {'service-host': [{}]}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
         "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
-        "    print(json.dumps(load(), sort_keys=True, separators=(',', ':')))\n"
+        "    value = load()\n"
+        "    config = value['config']\n"
+        "    for name, details in config['services'].items():\n"
+        "        if name not in value['advertised']:\n"
+        "            details['advertised'] = False\n"
+        "    print(json.dumps(config, sort_keys=True, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
-        "    services = {name: {'TCP': {'443': {'HTTPS': True}}} for name in load()['services']}\n"
+        "    services = {name: {'TCP': {'443': {'HTTPS': True}}} for name in load()['config']['services']}\n"
         "    print(json.dumps({'Services': services}, sort_keys=True, separators=(',', ':')))\n"
         "elif args == ['serve', 'reset']:\n"
-        "    save({'version': '0.0.1', 'services': {}})\n"
+        "    value = load()\n"
+        "    value['config'] = {'version': '0.0.1', 'services': {}}\n"
+        "    save(value)\n"
+        "elif len(args) == 3 and args[:2] == ['serve', 'drain']:\n"
+        "    value = load()\n"
+        "    value['advertised'] = [name for name in value['advertised'] if name != args[2]]\n"
+        "    save(value)\n"
+        "elif len(args) == 3 and args[:2] == ['serve', 'clear']:\n"
+        "    value = load()\n"
+        "    if args[2] in value['config']['services']:\n"
+        "        del value['config']['services'][args[2]]\n"
+        "        value['advertised'] = [name for name in value['advertised'] if name != args[2]]\n"
+        "        save(value)\n"
+        "elif len(args) == 4 and args[:3] == ['serve', 'set-config', '--all']:\n"
+        "    config = json.loads(pathlib.Path(args[3]).read_text(encoding='utf-8'))\n"
+        "    advertised = [name for name, details in config['services'].items() if details.get('advertised', True)]\n"
+        "    for details in config['services'].values():\n"
+        "        details.pop('advertised', None)\n"
+        "    save({'config': config, 'advertised': sorted(advertised)})\n"
+        "elif len(args) == 3 and args[:2] == ['serve', 'advertise']:\n"
+        "    value = load()\n"
+        "    value['advertised'] = sorted(set(value['advertised']) | {args[2]})\n"
+        "    save(value)\n"
         "elif args and args[0] == 'serve' and any(arg.startswith('--service=') for arg in args):\n"
         "    service = next(arg.split('=', 1)[1] for arg in args if arg.startswith('--service='))\n"
         "    upstream = args[-1]\n"
         "    value = load()\n"
-        "    value['services'][service] = {'endpoints': {'tcp:443': upstream}}\n"
+        "    value['config']['services'][service] = {'endpoints': {'tcp:443': upstream}}\n"
+        "    value['advertised'] = sorted(set(value['advertised']) | {service})\n"
         "    save(value)\n",
         encoding="utf-8",
     )
@@ -125,17 +155,25 @@ def _write_logging_mktemp(tmp_path: Path) -> Path:
     return allocations
 
 
-def _wait_for_service_map(state: Path, expected: dict[str, object]) -> None:
+def _wait_for_service_state(
+    state: Path,
+    expected: dict[str, object],
+    advertised: set[str],
+) -> None:
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
         try:
-            if json.loads(state.read_text(encoding="utf-8")) == expected:
+            actual = json.loads(state.read_text(encoding="utf-8"))
+            if actual == {
+                "config": expected,
+                "advertised": sorted(advertised),
+            }:
                 return
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         time.sleep(0.05)
     actual = state.read_text(encoding="utf-8") if state.exists() else "<missing>"
-    pytest.fail(f"service map did not converge: {actual}")
+    pytest.fail(f"Tailscale service state did not converge: {actual}")
 
 
 def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> None:
@@ -280,6 +318,7 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
         "/run/secrets/hermes-api-key"
     }
     assert configurator["restart"] == "unless-stopped"
+    assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
         "tailscale-gateway": {
@@ -295,17 +334,15 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     subprocess.run(["/bin/sh", "-n", script], check=True)
     text = script.read_text()
 
-    assert "serve set-config" not in text
+    assert "serve set-config --all" in text
     for command in (
         "--service=svc:vonk-forge --https=443 http://caddy:8080",
         "--service=svc:hermes-api --https=443 http://hermes-agent:8642",
         "--service=svc:hermes-dashboard --https=443 http://hermes-agent:9119",
     ):
         assert command in text
-    for service in HERMES_MAP["services"]:
-        assert f"serve advertise {service}" in text
     assert "serve get-config --all" in text
-    assert "serve reset" in text
+    assert "serve reset" not in text
     assert json.dumps(DEFAULT_MAP, sort_keys=True, separators=(",", ":")) in text
     assert json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":")) in text
     assert text.count('"HTTPS":true') >= 3
@@ -379,11 +416,11 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
     calls = log.read_text()
     for command in (
         "--service=svc:vonk-forge --https=443 http://caddy:8080",
-        "serve reset",
+        "serve set-config --all",
     ):
         assert command in calls
-    assert "svc:hermes-" not in calls
-    assert "set-config" not in calls
+    assert "--service=svc:hermes-" not in calls
+    assert "serve reset" not in calls
 
 
 def test_configurator_advertises_hermes_when_both_profile_endpoints_are_available(
@@ -454,7 +491,7 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
     assert result.returncode == 0, result.stderr
     invocation_log = calls.read_text(encoding="utf-8")
     for service in HERMES_MAP["services"]:
-        assert f"serve advertise {service}" in invocation_log
+        assert f"--service={service} --https=443" in invocation_log
     request_log = requests.read_text(encoding="utf-8")
     assert "GET /health HTTP/1.1<CR>" in request_log
     assert "Authorization: Bearer test-hermes-key<CR>" in request_log
@@ -498,13 +535,13 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
         text=True,
     )
     try:
-        _wait_for_service_map(state, DEFAULT_MAP)
+        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
         ready.touch()
-        _wait_for_service_map(state, HERMES_MAP)
+        _wait_for_service_state(state, HERMES_MAP, set(HERMES_MAP["services"]))
         ready.unlink()
-        _wait_for_service_map(state, DEFAULT_MAP)
+        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
         ready.touch()
-        _wait_for_service_map(state, HERMES_MAP)
+        _wait_for_service_state(state, HERMES_MAP, set(HERMES_MAP["services"]))
 
         healthchecks = [
             subprocess.Popen(
@@ -523,6 +560,7 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
             0,
             0,
         ], results
+        assert results == [("", "")] * 4
     finally:
         reconciler.terminate()
         try:
@@ -532,10 +570,25 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
             stdout, stderr = reconciler.communicate(timeout=5)
         daemon_socket.close()
     assert reconciler.returncode in {-15, 0}, (stdout, stderr)
+    assert stdout == ""
+    assert stderr == ""
     allocated = allocations.read_text(encoding="utf-8").splitlines()
     assert len(allocated) >= 5
     assert len(allocated) == len(set(allocated))
     assert not list(scratch.iterdir())
+    invocations = calls.read_text(encoding="utf-8").splitlines()
+    drain_api = invocations.index("serve drain svc:hermes-api")
+    clear_api = invocations.index("serve clear svc:hermes-api", drain_api)
+    drain_dashboard = invocations.index("serve drain svc:hermes-dashboard", clear_api)
+    clear_dashboard = invocations.index(
+        "serve clear svc:hermes-dashboard", drain_dashboard
+    )
+    clear_all = next(
+        index
+        for index, invocation in enumerate(invocations[clear_dashboard:], clear_dashboard)
+        if invocation.startswith("serve set-config --all ")
+    )
+    assert drain_api < clear_api < drain_dashboard < clear_dashboard < clear_all
 
 
 def test_grants_example_is_exact_service_least_privilege() -> None:
