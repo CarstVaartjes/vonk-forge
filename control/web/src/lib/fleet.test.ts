@@ -168,7 +168,7 @@ test("summarizes live delayed stale and offline nodes without treating null as c
     schema_version: 1,
     event_cursor: 8,
     generated_at: NOW.toISOString(),
-    repository_commit: "a".repeat(40),
+    authority_revision: "a".repeat(64),
     nodes: [
       node({
         telemetry: telemetry("2026-08-15T11:59:58Z", 80),
@@ -214,7 +214,7 @@ test("counts unique active warning conditions without duplicating projected fres
       {code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning"},
     ],
   });
-  const snapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), repository_commit: "a".repeat(40), nodes: [delayed, offline]};
+  const snapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [delayed, offline]};
 
   expect(summarizeFleet(snapshot, NOW).warnings).toBe(4);
 });
@@ -223,7 +223,7 @@ test("marks unified live capacity partial or unknown instead of presenting an un
   const reporting = node({id: "node-reporting", telemetry: telemetry("2026-08-15T11:59:58Z", 80)});
   const missingGpu = telemetry("2026-08-15T11:59:58Z", 60);
   missingGpu.sample.gpu_memory_free_bytes = null;
-  const partialSnapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), repository_commit: "a".repeat(40), nodes: [reporting, node({id: "node-missing", telemetry: missingGpu})]};
+  const partialSnapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [reporting, node({id: "node-missing", telemetry: missingGpu})]};
   const unknownSnapshot: VisualFleetSnapshot = {...partialSnapshot, nodes: [node({id: "node-missing", telemetry: missingGpu})]};
 
   expect(summarizeFleet(partialSnapshot, NOW)).toMatchObject({

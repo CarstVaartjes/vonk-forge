@@ -74,7 +74,7 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
         schema_version: 1,
         event_cursor: 7,
         generated_at: "2026-08-15T12:00:00Z",
-        repository_commit: "a".repeat(40),
+        authority_revision: "a".repeat(64),
         nodes: [],
       }
       : {commit: "a".repeat(40), evidence_digest: "e".repeat(64), nodes: []};
@@ -93,7 +93,7 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
     schema_version: 1,
     event_cursor: 7,
     generated_at: "2026-08-15T12:00:00Z",
-    repository_commit: "a".repeat(40),
+    authority_revision: "a".repeat(64),
     nodes: [],
   });
   expect(evidence.evidence_digest).toBe("e".repeat(64));
@@ -118,7 +118,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     const path = new URL(request.url).pathname;
     if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
     if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, topology: null, operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
-    if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", base_commit: "a".repeat(40), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
+    if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
       plan_digest: "plan-1", nodes: ["node-a", "node-b"], result: null,

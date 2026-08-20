@@ -74,7 +74,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   const libraryOperation = vi.fn(async () => operation("partial", {job_id: "job-load"}));
   const retryLibraryOperation = vi.fn(async () => operation("queued", {job_id: "job-load"}));
   const libraryJobProgress = vi.fn(async () => ({
-    id: "job-load", kind: "run", state: "failed", base_commit: "", current_attempt: 1,
+    id: "job-load", kind: "run", state: "failed", authority_revision: "a".repeat(64), current_attempt: 1,
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }));
@@ -271,7 +271,7 @@ test("publishes deferred job progress and refreshes terminal authority before ch
   expect(onChange).not.toHaveBeenCalled();
   expect(onRefresh).not.toHaveBeenCalled();
   resolveJob({
-    id: "job-load", kind: "run", state: "failed", base_commit: "", current_attempt: 1,
+    id: "job-load", kind: "run", state: "failed", authority_revision: "a".repeat(64), current_attempt: 1,
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   });

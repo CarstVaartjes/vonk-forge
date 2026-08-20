@@ -7,7 +7,7 @@ test.beforeEach(async ({page}) => {
 });
 
 test("the redesigned shell exposes only Fleet and Library", async ({page}) => {
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), repository_commit: commit, nodes: []}}));
+  await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
   await page.route("**/api/v1/library**", route => route.fulfill({json: {
     schema_version: 1,
     generated_at: new Date().toISOString(),

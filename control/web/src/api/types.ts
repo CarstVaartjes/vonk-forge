@@ -19,9 +19,9 @@ export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type JobSummary = components["schemas"]["JobSummary"];
 export type JobsResponse = components["schemas"]["JobsResponse"];
-export type ProposalInput = {base_commit: string; changes: {path: string; document: Record<string, unknown>}[]};
-export type ProposalPreview = {base_commit: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
-export type AuditSummary = {request_id: string; actor: string; action: string; base_commit?: string; targets: string[]};
+export type ProposalInput = {base_revision: string; changes: {path: string; document: Record<string, unknown>}[]};
+export type ProposalPreview = {base_revision: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
+export type AuditSummary = {request_id: string; actor: string; action: string; authority_revision?: string; targets: string[]};
 export type AuditResponse = {events: AuditSummary[]};
 export type UpdateTarget = {
   build_digest: string;

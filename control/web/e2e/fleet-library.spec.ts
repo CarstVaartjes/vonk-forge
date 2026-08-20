@@ -64,7 +64,7 @@ function localSnapshot() {
     schema_version: 1,
     event_cursor: 12,
     generated_at: observedAt,
-    repository_commit: commit,
+    authority_revision: commit,
     nodes: [{
       id: nodeId,
       display_name: "Aurora",
@@ -164,7 +164,7 @@ async function installLocalFleetFixture(page: Page) {
     return route.fulfill({json: libraryOperation("queued")});
   });
   await page.route("**/api/v1/jobs/job-load*", route => route.fulfill({json: {
-    id: "job-load", kind: "run", state: "failed", base_commit: "", current_attempt: 1,
+    id: "job-load", kind: "run", state: "failed", authority_revision: commit, current_attempt: 1,
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }}));
