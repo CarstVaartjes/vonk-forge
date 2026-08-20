@@ -25,15 +25,12 @@ a `dev-*` volume, synthetic secret bundle, local source checkout, alternate
 hostname, alternate port, or second PKI root.
 
 Hermes is an opt-in profile, not a prerequisite for the control plane. The
-default project starts without requiring a Hermes image, Hermes API key,
-workspace, or dashboard origin. To enable Hermes, provide these additional
-`.env` values with an immutable published Hermes image and create its
-persistent data directories:
+published rendered Compose file already contains the immutable Hermes image,
+even while the profile is disabled. To enable Hermes, add only its site inputs
+to `.env`; its persistent data uses Docker named volumes:
 
 ```dotenv
-HERMES_AGENT_IMAGE=ghcr.io/carstvaartjes/vonk-forge-hermes:<version>@sha256:<digest>
-HERMES_API_KEY_FILE=/srv/vonk-forge/secrets/hermes-api-key
-HERMES_DATA_ROOT=/srv/vonk-forge/hermes
+HERMES_API_KEY_FILE=./secrets/hermes-api-key
 HERMES_DASHBOARD_ORIGIN=https://hermes-dashboard.<tailnet>.ts.net
 ```
 

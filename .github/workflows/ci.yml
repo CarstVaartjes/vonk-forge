@@ -759,7 +759,8 @@ jobs:
           scripts/render-production-compose \
             --output release-output/docker-compose.production.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:latest@${{ steps.api.outputs.digest }}" \
-            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:latest@${{ steps.worker.outputs.digest }}"
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:latest@${{ steps.worker.outputs.digest }}" \
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:latest@${{ steps.hermes.outputs.digest }}"
           release_input="release/platform/${RELEASE_VERSION}.input.json"
           test -f "$release_input"
           uv run --frozen scripts/build-control-deployment-bundle \

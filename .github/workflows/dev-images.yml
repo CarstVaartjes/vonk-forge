@@ -177,17 +177,21 @@ jobs:
             > "$worker_manifest"
           api_digest=$(skopeo manifest-digest "$api_manifest")
           worker_digest=$(skopeo manifest-digest "$worker_manifest")
+          hermes_image=$(sed -n 's/^HERMES_AGENT_IMAGE=//p' deploy/compose/tests/test.env)
+          [[ "$hermes_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
           scripts/render-dev-compose \
             --template deploy/compose/compose.dev.images.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
+            --hermes-image "$hermes_image" \
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
             --template deploy/compose/compose.dev.images.yaml \
             --output "$publication_root/docker-compose.dev.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
+            --hermes-image "$hermes_image" \
             --channel dev
           docker compose \
             --env-file deploy/compose/tests/test.env \

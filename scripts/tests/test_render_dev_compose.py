@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ DEVELOPMENT_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DIGEST = "a" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 
 
 def _renderer():
@@ -25,10 +27,15 @@ def _renderer():
     return module
 
 
-def test_render_inlines_compose_includes(tmp_path: Path) -> None:
+def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
+    tmp_path: Path,
+) -> None:
+    """Catches a deployment bundle that needs files beside docker-compose.yaml."""
     output = tmp_path / "docker-compose.yaml"
 
-    _renderer().render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, channel="pinned")
+    _renderer().render(
+        TEMPLATE, output, API_IMAGE, WORKER_IMAGE, HERMES_IMAGE, channel="pinned"
+    )
 
     text = output.read_text(encoding="utf-8")
     document = yaml.safe_load(text)
@@ -38,20 +45,47 @@ def test_render_inlines_compose_includes(tmp_path: Path) -> None:
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert text.count(API_IMAGE) >= 2
     assert text.count(WORKER_IMAGE) >= 5
-    assert (tmp_path / "Caddyfile").is_file()
-    assert (tmp_path / "tailscale/configure.sh").is_file()
-    assert "./tailscale/configure.sh:/usr/local/bin/configure-tailscale:ro" in text
-    assert not (tmp_path / "hermes-agent").exists()
-    assert not (tmp_path / "step-ca").exists()
-    assert not (tmp_path / "bin").exists()
-    assert not (tmp_path / "trust").exists()
+    assert set(path.name for path in tmp_path.iterdir()) == {"docker-compose.yaml"}
+    assert document["services"]["caddy"]["configs"]
+    assert "configs:" in text
+    assert all(
+        isinstance(service, dict)
+        and isinstance(service.get("image"), str)
+        and "@sha256:" in service["image"]
+        and "${" not in service["image"]
+        for service in document["services"].values()
+    )
+
+    for profile in ([], ["--profile", "hermes"]):
+        config = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                str(ROOT / "deploy/compose/tests/test.env"),
+                "-f",
+                str(output),
+                *profile,
+                "config",
+                "-q",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert config.returncode == 0, config.stderr
 
 
 def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path) -> None:
     output = tmp_path / "docker-compose.yaml"
 
     _renderer().render(
-        DEVELOPMENT_TEMPLATE, output, API_IMAGE, WORKER_IMAGE, channel="pinned"
+        DEVELOPMENT_TEMPLATE,
+        output,
+        API_IMAGE,
+        WORKER_IMAGE,
+        HERMES_IMAGE,
+        channel="pinned",
     )
 
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
@@ -69,8 +103,9 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="immutable published development image"):
         _renderer().render(
             TEMPLATE,
-            output,
-            f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
-            WORKER_IMAGE,
-            channel="dev",
+                output,
+                f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+                WORKER_IMAGE,
+                HERMES_IMAGE,
+                channel="dev",
         )

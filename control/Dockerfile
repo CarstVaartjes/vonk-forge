@@ -26,10 +26,7 @@ RUN python -m pip install --no-cache-dir --prefix=/install \
     /wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl /vonk-cluster-profiles .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 control \
+RUN groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control
 COPY --from=build /install /usr/local
 WORKDIR /srv/vonk-control
@@ -71,9 +68,6 @@ except BaseException:
 PY
 
 FROM runtime-root AS api-root
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends openssh-client \
-    && rm -rf /var/lib/apt/lists/*
 ARG VONK_DEV_SOURCE_COMMIT
 RUN python - "$VONK_DEV_SOURCE_COMMIT" "api" <<'PY'
 import os

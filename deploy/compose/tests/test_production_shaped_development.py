@@ -86,6 +86,7 @@ def test_development_launcher_invokes_the_canonical_graph_with_published_images(
 
     workflow = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
     assert workflow.count("--template deploy/compose/compose.dev.images.yaml") == 2
+    assert workflow.count('--hermes-image "$hermes_image"') == 2
 
 
 def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
@@ -107,6 +108,9 @@ def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
         encoding="utf-8"
     )
     assert "--profile hermes up -d --wait" in runbook
+    assert "/srv/vonk-forge" not in runbook
+    assert "HERMES_DATA_ROOT" not in runbook
+    assert "already contains the immutable Hermes image" in runbook
 
 
 def test_development_image_workflow_validates_the_canonical_graph_with_test_inputs() -> None:

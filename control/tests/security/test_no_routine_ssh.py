@@ -77,17 +77,16 @@ def test_retired_runtime_modules_are_absent() -> None:
     assert not (PACKAGE / "legacy_route_runtime.py").exists()
 
 
-def test_production_worker_image_has_local_git_without_direct_transport_tools() -> None:
-    dockerfile = (ROOT / "control/Dockerfile").read_text()
-    runtime = dockerfile.split(" AS runtime-root", 1)[1].split(" AS api-root", 1)[0]
-    worker = dockerfile.split(" AS worker", 1)[1].split(" AS api", 1)[0]
-    api_root = dockerfile.split(" AS api-root", 1)[1].split(" AS worker", 1)[0]
+def test_production_images_have_no_git_or_ssh_transport_tools() -> None:
+    dockerfile = (ROOT / "control/Dockerfile").read_text().lower()
+    runtime = dockerfile.split(" as runtime-root", 1)[1].split(" as api-root", 1)[0]
+    worker = dockerfile.split(" as worker", 1)[1].split(" as api", 1)[0]
+    api_root = dockerfile.split(" as api-root", 1)[1].split(" as worker", 1)[0]
 
-    assert "apt-get install --yes --no-install-recommends git" in runtime
-    assert "apt-get" not in worker
-    assert "openssh-client" not in worker
-    assert " git" not in worker
-    assert "apt-get install --yes --no-install-recommends openssh-client" in api_root
+    for stage in (runtime, worker, api_root):
+        assert "apt-get install" not in stage
+        assert "openssh" not in stage
+        assert " git" not in stage
 
 
 def test_production_worker_has_no_cluster_egress_network() -> None:

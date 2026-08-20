@@ -15,9 +15,10 @@ import yaml
 
 API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
 WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
-TOKEN_COUNTS = {API_TOKEN: 2, WORKER_TOKEN: 5}
+HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
+TOKEN_COUNTS = {API_TOKEN: 2, WORKER_TOKEN: 5, HERMES_TOKEN: 1}
 IMAGE_PATTERN = re.compile(
-    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker)"
+    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes)"
     r":latest@sha256:[0-9a-f]{64}\Z"
 )
 
@@ -41,8 +42,14 @@ def _canonical_renderer():
     return module
 
 
-def render(template: Path, output: Path, api_image: str, worker_image: str) -> None:
-    """Render one production Compose file without resolving operator inputs."""
+def render(
+    template: Path,
+    output: Path,
+    api_image: str,
+    worker_image: str,
+    hermes_image: str,
+) -> None:
+    """Render one self-contained production Compose file."""
     if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
@@ -55,25 +62,38 @@ def render(template: Path, output: Path, api_image: str, worker_image: str) -> N
             raise ValueError("template and output must be different files")
     _validate_image(api_image, "api")
     _validate_image(worker_image, "worker")
+    _validate_image(hermes_image, "hermes")
 
     text = template.read_text(encoding="utf-8")
     for token, count in TOKEN_COUNTS.items():
-        if text.count(token) != count:
-            role = "API" if token == API_TOKEN else "worker"
+        actual = (
+            text.count(token)
+            if token in {API_TOKEN, WORKER_TOKEN}
+            else _canonical_renderer()._count_template_token(template, token)
+        )
+        if actual != count:
+            role = {
+                API_TOKEN: "API",
+                WORKER_TOKEN: "worker",
+                HERMES_TOKEN: "Hermes",
+            }[token]
             raise ValueError(f"template {role} image token count changed")
     canonical_renderer = _canonical_renderer()
     document = canonical_renderer._compose_document(template)
     document = canonical_renderer._replace_image_tokens(
         document,
-        {API_TOKEN: api_image, WORKER_TOKEN: worker_image},
+        {
+            API_TOKEN: api_image,
+            WORKER_TOKEN: worker_image,
+            HERMES_TOKEN: hermes_image,
+        },
     )
+    canonical_renderer._resolve_runtime_images(document)
+    canonical_renderer._embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
-    if "CONTROL_API_IMAGE" in rendered or "CONTROL_WORKER_IMAGE" in rendered:
-        raise ValueError("template contains unresolved control image input")
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("template is not the production graph")
 
-    canonical_renderer._copy_runtime_assets(template, output)
     descriptor, stage_name = tempfile.mkstemp(
         prefix=".render-production-compose-", dir=output.parent
     )
@@ -99,6 +119,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
+    parser.add_argument("--hermes-image", required=True)
     return parser.parse_args()
 
 
@@ -109,6 +130,7 @@ def main() -> None:
         arguments.output,
         arguments.api_image,
         arguments.worker_image,
+        arguments.hermes_image,
     )
 
 

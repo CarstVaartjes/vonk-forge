@@ -366,6 +366,7 @@ def test_tag_release_builds_and_publishes_exact_platform_target() -> None:
     assert "docker-compose.production.yml" in build
     assert ":latest@${{ steps.api.outputs.digest }}" in build
     assert ":latest@${{ steps.worker.outputs.digest }}" in build
+    assert ":latest@${{ steps.hermes.outputs.digest }}" in build
     assert "scripts/build-control-deployment-bundle" in build
     assert "scripts/publish-platform-target describe-bundle" in build
     assert "scripts/build-platform-manifest" in build
