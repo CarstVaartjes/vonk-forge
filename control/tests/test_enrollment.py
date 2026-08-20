@@ -1,7 +1,5 @@
 import base64
 import hashlib
-import shutil
-import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -682,55 +680,6 @@ def test_local_revocation_precedes_remote_and_retry_calls_only_unconfirmed_seria
     assert authority.revocations == [issued.serial, "serial-2", "serial-2"]
     with sessions() as session:
         assert session.get(AgentCertificate, "serial-2").ca_revoked_at is not None  # type: ignore[union-attr]
-
-
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL locking integration tests")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:16",
-            ],
-            text=True,
-        ).strip()
-    except subprocess.CalledProcessError as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except SQLAlchemyError:
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
 
 
 @pytest.mark.parametrize("crash_new_revocation", (False, True))

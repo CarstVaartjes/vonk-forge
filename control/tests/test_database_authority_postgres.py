@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.database_authority import (
     AuthorityChange,
@@ -26,77 +20,6 @@ from vonk_control.models import (
     ControlAuthorityProposal,
     ControlAuthorityRevision,
 )
-
-
-def _postgres_unavailable(message: str) -> None:
-    if os.getenv("CI"):
-        pytest.fail(message)
-    pytest.skip(message)
-
-
-@pytest.fixture(scope="module")
-def postgres_engine() -> Engine:
-    if shutil.which("docker") is None:
-        _postgres_unavailable("Docker is required for PostgreSQL authority tests")
-    docker_info = subprocess.run(
-        ["docker", "info"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if docker_info.returncode != 0:
-        _postgres_unavailable("Docker is unavailable for PostgreSQL authority tests")
-    try:
-        container = subprocess.check_output(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                "127.0.0.1::5432",
-                "postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db",
-            ],
-            text=True,
-            timeout=30,
-        ).strip()
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
-    try:
-        port = subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
-                container,
-            ],
-            text=True,
-            timeout=10,
-        ).strip()
-        engine = create_engine(
-            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-        )
-        for _ in range(100):
-            try:
-                with engine.connect():
-                    break
-            except (OSError, SQLAlchemyError):
-                time.sleep(0.1)
-        else:
-            raise AssertionError("disposable PostgreSQL did not become ready")
-        yield engine
-        engine.dispose()
-    finally:
-        subprocess.run(
-            ["docker", "stop", container],
-            check=False,
-            capture_output=True,
-            timeout=30,
-        )
 
 
 @pytest.fixture

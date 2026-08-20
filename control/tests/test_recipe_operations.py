@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import socket
-import subprocess
 import threading
 import time
 import uuid
@@ -15,7 +12,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from sqlalchemy import create_engine, event, select, text, update
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
@@ -518,52 +514,6 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
             for node in source_nodes
         )
     return run_id
-
-
-@pytest.fixture(scope="module")
-def postgres_engine():
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL recipe concurrency tests")
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        port = reservation.getsockname()[1]
-    name = f"vonk-recipe-test-{uuid.uuid4().hex[:12]}"
-    try:
-        subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "--name",
-                name,
-                "-e",
-                "POSTGRES_PASSWORD=postgres",
-                "-p",
-                f"127.0.0.1:{port}:5432",
-                "postgres:18.0-bookworm",
-            ],
-            check=True,
-            capture_output=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
-    engine = create_engine(
-        f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
-    )
-    try:
-        for _ in range(50):
-            try:
-                with engine.connect():
-                    break
-            except OperationalError:
-                time.sleep(0.1)
-        else:
-            pytest.skip("disposable PostgreSQL did not become ready")
-        yield engine
-    finally:
-        engine.dispose()
-        subprocess.run(["docker", "stop", name], check=False, capture_output=True)
 
 
 def _postgres_backend_pid(connection) -> int:
