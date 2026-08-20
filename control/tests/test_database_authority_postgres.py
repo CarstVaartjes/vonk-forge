@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -23,10 +24,16 @@ from vonk_control.models import (
 )
 
 
+def _postgres_unavailable(message: str) -> None:
+    if os.getenv("CI"):
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 @pytest.fixture(scope="module")
 def postgres_engine() -> Engine:
     if shutil.which("docker") is None:
-        pytest.skip("Docker is required for PostgreSQL authority tests")
+        _postgres_unavailable("Docker is required for PostgreSQL authority tests")
     try:
         container = subprocess.check_output(
             [
@@ -44,7 +51,7 @@ def postgres_engine() -> Engine:
             timeout=30,
         ).strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
+        _postgres_unavailable(f"disposable PostgreSQL is unavailable: {error}")
     try:
         port = subprocess.check_output(
             [
@@ -67,7 +74,7 @@ def postgres_engine() -> Engine:
             except (OSError, SQLAlchemyError):
                 time.sleep(0.1)
         else:
-            pytest.skip("disposable PostgreSQL did not become ready")
+            _postgres_unavailable("disposable PostgreSQL did not become ready")
         yield engine
         engine.dispose()
     finally:
@@ -121,6 +128,8 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
 
     revision = service.apply(preview)
 
+    assert revision != base
     with sessions() as session:
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
+        assert session.get(ControlAuthorityProposal, preview.proposal_id).applied_revision == revision

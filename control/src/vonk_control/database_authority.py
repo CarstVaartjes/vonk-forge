@@ -281,7 +281,7 @@ class DatabaseProposalService:
                 raise ValueError(f"duplicate proposal path: {path}")
             seen.add(path)
             if not isinstance(change.document, Mapping):
-                raise TypeError("proposal document must be an object")
+                raise ValueError("proposal document must be an object")  # noqa: TRY004
             serialize_document(path, change.document)
             normalized.append({"path": path, "document": dict(change.document)})
         normalized.sort(key=lambda value: str(value["path"]))
