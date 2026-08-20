@@ -1,7 +1,10 @@
+import json
 import os
 import re
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
@@ -213,6 +216,11 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
     assert text.index(setup) < text.index("docker/setup-buildx-action@")
     assert text.index(setup) < text.index("- name: Build exact OCI archives")
     qemu = text[text.index(setup) : text.index("- name: Build exact OCI archives")]
+    assert (
+        "image: docker.io/tonistiigi/binfmt@sha256:"
+        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+        in qemu
+    )
     assert "platforms: arm64" in qemu
 
 
@@ -222,10 +230,92 @@ def test_development_image_publication_requires_both_platforms() -> None:
     )
 
     assert "--format '{{ json .Manifest }}'" in verification
-    assert '.platform.os == "linux"' in verification
-    assert '.platform.architecture == "amd64"' in verification
-    assert '.platform.architecture == "arm64"' in verification
-    assert '== ["amd64", "arm64"]' in verification
+    assert "scripts/verify-multiarch-image-manifest" in verification
+    assert '"docker://$image@$runnable_digest"' in verification
+    assert '"$image@$attestation_digest"' in verification
+
+
+def image_descriptor(architecture: str, marker: str) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": f"sha256:{marker * 64}",
+        "platform": {"os": "linux", "architecture": architecture},
+    }
+
+
+def attestation_descriptor(subject_marker: str, marker: str) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": f"sha256:{marker * 64}",
+        "platform": {"os": "unknown", "architecture": "unknown"},
+        "annotations": {
+            "vnd.docker.reference.type": "attestation-manifest",
+            "vnd.docker.reference.digest": f"sha256:{subject_marker * 64}",
+        },
+    }
+
+
+def verify_multiarch_fixture(tmp_path: Path, manifests: list[dict[str, object]]):
+    fixture = tmp_path / "manifest.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": manifests,
+            }
+        )
+    )
+    return subprocess.run(
+        [ROOT / "scripts/verify-multiarch-image-manifest", fixture],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
+def test_multiarch_manifest_contract_binds_attestations_to_each_leaf(
+    tmp_path: Path,
+) -> None:
+    result = verify_multiarch_fixture(
+        tmp_path,
+        [
+            image_descriptor("amd64", "a"),
+            image_descriptor("arm64", "b"),
+            attestation_descriptor("a", "c"),
+            attestation_descriptor("b", "d"),
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        f"amd64\tsha256:{'a' * 64}\tsha256:{'c' * 64}",
+        f"arm64\tsha256:{'b' * 64}\tsha256:{'d' * 64}",
+    ]
+
+
+@pytest.mark.parametrize(
+    "invalid_descriptor",
+    [
+        image_descriptor("s390x", "e"),
+        image_descriptor("amd64", "e"),
+        attestation_descriptor("e", "f"),
+    ],
+)
+def test_multiarch_manifest_contract_rejects_extra_or_unbound_descriptors(
+    tmp_path: Path, invalid_descriptor: dict[str, object]
+) -> None:
+    result = verify_multiarch_fixture(
+        tmp_path,
+        [
+            image_descriptor("amd64", "a"),
+            image_descriptor("arm64", "b"),
+            attestation_descriptor("a", "c"),
+            attestation_descriptor("b", "d"),
+            invalid_descriptor,
+        ],
+    )
+
+    assert result.returncode != 0
 
 
 def rendered_step_run(job_name: str, step_name: str) -> str:

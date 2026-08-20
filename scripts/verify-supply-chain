@@ -355,6 +355,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/install-release-publication",
         "scripts/refuse-existing-image-version",
         "scripts/validate-container-release-digests",
+        "scripts/verify-multiarch-image-manifest",
         "scripts/verify-public-image-inputs",
         "scripts/verify-supply-chain",
         "scripts/workload-artifact-metadata",

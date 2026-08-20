@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 1)); then
+  echo "usage: verify-multiarch-image-manifest MANIFEST_JSON" >&2
+  exit 64
+fi
+
+manifest=$1
+[[ -f "$manifest" && ! -L "$manifest" ]]
+
+jq -e '
+  def is_attestation:
+    (.annotations["vnd.docker.reference.type"] // "")
+      == "attestation-manifest";
+  def runnable: select(is_attestation | not);
+  def attestation: select(is_attestation);
+  def platform: {os: .platform.os, architecture: .platform.architecture};
+
+  (.mediaType == "application/vnd.oci.image.index.v1+json")
+  and (
+    [.manifests[]? | runnable | platform] | sort_by(.architecture)
+  ) == [
+    {os: "linux", architecture: "amd64"},
+    {os: "linux", architecture: "arm64"}
+  ]
+  and all(
+    .manifests[]? | runnable;
+    .mediaType == "application/vnd.oci.image.manifest.v1+json"
+    and (.digest | test("^sha256:[0-9a-f]{64}$"))
+  )
+  and ([.manifests[]? | attestation] | length == 2)
+  and all(
+    .manifests[]? | attestation;
+    .mediaType == "application/vnd.oci.image.manifest.v1+json"
+    and .platform.os == "unknown"
+    and .platform.architecture == "unknown"
+    and (.digest | test("^sha256:[0-9a-f]{64}$"))
+    and (
+      .annotations["vnd.docker.reference.digest"]
+      | test("^sha256:[0-9a-f]{64}$")
+    )
+  )
+  and (
+    [.manifests[]? | runnable | .digest] | sort
+  ) == (
+    [.manifests[]? | attestation
+      | .annotations["vnd.docker.reference.digest"]] | sort
+  )
+' "$manifest" >/dev/null
+
+for architecture in amd64 arm64; do
+  jq -er --arg architecture "$architecture" '
+    . as $index
+    | ($index.manifests[]
+        | select(
+            .platform.os == "linux"
+            and .platform.architecture == $architecture
+          )
+        | .digest) as $runnable_digest
+    | ($index.manifests[]
+        | select(
+            (.annotations["vnd.docker.reference.type"] // "")
+              == "attestation-manifest"
+            and .annotations["vnd.docker.reference.digest"]
+              == $runnable_digest
+          )
+        | .digest) as $attestation_digest
+    | [$architecture, $runnable_digest, $attestation_digest] | @tsv
+  ' "$manifest"
+done
