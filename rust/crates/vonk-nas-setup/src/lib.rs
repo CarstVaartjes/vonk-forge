@@ -779,8 +779,8 @@ fn validate_single_line_secret(value: &str, file: &str) -> Result<(), SetupError
 }
 
 fn read_import_file(path: &Path, maximum_bytes: u64) -> Result<String, SetupError> {
-    reject_symlink_components(path)?;
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
+    let path = canonicalize_selected_path(path)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
         SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
     })?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum_bytes {
@@ -789,7 +789,7 @@ fn read_import_file(path: &Path, maximum_bytes: u64) -> Result<String, SetupErro
             path.display()
         )));
     }
-    fs::read_to_string(path).map_err(|error| {
+    fs::read_to_string(&path).map_err(|error| {
         SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
     })
 }
@@ -846,8 +846,8 @@ pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
-    ensure_safe_output_root(&request.output_root)?;
-    let bundle = request.output_root.join("vonk-forge");
+    let output_root = ensure_safe_output_root(&request.output_root)?;
+    let bundle = output_root.join("vonk-forge");
     match request.mode {
         SetupMode::Install => install(payload, &bundle, prompt, generator),
         SetupMode::Upgrade => upgrade(payload, &bundle, prompt, generator),
@@ -1262,8 +1262,8 @@ fn import_pki(
     environment: &[(String, String)],
     directory: &Path,
 ) -> Result<PkiMaterial, SetupError> {
-    reject_symlink_components(directory)?;
-    require_real_directory(directory).map_err(|_| {
+    let directory = canonicalize_selected_path(directory)?;
+    require_real_directory(&directory).map_err(|_| {
         SetupError::InvalidSecretMaterial(format!(
             "{} is not a safe PKI import directory",
             directory.display()
@@ -1881,12 +1881,12 @@ fn render_environment(values: &[(&String, String)]) -> Result<String, SetupError
     Ok(rendered)
 }
 
-fn ensure_safe_output_root(output: &Path) -> Result<(), SetupError> {
+fn ensure_safe_output_root(output: &Path) -> Result<PathBuf, SetupError> {
     if output.as_os_str().is_empty() {
         return Err(SetupError::UnsafeDestination("path is empty".to_owned()));
     }
-    reject_symlink_components(output)?;
-    match fs::symlink_metadata(output) {
+    let output = canonicalize_selected_path(output)?;
+    match fs::symlink_metadata(&output) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
         Ok(_) => {
             return Err(SetupError::UnsafeDestination(
@@ -1894,51 +1894,85 @@ fn ensure_safe_output_root(output: &Path) -> Result<(), SetupError> {
             ));
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir_all(output)?;
-            set_directory_mode(output)?;
-            reject_symlink_components(output)?;
+            fs::create_dir_all(&output)?;
+            set_directory_mode(&output)?;
         }
         Err(error) => return Err(error.into()),
     }
-    Ok(())
+    let output = fs::canonicalize(output)?;
+    match fs::symlink_metadata(&output) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(output),
+        _ => Err(SetupError::UnsafeDestination(
+            "output root is not a real directory".to_owned(),
+        )),
+    }
 }
 
-fn reject_symlink_components(path: &Path) -> Result<(), SetupError> {
-    let absolute = if path.is_absolute() {
+fn canonicalize_selected_path(path: &Path) -> Result<PathBuf, SetupError> {
+    let requested = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()?.join(path)
     };
-    let mut current = PathBuf::new();
-    for component in absolute.components() {
+    let mut absolute = PathBuf::new();
+    for component in requested.components() {
         match component {
             Component::ParentDir => {
                 return Err(SetupError::UnsafeDestination(
                     "parent traversal is not allowed".to_owned(),
                 ));
             }
-            Component::CurDir => continue,
-            _ => current.push(component.as_os_str()),
+            Component::CurDir => {}
+            _ => absolute.push(component.as_os_str()),
         }
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(SetupError::UnsafeDestination(format!(
-                    "{} is a symbolic link",
-                    current.display()
-                )));
+    }
+
+    match fs::symlink_metadata(&absolute) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(SetupError::UnsafeDestination(format!(
+                "{} is a symbolic link",
+                absolute.display()
+            )));
+        }
+        Ok(_) => return fs::canonicalize(absolute).map_err(SetupError::from),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+
+    let mut ancestor = absolute.as_path();
+    let mut missing = Vec::new();
+    loop {
+        let name = ancestor.file_name().ok_or_else(|| {
+            SetupError::UnsafeDestination("path has no existing ancestor".to_owned())
+        })?;
+        missing.push(name.to_os_string());
+        ancestor = ancestor.parent().ok_or_else(|| {
+            SetupError::UnsafeDestination("path has no existing ancestor".to_owned())
+        })?;
+        match fs::symlink_metadata(ancestor) {
+            Ok(_) => {
+                let mut canonical = fs::canonicalize(ancestor)?;
+                if !fs::metadata(&canonical)?.is_dir() {
+                    return Err(SetupError::UnsafeDestination(format!(
+                        "{} is not a directory",
+                        ancestor.display()
+                    )));
+                }
+                for component in missing.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
     }
-    Ok(())
 }
 
 fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
-    reject_symlink_components(bundle)?;
-    require_real_directory(bundle)?;
-    for entry in fs::read_dir(bundle)? {
+    let bundle = canonicalize_selected_path(bundle)?;
+    require_real_directory(&bundle)?;
+    for entry in fs::read_dir(&bundle)? {
         let entry = entry?;
         let name = entry.file_name();
         if name != ".env" && name != "docker-compose.yaml" && name != "secrets" {

@@ -699,9 +699,19 @@ fn complete_existing_pki_can_be_imported_without_regeneration() {
     .expect("source PKI");
 
     let target = tempdir().expect("target directory");
+    #[cfg(unix)]
+    let import_directory = {
+        use std::os::unix::fs::symlink;
+
+        let linked_bundle = target.path().join("linked-source-bundle");
+        symlink(&source_result.root, &linked_bundle).expect("import ancestor symlink");
+        linked_bundle.join("secrets")
+    };
+    #[cfg(not(unix))]
+    let import_directory = source_result.root.join("secrets");
     let input = format!(
         "control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n{}\n",
-        source_result.root.join("secrets").display()
+        import_directory.display()
     );
     let mut target_output = Vec::new();
     let mut target_prompt = PromptIo::new(Cursor::new(input.into_bytes()), &mut target_output);
@@ -726,4 +736,33 @@ fn complete_existing_pki_can_be_imported_without_regeneration() {
         std::fs::read_to_string(source_result.root.join(".env")).expect("source environment"),
         std::fs::read_to_string(target_result.root.join(".env")).expect("target environment")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn pki_import_rejects_a_symlink_selected_as_the_directory_leaf() {
+    use std::os::unix::fs::symlink;
+
+    let source = tempdir().expect("source directory");
+    let source_result = install_pki_bundle(source.path());
+    let target = tempdir().expect("target directory");
+    let linked_secrets = target.path().join("linked-secrets");
+    symlink(source_result.join("secrets"), &linked_secrets).expect("import leaf symlink");
+    let input = format!(
+        "control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n{}\n",
+        linked_secrets.display()
+    );
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(input.into_bytes()), &mut output);
+
+    let error = prepare(
+        &pki_payload(),
+        SetupRequest::install(target.path()),
+        &mut prompt,
+        &SequenceGenerator::new([]),
+    )
+    .expect_err("a selected import leaf symlink is rejected");
+
+    assert!(error.to_string().contains("symbolic link"));
+    assert!(!target.path().join("vonk-forge").exists());
 }

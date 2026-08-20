@@ -68,7 +68,12 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
     )
     .expect("bundle prepared");
 
-    assert_eq!(result.root, temporary.path().join("vonk-forge"));
+    assert_eq!(
+        result.root,
+        std::fs::canonicalize(temporary.path())
+            .expect("canonical output")
+            .join("vonk-forge")
+    );
     let mut entries = std::fs::read_dir(&result.root)
         .expect("bundle directory")
         .map(|entry| entry.expect("directory entry").file_name())
@@ -480,6 +485,38 @@ fn payload_rejects_secret_path_traversal() {
 
 #[cfg(unix)]
 #[test]
+fn install_accepts_a_real_output_below_a_symlinked_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    let temporary = tempdir().expect("temporary directory");
+    let actual = temporary.path().join("actual");
+    let output = actual.join("output");
+    std::fs::create_dir_all(&output).expect("real output");
+    let linked = temporary.path().join("linked");
+    symlink(&actual, &linked).expect("ancestor symlink");
+    let requested = linked.join("output");
+    let expected = std::fs::canonicalize(&requested)
+        .expect("canonical output")
+        .join("vonk-forge");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(
+        Cursor::new(b"forge.example.test\n\nn\n".to_vec()),
+        &mut output,
+    );
+
+    let result = prepare(
+        &payload(),
+        SetupRequest::install(&requested),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("real output below a symlinked ancestor is accepted");
+
+    assert_eq!(result.root, expected);
+}
+
+#[cfg(unix)]
+#[test]
 fn install_rejects_a_symlinked_output_root() {
     use std::os::unix::fs::symlink;
 
@@ -488,18 +525,20 @@ fn install_rejects_a_symlinked_output_root() {
     std::fs::create_dir(&actual).expect("actual output");
     let linked = temporary.path().join("linked");
     symlink(&actual, &linked).expect("output symlink");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    for requested in [linked.clone(), linked.join(".")] {
+        let mut output = Vec::new();
+        let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
-        &payload(),
-        SetupRequest::install(&linked),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect_err("symlinked output rejected");
+        let error = prepare(
+            &payload(),
+            SetupRequest::install(&requested),
+            &mut prompt,
+            &FixedSecretGenerator,
+        )
+        .expect_err("symlinked output rejected");
 
-    assert!(error.to_string().contains("symbolic link"));
+        assert!(error.to_string().contains("symbolic link"));
+    }
     assert!(!actual.join("vonk-forge").exists());
 }
 
