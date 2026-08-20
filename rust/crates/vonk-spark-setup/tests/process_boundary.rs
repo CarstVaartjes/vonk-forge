@@ -19,6 +19,33 @@ const HELPER_ROOT: &str = "VONK_SPARK_PROCESS_HELPER_ROOT";
 const APPLY_HELPER: &str = "VONK_SPARK_PROCESS_APPLY_HELPER";
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
 
+#[derive(Clone, Copy)]
+struct NativeReleaseIdentity {
+    platform: &'static str,
+    architecture: &'static str,
+}
+
+fn native_release_identity() -> NativeReleaseIdentity {
+    match std::env::consts::ARCH {
+        "x86_64" => NativeReleaseIdentity {
+            platform: "linux-amd64",
+            architecture: "amd64",
+        },
+        "aarch64" => NativeReleaseIdentity {
+            platform: "linux-arm64",
+            architecture: "arm64",
+        },
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    }
+}
+
+fn package_filename() -> String {
+    format!(
+        "vonk-forge-agent_1.0.0_{}.deb",
+        native_release_identity().architecture
+    )
+}
+
 struct NoCommands;
 
 impl CommandRunner for NoCommands {
@@ -79,11 +106,12 @@ impl CommandRunner for BootstrapRunner {
 }
 
 fn package(path: &Path) {
+    let architecture = native_release_identity().architecture;
     let root = path.parent().unwrap().join("package-root");
     fs::create_dir_all(root.join("DEBIAN")).unwrap();
     fs::write(
         root.join("DEBIAN/control"),
-        "Package: vonk-forge-agent\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: test <test@example.test>\nDescription: process test\n",
+        format!("Package: vonk-forge-agent\nVersion: 1.0.0\nArchitecture: {architecture}\nMaintainer: test <test@example.test>\nDescription: process test\n"),
     )
     .unwrap();
     assert!(
@@ -107,7 +135,8 @@ fn signed_request_with_setup(
     root: &Path,
     setup_contents: &[u8],
 ) -> (SetupRequest, ReleaseAuthority) {
-    let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
+    let identity = native_release_identity();
+    let package_path = root.join(package_filename());
     package(&package_path);
     let executable = root.join("vonk-spark-setup");
     fs::write(&executable, setup_contents).unwrap();
@@ -173,21 +202,24 @@ fn signed_request_with_setup(
         .write_all(b"\n")
         .unwrap();
     let generation = "a".repeat(64);
+    let agent_artifact = format!("agent-package-{}", identity.platform);
+    let setup_artifact = format!("spark-setup-{}", identity.platform);
+    let setup_signature_artifact = format!("spark-setup-signature-{}", identity.platform);
     let manifest = root.join("release.json");
     let release = serde_json::json!({
         "artifacts": {
-            "agent-package-linux-amd64": {
-                "path": format!("artifacts/stable/releases/{generation}/spark/current/linux-amd64/vonk-forge-agent.deb"),
+            (agent_artifact): {
+                "path": format!("artifacts/stable/releases/{generation}/spark/current/{}/vonk-forge-agent.deb", identity.platform),
                 "sha256": hex::encode(Sha256::digest(fs::read(&package_path).unwrap())),
                 "size": fs::metadata(&package_path).unwrap().len(),
             },
-            "spark-setup-linux-amd64": {
-                "path": format!("artifacts/stable/releases/{generation}/spark/current/linux-amd64/vonk-spark-setup"),
+            (setup_artifact): {
+                "path": format!("artifacts/stable/releases/{generation}/spark/current/{}/vonk-spark-setup", identity.platform),
                 "sha256": hex::encode(Sha256::digest(fs::read(&executable).unwrap())),
                 "size": fs::metadata(&executable).unwrap().len(),
             },
-            "spark-setup-signature-linux-amd64": {
-                "path": format!("artifacts/stable/releases/{generation}/spark/current/linux-amd64/vonk-spark-setup.sig"),
+            (setup_signature_artifact): {
+                "path": format!("artifacts/stable/releases/{generation}/spark/current/{}/vonk-spark-setup.sig", identity.platform),
                 "sha256": hex::encode(Sha256::digest(fs::read(&setup_signature).unwrap())),
                 "size": fs::metadata(&setup_signature).unwrap().len(),
             }
@@ -637,11 +669,7 @@ fn headless_upgrade_reaches_the_real_stdin_only_sudo_boundary() {
     fs::copy(temporary.path().join("vonk-spark-setup"), &executable).unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
     let package = session.join("vonk-forge-agent.deb");
-    fs::copy(
-        temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb"),
-        &package,
-    )
-    .unwrap();
+    fs::copy(temporary.path().join(package_filename()), &package).unwrap();
     fs::set_permissions(&package, fs::Permissions::from_mode(0o600)).unwrap();
     let mut apply = ProcessCommand::new("/usr/bin/setsid")
         .arg(std::env::current_exe().unwrap())

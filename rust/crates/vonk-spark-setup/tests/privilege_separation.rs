@@ -16,6 +16,36 @@ use vonk_spark_setup::{
 
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
 
+#[derive(Clone, Copy)]
+struct NativeReleaseIdentity {
+    platform: &'static str,
+    architecture: &'static str,
+    wrong_architecture: &'static str,
+}
+
+fn native_release_identity() -> NativeReleaseIdentity {
+    match std::env::consts::ARCH {
+        "x86_64" => NativeReleaseIdentity {
+            platform: "linux-amd64",
+            architecture: "amd64",
+            wrong_architecture: "arm64",
+        },
+        "aarch64" => NativeReleaseIdentity {
+            platform: "linux-arm64",
+            architecture: "arm64",
+            wrong_architecture: "amd64",
+        },
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    }
+}
+
+fn package_filename() -> String {
+    format!(
+        "vonk-forge-agent_1.0.0_{}.deb",
+        native_release_identity().architecture
+    )
+}
+
 struct SignedRelease {
     authority: ReleaseAuthority,
     manifest: PathBuf,
@@ -28,6 +58,10 @@ fn signed_release(
     package: &std::path::Path,
     executable: &std::path::Path,
 ) -> SignedRelease {
+    let identity = native_release_identity();
+    let agent_artifact = format!("agent-package-{}", identity.platform);
+    let setup_artifact = format!("spark-setup-{}", identity.platform);
+    let setup_signature_artifact = format!("spark-setup-signature-{}", identity.platform);
     let private_key = root.join("installer-release-private.pem");
     let public_key = root.join("installer-release-public.pem");
     assert!(
@@ -92,18 +126,18 @@ fn signed_release(
     let setup_signature_raw = fs::read(&setup_signature).unwrap();
     let release = serde_json::json!({
         "artifacts": {
-            "agent-package-linux-amd64": {
-                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-forge-agent.deb",
+            (agent_artifact): {
+                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-forge-agent.deb", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&package_raw)),
                 "size": package_raw.len(),
             },
-            "spark-setup-linux-amd64": {
-                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-spark-setup",
+            (setup_artifact): {
+                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-spark-setup", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&setup_raw)),
                 "size": setup_raw.len(),
             },
-            "spark-setup-signature-linux-amd64": {
-                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-spark-setup.sig",
+            (setup_signature_artifact): {
+                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-spark-setup.sig", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&setup_signature_raw)),
                 "size": setup_signature_raw.len(),
             }
@@ -259,7 +293,12 @@ fn fresh_answers(ca: &[u8]) -> FreshAnswers {
 }
 
 fn package(path: &std::path::Path) {
-    package_with_identity(path, "vonk-forge-agent", "1.0.0", "amd64");
+    package_with_identity(
+        path,
+        "vonk-forge-agent",
+        "1.0.0",
+        native_release_identity().architecture,
+    );
 }
 
 fn package_with_identity(
@@ -301,7 +340,7 @@ fn paths(root: &std::path::Path) -> InstallPaths {
 }
 
 fn signed_request(root: &std::path::Path) -> (SetupRequest, ReleaseAuthority) {
-    let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
+    let package_path = root.join(package_filename());
     package(&package_path);
     let executable = root.join("vonk-spark-setup");
     fs::write(&executable, b"verified setup executable").unwrap();
@@ -339,7 +378,7 @@ fn root_session(root: &std::path::Path, prepared: &vonk_spark_setup::PreparedSet
 }
 
 fn request(root: &std::path::Path) -> SetupRequest {
-    let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
+    let package_path = root.join(package_filename());
     package(&package_path);
     request_for_package(root, package_path)
 }
@@ -488,7 +527,12 @@ fn root_apply_accepts_only_artifacts_bound_by_the_trusted_signed_release() {
     let staged_executable = root_session(temporary.path(), &prepared);
 
     let malicious = temporary.path().join("malicious.deb");
-    package_with_identity(&malicious, "vonk-forge-agent", "1.0.0", "amd64");
+    package_with_identity(
+        &malicious,
+        "vonk-forge-agent",
+        "1.0.0",
+        native_release_identity().architecture,
+    );
     fs::copy(
         malicious,
         staged_executable
@@ -570,7 +614,7 @@ fn setup_signature_must_match_the_signed_release_before_prompt_or_sudo() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
-    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    let package_path = temporary.path().join(package_filename());
     package(&package_path);
     let executable = temporary.path().join("vonk-spark-setup");
     fs::write(&executable, b"verified setup executable").unwrap();
@@ -1063,13 +1107,16 @@ fn package_format_identity_and_release_name_are_verified_before_prompt_or_sudo()
         let package_path = if case == "name" {
             temporary.path().join("release.deb")
         } else {
-            temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb")
+            temporary.path().join(package_filename())
         };
         match case {
             "format" => fs::write(&package_path, vec![b'x'; 80]).unwrap(),
-            "identity" => {
-                package_with_identity(&package_path, "vonk-forge-agent", "1.0.0", "arm64")
-            }
+            "identity" => package_with_identity(
+                &package_path,
+                "vonk-forge-agent",
+                "1.0.0",
+                native_release_identity().wrong_architecture,
+            ),
             "name" => package(&package_path),
             _ => unreachable!(),
         }
@@ -1085,7 +1132,13 @@ fn package_format_identity_and_release_name_are_verified_before_prompt_or_sudo()
             CallerIdentity::unprivileged(1000),
         );
 
-        assert!(result.is_err(), "{case} must be rejected");
+        let exact_error = match case {
+            "format" => matches!(result, Err(SetupError::PackageFormat)),
+            "identity" => matches!(result, Err(SetupError::PackageIdentity)),
+            "name" => matches!(result, Err(SetupError::UnsafePackage)),
+            _ => unreachable!(),
+        };
+        assert!(exact_error, "{case} must be rejected by its exact boundary");
         assert!(runner.commands.is_empty());
     }
 }
