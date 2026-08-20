@@ -132,6 +132,7 @@ class DatabaseAuthorityService:
                     created_at=now,
                 )
             )
+            session.flush()
             session.add(
                 ControlAuthorityHead(
                     singleton_id=1,
@@ -249,6 +250,7 @@ class DatabaseAuthorityService:
                         created_at=self._clock(),
                     )
                 )
+                session.flush()
             head.revision_id = revision_id
             head.updated_at = self._clock()
             proposal.applied_revision = revision_id
@@ -279,7 +281,7 @@ class DatabaseProposalService:
                 raise ValueError(f"duplicate proposal path: {path}")
             seen.add(path)
             if not isinstance(change.document, Mapping):
-                raise ValueError("proposal document must be an object")
+                raise ValueError("proposal document must be an object")  # noqa: TRY004
             serialize_document(path, change.document)
             normalized.append({"path": path, "document": dict(change.document)})
         normalized.sort(key=lambda value: str(value["path"]))
