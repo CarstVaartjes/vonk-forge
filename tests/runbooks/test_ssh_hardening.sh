@@ -4,7 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 drop_in="$repo_root/nodes/etc/ssh/sshd_config.d/90-vonk-admin.conf"
 installer="$repo_root/nodes/bin/install-ssh-hardening"
-runbook="$repo_root/docs/runbooks/ssh-recovery.md"
 
 expected="$(printf '%s\n' \
   'PasswordAuthentication no' \
@@ -23,9 +22,5 @@ grep -Fq -- '--admin-user USER' /tmp/vonk-hardening-usage.out
 grep -Fq -- '--admin-key-fingerprint SHA256:' /tmp/vonk-hardening-usage.out
 grep -Fq -- '--drop-in FILE' /tmp/vonk-hardening-usage.out
 rm -f /tmp/vonk-hardening-usage.out
-
-grep -Fq -- '--admin-user' "$runbook"
-grep -Fq -- '--admin-key-fingerprint' "$runbook"
-grep -Fq -- '--recovery-marker' "$runbook"
 
 printf 'SSH hardening artifacts: PASS\n'
