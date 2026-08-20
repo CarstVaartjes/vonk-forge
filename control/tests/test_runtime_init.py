@@ -151,8 +151,10 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
     ownership: dict[Path, tuple[int, int]] = {}
     monkeypatch.setattr(
         os,
-        "chown",
-        lambda path, uid, gid: ownership.__setitem__(Path(path), (uid, gid)),
+        "fchown",
+        lambda descriptor, uid, gid: ownership.__setitem__(
+            Path(os.readlink(f"/proc/self/fd/{descriptor}")), (uid, gid)
+        ),
     )
 
     prepare_shared_volumes(SharedRuntimePaths(**roots))
@@ -186,3 +188,23 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         "workload-publication/metadata": 0o750,
         "workload-publication/targets": 0o750,
     }
+
+
+def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    routes = tmp_path / "routes"
+    routes.symlink_to(outside, target_is_directory=True)
+    paths = SharedRuntimePaths(
+        routes=routes,
+        supervisor=tmp_path / "supervisor",
+        update_socket=tmp_path / "update-socket",
+        verifier=tmp_path / "verifier",
+        agent_publication=tmp_path / "agent-publication",
+        workload_publication=tmp_path / "workload-publication",
+    )
+
+    with pytest.raises(RuntimeSecretError, match="shared runtime directory is unsafe"):
+        prepare_shared_volumes(paths)
+
+    assert list(outside.iterdir()) == []

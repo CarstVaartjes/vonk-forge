@@ -222,10 +222,32 @@ def stage_compose_secrets(
 
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
     target = Path(path)
-    target.mkdir(mode=mode, parents=True, exist_ok=True)
-    os.chown(target, uid, gid)
-    os.chmod(target, mode)
-    return target
+    if not target.is_absolute() or len(target.parts) < 2:
+        raise RuntimeSecretError("shared runtime directory is unsafe")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = -1
+    try:
+        descriptor = os.open("/", flags)
+        for component in target.parts[1:]:
+            if component in {"", ".", ".."}:
+                raise RuntimeSecretError("shared runtime directory is unsafe")
+            try:
+                os.mkdir(component, mode=mode, dir_fd=descriptor)
+            except FileExistsError:
+                pass
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, mode)
+        return target
+    except RuntimeSecretError:
+        raise
+    except OSError as error:
+        raise RuntimeSecretError("shared runtime directory is unsafe") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:

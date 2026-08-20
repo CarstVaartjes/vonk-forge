@@ -420,7 +420,9 @@ def test_health_probe_is_bounded_get_without_body(tmp_path: Path) -> None:
     assert seen[0].content == b""
 
 
-def test_production_agent_service_builder_selects_step_ca_and_checks_reachability(tmp_path: Path, monkeypatch) -> None:
+def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
+    tmp_path: Path, monkeypatch
+) -> None:
     calls: list[object] = []
 
     class FakeStepAuthority:
@@ -428,7 +430,7 @@ def test_production_agent_service_builder_selects_step_ca_and_checks_reachabilit
             calls.append(kwargs)
 
         def check_health(self) -> None:
-            calls.append("health")
+            raise AssertionError("API construction must not contact Step CA")
 
     monkeypatch.setattr("vonk_control.step_ca.StepCertificateAuthority", FakeStepAuthority)
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
@@ -439,25 +441,23 @@ def test_production_agent_service_builder_selects_step_ca_and_checks_reachabilit
     services = build_agent_services(settings, sessions, lambda: NOW)
 
     assert isinstance(services, AgentApiServices)
-    assert calls[-1] == "health"
+    assert len(calls) == 1
     assert calls[0]["ca_url"] == CA_URL
     assert settings.agent_artifact_root.is_dir()
     assert isinstance(services.presence, AgentPresenceService)
 
 
-def test_production_agent_service_builder_fails_closed_on_unreachable_or_mixed_provider(tmp_path: Path, monkeypatch) -> None:
-    class Unreachable:
+def test_production_agent_service_builder_rejects_mixed_provider(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class DeferredStepAuthority:
         def __init__(self, **kwargs) -> None:
             pass
 
-        def check_health(self) -> None:
-            raise StepCAError("step-ca request failed")
-
-    monkeypatch.setattr("vonk_control.step_ca.StepCertificateAuthority", Unreachable)
+    monkeypatch.setattr(
+        "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
+    )
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="10.0.0.240/28")
-    with pytest.raises(StepCAError, match="request failed"):
-        build_agent_services(settings, object(), lambda: NOW)
-
     settings.agent_ca_provider = "unknown"
     with pytest.raises(RuntimeError, match="provider is unavailable"):
         build_agent_services(settings, object(), lambda: NOW)
@@ -487,7 +487,7 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_path: Path, monkeypatch) -> None:
     """Exercise the tracked public config against the exact production image."""
     if shutil.which("docker") is None or subprocess.run(
-        ["docker", "info"], capture_output=True
+        ["docker", "info"], capture_output=True, check=False
     ).returncode != 0:
         pytest.skip("Docker daemon is required for the pinned step-ca integration test")
     tmp_path.chmod(0o777)

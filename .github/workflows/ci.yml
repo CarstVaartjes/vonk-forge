@@ -138,6 +138,17 @@ jobs:
           enable-cache: true
       - name: Install locked admin web dependencies
         run: npm ci --prefix control/web
+      - name: Pull exact PostgreSQL integration image
+        run: >-
+          docker pull
+          postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+      - name: Run required fresh PostgreSQL integration contracts
+        env:
+          CI: "true"
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          control/tests/test_database_authority_postgres.py
+          deploy/compose/tests/test_postgres_init_databases.py
       - name: Run focused repository contracts
         run: >-
           uv run --python 3.12 --project control --frozen --with-editable .
@@ -224,7 +235,9 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Pull PostgreSQL test image
-        run: docker pull postgres:16
+        run: >-
+          docker pull
+          postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
       - name: Run complete control suite
         shell: bash
         env:

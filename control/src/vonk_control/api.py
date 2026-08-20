@@ -63,6 +63,9 @@ from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import install_catalog_routes
 from .catalog_service import CatalogService
 from .cluster_mappings import ClusterMappingService
+from .database_authority import (
+    AuthorityChange,
+)
 from .fleet_projection import FleetSnapshot, TelemetryHistoryResponse
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
@@ -83,12 +86,6 @@ from .operation_api import (
     decode_offset,
     fleet_response,
     job_response,
-)
-from .database_authority import (
-    AuthorityChange,
-    DatabaseAuthorityService,
-    DatabaseChangeService,
-    DatabaseProposalService,
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
@@ -719,7 +716,6 @@ def build_agent_services(
             timeout_seconds=settings.agent_ca_timeout_seconds,
             max_response_bytes=settings.agent_ca_max_response_bytes,
         )
-        authority.check_health()
     elif settings.agent_ca_provider == "builtin":
         if settings.agent_intermediate_key_path is None:
             raise RuntimeError("built-in intermediate key path is unavailable")
@@ -1835,8 +1831,12 @@ def production_app() -> FastAPI:
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .catalog_seeds import seed_builtin_harnesses
-    from .database_authority import DatabaseAuthorityService, DatabaseChangeService, DatabaseProposalService
     from .dashboard import DashboardService
+    from .database_authority import (
+        DatabaseAuthorityService,
+        DatabaseChangeService,
+        DatabaseProposalService,
+    )
     from .db import build_engine, session_factory
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection

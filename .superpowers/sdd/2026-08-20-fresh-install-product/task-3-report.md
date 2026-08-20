@@ -97,3 +97,22 @@ The unrelated unstaged Task 6 changes in `control/src/vonk_control/offline.py`,
 fresh-install design and plan files were read for context and left untouched;
 the binding ruling was already represented by the implementation brief and
 this report.
+
+## Review fix round 1
+
+- Removed the synchronous Step CA network probe from API construction. Step CA
+  still starts only after the API has staged its secrets and become ready, its
+  own healthcheck remains part of `compose up --wait`, and CA operations retain
+  their request-time fail-closed behavior.
+- Replaced the database-only API container healthcheck with an actual loopback
+  `/api/v1/readyz` probe. The healthcheck irreversibly drops supplementary
+  groups and all real/effective/saved IDs to `10001` and verifies source-secret
+  isolation before opening the socket.
+- Replaced path-following shared-volume preparation with descriptor-relative
+  `O_NOFOLLOW|O_DIRECTORY` traversal and `fchown`/`fchmod`; symlinked components
+  now fail closed.
+- Added both real PostgreSQL fresh-start contracts to the required PR smoke job
+  and changed required CI pre-pulls to the exact PostgreSQL 18.3 digest.
+- Focused verification after the fixes: `85 passed, 14 skipped` locally; all
+  skips require Docker and fail rather than skip under `CI=true`. Ruff 0.16.1,
+  shell syntax, default/Hermes Compose rendering, and `git diff --check` pass.
