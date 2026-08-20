@@ -146,11 +146,8 @@ struct StepCaControllerFiles {
     root_certificate: String,
     intermediate_certificate: String,
     intermediate_private_key: String,
-    controller_ca_certificate: String,
     controller_server_certificate: String,
     controller_server_private_key: String,
-    agent_client_ca_certificate: String,
-    agent_root_certificate: String,
     provisioner_private_jwk: String,
     provisioner_public_jwk: String,
     ca_config: String,
@@ -158,16 +155,13 @@ struct StepCaControllerFiles {
 }
 
 impl StepCaControllerFiles {
-    fn all(&self) -> [&str; 12] {
+    fn all(&self) -> [&str; 9] {
         [
             &self.root_certificate,
             &self.intermediate_certificate,
             &self.intermediate_private_key,
-            &self.controller_ca_certificate,
             &self.controller_server_certificate,
             &self.controller_server_private_key,
-            &self.agent_client_ca_certificate,
-            &self.agent_root_certificate,
             &self.provisioner_private_jwk,
             &self.provisioner_public_jwk,
             &self.ca_config,
@@ -1106,7 +1100,6 @@ fn generate_pki<G: SecretGenerator>(
                 files.intermediate_private_key.clone(),
                 encrypted_intermediate,
             ),
-            (files.controller_ca_certificate.clone(), root_pem.clone()),
             (
                 files.controller_server_certificate.clone(),
                 controller_chain,
@@ -1115,8 +1108,6 @@ fn generate_pki<G: SecretGenerator>(
                 files.controller_server_private_key.clone(),
                 controller_key.serialize_pem(),
             ),
-            (files.agent_client_ca_certificate.clone(), root_pem.clone()),
-            (files.agent_root_certificate.clone(), root_pem),
             (
                 files.provisioner_private_jwk.clone(),
                 serde_json::to_string(&private_jwk)
@@ -1370,16 +1361,6 @@ fn validate_pki_material(
         ));
     }
 
-    for copy in [
-        &paths.controller_ca_certificate,
-        &paths.agent_client_ca_certificate,
-        &paths.agent_root_certificate,
-    ] {
-        if normalized_secret(value(copy)?) != normalized_secret(root_pem) {
-            return Err(invalid_pki("root certificate copies do not match"));
-        }
-    }
-
     let public: PublicJwk = serde_json::from_str(value(&paths.provisioner_public_jwk)?)
         .map_err(|_| invalid_pki("public provisioner JWK is invalid"))?;
     let private: PrivateJwk = serde_json::from_str(value(&paths.provisioner_private_jwk)?)
@@ -1445,10 +1426,6 @@ fn validate_es256_jwks(public: &PublicJwk, private: &PrivateJwk) -> Result<(), S
     Ok(())
 }
 
-fn normalized_secret(value: &str) -> &str {
-    value.trim_end_matches(['\r', '\n'])
-}
-
 fn invalid_pki(message: &str) -> SetupError {
     SetupError::InvalidSecretMaterial(format!("Step CA/controller PKI {message}"))
 }
@@ -1499,7 +1476,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                 set_environment_value(&mut environment, &request.kid_env, material.kid);
                 new_secrets.extend(material.files);
             }
-            12 => {
+            count if count == request.files.all().len() => {
                 let files = request
                     .files
                     .all()

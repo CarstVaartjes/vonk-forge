@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,26 +20,33 @@ DEV_WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'b' * 40}@
 DEV_HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 
 
-def _renderer():
-    loader = importlib.machinery.SourceFileLoader(
-        "render_production_compose", str(SCRIPT)
+def _run_production(
+    template: Path,
+    output: Path,
+    api_image: str = API_IMAGE,
+    worker_image: str = WORKER_IMAGE,
+    hermes_image: str = HERMES_IMAGE,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--template",
+            str(template),
+            "--output",
+            str(output),
+            "--api-image",
+            api_image,
+            "--worker-image",
+            worker_image,
+            "--hermes-image",
+            hermes_image,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
     )
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
-
-
-def _development_renderer():
-    loader = importlib.machinery.SourceFileLoader(
-        "render_dev_compose_for_production_test", str(DEV_SCRIPT)
-    )
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
 
 
 def _replace(value: object, replacements: dict[str, str]) -> object:
@@ -61,15 +68,31 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
     production.parent.mkdir()
     development.parent.mkdir()
 
-    _renderer().render(TEMPLATE, production, API_IMAGE, WORKER_IMAGE, HERMES_IMAGE)
-    _development_renderer().render(
-        TEMPLATE,
-        development,
-        DEV_API_IMAGE,
-        DEV_WORKER_IMAGE,
-        DEV_HERMES_IMAGE,
-        channel="dev",
+    production_result = _run_production(TEMPLATE, production)
+    development_result = subprocess.run(
+        [
+            sys.executable,
+            str(DEV_SCRIPT),
+            "--template",
+            str(TEMPLATE),
+            "--output",
+            str(development),
+            "--api-image",
+            DEV_API_IMAGE,
+            "--worker-image",
+            DEV_WORKER_IMAGE,
+            "--hermes-image",
+            DEV_HERMES_IMAGE,
+            "--channel",
+            "dev",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
     )
+    assert production_result.returncode == 0, production_result.stderr
+    assert development_result.returncode == 0, development_result.stderr
 
     production_model = yaml.safe_load(production.read_text(encoding="utf-8"))
     development_model = yaml.safe_load(development.read_text(encoding="utf-8"))
@@ -91,8 +114,9 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
 ) -> None:
     output = tmp_path / "docker-compose.production.yml"
 
-    _renderer().render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, HERMES_IMAGE)
+    result = _run_production(TEMPLATE, output)
 
+    assert result.returncode == 0, result.stderr
     text = output.read_text(encoding="utf-8")
     document = yaml.safe_load(text)
     assert document["services"]["control-api"]["image"] == API_IMAGE
@@ -129,9 +153,10 @@ def test_render_rejects_nonproduction_or_unpinned_images(
     output = tmp_path / "docker-compose.production.yml"
     output.write_text("preserve\n", encoding="utf-8")
 
-    with pytest.raises(ValueError):
-        _renderer().render(TEMPLATE, output, image, WORKER_IMAGE, HERMES_IMAGE)
+    result = _run_production(TEMPLATE, output, api_image=image)
 
+    assert result.returncode != 0
+    assert "immutable production version" in result.stderr
     assert output.read_text(encoding="utf-8") == "preserve\n"
 
 
@@ -146,11 +171,22 @@ def test_render_rejects_template_token_drift(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="API image token"):
-        _renderer().render(
-            template,
-            tmp_path / "docker-compose.production.yml",
-            API_IMAGE,
-            WORKER_IMAGE,
-            HERMES_IMAGE,
-        )
+    result = _run_production(
+        template,
+        tmp_path / "docker-compose.production.yml",
+    )
+
+    assert result.returncode != 0
+    assert "API image token" in result.stderr
+
+
+def test_cli_accepts_a_relative_template_path(tmp_path: Path) -> None:
+    output = tmp_path / "docker-compose.yaml"
+
+    result = _run_production(
+        TEMPLATE.relative_to(ROOT),
+        output,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert yaml.safe_load(output.read_text(encoding="utf-8"))["services"]

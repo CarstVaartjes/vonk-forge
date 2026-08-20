@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,14 +18,39 @@ HERMES_IMAGE = (
 )
 
 
-def _renderer():
-    script = ROOT / "scripts/render-dev-compose"
-    loader = importlib.machinery.SourceFileLoader("render_dev_compose", str(script))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+SCRIPT = ROOT / "scripts/render-dev-compose"
+
+
+def _run_renderer(
+    output: Path,
+    *,
+    api_image: str = API_IMAGE,
+    worker_image: str = WORKER_IMAGE,
+    hermes_image: str = HERMES_IMAGE,
+    channel: str = "pinned",
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--template",
+            str(TEMPLATE),
+            "--output",
+            str(output),
+            "--api-image",
+            api_image,
+            "--worker-image",
+            worker_image,
+            "--hermes-image",
+            hermes_image,
+            "--channel",
+            channel,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
@@ -36,10 +59,9 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     """Catches a deployment bundle that needs files beside docker-compose.yaml."""
     output = tmp_path / "docker-compose.yaml"
 
-    _renderer().render(
-        TEMPLATE, output, API_IMAGE, WORKER_IMAGE, HERMES_IMAGE, channel="pinned"
-    )
+    result = _run_renderer(output)
 
+    assert result.returncode == 0, result.stderr
     text = output.read_text(encoding="utf-8")
     document = yaml.safe_load(text)
     assert "\ninclude:" not in text
@@ -85,10 +107,9 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
     """Catches embedded scripts becoming non-executable or data becoming writable."""
     output = tmp_path / "docker-compose.yaml"
 
-    _renderer().render(
-        TEMPLATE, output, API_IMAGE, WORKER_IMAGE, HERMES_IMAGE, channel="pinned"
-    )
+    result = _run_renderer(output)
 
+    assert result.returncode == 0, result.stderr
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
     expected = {
         "caddy": {
@@ -121,15 +142,9 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
 def test_render_uses_canonical_template_and_inlines_step_ca(tmp_path: Path) -> None:
     output = tmp_path / "docker-compose.yaml"
 
-    _renderer().render(
-        TEMPLATE,
-        output,
-        API_IMAGE,
-        WORKER_IMAGE,
-        HERMES_IMAGE,
-        channel="pinned",
-    )
+    result = _run_renderer(output)
 
+    assert result.returncode == 0, result.stderr
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert "step-ca" in document["services"]
     api_secrets = document["services"]["control-api"]["secrets"]
@@ -140,12 +155,11 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     """Catches a development bundle that is not reproducible from its manifest."""
     output = tmp_path / "docker-compose.yaml"
 
-    with pytest.raises(ValueError, match="immutable published development image"):
-        _renderer().render(
-            TEMPLATE,
-            output,
-            f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
-            WORKER_IMAGE,
-            HERMES_IMAGE,
-            channel="dev",
-        )
+    result = _run_renderer(
+        output,
+        api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+        channel="dev",
+    )
+
+    assert result.returncode != 0
+    assert "immutable published development image" in result.stderr

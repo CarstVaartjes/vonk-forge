@@ -142,11 +142,8 @@ const PKI_PAYLOAD: &[u8] = br#"{
       "root_certificate": "step-ca/root-certificate",
       "intermediate_certificate": "step-ca/intermediate-certificate",
       "intermediate_private_key": "step-ca/intermediate-key",
-      "controller_ca_certificate": "controller-ca.pem",
       "controller_server_certificate": "controller-server-certificate",
       "controller_server_private_key": "controller-server-key",
-      "agent_client_ca_certificate": "agent-client-ca",
-      "agent_root_certificate": "step-ca-root-certificate",
       "provisioner_private_jwk": "agent-ca-credential",
       "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
       "ca_config": "step-ca/ca.json",
@@ -156,15 +153,12 @@ const PKI_PAYLOAD: &[u8] = br#"{
   "hermes": null
 }"#;
 
-const PKI_FILES: [&str; 12] = [
+const PKI_FILES: [&str; 9] = [
     "step-ca/root-certificate",
     "step-ca/intermediate-certificate",
     "step-ca/intermediate-key",
-    "controller-ca.pem",
     "controller-server-certificate",
     "controller-server-key",
-    "agent-client-ca",
-    "step-ca-root-certificate",
     "agent-ca-credential",
     "agent-ca-provisioner-public-jwk",
     "step-ca/ca.json",
@@ -242,19 +236,6 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
             "registry.example.test"
         ]
     );
-    assert_eq!(
-        root_pem,
-        std::fs::read(secrets.join("controller-ca.pem")).expect("controller CA copy")
-    );
-    assert_eq!(
-        root_pem,
-        std::fs::read(secrets.join("agent-client-ca")).expect("client CA copy")
-    );
-    assert_eq!(
-        root_pem,
-        std::fs::read(secrets.join("step-ca-root-certificate")).expect("agent root copy")
-    );
-
     let server_key_pem =
         std::fs::read_to_string(secrets.join("controller-server-key")).expect("server key");
     let server_key = KeyPair::from_pem(&server_key_pem).expect("server PKCS#8 key");

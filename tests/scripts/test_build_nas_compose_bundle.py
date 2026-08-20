@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -156,8 +157,29 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "secrets": [],
     }
 
+    installer_secret_files = {
+        item["file"] for item in payload["secrets"]
+    }
+    for group in ("random_text", "ed25519_pkcs8_pem", "postgres_urls"):
+        installer_secret_files.update(
+            item["file"] for item in payload["generated_secrets"][group]
+        )
+    installer_secret_files.update(payload["step_ca_controller"]["files"].values())
+    installer_environment = {
+        item["env"] for item in payload["internal_values"]
+    } | {item["env"] for item in payload["required_values"]}
+    installer_environment.add(payload["step_ca_controller"]["kid_env"])
+    installer_environment.add(payload["hermes"]["env"])
+    installer_environment.update(
+        item["env"] for item in payload["hermes"]["required_values"]
+    )
+
     compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)
+    required_compose_environment = set(
+        re.findall(r"(?<!\$)\$\{([A-Z_][A-Z0-9_]*):\?", compose_text)
+    )
+    assert required_compose_environment <= installer_environment
     assert set(compose["services"]) == SERVICES
     assert "include" not in compose
     assert "name" not in compose
@@ -175,6 +197,11 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         secret["file"].startswith("./secrets/") and "${" not in secret["file"]
         for secret in compose["secrets"].values()
     )
+    compose_secret_files = {
+        secret["file"].removeprefix("./secrets/")
+        for secret in compose["secrets"].values()
+    }
+    assert compose_secret_files == installer_secret_files
     assert compose["secrets"]["step-ca-config"]["file"] == (
         "./secrets/step-ca/ca.json"
     )

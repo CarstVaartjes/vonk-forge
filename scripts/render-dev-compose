@@ -164,6 +164,7 @@ def _config_mounts(
 
 
 def _embed_runtime_assets(document: dict[str, object], source_root: Path) -> None:
+    source_root = source_root.resolve()
     services = document.get("services")
     if not isinstance(services, dict):
         raise TypeError("Compose services are invalid")
