@@ -110,3 +110,31 @@ current GitHub-only key and all external secrets were left untouched. No
   required top-level version field.
 - The full canary acceptance cannot be validated without the protected external
   infrastructure listed above. It must run successfully before promotion.
+
+## Fix round 1 correction
+
+The earlier top-level `name`/`version` addition and Compose-v5 warning exemption
+were incorrect. The payload now omits both fields and rejects every parser
+diagnostic. The CI-only reference rollout uses a digest-pinned Docker Engine
+29.4.3 DIND fixture and the already checksum-verified Compose 5.1.3 fixture;
+neither is an installer, bundle, environment, secret, prompt, or deployment
+input.
+
+### Fix round 1 verification
+
+```text
+$ uv run pytest tests/test_acceptance_runtime.py tests/test_fresh_nas_acceptance.py tests/scripts/test_build_nas_compose_bundle.py tests/scripts/test_install_release_publication.py tests/test_installer_publication_workflow.py -q
+...............................................                          [100%]
+47 passed in 10.94s
+
+$ uvx --from ruff==0.16.1 ruff check --force-exclude <Task 13A Python paths>
+All checks passed!
+
+$ git diff --check
+(exit 0; no output)
+```
+
+This round removes the forbidden YAML fields, rejects all Compose diagnostics,
+adds the NAS acceptance gates to authority validation, limits the reference
+rollout to Hermes, hardens full writes/TLS cleanup, and pins a CI-only Docker
+29.4.3 DIND service paired with the Compose 5.1.3 reference fixture.

@@ -23,8 +23,11 @@ NAS_PLATFORMS = (
 )
 SPARK_PLATFORMS = ("linux-amd64", "linux-arm64")
 ACCEPTANCE_GATES = {
+    "compose_compatibility_lower",
+    "compose_compatibility_ugreen",
     "compose_default",
     "compose_hermes",
+    "nas_site_secret_preservation",
     "nas_workstation",
     "spark_amd64",
     "spark_arm64",
@@ -339,7 +342,14 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         _gate_report(
             report_root / "nas.json",
             publication,
-            {"nas_workstation", "compose_default", "compose_hermes"},
+            {
+                "compose_compatibility_lower",
+                "compose_compatibility_ugreen",
+                "compose_default",
+                "compose_hermes",
+                "nas_site_secret_preservation",
+                "nas_workstation",
+            },
         ),
         _gate_report(
             report_root / "spark-amd64.json",

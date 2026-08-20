@@ -45,6 +45,10 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     jobs = _workflow()["jobs"]
     nas = jobs["nas-acceptance"]
     assert nas["permissions"] == {"contents": "read"}
+    assert nas["services"]["docker-engine"]["image"] == (
+        "docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495"
+    )
+    assert nas["services"]["docker-engine"]["env"] == {"DOCKER_TLS_CERTDIR": ""}
     steps = _steps(nas)
     fixture_step = steps["Download verified Compose parser fixtures"]
     assert fixture_step["shell"] == "bash"
@@ -57,6 +61,10 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
     )
     assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_UGREEN"] == (
+        "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
+    )
+    assert acceptance_step["env"]["DOCKER_HOST"] == "tcp://docker-engine:2375"
+    assert acceptance_step["env"]["VONK_ACCEPTANCE_REFERENCE_COMPOSE"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
     )
     report = steps["Upload NAS behavioral gate report"]

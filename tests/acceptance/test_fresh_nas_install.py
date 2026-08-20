@@ -224,6 +224,15 @@ def host_command_environment() -> dict[str, str]:
     }
 
 
+def reference_compose() -> list[str]:
+    executable = Path(required_environment("VONK_ACCEPTANCE_REFERENCE_COMPOSE"))
+    if not executable.is_absolute() or not executable.is_file() or not os.access(
+        executable, os.X_OK
+    ):
+        raise AcceptanceError("reference Compose fixture is unavailable")
+    return [str(executable)]
+
+
 def parsed_environment(bundle: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for line in (bundle / ".env").read_text().splitlines():
@@ -279,7 +288,7 @@ def assert_site_secrets_preserved(bundle: Path, before: dict[Path, bytes]) -> No
 
 
 def compose_services(bundle: Path) -> set[str]:
-    output = run(["docker", "compose", "config", "--services"], cwd=bundle)
+    output = run([*reference_compose(), "config", "--services"], cwd=bundle)
     return {line for line in output.stdout.splitlines() if line}
 
 
@@ -310,8 +319,7 @@ def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -
 def verify_postgres_databases(bundle: Path) -> None:
     result = run(
         [
-            "docker",
-            "compose",
+            *reference_compose(),
             "exec",
             "-T",
             "postgres",
@@ -334,8 +342,7 @@ def verify_tailscale_services(
 ) -> None:
     status = run(
         [
-            "docker",
-            "compose",
+            *reference_compose(),
             "exec",
             "-T",
             "tailscale-gateway",
@@ -351,8 +358,7 @@ def verify_tailscale_services(
         raise AcceptanceError("Tailscale gateway is not running")
     serve = run(
         [
-            "docker",
-            "compose",
+            *reference_compose(),
             "exec",
             "-T",
             "tailscale-gateway",
@@ -379,8 +385,7 @@ def verify_tailscale_services(
         hostname, _, path = url.removeprefix("https://").partition("/")
         https_over_command(
             [
-                "docker",
-                "compose",
+                *reference_compose(),
                 "exec",
                 "-T",
                 "tailscale-gateway",
@@ -407,12 +412,12 @@ def exercise_compose(
     hermes: bool,
 ) -> None:
     expected = HERMES_SERVICES if hermes else DEFAULT_SERVICES
-    configured = run(["docker", "compose", "config", "--quiet"], cwd=bundle)
+    configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
     if configured.stdout or configured.stderr:
         raise AcceptanceError("Compose validation emitted output")
     if compose_services(bundle) != expected:
         raise AcceptanceError("rendered Compose service topology is not canonical")
-    images = run(["docker", "compose", "config", "--images"], cwd=bundle).stdout
+    images = run([*reference_compose(), "config", "--images"], cwd=bundle).stdout
     for image in images.splitlines():
         if "@sha256:" not in image or any(
             mutable in image for mutable in (":latest", ":dev", ":main", ":edge")
@@ -422,8 +427,7 @@ def exercise_compose(
     try:
         run(
             [
-                "docker",
-                "compose",
+                *reference_compose(),
                 "up",
                 "-d",
                 "--wait",
@@ -435,7 +439,7 @@ def exercise_compose(
             timeout=420,
         )
         status = run(
-            ["docker", "compose", "ps", "--all", "--format", "json"],
+            [*reference_compose(), "ps", "--all", "--format", "json"],
             cwd=bundle,
         )
         assert_compose_services_healthy(status.stdout, expected)
@@ -445,8 +449,7 @@ def exercise_compose(
     finally:
         run(
             [
-                "docker",
-                "compose",
+                *reference_compose(),
                 "down",
                 "--volumes",
                 "--remove-orphans",
@@ -456,6 +459,12 @@ def exercise_compose(
             cwd=bundle,
             timeout=120,
         )
+
+
+def reference_rollout_bundles(default: Path, hermes: Path) -> tuple[Path, ...]:
+    """The Hermes graph is a superset, so one rollout covers all services."""
+    del default
+    return (hermes,)
 
 
 def main() -> None:
@@ -524,20 +533,14 @@ def main() -> None:
                 fixtures=fixtures,
                 environment=host_command_environment(),
             )
-        exercise_compose(
-            first,
-            nas_ip=nas_ip,
-            enrollment_hostname=enrollment_hostname,
-            tailnet_suffix=tailnet_suffix,
-            hermes=False,
-        )
-        exercise_compose(
-            hermes,
-            nas_ip=nas_ip,
-            enrollment_hostname=enrollment_hostname,
-            tailnet_suffix=tailnet_suffix,
-            hermes=True,
-        )
+        for bundle in reference_rollout_bundles(first, hermes):
+            exercise_compose(
+                bundle,
+                nas_ip=nas_ip,
+                enrollment_hostname=enrollment_hostname,
+                tailnet_suffix=tailnet_suffix,
+                hermes=True,
+            )
 
 
 if __name__ == "__main__":

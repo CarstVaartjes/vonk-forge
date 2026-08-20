@@ -435,6 +435,12 @@ jobs:
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
       contents: read
+    services:
+      docker-engine:
+        image: docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
+        env:
+          DOCKER_TLS_CERTDIR: ""
+        options: --privileged
     steps:
       - name: Check out exact candidate acceptance suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -474,10 +480,12 @@ jobs:
       - name: Run literal clean NAS and Compose acceptance
         shell: bash
         env:
+          DOCKER_HOST: tcp://docker-engine:2375
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}

@@ -11,7 +11,7 @@ import ssl
 import stat
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 
@@ -19,10 +19,14 @@ class AcceptanceError(RuntimeError):
     pass
 
 
-_COMPOSE_VERSION_OBSOLETE = (
-    "the attribute `version` is obsolete, it will be ignored, "
-    "please remove it to avoid potential confusion"
-)
+def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
+    """Write a complete payload or fail instead of silently truncating it."""
+    offset = 0
+    while offset < len(payload):
+        count = write(payload[offset:])
+        if not isinstance(count, int) or count <= 0:
+            raise AcceptanceError("acceptance transport stopped before a full write")
+        offset += count
 
 
 def run_interactive(
@@ -69,7 +73,10 @@ def run_interactive(
                     observed = transcript.decode("utf-8", errors="replace")
                     position = observed.find(prompt, matched_through)
                     if position >= 0:
-                        os.write(terminal, answer.encode("utf-8") + b"\n")
+                        write_all(
+                            lambda payload: os.write(terminal, payload),
+                            answer.encode("utf-8") + b"\n",
+                        )
                         matched_through = position + len(prompt)
                         pending.pop(0)
             child, observed_status = os.waitpid(pid, os.WNOHANG)
@@ -223,12 +230,7 @@ def assert_compose_compatibility(
                 f"Compose fixture {name!r} rejected the bundle:\n"
                 f"{result.stdout[-4000:]}\n{result.stderr[-4000:]}"
             )
-        known_version_diagnostic = result.stderr and all(
-            _COMPOSE_VERSION_OBSOLETE in line
-            for line in result.stderr.splitlines()
-            if line
-        )
-        if result.stdout or (result.stderr and not known_version_diagnostic):
+        if result.stdout or result.stderr:
             raise AcceptanceError(
                 f"Compose fixture {name!r} emitted output:\n"
                 f"{result.stdout[-4000:]}\n{result.stderr[-4000:]}"
@@ -272,7 +274,7 @@ def https_over_command(
 
     def flush_tls() -> None:
         while data := outgoing.read():
-            process.stdin.write(data)
+            write_all(process.stdin.write, data)
             process.stdin.flush()
 
     def receive_tls() -> None:
@@ -281,6 +283,8 @@ def https_over_command(
             raise AcceptanceError("HTTPS tunnel timed out")
         readable, _, _ = select.select([process.stdout], [], [], remaining)
         if not readable:
+            if process.poll() is not None:
+                raise AcceptanceError("HTTPS tunnel exited before completing TLS")
             raise AcceptanceError("HTTPS tunnel timed out")
         data = os.read(process.stdout.fileno(), 64 * 1024)
         if data:
@@ -296,6 +300,8 @@ def https_over_command(
             except ssl.SSLWantReadError:
                 flush_tls()
                 receive_tls()
+            except ssl.SSLWantWriteError:
+                flush_tls()
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {server_hostname}\r\n"
@@ -308,6 +314,9 @@ def https_over_command(
                 offset += tls.write(request[offset:])
             except ssl.SSLWantWriteError:
                 flush_tls()
+            except ssl.SSLWantReadError:
+                flush_tls()
+                receive_tls()
         flush_tls()
         response = bytearray()
         while True:
@@ -319,6 +328,8 @@ def https_over_command(
             except ssl.SSLWantReadError:
                 flush_tls()
                 receive_tls()
+            except ssl.SSLWantWriteError:
+                flush_tls()
             except ssl.SSLEOFError:
                 if response:
                     break
@@ -334,11 +345,20 @@ def https_over_command(
     except (BrokenPipeError, ConnectionError, OSError, ssl.SSLError) as error:
         raise AcceptanceError("tailnet HTTPS endpoint is unavailable") from error
     finally:
-        process.stdin.close()
+        try:
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
         if process.poll() is None:
-            process.terminate()
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
             process.wait()

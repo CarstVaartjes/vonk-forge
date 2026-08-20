@@ -17,6 +17,7 @@ from tests.acceptance.runtime import (
     assert_compose_services_healthy,
     https_over_command,
     run_interactive,
+    write_all,
 )
 
 
@@ -118,9 +119,7 @@ def test_compose_compatibility_exercises_every_declared_parser_fixture(
 ) -> None:
     bundle = tmp_path / "vonk-forge"
     bundle.mkdir()
-    (bundle / "docker-compose.yaml").write_text(
-        "name: vonk-forge\nversion: '3.9'\nservices: {}\n"
-    )
+    (bundle / "docker-compose.yaml").write_text("services: {}\n")
     (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge\n")
     log = tmp_path / "fixtures.log"
     fixtures = []
@@ -142,7 +141,7 @@ def test_compose_compatibility_exercises_every_declared_parser_fixture(
     ]
 
 
-def test_compose_compatibility_allows_only_the_required_version_diagnostic(
+def test_compose_compatibility_rejects_all_parser_diagnostics(
     tmp_path: Path,
 ) -> None:
     bundle = tmp_path / "vonk-forge"
@@ -156,11 +155,26 @@ def test_compose_compatibility_allows_only_the_required_version_diagnostic(
     )
     fixture.chmod(0o755)
 
-    assert_compose_compatibility(
-        bundle,
-        fixtures=[("ugreen-compose-5.1.3", fixture)],
-        environment={"PATH": "/usr/bin:/bin"},
-    )
+    with pytest.raises(AcceptanceError, match="emitted output"):
+        assert_compose_compatibility(
+            bundle,
+            fixtures=[("ugreen-compose-5.1.3", fixture)],
+            environment={"PATH": "/usr/bin:/bin"},
+        )
+
+
+def test_write_all_retries_deterministic_partial_writes() -> None:
+    received = bytearray()
+    chunks = iter((2, 1, 3))
+
+    def partial_write(data: bytes) -> int:
+        count = next(chunks)
+        received.extend(data[:count])
+        return count
+
+    write_all(partial_write, b"abcdef")
+
+    assert received == b"abcdef"
 
 
 def test_https_tunnel_performs_hostname_verified_tls_over_a_command(
