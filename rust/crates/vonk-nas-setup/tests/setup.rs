@@ -32,7 +32,7 @@ impl SecretGenerator for FixedSecretGenerator {
 fn payload() -> CanonicalTemplatePayload {
     CanonicalTemplatePayload::from_json(
         br#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:abc\n",
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
@@ -43,6 +43,8 @@ fn payload() -> CanonicalTemplatePayload {
           "hermes": {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
+            "enabled_value": "true",
+            "disabled_value": "false",
             "required_values": [],
             "secrets": []
           }
@@ -200,7 +202,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
 fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:new\n",
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"},
@@ -213,6 +215,8 @@ fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
           "hermes": {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
+            "enabled_value": "true",
+            "disabled_value": "false",
             "required_values": [],
             "secrets": []
           }
@@ -373,7 +377,7 @@ fn os_secret_generator_returns_fresh_hex_encoded_entropy() {
 fn payload_rejects_secret_path_traversal() {
     let error = CanonicalTemplatePayload::from_json(
         br#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
           "secrets": [{"file": "../outside", "prompt": "Unsafe", "generate_bytes": 32}],
@@ -414,13 +418,15 @@ fn install_rejects_a_symlinked_output_root() {
 fn hermes_prompts_are_conditional_on_opt_in() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
           "secrets": [],
           "hermes": {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
+            "enabled_value": "true",
+            "disabled_value": "false",
             "required_values": [{"env": "HERMES_ENDPOINT", "prompt": "Hermes endpoint"}],
             "secrets": [{"file": "hermes-token", "prompt": "Hermes token"}]
           }
@@ -460,7 +466,7 @@ fn hermes_prompts_are_conditional_on_opt_in() {
 fn install_creates_safe_nested_secret_paths() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
           "secrets": [
@@ -507,4 +513,58 @@ fn install_creates_safe_nested_secret_paths() {
             0o600
         );
     }
+}
+
+#[test]
+fn schema_v2_emits_internal_values_and_maps_hermes_to_compose_profiles() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "internal_values": [
+            {"env": "DATABASE_URL_FILE", "value": "./secrets/database-url"},
+            {"env": "STEP_CA_CONFIG_FILE", "value": "./secrets/step-ca/ca.json"}
+          ],
+          "required_values": [],
+          "secrets": [],
+          "generated_secrets": {
+            "random_text": [],
+            "ed25519_pkcs8_pem": [],
+            "postgres_urls": []
+          },
+          "step_ca_controller": null,
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": "",
+            "required_values": [],
+            "secrets": []
+          }
+        }"#,
+    )
+    .expect("valid v2 payload");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(b"yes\n".to_vec()), &mut output);
+
+    prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle prepared");
+
+    assert_eq!(
+        std::fs::read_to_string(temporary.path().join("vonk-forge/.env")).expect("environment"),
+        "DATABASE_URL_FILE=./secrets/database-url\n\
+STEP_CA_CONFIG_FILE=./secrets/step-ca/ca.json\n\
+COMPOSE_PROFILES=hermes\n"
+    );
+    assert!(
+        !String::from_utf8(output)
+            .expect("UTF-8 prompts")
+            .contains("secrets/")
+    );
 }

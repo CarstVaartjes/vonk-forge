@@ -6,8 +6,18 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use base64ct::{Base64UrlUnpadded, Encoding};
+use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
+use p256::elliptic_curve::sec1::ToEncodedPoint;
+use pkcs8::LineEnding;
+use rand_core::OsRng;
+use rcgen::{
+    BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
+    KeyPair, KeyUsagePurpose, PKCS_ED25519,
+};
 use ring::rand::{SecureRandom, SystemRandom};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -28,6 +38,8 @@ pub enum SetupError {
     Io(#[from] io::Error),
     #[error(transparent)]
     SecretGeneration(#[from] SecretGenerationError),
+    #[error("generated secret material is invalid: {0}")]
+    InvalidSecretMaterial(String),
 }
 
 #[derive(Debug, Error)]
@@ -60,10 +72,107 @@ pub struct CanonicalTemplatePayload {
     schema_version: u8,
     docker_compose_yaml: String,
     #[serde(default)]
+    internal_values: Vec<InternalValue>,
+    #[serde(default)]
     required_values: Vec<RequiredValuePrompt>,
     #[serde(default)]
     secrets: Vec<SecretPrompt>,
+    #[serde(default)]
+    generated_secrets: GeneratedSecrets,
+    step_ca_controller: Option<StepCaControllerRequest>,
     hermes: Option<HermesPrompt>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InternalValue {
+    env: String,
+    value: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GeneratedSecrets {
+    #[serde(default)]
+    random_text: Vec<RandomTextRequest>,
+    #[serde(default)]
+    ed25519_pkcs8_pem: Vec<Ed25519KeyRequest>,
+    #[serde(default)]
+    postgres_urls: Vec<PostgresUrlRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RandomTextRequest {
+    file: String,
+    prompt: String,
+    bytes: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ed25519KeyRequest {
+    file: String,
+    prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PostgresUrlRequest {
+    file: String,
+    password_file: String,
+    scheme: String,
+    username: String,
+    host: String,
+    port: u16,
+    database: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StepCaControllerRequest {
+    prompt: String,
+    hostname_envs: Vec<String>,
+    provisioner_name: String,
+    kid_env: String,
+    password_bytes: usize,
+    files: StepCaControllerFiles,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StepCaControllerFiles {
+    root_certificate: String,
+    intermediate_certificate: String,
+    intermediate_private_key: String,
+    controller_ca_certificate: String,
+    controller_server_certificate: String,
+    controller_server_private_key: String,
+    agent_client_ca_certificate: String,
+    agent_root_certificate: String,
+    provisioner_private_jwk: String,
+    provisioner_public_jwk: String,
+    ca_config: String,
+    password: String,
+}
+
+impl StepCaControllerFiles {
+    fn all(&self) -> [&str; 12] {
+        [
+            &self.root_certificate,
+            &self.intermediate_certificate,
+            &self.intermediate_private_key,
+            &self.controller_ca_certificate,
+            &self.controller_server_certificate,
+            &self.controller_server_private_key,
+            &self.agent_client_ca_certificate,
+            &self.agent_root_certificate,
+            &self.provisioner_private_jwk,
+            &self.provisioner_public_jwk,
+            &self.ca_config,
+            &self.password,
+        ]
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +196,8 @@ struct SecretPrompt {
 struct HermesPrompt {
     env: String,
     prompt: String,
+    enabled_value: String,
+    disabled_value: String,
     #[serde(default)]
     required_values: Vec<RequiredValuePrompt>,
     #[serde(default)]
@@ -102,7 +213,7 @@ impl CanonicalTemplatePayload {
     }
 
     fn validate(&self) -> Result<(), SetupError> {
-        if self.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(SetupError::InvalidPayload(
                 "unsupported schema version".to_owned(),
             ));
@@ -115,6 +226,21 @@ impl CanonicalTemplatePayload {
 
         let mut environment = HashSet::new();
         let mut secrets = HashSet::new();
+        for value in &self.internal_values {
+            validate_env_name(&value.env)?;
+            if value.value.contains('\0') {
+                return Err(SetupError::InvalidPayload(format!(
+                    "internal value for {} contains NUL",
+                    value.env
+                )));
+            }
+            if !environment.insert(value.env.as_str()) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "duplicate environment key {}",
+                    value.env
+                )));
+            }
+        }
         validate_prompts(
             &self.required_values,
             &self.secrets,
@@ -134,6 +260,15 @@ impl CanonicalTemplatePayload {
                     "Hermes prompt is empty".to_owned(),
                 ));
             }
+            if hermes.enabled_value == hermes.disabled_value
+                || hermes.enabled_value.contains(['\0', '\r', '\n'])
+                || hermes.disabled_value.contains(['\0', '\r', '\n'])
+            {
+                return Err(SetupError::InvalidPayload(
+                    "Hermes enabled and disabled values must be distinct single-line values"
+                        .to_owned(),
+                ));
+            }
             validate_prompts(
                 &hermes.required_values,
                 &hermes.secrets,
@@ -141,8 +276,117 @@ impl CanonicalTemplatePayload {
                 &mut secrets,
             )?;
         }
+        for request in &self.generated_secrets.random_text {
+            validate_generated_file(&request.file, &mut secrets)?;
+            validate_generation_prompt(&request.prompt, &request.file)?;
+            if !(16..=128).contains(&request.bytes) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "generation size for {} is outside 16..=128 bytes",
+                    request.file
+                )));
+            }
+        }
+        for request in &self.generated_secrets.ed25519_pkcs8_pem {
+            validate_generated_file(&request.file, &mut secrets)?;
+            validate_generation_prompt(&request.prompt, &request.file)?;
+        }
+        for request in &self.generated_secrets.postgres_urls {
+            validate_generated_file(&request.file, &mut secrets)?;
+            validate_secret_name(&request.password_file)?;
+            if !secrets.contains(request.password_file.as_str()) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "PostgreSQL URL {} references undeclared password file {}",
+                    request.file, request.password_file
+                )));
+            }
+            validate_postgres_url_request(request)?;
+        }
+        if let Some(request) = &self.step_ca_controller {
+            if request.prompt.trim().is_empty()
+                || request.provisioner_name.trim().is_empty()
+                || request.provisioner_name.contains(['\0', '\r', '\n'])
+                || !(16..=128).contains(&request.password_bytes)
+                || request.hostname_envs.is_empty()
+            {
+                return Err(SetupError::InvalidPayload(
+                    "Step CA/controller request is incomplete".to_owned(),
+                ));
+            }
+            let mut hostnames = HashSet::new();
+            for name in &request.hostname_envs {
+                validate_env_name(name)?;
+                if !environment.contains(name.as_str()) || !hostnames.insert(name.as_str()) {
+                    return Err(SetupError::InvalidPayload(format!(
+                        "Step CA hostname environment key {name} is undeclared or repeated"
+                    )));
+                }
+            }
+            validate_env_name(&request.kid_env)?;
+            if !environment.insert(request.kid_env.as_str()) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "duplicate environment key {}",
+                    request.kid_env
+                )));
+            }
+            for file in request.files.all() {
+                validate_generated_file(file, &mut secrets)?;
+            }
+        }
         Ok(())
     }
+}
+
+fn validate_generated_file<'a>(
+    file: &'a str,
+    secrets: &mut HashSet<&'a str>,
+) -> Result<(), SetupError> {
+    validate_secret_name(file)?;
+    if !secrets.insert(file) {
+        return Err(SetupError::InvalidPayload(format!(
+            "duplicate secret file {file}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_generation_prompt(prompt: &str, file: &str) -> Result<(), SetupError> {
+    if prompt.trim().is_empty() {
+        return Err(SetupError::InvalidPayload(format!(
+            "prompt for {file} is empty"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_postgres_url_request(request: &PostgresUrlRequest) -> Result<(), SetupError> {
+    let valid_scheme = request
+        .scheme
+        .chars()
+        .enumerate()
+        .all(|(index, character)| {
+            if index == 0 {
+                character.is_ascii_lowercase()
+            } else {
+                character.is_ascii_lowercase()
+                    || character.is_ascii_digit()
+                    || matches!(character, '+' | '-' | '.')
+            }
+        });
+    if !valid_scheme
+        || request.username.is_empty()
+        || request.host.is_empty()
+        || request.port == 0
+        || request.database.is_empty()
+        || [&request.username, &request.host, &request.database]
+            .iter()
+            .any(|value| value.contains(['\0', '\r', '\n']))
+    {
+        return Err(SetupError::InvalidPayload(format!(
+            "PostgreSQL URL request for {} is invalid",
+            request.file
+        )));
+    }
+    Ok(())
 }
 
 fn validate_prompts<'a>(
@@ -364,6 +608,63 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         }
     }
 
+    fn generated_text<G: SecretGenerator>(
+        &mut self,
+        request: &RandomTextRequest,
+        generator: &G,
+    ) -> Result<String, SetupError> {
+        let value =
+            self.read_hidden_value(&format!("{} (leave blank to generate)", request.prompt))?;
+        if value.is_empty() {
+            generator.generate(request.bytes).map_err(SetupError::from)
+        } else {
+            validate_single_line_secret(&value, &request.file)?;
+            Ok(value)
+        }
+    }
+
+    fn ed25519_private_key(&mut self, request: &Ed25519KeyRequest) -> Result<String, SetupError> {
+        let import_path = self.read_hidden_value(&format!(
+            "{} (existing PEM path; leave blank to generate)",
+            request.prompt
+        ))?;
+        if import_path.is_empty() {
+            return KeyPair::generate_for(&PKCS_ED25519)
+                .map(|key| key.serialize_pem())
+                .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()));
+        }
+        let pem = read_import_file(Path::new(&import_path), 64 * 1024)?;
+        validate_ed25519_private_key(&pem, &request.file)?;
+        Ok(pem)
+    }
+
+    fn pki_import_directory(
+        &mut self,
+        request: &StepCaControllerRequest,
+    ) -> Result<Option<PathBuf>, SetupError> {
+        let path = self.read_hidden_value(&format!(
+            "{} (existing bundle secrets directory; leave blank to generate)",
+            request.prompt
+        ))?;
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(PathBuf::from(path)))
+        }
+    }
+
+    fn read_hidden_value(&mut self, label: &str) -> Result<String, SetupError> {
+        self.secret_input
+            .read_secret(label, &mut self.reader, &mut self.writer)
+            .map_err(|error| {
+                if error.kind() == io::ErrorKind::UnexpectedEof {
+                    SetupError::InputEnded
+                } else {
+                    SetupError::Io(error)
+                }
+            })
+    }
+
     fn confirm(&mut self, label: &str) -> Result<bool, SetupError> {
         loop {
             let value = self.line(&format!("{label} [y/N]"))?;
@@ -374,6 +675,43 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
             }
         }
     }
+}
+
+fn validate_single_line_secret(value: &str, file: &str) -> Result<(), SetupError> {
+    if value.is_empty() || value.contains(['\0', '\r', '\n']) {
+        return Err(SetupError::InvalidSecretMaterial(format!(
+            "{file} must be a non-empty single-line value"
+        )));
+    }
+    Ok(())
+}
+
+fn read_import_file(path: &Path, maximum_bytes: u64) -> Result<String, SetupError> {
+    reject_symlink_components(path)?;
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum_bytes {
+        return Err(SetupError::InvalidSecretMaterial(format!(
+            "{} is not a safe regular import file",
+            path.display()
+        )));
+    }
+    fs::read_to_string(path).map_err(|error| {
+        SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
+    })
+}
+
+fn validate_ed25519_private_key(pem: &str, file: &str) -> Result<(), SetupError> {
+    let key = KeyPair::from_pem(pem).map_err(|_| {
+        SetupError::InvalidSecretMaterial(format!("{file} is not a PKCS#8 PEM private key"))
+    })?;
+    if !key.is_compatible(&PKCS_ED25519) {
+        return Err(SetupError::InvalidSecretMaterial(format!(
+            "{file} is not an Ed25519 private key"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,24 +774,56 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let staging = create_staging_directory(bundle.parent().expect("bundle has output parent"))?;
     let result = (|| {
-        let mut environment = Vec::new();
+        let mut environment = payload
+            .internal_values
+            .iter()
+            .map(|value| (value.env.clone(), value.value.clone()))
+            .collect::<Vec<_>>();
         let mut secret_values = Vec::new();
         for value in &payload.required_values {
-            environment.push((&value.env, prompt.required(value)?));
+            environment.push((value.env.clone(), prompt.required(value)?));
         }
         for secret in &payload.secrets {
-            secret_values.push((&secret.file, prompt.secret(secret, generator)?));
+            secret_values.push((secret.file.clone(), prompt.secret(secret, generator)?));
+        }
+        for request in &payload.generated_secrets.random_text {
+            secret_values.push((
+                request.file.clone(),
+                prompt.generated_text(request, generator)?,
+            ));
+        }
+        for request in &payload.generated_secrets.ed25519_pkcs8_pem {
+            secret_values.push((request.file.clone(), prompt.ed25519_private_key(request)?));
+        }
+        for request in &payload.generated_secrets.postgres_urls {
+            let password = secret_value(&secret_values, &request.password_file)?.to_owned();
+            secret_values.push((
+                request.file.clone(),
+                render_postgres_url(request, &password)?,
+            ));
+        }
+        if let Some(request) = &payload.step_ca_controller {
+            let material = prepare_pki(request, &environment, prompt, generator)?;
+            environment.push((request.kid_env.clone(), material.kid));
+            secret_values.extend(material.files);
         }
 
         let hermes_enabled = if let Some(hermes) = &payload.hermes {
             let enabled = prompt.confirm(&hermes.prompt)?;
-            environment.push((&hermes.env, enabled.to_string()));
+            environment.push((
+                hermes.env.clone(),
+                if enabled {
+                    hermes.enabled_value.clone()
+                } else {
+                    hermes.disabled_value.clone()
+                },
+            ));
             if enabled {
                 for value in &hermes.required_values {
-                    environment.push((&value.env, prompt.required(value)?));
+                    environment.push((value.env.clone(), prompt.required(value)?));
                 }
                 for secret in &hermes.secrets {
-                    secret_values.push((&secret.file, prompt.secret(secret, generator)?));
+                    secret_values.push((secret.file.clone(), prompt.secret(secret, generator)?));
                 }
             }
             Some(enabled)
@@ -466,14 +836,13 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             payload.docker_compose_yaml.as_bytes(),
             0o644,
         )?;
-        let environment = render_environment(&environment)?;
+        let environment = render_owned_environment(&environment)?;
         write_new_file(&staging.join(".env"), environment.as_bytes(), 0o600)?;
         let secret_directory = staging.join("secrets");
         create_secure_directory(&secret_directory)?;
         for (name, value) in secret_values {
-            let mut content = value.into_bytes();
-            content.push(b'\n');
-            write_secret_file(&secret_directory, name, &content)?;
+            let content = secret_file_content(value);
+            write_secret_file(&secret_directory, &name, &content)?;
         }
         sync_directory(&secret_directory)?;
         sync_directory(&staging)?;
@@ -490,6 +859,504 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     result
 }
 
+fn secret_value<'a>(values: &'a [(String, String)], file: &str) -> Result<&'a str, SetupError> {
+    values
+        .iter()
+        .find_map(|(name, value)| (name.as_str() == file).then_some(value.as_str()))
+        .ok_or_else(|| {
+            SetupError::InvalidPayload(format!("generated secret dependency {file} is unavailable"))
+        })
+}
+
+fn render_postgres_url(request: &PostgresUrlRequest, password: &str) -> Result<String, SetupError> {
+    validate_single_line_secret(password, &request.password_file)?;
+    let mut url = url::Url::parse(&format!(
+        "{}://{}:{}/",
+        request.scheme, request.host, request.port
+    ))
+    .map_err(|_| {
+        SetupError::InvalidPayload(format!(
+            "PostgreSQL URL request for {} is invalid",
+            request.file
+        ))
+    })?;
+    url.set_username(&request.username).map_err(|_| {
+        SetupError::InvalidPayload(format!(
+            "PostgreSQL username for {} is invalid",
+            request.file
+        ))
+    })?;
+    url.set_password(Some(password)).map_err(|_| {
+        SetupError::InvalidSecretMaterial(format!(
+            "password for {} cannot be encoded",
+            request.file
+        ))
+    })?;
+    url.set_path(&request.database);
+    Ok(url.into())
+}
+
+fn secret_file_content(value: String) -> Vec<u8> {
+    let mut content = value.trim_end_matches(['\r', '\n']).as_bytes().to_vec();
+    content.push(b'\n');
+    content
+}
+
+struct PkiMaterial {
+    kid: String,
+    files: Vec<(String, String)>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct PublicJwk {
+    alg: String,
+    crv: String,
+    kid: String,
+    kty: String,
+    #[serde(rename = "use")]
+    key_use: String,
+    x: String,
+    y: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct PrivateJwk {
+    alg: String,
+    crv: String,
+    d: String,
+    kid: String,
+    kty: String,
+    #[serde(rename = "use")]
+    key_use: String,
+    x: String,
+    y: String,
+}
+
+fn prepare_pki<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    prompt: &mut PromptIo<R, W, S>,
+    generator: &G,
+) -> Result<PkiMaterial, SetupError> {
+    if let Some(directory) = prompt.pki_import_directory(request)? {
+        return import_pki(request, environment, &directory);
+    }
+    generate_pki(request, environment, generator)
+}
+
+fn generate_pki<G: SecretGenerator>(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    generator: &G,
+) -> Result<PkiMaterial, SetupError> {
+    let hostnames = pki_hostnames(request, environment)?;
+    let password = generator.generate(request.password_bytes)?;
+    validate_single_line_secret(&password, &request.files.password)?;
+
+    let root_key = KeyPair::generate_for(&PKCS_ED25519)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let root_params = ca_certificate_params("Vonk Forge Root CA", 1, 3650)?;
+    let root = CertifiedIssuer::self_signed(root_params, root_key)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+
+    let intermediate_key = KeyPair::generate_for(&PKCS_ED25519)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let intermediate_der = intermediate_key.serialize_der();
+    let intermediate_params = ca_certificate_params("Vonk Forge Agent Intermediate CA", 0, 1825)?;
+    let intermediate = CertifiedIssuer::signed_by(intermediate_params, intermediate_key, &root)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+
+    let controller_key = KeyPair::generate_for(&PKCS_ED25519)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let mut controller_params = CertificateParams::new(hostnames.clone()).map_err(|error| {
+        SetupError::InvalidPayload(format!("invalid controller hostname: {error}"))
+    })?;
+    let now = time::OffsetDateTime::now_utc();
+    controller_params.not_before = now - time::Duration::hours(1);
+    controller_params.not_after = now + time::Duration::days(397);
+    controller_params
+        .distinguished_name
+        .push(DnType::CommonName, hostnames[0].clone());
+    controller_params
+        .key_usages
+        .push(KeyUsagePurpose::DigitalSignature);
+    controller_params
+        .extended_key_usages
+        .push(ExtendedKeyUsagePurpose::ServerAuth);
+    controller_params.use_authority_key_identifier_extension = true;
+    let controller_certificate = controller_params
+        .signed_by(&controller_key, &intermediate)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+
+    let signing_key = ed25519_dalek::SigningKey::from_pkcs8_der(&intermediate_der)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let encrypted_intermediate = signing_key
+        .to_pkcs8_encrypted_pem(&mut OsRng, password.as_bytes(), LineEnding::LF)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?
+        .to_string();
+    let (public_jwk, private_jwk) = generate_es256_jwks()?;
+    let ca_config = render_ca_config(request, &public_jwk)?;
+    let root_pem = root.pem();
+    let intermediate_pem = intermediate.pem();
+    let controller_chain = format!("{}{}", controller_certificate.pem(), intermediate_pem);
+    let files = &request.files;
+
+    Ok(PkiMaterial {
+        kid: public_jwk.kid.clone(),
+        files: vec![
+            (files.root_certificate.clone(), root_pem.clone()),
+            (files.intermediate_certificate.clone(), intermediate_pem),
+            (
+                files.intermediate_private_key.clone(),
+                encrypted_intermediate,
+            ),
+            (files.controller_ca_certificate.clone(), root_pem.clone()),
+            (
+                files.controller_server_certificate.clone(),
+                controller_chain,
+            ),
+            (
+                files.controller_server_private_key.clone(),
+                controller_key.serialize_pem(),
+            ),
+            (files.agent_client_ca_certificate.clone(), root_pem.clone()),
+            (files.agent_root_certificate.clone(), root_pem),
+            (
+                files.provisioner_private_jwk.clone(),
+                serde_json::to_string(&private_jwk)
+                    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
+            ),
+            (
+                files.provisioner_public_jwk.clone(),
+                serde_json::to_string(&public_jwk)
+                    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
+            ),
+            (files.ca_config.clone(), ca_config),
+            (files.password.clone(), password),
+        ],
+    })
+}
+
+fn ca_certificate_params(
+    common_name: &str,
+    path_length: u8,
+    validity_days: i64,
+) -> Result<CertificateParams, SetupError> {
+    let mut params = CertificateParams::new(Vec::<String>::new())
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let now = time::OffsetDateTime::now_utc();
+    params.not_before = now - time::Duration::hours(1);
+    params.not_after = now + time::Duration::days(validity_days);
+    params
+        .distinguished_name
+        .push(DnType::CommonName, common_name);
+    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(path_length));
+    params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::CrlSign,
+    ];
+    Ok(params)
+}
+
+fn pki_hostnames(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+) -> Result<Vec<String>, SetupError> {
+    request
+        .hostname_envs
+        .iter()
+        .map(|name| {
+            let value = environment_value(environment, name).ok_or_else(|| {
+                SetupError::InvalidPayload(format!(
+                    "Step CA hostname environment key {name} is unavailable"
+                ))
+            })?;
+            if value.is_empty() || value.contains(['\0', '\r', '\n', '/', ':']) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "Step CA hostname value for {name} is invalid"
+                )));
+            }
+            Ok(value.to_owned())
+        })
+        .collect()
+}
+
+fn generate_es256_jwks() -> Result<(PublicJwk, PrivateJwk), SetupError> {
+    let secret = p256::SecretKey::random(&mut OsRng);
+    let point = secret.public_key().to_encoded_point(false);
+    let x = Base64UrlUnpadded::encode_string(
+        point
+            .x()
+            .ok_or_else(|| SetupError::InvalidSecretMaterial("P-256 x is missing".to_owned()))?,
+    );
+    let y = Base64UrlUnpadded::encode_string(
+        point
+            .y()
+            .ok_or_else(|| SetupError::InvalidSecretMaterial("P-256 y is missing".to_owned()))?,
+    );
+    let canonical = format!("{{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"{x}\",\"y\":\"{y}\"}}");
+    let kid = Base64UrlUnpadded::encode_string(&Sha256::digest(canonical.as_bytes()));
+    let public = PublicJwk {
+        alg: "ES256".to_owned(),
+        crv: "P-256".to_owned(),
+        kid: kid.clone(),
+        kty: "EC".to_owned(),
+        key_use: "sig".to_owned(),
+        x: x.clone(),
+        y: y.clone(),
+    };
+    let private = PrivateJwk {
+        alg: "ES256".to_owned(),
+        crv: "P-256".to_owned(),
+        d: Base64UrlUnpadded::encode_string(&secret.to_bytes()),
+        kid,
+        kty: "EC".to_owned(),
+        key_use: "sig".to_owned(),
+        x,
+        y,
+    };
+    Ok((public, private))
+}
+
+fn render_ca_config(
+    request: &StepCaControllerRequest,
+    public_jwk: &PublicJwk,
+) -> Result<String, SetupError> {
+    let document = serde_json::json!({
+        "root": "/run/vonk-normalized-secrets/step-ca/root-certificate",
+        "crt": "/run/vonk-normalized-secrets/step-ca/intermediate-certificate",
+        "key": "/run/vonk-normalized-secrets/step-ca/intermediate-key",
+        "address": ":9000",
+        "insecureAddress": "",
+        "dnsNames": ["step-ca"],
+        "logger": {"format": "json"},
+        "db": {"type": "badgerv2", "dataSource": "/home/step/db"},
+        "crl": {
+            "enabled": true,
+            "generateOnRevoke": true,
+            "cacheDuration": "1h",
+            "renewPeriod": "30m"
+        },
+        "authority": {
+            "provisioners": [{
+                "type": "JWK",
+                "name": request.provisioner_name,
+                "key": public_jwk,
+                "claims": {
+                    "minTLSCertDuration": "24h",
+                    "maxTLSCertDuration": "24h",
+                    "defaultTLSCertDuration": "24h",
+                    "disableRenewal": true,
+                    "disableSmallstepExtensions": true
+                },
+                "options": {
+                    "x509": {
+                        "template": "{\"subject\":{\"commonName\":{{ toJson .Subject.CommonName }}},\"sans\":{{ toJson .SANs }},\"keyUsage\":[\"digitalSignature\"],\"extKeyUsage\":[\"clientAuth\"]}"
+                    }
+                }
+            }]
+        }
+    });
+    serde_json::to_string_pretty(&document)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))
+}
+
+fn import_pki(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    directory: &Path,
+) -> Result<PkiMaterial, SetupError> {
+    reject_symlink_components(directory)?;
+    require_real_directory(directory).map_err(|_| {
+        SetupError::InvalidSecretMaterial(format!(
+            "{} is not a safe PKI import directory",
+            directory.display()
+        ))
+    })?;
+    let files = request
+        .files
+        .all()
+        .into_iter()
+        .map(|relative| {
+            read_import_file(&directory.join(relative), 1024 * 1024)
+                .map(|content| (relative.to_owned(), content))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let kid = validate_pki_material(request, environment, &files)?;
+    Ok(PkiMaterial { kid, files })
+}
+
+fn validate_pki_material(
+    request: &StepCaControllerRequest,
+    environment: &[(String, String)],
+    files: &[(String, String)],
+) -> Result<String, SetupError> {
+    let value = |name: &str| {
+        files
+            .iter()
+            .find_map(|(path, value)| (path == name).then_some(value.as_str()))
+            .ok_or_else(|| {
+                SetupError::InvalidSecretMaterial(format!("PKI member {name} is missing"))
+            })
+    };
+    let paths = &request.files;
+    let root_pem = value(&paths.root_certificate)?;
+    let intermediate_pem = value(&paths.intermediate_certificate)?;
+    let server_pem = value(&paths.controller_server_certificate)?;
+    let (_, root_block) = x509_parser::pem::parse_x509_pem(root_pem.as_bytes())
+        .map_err(|_| invalid_pki("root certificate is not valid PEM"))?;
+    let (_, intermediate_block) = x509_parser::pem::parse_x509_pem(intermediate_pem.as_bytes())
+        .map_err(|_| invalid_pki("intermediate certificate is not valid PEM"))?;
+    let (_, server_block) = x509_parser::pem::parse_x509_pem(server_pem.as_bytes())
+        .map_err(|_| invalid_pki("controller certificate is not valid PEM"))?;
+    let (_, root) = x509_parser::parse_x509_certificate(&root_block.contents)
+        .map_err(|_| invalid_pki("root certificate is not valid X.509"))?;
+    let (_, intermediate) = x509_parser::parse_x509_certificate(&intermediate_block.contents)
+        .map_err(|_| invalid_pki("intermediate certificate is not valid X.509"))?;
+    let (_, server) = x509_parser::parse_x509_certificate(&server_block.contents)
+        .map_err(|_| invalid_pki("controller certificate is not valid X.509"))?;
+    root.verify_signature(None)
+        .map_err(|_| invalid_pki("root certificate is not self-signed"))?;
+    intermediate
+        .verify_signature(Some(root.public_key()))
+        .map_err(|_| invalid_pki("intermediate certificate is not signed by the root"))?;
+    server
+        .verify_signature(Some(intermediate.public_key()))
+        .map_err(|_| invalid_pki("controller certificate is not signed by the intermediate"))?;
+    if !root.validity().is_valid()
+        || !intermediate.validity().is_valid()
+        || !server.validity().is_valid()
+    {
+        return Err(invalid_pki("certificate is outside its validity period"));
+    }
+
+    let expected_hostnames = pki_hostnames(request, environment)?;
+    let actual_hostnames = server
+        .subject_alternative_name()
+        .map_err(|_| invalid_pki("controller certificate has an invalid SAN extension"))?
+        .ok_or_else(|| invalid_pki("controller certificate has no SAN extension"))?
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            x509_parser::extensions::GeneralName::DNSName(value) => Some((*value).to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if actual_hostnames != expected_hostnames {
+        return Err(invalid_pki(
+            "controller certificate hostnames do not match the configured hostnames",
+        ));
+    }
+
+    let server_key = KeyPair::from_pem(value(&paths.controller_server_private_key)?)
+        .map_err(|_| invalid_pki("controller private key is not valid PKCS#8 PEM"))?;
+    if !server_key.is_compatible(&PKCS_ED25519)
+        || server_key.public_key_raw() != server.public_key().subject_public_key.data.as_ref()
+    {
+        return Err(invalid_pki(
+            "controller private key does not match the controller certificate",
+        ));
+    }
+    let password = value(&paths.password)?.trim_end_matches(['\r', '\n']);
+    validate_single_line_secret(password, &paths.password)?;
+    let intermediate_key = ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
+        value(&paths.intermediate_private_key)?,
+        password.as_bytes(),
+    )
+    .map_err(|_| invalid_pki("intermediate private key cannot be decrypted"))?;
+    if intermediate_key.verifying_key().as_bytes()
+        != intermediate.public_key().subject_public_key.data.as_ref()
+    {
+        return Err(invalid_pki(
+            "intermediate private key does not match the intermediate certificate",
+        ));
+    }
+
+    for copy in [
+        &paths.controller_ca_certificate,
+        &paths.agent_client_ca_certificate,
+        &paths.agent_root_certificate,
+    ] {
+        if normalized_secret(value(copy)?) != normalized_secret(root_pem) {
+            return Err(invalid_pki("root certificate copies do not match"));
+        }
+    }
+
+    let public: PublicJwk = serde_json::from_str(value(&paths.provisioner_public_jwk)?)
+        .map_err(|_| invalid_pki("public provisioner JWK is invalid"))?;
+    let private: PrivateJwk = serde_json::from_str(value(&paths.provisioner_private_jwk)?)
+        .map_err(|_| invalid_pki("private provisioner JWK is invalid"))?;
+    validate_es256_jwks(&public, &private)?;
+    let config: serde_json::Value = serde_json::from_str(value(&paths.ca_config)?)
+        .map_err(|_| invalid_pki("Step CA configuration is invalid JSON"))?;
+    let public_json = serde_json::to_value(&public)
+        .map_err(|_| invalid_pki("public provisioner JWK cannot be represented"))?;
+    if config["root"] != "/run/vonk-normalized-secrets/step-ca/root-certificate"
+        || config["crt"] != "/run/vonk-normalized-secrets/step-ca/intermediate-certificate"
+        || config["key"] != "/run/vonk-normalized-secrets/step-ca/intermediate-key"
+        || config["authority"]["provisioners"][0]["name"] != request.provisioner_name
+        || config["authority"]["provisioners"][0]["key"] != public_json
+    {
+        return Err(invalid_pki(
+            "Step CA configuration does not describe the imported authority",
+        ));
+    }
+    Ok(public.kid)
+}
+
+fn validate_es256_jwks(public: &PublicJwk, private: &PrivateJwk) -> Result<(), SetupError> {
+    if public.alg != "ES256"
+        || public.crv != "P-256"
+        || public.kty != "EC"
+        || public.key_use != "sig"
+        || private.alg != public.alg
+        || private.crv != public.crv
+        || private.kid != public.kid
+        || private.kty != public.kty
+        || private.key_use != public.key_use
+        || private.x != public.x
+        || private.y != public.y
+    {
+        return Err(invalid_pki("provisioner JWK metadata is inconsistent"));
+    }
+    let canonical = format!(
+        "{{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"{}\",\"y\":\"{}\"}}",
+        public.x, public.y
+    );
+    let expected_kid = Base64UrlUnpadded::encode_string(&Sha256::digest(canonical.as_bytes()));
+    if public.kid != expected_kid {
+        return Err(invalid_pki(
+            "provisioner JWK kid is not an RFC 7638 thumbprint",
+        ));
+    }
+    let scalar = Base64UrlUnpadded::decode_vec(&private.d)
+        .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
+    let secret = p256::SecretKey::from_slice(&scalar)
+        .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
+    let point = secret.public_key().to_encoded_point(false);
+    if Base64UrlUnpadded::encode_string(point.x().ok_or_else(|| invalid_pki("P-256 x is missing"))?)
+        != public.x
+        || Base64UrlUnpadded::encode_string(
+            point.y().ok_or_else(|| invalid_pki("P-256 y is missing"))?,
+        ) != public.y
+    {
+        return Err(invalid_pki(
+            "private provisioner JWK does not match the public JWK",
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_secret(value: &str) -> &str {
+    value.trim_end_matches(['\r', '\n'])
+}
+
+fn invalid_pki(message: &str) -> SetupError {
+    SetupError::InvalidSecretMaterial(format!("Step CA/controller PKI {message}"))
+}
+
 fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     bundle: &Path,
@@ -498,6 +1365,9 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 ) -> Result<SetupOutcome, SetupError> {
     validate_existing_bundle(bundle)?;
     let mut environment = parse_environment(&bundle.join(".env"))?;
+    for internal in &payload.internal_values {
+        set_environment_value(&mut environment, &internal.env, internal.value.clone());
+    }
     let mut new_secrets = Vec::new();
     for required in &payload.required_values {
         if environment_value(&environment, &required.env).is_none() {
@@ -511,11 +1381,53 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         generator,
         &mut new_secrets,
     )?;
+    collect_missing_generated_secrets(
+        &bundle.join("secrets"),
+        &payload.generated_secrets,
+        prompt,
+        generator,
+        &mut new_secrets,
+    )?;
+    if let Some(request) = &payload.step_ca_controller {
+        let secret_root = bundle.join("secrets");
+        let existing = request
+            .files
+            .all()
+            .into_iter()
+            .map(|file| secret_file_exists(&secret_root, file))
+            .collect::<Result<Vec<_>, _>>()?;
+        let existing_count = existing.into_iter().filter(|present| *present).count();
+        match existing_count {
+            0 => {
+                let material = prepare_pki(request, &environment, prompt, generator)?;
+                set_environment_value(&mut environment, &request.kid_env, material.kid);
+                new_secrets.extend(material.files);
+            }
+            12 => {
+                let files = request
+                    .files
+                    .all()
+                    .into_iter()
+                    .map(|file| {
+                        read_existing_secret(&secret_root, file)
+                            .map(|content| (file.to_owned(), content))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let kid = validate_pki_material(request, &environment, &files)?;
+                set_environment_value(&mut environment, &request.kid_env, kid);
+            }
+            _ => {
+                return Err(SetupError::InvalidSecretMaterial(
+                    "partial Step CA/controller PKI group cannot be upgraded".to_owned(),
+                ));
+            }
+        }
+    }
 
     let hermes_enabled = if let Some(hermes) = &payload.hermes {
         let enabled = match environment_value(&environment, &hermes.env) {
-            Some("true") => true,
-            Some("false") => false,
+            Some(value) if value == hermes.enabled_value => true,
+            Some(value) if value == hermes.disabled_value => false,
             Some(_) => {
                 return Err(SetupError::InvalidPayload(format!(
                     "existing {} value is not true or false",
@@ -524,7 +1436,14 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             }
             None => {
                 let enabled = prompt.confirm(&hermes.prompt)?;
-                environment.push((hermes.env.clone(), enabled.to_string()));
+                environment.push((
+                    hermes.env.clone(),
+                    if enabled {
+                        hermes.enabled_value.clone()
+                    } else {
+                        hermes.disabled_value.clone()
+                    },
+                ));
                 enabled
             }
         };
@@ -549,8 +1468,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let environment_document = render_owned_environment(&environment)?;
     for (name, value) in new_secrets {
-        let mut content = value.into_bytes();
-        content.push(b'\n');
+        let content = secret_file_content(value);
         write_secret_file(&bundle.join("secrets"), &name, &content)?;
     }
     atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
@@ -563,6 +1481,81 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         root: bundle.to_path_buf(),
         hermes_enabled,
     })
+}
+
+fn collect_missing_generated_secrets<
+    R: BufRead,
+    W: Write,
+    S: SecretInput<R, W>,
+    G: SecretGenerator,
+>(
+    secret_root: &Path,
+    generated: &GeneratedSecrets,
+    prompt: &mut PromptIo<R, W, S>,
+    generator: &G,
+    new_secrets: &mut Vec<(String, String)>,
+) -> Result<(), SetupError> {
+    for request in &generated.random_text {
+        if !secret_file_exists(secret_root, &request.file)? {
+            new_secrets.push((
+                request.file.clone(),
+                prompt.generated_text(request, generator)?,
+            ));
+        }
+    }
+    for request in &generated.ed25519_pkcs8_pem {
+        if secret_file_exists(secret_root, &request.file)? {
+            let existing = read_existing_secret(secret_root, &request.file)?;
+            validate_ed25519_private_key(&existing, &request.file)?;
+        } else {
+            new_secrets.push((request.file.clone(), prompt.ed25519_private_key(request)?));
+        }
+    }
+    for request in &generated.postgres_urls {
+        if secret_file_exists(secret_root, &request.file)? {
+            continue;
+        }
+        let password = if let Some(value) = new_secrets
+            .iter()
+            .find_map(|(name, value)| (name == &request.password_file).then_some(value.as_str()))
+        {
+            value.to_owned()
+        } else {
+            read_existing_secret(secret_root, &request.password_file)?
+        };
+        new_secrets.push((
+            request.file.clone(),
+            render_postgres_url(request, &password)?,
+        ));
+    }
+    Ok(())
+}
+
+fn secret_file_exists(root: &Path, relative: &str) -> Result<bool, SetupError> {
+    let path = root.join(relative);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(SetupError::UnsafeDestination(format!(
+            "{} is not a regular secret file",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn read_existing_secret(root: &Path, relative: &str) -> Result<String, SetupError> {
+    let path = root.join(relative);
+    let metadata = fs::metadata(&path)?;
+    if metadata.len() > 256 * 1024 {
+        return Err(SetupError::UnsafeDestination(format!(
+            "{} is too large",
+            path.display()
+        )));
+    }
+    Ok(fs::read_to_string(path)?
+        .trim_end_matches(['\r', '\n'])
+        .to_owned())
 }
 
 fn collect_missing_secrets<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
@@ -628,6 +1621,14 @@ fn environment_value<'a>(values: &'a [(String, String)], name: &str) -> Option<&
     values
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value.as_str()))
+}
+
+fn set_environment_value(values: &mut Vec<(String, String)>, name: &str, value: String) {
+    if let Some((_, existing)) = values.iter_mut().find(|(key, _)| key == name) {
+        *existing = value;
+    } else {
+        values.push((name.to_owned(), value));
+    }
 }
 
 fn render_owned_environment(values: &[(String, String)]) -> Result<String, SetupError> {
