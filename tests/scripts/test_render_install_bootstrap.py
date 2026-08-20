@@ -66,7 +66,9 @@ def test_renderer_pins_every_supported_native_installer(
         for platform in artifacts:
             package = tmp_path / f"agent-{platform}.deb"
             assert hashlib.sha256(package.read_bytes()).hexdigest() in rendered
-    assert result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
+    assert (
+        result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
+    )
 
 
 def test_renderer_fails_closed_on_missing_duplicate_or_unsafe_inputs(
@@ -110,3 +112,36 @@ def test_renderer_fails_closed_on_missing_duplicate_or_unsafe_inputs(
         )
         assert result.returncode == 2
         assert not output.exists()
+
+
+def test_renderer_binds_downloads_to_one_immutable_release_base(
+    tmp_path: Path,
+) -> None:
+    artifacts = _artifacts(tmp_path, "nas")
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"schema_version":1}\n')
+    output = tmp_path / "nas"
+    base_url = "https://install.vonkforge.ai/artifacts/stable/releases/" + "a" * 64
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "--kind",
+        "nas",
+        "--payload",
+        str(payload),
+        "--base-url",
+        base_url,
+        "--output",
+        str(output),
+    ]
+    for platform, artifact in artifacts.items():
+        command.extend(("--artifact", f"{platform}={artifact}"))
+
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    rendered = output.read_text()
+    assert f"base_url=${{VONK_INSTALL_BASE_URL:-{base_url}}}" in rendered
+    assert "https://install.vonkforge.ai/artifacts}" not in rendered
