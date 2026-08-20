@@ -68,8 +68,23 @@ hermes_is_available() {
             "${runtime_dir}/hermes-dashboard-response"
 }
 
+withdraw_hermes_services() {
+    # Tailscale v1.98.8 stores Serve config and AdvertiseServices
+    # independently. Drain before reading the map so stale advertisements are
+    # removed even when there is no corresponding Serve config to inspect.
+    # Clear then removes any remaining handler. Both commands are idempotent;
+    # suppress their expected informational output while preserving failures.
+    ts serve drain svc:hermes-api >/dev/null 2>&1
+    ts serve clear svc:hermes-api >/dev/null 2>&1
+    ts serve drain svc:hermes-dashboard >/dev/null 2>&1
+    ts serve clear svc:hermes-dashboard >/dev/null 2>&1
+}
+
 serve_is_exact() {
     include_hermes=$1
+    if [ "${include_hermes}" = "0" ]; then
+        withdraw_hermes_services
+    fi
     ts serve status --json >"${runtime_dir}/tailscale-serve-status.json"
     ts serve get-config --all >"${runtime_dir}/tailscale-serve-config.json"
     tr -d '[:space:]' \
@@ -103,29 +118,14 @@ configure_services() {
     # Configuration-file import currently infers the listener protocol from the
     # HTTP upstream and can create plaintext HTTP on port 443. Express the
     # listener protocol explicitly through the CLI instead.
-    if [ "${include_hermes}" = "0" ]; then
-        # Tailscale v1.98.8 stores Serve config and AdvertiseServices
-        # independently. Drain first so stale advertised preferences are
-        # withdrawn even if their config is already absent, then clear any
-        # remaining Hermes handlers.
-        ts serve drain svc:hermes-api
-        if grep -Fq 'svc:hermes-api' "${runtime_dir}/tailscale-serve-config.compact"; then
-            ts serve clear svc:hermes-api
-        fi
-        ts serve drain svc:hermes-dashboard
-        if grep -Fq 'svc:hermes-dashboard' "${runtime_dir}/tailscale-serve-config.compact"; then
-            ts serve clear svc:hermes-dashboard
-        fi
-    fi
-
     # Applying an empty all-services file clears both the complete Serve map
     # and AdvertiseServices. Re-add endpoints through the CLI so port 443 is
     # explicitly HTTPS; each CLI configuration also advertises that service.
-    ts serve set-config --all "${empty_service_map}"
-    ts serve --service=svc:vonk-forge --https=443 http://caddy:8080
+    ts serve set-config --all "${empty_service_map}" >/dev/null
+    ts serve --service=svc:vonk-forge --https=443 http://caddy:8080 >/dev/null
     if [ "${include_hermes}" = "1" ]; then
-        ts serve --service=svc:hermes-api --https=443 http://hermes-agent:8642
-        ts serve --service=svc:hermes-dashboard --https=443 http://hermes-agent:9119
+        ts serve --service=svc:hermes-api --https=443 http://hermes-agent:8642 >/dev/null
+        ts serve --service=svc:hermes-dashboard --https=443 http://hermes-agent:9119 >/dev/null
     fi
 }
 

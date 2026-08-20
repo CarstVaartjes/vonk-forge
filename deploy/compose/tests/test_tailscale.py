@@ -93,6 +93,8 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "        del value['config']['services'][args[2]]\n"
         "        value['advertised'] = [name for name in value['advertised'] if name != args[2]]\n"
         "        save(value)\n"
+        "    else:\n"
+        "        print(f'service {args[2]} not found in serve config, nothing to clear', file=sys.stderr)\n"
         "elif len(args) == 4 and args[:3] == ['serve', 'set-config', '--all']:\n"
         "    config = json.loads(pathlib.Path(args[3]).read_text(encoding='utf-8'))\n"
         "    advertised = [name for name, details in config['services'].items() if details.get('advertised', True)]\n"
@@ -109,7 +111,8 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "    value = load()\n"
         "    value['config']['services'][service] = {'endpoints': {'tcp:443': upstream}}\n"
         "    value['advertised'] = sorted(set(value['advertised']) | {service})\n"
-        "    save(value)\n",
+        "    save(value)\n"
+        "    print(f'Available within your tailnet: https://{service[4:]}')\n",
         encoding="utf-8",
     )
     fake.chmod(0o755)
@@ -224,8 +227,66 @@ def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     invocation_log = calls.read_text(encoding="utf-8")
     assert "serve get-config --all" in invocation_log
-    assert "svc:hermes-api" not in invocation_log
-    assert "svc:hermes-dashboard" not in invocation_log
+    assert "--service=svc:hermes-api" not in invocation_log
+    assert "--service=svc:hermes-dashboard" not in invocation_log
+
+
+def test_unavailable_hermes_with_stale_advertisements_is_withdrawn_before_exact_return(
+    tmp_path: Path,
+) -> None:
+    """Catches an exact Serve map hiding stale Hermes AdvertiseServices."""
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    state, calls = _write_stateful_tailscale(tmp_path)
+    state.write_text(
+        json.dumps(
+            {
+                "config": DEFAULT_MAP,
+                "advertised": [
+                    "svc:hermes-api",
+                    "svc:hermes-dashboard",
+                    "svc:vonk-forge",
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    nc = tmp_path / "nc"
+    nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    nc.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_CONFIGURE_ONCE": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "TS_TEST_STATE": str(state),
+                "TS_TEST_CALLS": str(calls),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "config": DEFAULT_MAP,
+        "advertised": ["svc:vonk-forge"],
+    }
+    invocations = calls.read_text(encoding="utf-8").splitlines()
+    first_exact_read = invocations.index("serve status --json")
+    assert invocations.index("serve drain svc:hermes-api") < first_exact_read
+    assert invocations.index("serve drain svc:hermes-dashboard") < first_exact_read
 
 
 def _environment() -> dict[str, str]:
