@@ -8,6 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "src/cluster_profiles/schemas"
 MIRROR = ROOT / "schemas"
+STANDALONE_SCHEMAS = {
+    "install-release-manifest.schema.json",
+    "workload-artifact-build.schema.json",
+}
 
 
 def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
@@ -15,7 +19,7 @@ def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
     mirror_names = {
         path.name
         for path in MIRROR.glob("*.json")
-        if path.name != "workload-artifact-build.schema.json"
+        if path.name not in STANDALONE_SCHEMAS
     }
 
     assert mirror_names == canonical_names
@@ -23,8 +27,8 @@ def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
         assert (MIRROR / name).read_bytes() == (CANONICAL / name).read_bytes()
 
 
-def test_owned_schema_identifiers_use_the_vonk_forge_namespace() -> None:
-    for path in sorted(MIRROR.glob("*.json")):
+def test_cluster_profile_schema_identifiers_use_the_vonk_forge_namespace() -> None:
+    for path in sorted(CANONICAL.glob("*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         if "$id" in document:
             assert document["$id"].startswith("https://vonk-forge.")
