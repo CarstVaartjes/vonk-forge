@@ -659,9 +659,25 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     assert denied < fallback
 
     enrollment_routes = site("enroll.test.example")["handle"][0]["routes"]
-    enrollment_proxy = next(route for route in enrollment_routes if "control-api:8000" in json.dumps(route, sort_keys=True))
-    assert enrollment_proxy["match"] == [{"path": ["/agent/v1/enroll"]}]
-    assert any(route.get("match") == [{"not": [{"path": ["/agent/v1/enroll"]}]}] for route in enrollment_routes)
+    enrollment_proxies = [
+        route
+        for route in enrollment_routes
+        if "control-api:8000" in json.dumps(route, sort_keys=True)
+    ]
+    assert {json.dumps(route["match"], sort_keys=True) for route in enrollment_proxies} == {
+        json.dumps(
+            [{"method": ["GET"], "path": ["/agent/v1/bootstrap"]}],
+            sort_keys=True,
+        ),
+        json.dumps(
+            [{"method": ["POST"], "path": ["/agent/v1/enroll"]}],
+            sort_keys=True,
+        ),
+    }
+    assert any(
+        route.get("handle") == [{"handler": "static_response", "status_code": 404}]
+        for route in enrollment_routes
+    )
 
     agent_site = site("agents.test.example")
     client_auth = next(

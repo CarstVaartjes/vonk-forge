@@ -133,18 +133,28 @@ http://127.0.0.1:8082 {
 }
 
 # Bootstrap is server-authenticated but intentionally does not request a client
-# certificate. It exposes exactly the bounded enrollment submission route.
+# certificate. It exposes only bounded discovery and enrollment submission.
 https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
 	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 
-	@not_enrollment not path /agent/v1/enroll
-	handle @not_enrollment {
-		respond 404
+	@bootstrap {
+		method GET
+		path /agent/v1/bootstrap
 	}
-	handle /agent/v1/enroll {
+	@enrollment {
+		method POST
+		path /agent/v1/enroll
+	}
+	handle @bootstrap {
+		request_header -X-Vonk-Agent-*
 		import control_proxy
 	}
+	handle @enrollment {
+		request_header -X-Vonk-Agent-*
+		import control_proxy
+	}
+	respond 404
 }
 
 # The agent endpoint is a distinct TLS SNI because client authentication cannot
