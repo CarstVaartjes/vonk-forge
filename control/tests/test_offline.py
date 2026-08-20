@@ -44,6 +44,8 @@ def test_installed_updater_exposes_only_allowlisted_maintenance_actions(
     ):
         assert action in output
     assert "hermes-setup" not in output
+    assert "--generation" not in output
+    assert "--apply" not in output
 
 
 def test_installed_updater_routes_maintenance_without_loading_release_authority(
@@ -91,8 +93,6 @@ def test_installed_updater_routes_maintenance_without_loading_release_authority(
             {
                 "service": None,
                 "since_minutes": 30,
-                "apply": False,
-                "expected_generation": None,
             },
         )
     ]

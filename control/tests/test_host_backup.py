@@ -318,7 +318,6 @@ def test_backup_compose_uses_canonical_graph_and_exact_generation_environment(
         command_policy=CommandPolicy(30, 0, 4096),
         artifact_policy=ArtifactPolicy(8 * 1024 * 1024, 0),
         compose_environment={"COMPOSE_PROJECT_NAME": "vonk-forge-control"},
-        compose_overlays=(),
         control_identity_root=tmp_path / "control-identity",
     )
 

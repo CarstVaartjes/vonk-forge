@@ -501,7 +501,6 @@ class HostBackupBoundary:
         identity_file: Path | None = None,
         site_sources: tuple[BackupSource, ...] = (),
         compose_environment: Mapping[str, str] | None = None,
-        compose_overlays: tuple[str, ...] = (),
         control_identity_root: Path | None = None,
         runner: BoundedCommandRunner | None = None,
         command_policy: CommandPolicy | None = None,
@@ -512,7 +511,6 @@ class HostBackupBoundary:
         self._identity_file = None if identity_file is None else Path(identity_file)
         self._site_sources = tuple(site_sources)
         self._compose_environment = dict(compose_environment or {})
-        self._compose_overlays = tuple(compose_overlays)
         self._control_identity_root = (
             None if control_identity_root is None else Path(control_identity_root)
         )
@@ -531,14 +529,6 @@ class HostBackupBoundary:
             raise ValueError("backup roots must be absolute")
         if any(not isinstance(source, BackupSource) for source in self._site_sources):
             raise TypeError("site backup sources are invalid")
-        if any(
-            not isinstance(name, str)
-            or not name
-            or Path(name).is_absolute()
-            or any(part in {"", ".", ".."} for part in Path(name).parts)
-            for name in self._compose_overlays
-        ):
-            raise ValueError("Compose overlays are invalid")
         if any(
             not isinstance(name, str)
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,126}", name)
@@ -561,25 +551,8 @@ class HostBackupBoundary:
             ):
                 raise ValueError("site backup source prefixes must not overlap")
 
-    def _compose_files(self, generation_root: Path, compose: Path) -> tuple[Path, ...]:
-        files = (compose,)
-        for overlay in self._compose_overlays:
-            path = generation_root / overlay
-            descriptor, _ = _open_regular(
-                path,
-                label="generation Compose overlay",
-                maximum=4 * 1024 * 1024,
-            )
-            os.close(descriptor)
-            files += (path,)
-        return files
-
-    def _compose_arguments(self, generation_root: Path, compose: Path) -> tuple[str, ...]:
-        return tuple(
-            item
-            for path in self._compose_files(generation_root, compose)
-            for item in ("--file", str(path))
-        )
+    def _compose_arguments(self, compose: Path) -> tuple[str, ...]:
+        return ("--file", str(compose))
 
     def _compose_env(self, generation: SelectedGeneration) -> dict[str, str]:
         try:
@@ -681,7 +654,7 @@ class HostBackupBoundary:
                     (
                         "/usr/bin/docker",
                         "compose",
-                        *self._compose_arguments(generation_root, compose_file),
+                        *self._compose_arguments(compose_file),
                         "exec",
                         "--no-TTY",
                         "postgres",
@@ -1128,7 +1101,7 @@ class HostBackupBoundary:
                     (
                         "/usr/bin/docker",
                         "compose",
-                        *self._compose_arguments(generation_root, compose),
+                        *self._compose_arguments(compose),
                         "exec",
                         "--no-TTY",
                         "postgres",
@@ -1311,7 +1284,7 @@ class HostBackupBoundary:
                 (
                     "/usr/bin/docker",
                     "compose",
-                    *self._compose_arguments(generation_root, compose),
+                    *self._compose_arguments(compose),
                     "exec",
                     "--no-TTY",
                     "postgres",

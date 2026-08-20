@@ -321,7 +321,7 @@ def test_maintenance_logs_have_a_fixed_service_allowlist_and_bounded_since(
         boundary.maintenance("logs", service="../../host", since_minutes=30)
     with pytest.raises(Exception, match="maintenance time range"):
         boundary.maintenance("logs", service="step-ca", since_minutes=0)
-    with pytest.raises(Exception, match="apply is not allowed"):
+    with pytest.raises(TypeError):
         boundary.maintenance("status", apply=True)
 
 

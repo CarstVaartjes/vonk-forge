@@ -544,7 +544,6 @@ class HostUpgradeBoundary:
             recipients_file=Path(recipients_file),
             identity_file=None if identity_file is None else Path(identity_file),
             compose_environment=self._site_environment_if_available(),
-            compose_overlays=(),
             control_identity_root=self._generation_store.identity_root,
             runner=self._runner,
         )
@@ -1271,16 +1270,10 @@ class HostUpgradeBoundary:
         *,
         service: str | None = None,
         since_minutes: int = 30,
-        apply: bool = False,
-        expected_generation: str | None = None,
     ) -> dict[str, object]:
         """Run one allowlisted operation against the selected immutable generation."""
 
         selected = self._require_active()
-        if apply:
-            raise UpgradeConflict("maintenance apply is not allowed for diagnostics")
-        if expected_generation is not None:
-            raise UpgradeConflict("planned generation is not allowed for diagnostics")
         if action != "logs" and service is not None:
             raise UpgradeConflict("maintenance service is not allowed for this action")
         if action == "logs":
@@ -2210,8 +2203,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     maintenance.add_argument("action", choices=_MAINTENANCE_ACTIONS)
     maintenance.add_argument("--service", choices=sorted(_MAINTENANCE_LOG_SERVICES))
     maintenance.add_argument("--since-minutes", type=int, default=30)
-    maintenance.add_argument("--generation")
-    maintenance.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "doctor":
@@ -2228,7 +2219,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             recipients = os.environ.get("VONK_BACKUP_RECIPIENTS_FILE", "")
             identity = os.environ.get("VONK_BACKUP_IDENTITY_FILE", "")
             needs_backup_credentials = bool(
-                args.apply and args.command in {"upgrade", "recover", "rollback"}
+                getattr(args, "apply", False)
+                and args.command in {"upgrade", "recover", "rollback"}
             )
             if needs_backup_credentials and (
                 not recipients or not Path(recipients).is_absolute()
@@ -2272,8 +2264,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                             args.action,
                             service=args.service,
                             since_minutes=args.since_minutes,
-                            apply=args.apply,
-                            expected_generation=args.generation,
                         ),
                         sort_keys=True,
                     )
