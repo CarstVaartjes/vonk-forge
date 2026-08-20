@@ -149,6 +149,20 @@ jobs:
           uv run --project control --frozen --with-editable . pytest -q
           control/tests/test_database_authority_postgres.py
           deploy/compose/tests/test_postgres_init_databases.py
+      - name: Run canonical runtime readiness model contracts
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
+          deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
+          deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
+          deploy/compose/tests/test_runtime_health_contract.py::test_hermes_dependency_is_optional_but_healthy_when_profile_is_selected
+      - name: Run required PKI and TLS container integration
+        env:
+          CI: "true"
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
+          deploy/compose/tests/test_pki_tls_integration.py
       - name: Run focused repository contracts
         run: >-
           uv run --python 3.12 --project control --frozen --with-editable .

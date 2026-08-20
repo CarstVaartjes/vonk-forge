@@ -66,7 +66,6 @@ def _environment() -> dict[str, str]:
         "STEP_CA_INTERMEDIATE_KEY_FILE": "/dev/null",
         "STEP_CA_PASSWORD_FILE": "/dev/null",
         "STEP_CA_ROOT_CERTIFICATE_FILE": "/dev/null",
-        "AGENT_INTERMEDIATE_KEY_FILE": "/dev/null",
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
         "VONK_AGENT_HOSTNAME": "agents.test.example",
@@ -91,6 +90,8 @@ def _require_docker_runtime() -> None:
         ["docker", "info"], capture_output=True, text=True, check=False
     )
     if result.returncode != 0:
+        if os.environ.get("CI"):
+            pytest.fail("Docker daemon unavailable")
         pytest.skip("Docker daemon unavailable")
 
 
@@ -318,7 +319,6 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "test-provider-public-jwk\n",
         "VONK_AGENT_CA_ROOT_FILE": "test-root-certificate\n",
         "VONK_CONTROLLER_CA_FILE": "test-controller-ca\n",
-        "VONK_AGENT_INTERMEDIATE_KEY_FILE": "test-builtin-key\n",
         "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
         "VONK_WORKER_API_TOKEN_FILE": "W" * 32 + "\n",
         "VONK_MANAGEMENT_CIDRS_FILE": "10.0.0.0/24\n",
@@ -342,7 +342,6 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
             (
                 "from vonk_control.settings import Settings; "
                 "settings = Settings.from_env_and_secrets(); "
-                "print(settings.agent_ca_provider); "
                 "print(settings.agent_proxy_auth.decode('ascii')); "
                 "print(settings.management_cidrs); "
                 "print(settings.direct_fabric_cidrs)"
@@ -366,14 +365,12 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
 
     result = _settings_result(rendered, tmp_path / "settings")
     assert result.returncode == 0, result.stderr
-    provider, proxy_auth, management, direct_fabric = result.stdout.splitlines()
-    assert provider == "step-ca"
+    proxy_auth, management, direct_fabric = result.stdout.splitlines()
     assert proxy_auth == "A" * 30 + "_-"
     assert management == "10.0.0.0/24"
     assert direct_fabric == "192.168.100.0/24,192.168.101.0/24"
 
     assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
-    assert "VONK_AGENT_BUILTIN_CA_BOOTSTRAP" not in api["environment"]
     assert api["environment"]["VONK_MANAGEMENT_CIDRS"] == "10.0.0.0/24"
     assert set(caddy["networks"]) == {
         "agent-proxy",
@@ -998,7 +995,6 @@ def test_canonical_step_ca_settings_pass_application_guard(tmp_path: Path) -> No
     result = _settings_result(rendered, tmp_path / "step-ca")
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "step-ca",
         token,
         "10.0.0.0/24",
         "192.168.100.0/24,192.168.101.0/24",

@@ -74,7 +74,7 @@ services:
       - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro
     networks: [data, litellm-data]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U control -d control"]
+      test: [CMD-SHELL, "pg_isready -U control -d control && psql -U control -d control -tAc 'SELECT 1' | grep -qx 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -91,7 +91,6 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-      VONK_AGENT_CA_PROVIDER: step-ca
       VONK_AGENT_RUNTIME: enabled
       VONK_AGENT_CLIENT_CA_FILE: /run/vonk-normalized-secrets/agent-client-ca
       VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/vonk-normalized-secrets/agent-intermediate-certificate
@@ -169,7 +168,7 @@ services:
       control-api: {condition: service_healthy}
       control-signer: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://control-api:8000/internal/v1/generation/readiness', timeout=3)"]
+      test: [CMD, python, -m, vonk_control.worker_healthcheck]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -214,7 +213,7 @@ services:
     depends_on:
       control-api: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-signer/signer.sock').st_mode)"]
+      test: [CMD, python, -m, vonk_control.signer_healthcheck]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -272,7 +271,7 @@ services:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10

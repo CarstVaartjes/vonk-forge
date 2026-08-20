@@ -6,6 +6,8 @@ import socket
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
 TAILSCALE_IMAGE = (
@@ -22,22 +24,74 @@ def test_default_tailscale_image_matches_the_audited_lock() -> None:
     assert source.count(TAILSCALE_IMAGE) == 2
 
 
-EXPECTED_MAP = {
+DEFAULT_MAP = {
+    "version": "0.0.1",
+    "services": {
+        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
+    },
+}
+HERMES_MAP = {
     "version": "0.0.1",
     "services": {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
         "svc:hermes-api": {"endpoints": {"tcp:443": "http://hermes-agent:8642"}},
-        "svc:hermes-dashboard": {"endpoints": {"tcp:443": "http://hermes-agent:9119"}},
+        "svc:hermes-dashboard": {
+            "endpoints": {"tcp:443": "http://hermes-agent:9119"}
+        },
     },
 }
 
 
-def test_production_gateway_retains_exactly_three_service_endpoints() -> None:
-    script = (COMPOSE / "tailscale/configure.sh").read_text(encoding="utf-8")
+def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    calls = tmp_path / "calls.log"
+    fake = tmp_path / "tailscale"
+    nc = tmp_path / "nc"
+    nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    nc.chmod(0o755)
+    expected = json.dumps(DEFAULT_MAP, separators=(",", ":"))
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"calls={calls}\n"
+        'printf \'%s\\n\' "$*" >>"$calls"\n'
+        'case "$*" in\n'
+        '  *"serve get-config --all"*) '
+        f"printf '%s\\n' '{expected}' ;;\n"
+        '  *"serve status --json"*) printf \'%s\\n\' '
+        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
+        '  *"status --json"*) printf \'%s\\n\' '
+        "'{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[]}}}' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        try:
+            result = subprocess.run(
+                ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+                env=os.environ
+                | {
+                    "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                    "TS_CONFIGURE_ONCE": "1",
+                    "TS_SOCKET_PATH": str(socket_path),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail("default-only Tailscale service map did not converge")
+    finally:
+        daemon_socket.close()
 
-    assert json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":")) in script
-    assert script.count("--service=svc:") == 3
-    assert script.count("serve advertise svc:") == 3
+    assert result.returncode == 0, result.stderr
+    invocation_log = calls.read_text(encoding="utf-8")
+    assert "serve get-config --all" in invocation_log
+    assert "svc:hermes-api" not in invocation_log
+    assert "svc:hermes-dashboard" not in invocation_log
 
 
 def _environment() -> dict[str, str]:
@@ -80,7 +134,11 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     assert not gateway.get("ports")
     assert not gateway.get("devices")
     assert not gateway.get("cap_add")
-    assert set(gateway["networks"]) == {"tailnet-hermes-edge", "tailnet-web-edge"}
+    assert set(gateway["networks"]) == {
+        "tailnet-control-plane",
+        "tailnet-hermes-edge",
+        "tailnet-web-edge",
+    }
     assert gateway["environment"] == {
         "TS_AUTH_ONCE": "true",
         "TS_CLIENT_ID": "file:/run/secrets/tailscale-oauth-client-id",
@@ -125,6 +183,11 @@ def test_configurator_waits_for_every_exact_backend_health_gate() -> None:
     assert configurator["restart"] == "unless-stopped"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
+        "hermes-agent": {
+            "condition": "service_healthy",
+            "required": False,
+            "restart": True,
+        },
         "tailscale-gateway": {
             "condition": "service_healthy",
             "required": True,
@@ -145,11 +208,12 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
         "--service=svc:hermes-dashboard --https=443 http://hermes-agent:9119",
     ):
         assert command in text
-    for service in EXPECTED_MAP["services"]:
+    for service in HERMES_MAP["services"]:
         assert f"serve advertise {service}" in text
     assert "serve get-config --all" in text
     assert "serve reset" in text
-    assert json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":")) in text
+    assert json.dumps(DEFAULT_MAP, sort_keys=True, separators=(",", ":")) in text
+    assert json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":")) in text
     assert text.count('"HTTPS":true') >= 3
     assert '"HTTP":true' in text
     assert "120" in text
@@ -166,11 +230,14 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
     repaired = tmp_path / "repaired"
     status_checks = tmp_path / "status-checks"
     fake = tmp_path / "tailscale"
+    nc = tmp_path / "nc"
+    nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    nc.chmod(0o755)
     healthy_status = json.dumps(
         {
             "Services": {
                 service: {"TCP": {"443": {"HTTPS": True}}}
-                for service in EXPECTED_MAP["services"]
+                for service in DEFAULT_MAP["services"]
             }
         },
         separators=(",", ":"),
@@ -183,7 +250,7 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
         'case "$*" in\n'
         '  *"serve get-config --all"*)\n'
         "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
-        '\'{"version":"0.0.1","services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\'; '
+        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\'; '
         'else printf \'%s\\n\' \'{"version":"0.0.1","services":{"svc:extra":{"endpoints":{"tcp:99":"tcp://unexpected:99"}}}}\'; fi ;;\n'
         '  *"serve status --json"*)\n'
         '    if [ -f "$repaired" ]; then count=0; '
@@ -218,12 +285,76 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
     calls = log.read_text()
     for command in (
         "--service=svc:vonk-forge --https=443 http://caddy:8080",
-        "--service=svc:hermes-api --https=443 http://hermes-agent:8642",
-        "--service=svc:hermes-dashboard --https=443 http://hermes-agent:9119",
         "serve reset",
     ):
         assert command in calls
+    assert "svc:hermes-" not in calls
     assert "set-config" not in calls
+
+
+def test_configurator_advertises_hermes_when_both_profile_endpoints_are_available(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    calls = tmp_path / "calls.log"
+    repaired = tmp_path / "repaired"
+    fake = tmp_path / "tailscale"
+    nc = tmp_path / "nc"
+    nc.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nc.chmod(0o755)
+    expected_map = json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":"))
+    healthy_status = json.dumps(
+        {
+            "Services": {
+                service: {"TCP": {"443": {"HTTPS": True}}}
+                for service in HERMES_MAP["services"]
+            }
+        },
+        separators=(",", ":"),
+    )
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"calls={calls}\n"
+        f"repaired={repaired}\n"
+        'printf \'%s\\n\' "$*" >>"$calls"\n'
+        'case "$*" in\n'
+        '  *"serve get-config --all"*) '
+        f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{expected_map}'; "
+        "else printf '%s\\n' '{\"version\":\"0.0.1\",\"services\":{}}'; fi ;;\n"
+        '  *"serve status --json"*) '
+        f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{healthy_status}'; "
+        "else printf '%s\\n' '{\"Services\":{}}'; fi ;;\n"
+        '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*) '
+        'touch "$repaired" ;;\n'
+        '  *"status --json"*) printf \'%s\\n\' '
+        "'{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[]}}}' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_CONFIGURE_ONCE": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+    invocation_log = calls.read_text(encoding="utf-8")
+    for service in HERMES_MAP["services"]:
+        assert f"serve advertise {service}" in invocation_log
 
 
 def test_grants_example_is_exact_service_least_privilege() -> None:
@@ -248,7 +379,7 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
     ]
     assert policy["autoApprovers"] == {
         "services": {
-            service: ["tag:vonk-gateway"] for service in EXPECTED_MAP["services"]
+            service: ["tag:vonk-gateway"] for service in HERMES_MAP["services"]
         }
     }
     assert policy["tests"] == [

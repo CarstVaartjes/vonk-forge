@@ -289,7 +289,6 @@ class Settings:
     token_signing_key: bytes
     metrics_token: str
     admin_grant_private_key_path: Path | None
-    agent_ca_provider: str
     agent_runtime: str
     agent_controller_origin: str
     agent_enrollment_origin: str
@@ -297,7 +296,6 @@ class Settings:
     agent_client_ca: bytes
     agent_intermediate_certificate: bytes
     agent_intermediate_certificate_path: Path | None
-    agent_intermediate_key_path: Path | None
     agent_ca_credential_path: Path | None
     agent_ca_provisioner_public_jwk_path: Path | None
     agent_ca_url: str
@@ -329,7 +327,6 @@ class Settings:
         mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
         if mode not in {"development", "test", "production"}:
             raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        agent_ca_provider = os.environ.get("VONK_AGENT_CA_PROVIDER", "")
         agent_runtime = os.environ.get(
             "VONK_AGENT_RUNTIME",
             "disabled" if mode == "development" else "enabled",
@@ -337,43 +334,6 @@ class Settings:
         if agent_runtime not in {"enabled", "disabled"}:
             raise SettingsError("VONK_AGENT_RUNTIME is invalid")
         agent_enabled = agent_runtime == "enabled" and mode in {"development", "production"}
-        builtin_bootstrap = os.environ.get("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "")
-        if builtin_bootstrap not in {"", "1"}:
-            raise SettingsError("VONK_AGENT_BUILTIN_CA_BOOTSTRAP is invalid")
-        if mode == "production" and not agent_ca_provider:
-            raise SettingsError("VONK_AGENT_CA_PROVIDER is required in production")
-        if agent_ca_provider and agent_ca_provider not in {"step-ca", "builtin"}:
-            raise SettingsError("VONK_AGENT_CA_PROVIDER is invalid")
-        if mode == "development" and agent_ca_provider == "step-ca":
-            raise SettingsError("development agent runtime cannot use step-ca")
-        if (
-            mode == "development"
-            and agent_runtime == "enabled"
-            and agent_ca_provider != "builtin"
-        ):
-            raise SettingsError(
-                "development agent runtime requires the builtin provider"
-            )
-        step_ca_settings_present = any(
-            os.environ.get(name)
-            for name in (
-                "VONK_AGENT_CA_CREDENTIAL", "VONK_AGENT_CA_CREDENTIAL_FILE",
-                "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE", "VONK_AGENT_CA_ROOT_FILE",
-            )
-        )
-        builtin_settings_present = bool(
-            builtin_bootstrap or os.environ.get("VONK_AGENT_INTERMEDIATE_KEY_FILE")
-        )
-        if (
-            agent_ca_provider == "builtin" and step_ca_settings_present
-        ) or (
-            agent_ca_provider == "step-ca" and builtin_settings_present
-        ):
-            raise SettingsError("agent CA provider settings cannot be combined")
-        if agent_ca_provider == "builtin" and builtin_bootstrap != "1":
-            raise SettingsError("built-in CA requires explicit bootstrap selection")
-        if agent_ca_provider != "builtin" and builtin_bootstrap:
-            raise SettingsError("built-in CA bootstrap requires the builtin provider")
         database_url = _secret("VONK_DATABASE_URL_FILE", production=mode == "production")
         if urlsplit(database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
             raise SettingsError("database URL must use PostgreSQL")
@@ -448,11 +408,7 @@ class Settings:
         agent_intermediate_certificate = (
             agent_intermediate_certificate_path.read_bytes() if agent_intermediate_certificate_path else b""
         )
-        agent_intermediate_key_path = (
-            _secret_path("VONK_AGENT_INTERMEDIATE_KEY_FILE")
-            if agent_enabled and agent_ca_provider == "builtin" else None
-        )
-        step_ca_enabled = agent_enabled and agent_ca_provider == "step-ca"
+        step_ca_enabled = agent_enabled
         agent_ca_credential_path = _secret_path("VONK_AGENT_CA_CREDENTIAL_FILE") if step_ca_enabled else None
         agent_ca_provisioner_public_jwk_path = (
             _secret_path("VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE") if step_ca_enabled else None
@@ -566,7 +522,6 @@ class Settings:
             token_signing_key=signing_key,
             metrics_token=metrics_token,
             admin_grant_private_key_path=admin_grant_private_key_path,
-            agent_ca_provider=agent_ca_provider,
             agent_runtime=agent_runtime,
             agent_controller_origin=agent_controller_origin,
             agent_enrollment_origin=agent_enrollment_origin,
@@ -574,7 +529,6 @@ class Settings:
             agent_client_ca=agent_client_ca,
             agent_intermediate_certificate=agent_intermediate_certificate,
             agent_intermediate_certificate_path=agent_intermediate_certificate_path,
-            agent_intermediate_key_path=agent_intermediate_key_path,
             agent_ca_credential_path=agent_ca_credential_path,
             agent_ca_provisioner_public_jwk_path=agent_ca_provisioner_public_jwk_path,
             agent_ca_url=agent_ca_url,

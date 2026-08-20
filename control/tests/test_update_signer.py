@@ -26,6 +26,7 @@ from vonk_control.update_signer import (
     SignerRunningIdentity,
     UnixUpdateSignerClient,
     UpdateSignerConnectionHandler,
+    check_signer_ready,
 )
 from vonk_control.upgrade import ActiveControlRelease, UpgradeConflict
 
@@ -373,7 +374,13 @@ def test_signer_settings_require_exact_running_image_and_identity_projection(
         SignerSettings.from_env_and_secrets()
 
 
-def _serve_once(path: Path, *, allowed_uid: int, policy=None):
+def _serve_once(
+    path: Path,
+    *,
+    allowed_uid: int,
+    policy=None,
+    healthcheck_uid: int | None = None,
+):
     ready = threading.Event()
     errors: list[BaseException] = []
 
@@ -386,7 +393,9 @@ def _serve_once(path: Path, *, allowed_uid: int, policy=None):
             connection, _ = listener.accept()
             with connection:
                 UpdateSignerConnectionHandler(
-                    policy or DeterministicPolicy(), allowed_peer_uid=allowed_uid
+                    policy or DeterministicPolicy(),
+                    allowed_peer_uid=allowed_uid,
+                    healthcheck_peer_uid=healthcheck_uid,
                 ).handle(connection)
         except (OSError, SignerProtocolError) as error:
             errors.append(error)
@@ -431,6 +440,27 @@ def test_unix_signer_round_trip_is_canonical_bounded_and_deterministic(
     second_thread.join(2)
     assert not second_errors
     assert second == response
+
+
+def test_signer_healthcheck_completes_a_protocol_round_trip_without_signing(
+    tmp_path: Path,
+) -> None:
+    class RejectPolicy:
+        def authorize(self, _request):
+            raise AssertionError("healthcheck must not invoke signing policy")
+
+    path = tmp_path / "signer-health.sock"
+    thread, errors = _serve_once(
+        path,
+        allowed_uid=os.getuid() + 1,
+        policy=RejectPolicy(),
+        healthcheck_uid=os.getuid(),
+    )
+
+    check_signer_ready(path)
+
+    thread.join(2)
+    assert not errors
 
 
 def test_signer_rejects_noncanonical_and_oversized_messages(tmp_path: Path) -> None:

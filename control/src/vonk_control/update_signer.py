@@ -291,6 +291,7 @@ class UpdateSignerConnectionHandler:
         policy: UpdateSignerPolicy,
         *,
         allowed_peer_uid: int,
+        healthcheck_peer_uid: int | None = None,
         request_timeout_seconds: float = 5.0,
     ) -> None:
         if not callable(getattr(policy, "authorize", None)):
@@ -301,6 +302,12 @@ class UpdateSignerConnectionHandler:
             or allowed_peer_uid < 0
         ):
             raise ValueError("signer peer UID is invalid")
+        if healthcheck_peer_uid is not None and (
+            isinstance(healthcheck_peer_uid, bool)
+            or not isinstance(healthcheck_peer_uid, int)
+            or healthcheck_peer_uid < 0
+        ):
+            raise ValueError("signer healthcheck peer UID is invalid")
         if (
             isinstance(request_timeout_seconds, bool)
             or not isinstance(request_timeout_seconds, (int, float))
@@ -309,6 +316,7 @@ class UpdateSignerConnectionHandler:
             raise ValueError("signer request timeout is invalid")
         self._policy = policy
         self._allowed_peer_uid = allowed_peer_uid
+        self._healthcheck_peer_uid = healthcheck_peer_uid
         self._request_timeout_seconds = float(request_timeout_seconds)
 
     def handle(self, connection: socket.socket) -> None:
@@ -321,13 +329,20 @@ class UpdateSignerConnectionHandler:
             )
         except (AttributeError, OSError, struct.error) as error:
             raise SignerProtocolError("signer peer identity is unavailable") from error
-        if uid != self._allowed_peer_uid:
+        if uid not in {self._allowed_peer_uid, self._healthcheck_peer_uid}:
             raise SignerProtocolError("signer peer UID is not authorized")
         raw = _read_message(
             connection,
             deadline=time.monotonic() + self._request_timeout_seconds,
         )
         request = _document(raw)
+        if request == {"kind": "health", "schema_version": 1}:
+            if uid != self._healthcheck_peer_uid:
+                raise SignerProtocolError("signer healthcheck peer UID is not authorized")
+            self._send(connection, {"schema_version": 1, "status": "ready"})
+            return
+        if uid != self._allowed_peer_uid:
+            raise SignerProtocolError("signer peer UID is not authorized")
         intent_id = request.get("intent_id")
         if not isinstance(intent_id, str):
             raise SignerProtocolError("signer intent ID is invalid")
@@ -348,6 +363,9 @@ class UpdateSignerConnectionHandler:
             "schema_version": 1,
             "signed_payload": dict(signed_payload),
         }
+        self._send(connection, response)
+
+    def _send(self, connection: socket.socket, response: Mapping[str, object]) -> None:
         encoded = _canonical(response)
         if len(encoded) > MAX_SIGNER_MESSAGE_BYTES:
             raise SignerProtocolError("signer response is too large")
@@ -401,6 +419,29 @@ class UnixUpdateSignerClient:
         ):
             raise SignerProtocolError("signer response binding is invalid")
         return response
+
+
+def check_signer_ready(
+    socket_path: Path,
+    *,
+    timeout_seconds: float = 3.0,
+) -> None:
+    """Complete a bounded signer protocol exchange without invoking key authority."""
+    request = {"kind": "health", "schema_version": 1}
+    encoded = _canonical(request)
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.settimeout(timeout_seconds)
+    try:
+        connection.connect(str(socket_path))
+        connection.sendall(encoded)
+        connection.shutdown(socket.SHUT_WR)
+        response = _document(_read_message(connection))
+    except OSError as error:
+        raise SignerProtocolError("signer service is unavailable") from error
+    finally:
+        connection.close()
+    if response != {"schema_version": 1, "status": "ready"}:
+        raise SignerProtocolError("signer health response is invalid")
 
 
 class RootUpdateSignerPolicy:
@@ -818,7 +859,11 @@ def main() -> None:
     policy = RootUpdateSignerPolicy(authority, loader, verifier)
     serve_forever(
         settings.socket_path,
-        UpdateSignerConnectionHandler(policy, allowed_peer_uid=10001),
+        UpdateSignerConnectionHandler(
+            policy,
+            allowed_peer_uid=10001,
+            healthcheck_peer_uid=10003,
+        ),
     )
 
 

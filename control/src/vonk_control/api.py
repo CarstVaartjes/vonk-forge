@@ -651,7 +651,6 @@ def build_agent_services(
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
     )
-    from .pki import BuiltinCertificateAuthority
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .step_ca import StepCertificateAuthority
     from .workload_helper_authority import (
@@ -698,33 +697,23 @@ def build_agent_services(
         enrollment_endpoint=settings.agent_enrollment_origin,
         controller_ca_path=settings.controller_ca_path,
     )
-    if settings.agent_ca_provider == "step-ca":
-        if (
-            settings.agent_ca_root_path is None
-            or settings.agent_ca_credential_path is None
-            or settings.agent_ca_provisioner_public_jwk_path is None
-        ):
-            raise RuntimeError("step-ca provider files are unavailable")
-        authority = StepCertificateAuthority(
-            ca_url=settings.agent_ca_url,
-            root_certificate_path=settings.agent_ca_root_path,
-            intermediate_certificate_path=settings.agent_intermediate_certificate_path,
-            provisioner_name=settings.agent_ca_provisioner_name,
-            provisioner_kid=settings.agent_ca_provisioner_kid,
-            credential_path=settings.agent_ca_credential_path,
-            provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
-            timeout_seconds=settings.agent_ca_timeout_seconds,
-            max_response_bytes=settings.agent_ca_max_response_bytes,
-        )
-    elif settings.agent_ca_provider == "builtin":
-        if settings.agent_intermediate_key_path is None:
-            raise RuntimeError("built-in intermediate key path is unavailable")
-        authority = BuiltinCertificateAuthority(
-            settings.agent_intermediate_key_path,
-            settings.agent_intermediate_certificate_path,
-        )
-    else:
-        raise RuntimeError("agent CA provider is unavailable")
+    if (
+        settings.agent_ca_root_path is None
+        or settings.agent_ca_credential_path is None
+        or settings.agent_ca_provisioner_public_jwk_path is None
+    ):
+        raise RuntimeError("step-ca provider files are unavailable")
+    authority = StepCertificateAuthority(
+        ca_url=settings.agent_ca_url,
+        root_certificate_path=settings.agent_ca_root_path,
+        intermediate_certificate_path=settings.agent_intermediate_certificate_path,
+        provisioner_name=settings.agent_ca_provisioner_name,
+        provisioner_kid=settings.agent_ca_provisioner_kid,
+        credential_path=settings.agent_ca_credential_path,
+        provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
+        timeout_seconds=settings.agent_ca_timeout_seconds,
+        max_response_bytes=settings.agent_ca_max_response_bytes,
+    )
     tuf_metadata_root = getattr(
         settings,
         "agent_tuf_metadata_root",

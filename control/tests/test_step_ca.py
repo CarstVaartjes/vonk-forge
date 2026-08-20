@@ -138,12 +138,12 @@ def _provider(tmp_path: Path, handler, *, max_response_bytes: int = 64 * 1024) -
 def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleNamespace:
     material = _write_material(tmp_path)
     return SimpleNamespace(
-        agent_runtime="enabled", agent_ca_provider="step-ca",
+        agent_runtime="enabled",
         agent_controller_origin="https://agents.example.test:8443",
         agent_enrollment_origin="https://enroll.example.test:8443",
         controller_ca_path=material["root_path"],
         agent_intermediate_certificate_path=material["intermediate_path"],
-        agent_intermediate_key_path=None, agent_ca_root_path=material["root_path"],
+        agent_ca_root_path=material["root_path"],
         agent_ca_credential_path=material["credential_path"], agent_ca_url=CA_URL,
         agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
         agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid=material["kid"],
@@ -447,20 +447,25 @@ def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
     assert isinstance(services.presence, AgentPresenceService)
 
 
-def test_production_agent_service_builder_rejects_mixed_provider(
+def test_production_agent_service_builder_always_constructs_step_ca(
     tmp_path: Path, monkeypatch
 ) -> None:
+    calls: list[dict[str, object]] = []
+
     class DeferredStepAuthority:
         def __init__(self, **kwargs) -> None:
-            pass
+            calls.append(kwargs)
 
     monkeypatch.setattr(
         "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
     )
-    settings = _builder_settings(tmp_path, direct_fabric_cidrs="10.0.0.240/28")
-    settings.agent_ca_provider = "unknown"
-    with pytest.raises(RuntimeError, match="provider is unavailable"):
-        build_agent_services(settings, object(), lambda: NOW)
+    settings = _builder_settings(
+        tmp_path, direct_fabric_cidrs="192.168.100.0/24"
+    )
+    build_agent_services(settings, object(), lambda: NOW)
+
+    assert len(calls) == 1
+    assert calls[0]["ca_url"] == CA_URL
 
 
 def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation() -> None:
@@ -489,6 +494,8 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
     if shutil.which("docker") is None or subprocess.run(
         ["docker", "info"], capture_output=True, check=False
     ).returncode != 0:
+        if os.environ.get("CI"):
+            pytest.fail("Docker daemon is required for the pinned step-ca integration test")
         pytest.skip("Docker daemon is required for the pinned step-ca integration test")
     tmp_path.chmod(0o777)
     root_password = tmp_path / "root-password"
@@ -603,9 +610,39 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
         assert extensions[ExtensionOID.KEY_USAGE].critical is True
         assert extensions[ExtensionOID.EXTENDED_KEY_USAGE].critical is False
         assert extensions[ExtensionOID.EXTENDED_KEY_USAGE].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
+        renewed = provider.renew_node(
+            NODE_ID,
+            _csr(),
+            datetime.now(UTC).replace(microsecond=0),
+            request_id="r" * 43,
+        )
+        assert renewed.serial != issued.serial
         provider.revoke_node(issued.serial, datetime.now(UTC).replace(microsecond=0))
         crl = x509.load_pem_x509_crl(provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0)))
         assert issued.serial in {str(record.serial_number) for record in crl}
+
+        subprocess.run(
+            ["docker", "restart", container],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                provider.check_health()
+                break
+            except StepCAError:
+                if time.monotonic() >= deadline:
+                    pytest.fail("pinned step-ca did not recover after restart")
+                time.sleep(0.1)
+        persisted_crl = x509.load_pem_x509_crl(
+            provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
+        )
+        assert issued.serial in {
+            str(record.serial_number) for record in persisted_crl
+        }
     finally:
         subprocess.run(
             ["docker", "rm", "--force", container],

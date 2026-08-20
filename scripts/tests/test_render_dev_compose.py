@@ -128,7 +128,6 @@ def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path)
     )
 
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
-    assert document["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "step-ca"
     assert "step-ca" in document["services"]
     api_secrets = document["services"]["control-api"]["secrets"]
     assert "admin-grant-private-key" in api_secrets
