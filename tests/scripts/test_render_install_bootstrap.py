@@ -31,6 +31,8 @@ def test_renderer_pins_every_supported_native_installer(
     tmp_path: Path, kind: str
 ) -> None:
     artifacts = _artifacts(tmp_path, kind)
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"schema_version":1}\n')
     output = tmp_path / kind
     command = [
         sys.executable,
@@ -42,6 +44,8 @@ def test_renderer_pins_every_supported_native_installer(
     ]
     for platform, artifact in artifacts.items():
         command.extend(("--artifact", f"{platform}={artifact}"))
+    if kind == "nas":
+        command.extend(("--payload", str(payload)))
 
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
 
@@ -50,6 +54,8 @@ def test_renderer_pins_every_supported_native_installer(
     assert re.search(r"@[A-Z0-9_]+_SHA256@", rendered) is None
     for artifact in artifacts.values():
         assert hashlib.sha256(artifact.read_bytes()).hexdigest() in rendered
+    if kind == "nas":
+        assert hashlib.sha256(payload.read_bytes()).hexdigest() in rendered
     assert result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
 
 

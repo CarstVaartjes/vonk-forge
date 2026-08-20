@@ -28,9 +28,14 @@ def _run_bootstrap(
     commands.mkdir()
     artifact = tmp_path / "published-installer"
     artifact.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$0|$*\" > \"$VONK_TEST_RECEIPT\"\n"
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$0|$*\" > \"$VONK_TEST_RECEIPT\"\n"
+        "if [ \"${1:-}\" = --template ]; then printf 'payload=%s\\n' \"$(cat \"$2\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
     )
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    payload = tmp_path / "published-nas-payload.json"
+    payload.write_text('{"schema_version":1}\n')
+    payload_digest = hashlib.sha256(payload.read_bytes()).hexdigest()
     rendered = tmp_path / f"install-{kind}"
     source = (ROOT / "install" / kind).read_text()
     for placeholder in (
@@ -42,6 +47,7 @@ def _run_bootstrap(
         "@SPARK_LINUX_ARM64_SHA256@",
     ):
         source = source.replace(placeholder, digest)
+    source = source.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
     rendered.write_text(source)
     _fake_command(
         commands,
@@ -53,7 +59,8 @@ def _run_bootstrap(
         "curl",
         'destination=\nurl=\nwhile [ "$#" -gt 0 ]; do\n'
         '  case "$1" in -o) destination=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac\n'
-        'done\ncp "$VONK_TEST_ARTIFACT" "$destination"\n',
+        'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
+        'cp "$source" "$destination"\n',
     )
     forbidden = tmp_path / "forbidden-tools"
     for command in ("sudo", "docker", "git", "ssh"):
@@ -69,6 +76,7 @@ def _run_bootstrap(
         "TMPDIR": str(tmp_path),
         "VONK_INSTALL_BASE_URL": "https://install.example.test/artifacts",
         "VONK_TEST_ARTIFACT": str(artifact),
+        "VONK_TEST_PAYLOAD": str(payload),
         "VONK_TEST_RECEIPT": str(receipt),
         "VONK_TEST_FORBIDDEN": str(forbidden),
     }
@@ -86,8 +94,6 @@ def _run_bootstrap(
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
     (
-        ("nas", "Linux", "x86_64", ("--output", "chosen"), "--output chosen"),
-        ("nas", "Darwin", "arm64", ("--output", "chosen"), "--output chosen"),
         ("spark", "Linux", "x86_64", (), ""),
         ("spark", "Linux", "aarch64", (), ""),
     ),
@@ -110,6 +116,40 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
 
     assert result.returncode == 0, result.stderr
     assert receipt.read_text().rstrip().endswith(f"|{expected_arguments}")
+    assert not forbidden.exists()
+
+
+@pytest.mark.parametrize(
+    ("system", "machine"),
+    (("Linux", "x86_64"), ("Darwin", "arm64")),
+)
+def test_nas_bootstrap_needs_no_arguments_and_supplies_verified_payload(
+    tmp_path: Path, system: str, machine: str
+) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path, "nas", system=system, machine=machine
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = receipt.read_text().splitlines()
+    invocation = lines[0].split("|", 1)[1].split()
+    assert invocation[0] == "--template"
+    assert lines[1] == 'payload={"schema_version":1}'
+    assert invocation[2:] == []
+    assert not forbidden.exists()
+
+
+def test_nas_bootstrap_reuses_the_same_command_for_upgrade(tmp_path: Path) -> None:
+    (tmp_path / "vonk-forge").mkdir()
+
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path, "nas", system="Linux", machine="x86_64"
+    )
+
+    assert result.returncode == 0, result.stderr
+    invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
+    assert invocation[0] == "--template"
+    assert invocation[2:] == ["--upgrade"]
     assert not forbidden.exists()
 
 

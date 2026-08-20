@@ -70,7 +70,7 @@ def _artifact_arguments(values: list[str]) -> dict[str, Path]:
     return result
 
 
-def render(kind: str, artifacts: dict[str, Path]) -> bytes:
+def render(kind: str, artifacts: dict[str, Path], payload: Path | None = None) -> bytes:
     expected = set(PLATFORMS[kind])
     if set(artifacts) != expected:
         raise RenderError(f"{kind} installer platforms are incomplete")
@@ -87,6 +87,17 @@ def render(kind: str, artifacts: dict[str, Path]) -> bytes:
         if rendered.count(placeholder) != 1:
             raise RenderError(f"bootstrap template is missing {platform}")
         rendered = rendered.replace(placeholder, digest)
+    if kind == "nas":
+        if payload is None:
+            raise RenderError("nas release payload is missing")
+        payload_digest = hashlib.sha256(
+            _read_regular(payload, "nas release payload", MAX_ARTIFACT_BYTES)
+        ).hexdigest()
+        if rendered.count("@NAS_PAYLOAD_SHA256@") != 1:
+            raise RenderError("bootstrap template is missing the NAS payload")
+        rendered = rendered.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
+    elif payload is not None:
+        raise RenderError("spark bootstrap does not accept a NAS payload")
     if PLACEHOLDER.search(rendered):
         raise RenderError("bootstrap template has unresolved digests")
     return rendered.encode("ascii")
@@ -115,12 +126,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="render-install-bootstrap")
     parser.add_argument("--kind", choices=tuple(PLATFORMS), required=True)
     parser.add_argument("--artifact", action="append", default=[])
+    parser.add_argument("--payload", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
         rendered = render(
             arguments.kind,
             _artifact_arguments(arguments.artifact),
+            arguments.payload,
         )
         _write_new(arguments.output, rendered)
     except (OSError, RenderError) as error:
