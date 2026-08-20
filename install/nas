@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 kind=nas
 base_url=${VONK_INSTALL_BASE_URL:-https://install.vonkforge.ai/artifacts}
