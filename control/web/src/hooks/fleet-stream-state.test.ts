@@ -6,7 +6,7 @@ function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
     schema_version: 1,
     event_cursor: cursor,
     generated_at: "2026-08-15T12:00:00Z",
-    repository_commit: "a".repeat(40),
+    authority_revision: "a".repeat(64),
     nodes: [{
       id: "node-a",
       display_name: "Alpha",

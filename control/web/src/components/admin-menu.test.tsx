@@ -17,7 +17,7 @@ test("opens audit log from the operator menu and closes it without leaving Fleet
       request_id: "audit-1",
       actor: "admin",
       action: "library.recipe.run.applied",
-      base_commit: "a".repeat(40),
+      authority_revision: "a".repeat(64),
       targets: ["node-1"],
     }],
   });
@@ -56,7 +56,7 @@ test("renders only the first eight audit events inside the compact audit drawer"
       request_id: `audit-${index + 1}`,
       actor: `admin-${index + 1}`,
       action: `action-${index + 1}`,
-      base_commit: "a".repeat(40),
+      authority_revision: "a".repeat(64),
       targets: [`node-${index + 1}`],
     })),
   });

@@ -8,7 +8,7 @@ import {StatusPill} from "./status-pill";
 import {FleetIcon} from "./icons";
 
 const apiFixture = {
-  visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", repository_commit: "a".repeat(40), nodes: []}),
+  visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
   updateSkew: async () => ({
     affected_nodes: [],
     digest: `sha256:${"b".repeat(64)}`,

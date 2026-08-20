@@ -153,7 +153,7 @@ export function FleetPage({api}: {api: ControlApi}) {
         <button type="button" className="button" aria-label="Add Spark" onClick={() => setOnboarding(true)}>+ Add Spark</button>
         <div className="connection-state" aria-label="Fleet stream state">
           <StatusPill tone={connection.tone}>{connection.label}</StatusPill>
-          {fleet.snapshot && <small>Event {fleet.snapshot.event_cursor} · repository {fleet.snapshot.repository_commit.slice(0, 8)}</small>}
+          {fleet.snapshot && <small>Event {fleet.snapshot.event_cursor} · authority {fleet.snapshot.authority_revision.slice(0, 8)}</small>}
         </div>
       </div>
     </header>
