@@ -151,6 +151,7 @@ def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_versio
         "docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495"
         in docker_log
     )
+    assert "--userland-proxy=false" in docker_log
     assert "tcp://127.0.0.1:2375|version --format {{.Server.Version}}" in docker_log
     assert "|inspect " not in docker_log
     assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n"  # type: ignore[attr-defined]
