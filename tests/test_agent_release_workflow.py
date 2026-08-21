@@ -571,10 +571,9 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
     metadata = text.split("\n  build-test-sign:\n", 1)[0]
 
-    assert (
-        '  push:\n    branches: [main]\n    paths-ignore:\n'
-        '      - "docs/**"\n      - "**/README.md"'
-    ) in text
+    assert "  push:\n    branches: [main]\n  workflow_dispatch:" in text
+    assert "paths:" not in text.split("  workflow_dispatch:", 1)[0]
+    assert "paths-ignore:" not in text.split("  workflow_dispatch:", 1)[0]
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
     assert "version:" not in dispatch
