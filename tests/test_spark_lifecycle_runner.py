@@ -167,6 +167,55 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     ]
 
 
+def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    secret = "tskey-client-sensitive-value"
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret)
+    status = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=json.dumps(
+            [
+                {
+                    "ExitCode": 0,
+                    "Health": "healthy",
+                    "Service": "postgres",
+                    "State": "running",
+                },
+                {
+                    "ExitCode": 1,
+                    "Health": "",
+                    "Service": "tailscale-gateway",
+                    "State": "restarting",
+                },
+            ]
+        ),
+        stderr="",
+    )
+    logs = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=f"discarded diagnostic beginning{'x' * 9_000}\nauthentication failed for {secret}\n",
+        stderr="",
+    )
+    outputs = iter((status, logs))
+    run._diagnostic_command = lambda _command: next(outputs)
+
+    diagnostics = run._controller_startup_diagnostics()
+
+    assert secret not in diagnostics
+    assert "discarded diagnostic beginning" not in diagnostics
+    assert len(diagnostics) < 8_500
+    assert "authentication failed for <redacted>" in diagnostics
+    assert "postgres=running/healthy/exit-0" in diagnostics
+    assert "tailscale-gateway=restarting/none/exit-1" in diagnostics
+
+
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (
     None
 ):

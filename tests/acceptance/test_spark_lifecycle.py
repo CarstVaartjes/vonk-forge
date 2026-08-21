@@ -35,6 +35,7 @@ from scripts.spark_lifecycle_contract import (
 )
 from tests.acceptance.runtime import (
     AcceptanceError,
+    _compose_rows,
     assert_compose_services_healthy,
     bootstrap_command,
     https_over_command,
@@ -458,6 +459,11 @@ class SparkLifecycle:
                 timeout=timeout,
                 check=False,
             )
+        except subprocess.TimeoutExpired as error:
+            raise LifecycleError(
+                f"acceptance command timed out after {timeout}s: "
+                f"{Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip()
+            ) from error
         except (OSError, subprocess.SubprocessError) as error:
             raise LifecycleError("acceptance command could not execute") from error
         if result.returncode != 0:
@@ -465,6 +471,75 @@ class SparkLifecycle:
                 f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip()
             )
         return result
+
+    @staticmethod
+    def _redact_diagnostics(raw: str) -> str:
+        redacted = raw
+        for name in (
+            "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+            "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+            "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY",
+        ):
+            value = os.environ.get(name)
+            if value:
+                redacted = redacted.replace(value, "<redacted>")
+        redacted = re.sub(r"\x1b\[[0-9;]*m", "", redacted)
+        return redacted[-8_000:]
+
+    def _diagnostic_command(
+        self, command: list[str]
+    ) -> subprocess.CompletedProcess[str] | None:
+        assert self.bundle is not None
+        try:
+            return subprocess.run(
+                command,
+                cwd=self.bundle,
+                env=host_command_environment(),
+                stdin=subprocess.DEVNULL,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def _controller_startup_diagnostics(self) -> str:
+        status = self._diagnostic_command(
+            self._compose("ps", "--all", "--format", "json")
+        )
+        if status is None:
+            return "controller diagnostics unavailable"
+        if status.returncode != 0:
+            output = self._redact_diagnostics(status.stderr or status.stdout)
+            return f"controller status unavailable: {output or 'no output'}"
+        try:
+            rows = _compose_rows(status.stdout)
+        except AcceptanceError:
+            output = self._redact_diagnostics(status.stdout)
+            return f"controller status invalid: {output or 'no output'}"
+        states: list[str] = []
+        broken: list[str] = []
+        for row in sorted(rows, key=lambda item: str(item.get("Service", ""))):
+            service = row.get("Service")
+            if not isinstance(service, str) or not service:
+                continue
+            state = str(row.get("State", "unknown"))
+            health = str(row.get("Health", "none")) or "none"
+            exit_code = str(row.get("ExitCode", "unknown"))
+            states.append(f"{service}={state}/{health}/exit-{exit_code}")
+            if state != "running" or health != "healthy":
+                broken.append(service)
+        details = f"states: {', '.join(states) or 'none'}"
+        if not broken:
+            return details
+        logs = self._diagnostic_command(
+            self._compose("logs", "--no-color", "--tail", "80", *broken)
+        )
+        if logs is None:
+            return f"{details}; logs unavailable"
+        output = self._redact_diagnostics(logs.stdout or logs.stderr)
+        return f"{details}; failing service logs:\n{output or 'no output'}"
 
     def _cleanup(self) -> None:
         failures: list[BaseException] = []
@@ -555,18 +630,24 @@ class SparkLifecycle:
         )
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
-        self._run_command(
-            self._compose(
-                "up",
-                "-d",
-                "--wait",
-                "--wait-timeout",
-                "360",
-                "--remove-orphans",
-            ),
-            cwd=self.bundle,
-            timeout=420,
-        )
+        try:
+            self._run_command(
+                self._compose(
+                    "up",
+                    "-d",
+                    "--wait",
+                    "--wait-timeout",
+                    "360",
+                    "--remove-orphans",
+                ),
+                cwd=self.bundle,
+                timeout=420,
+            )
+        except LifecycleError as error:
+            diagnostics = self._controller_startup_diagnostics()
+            raise LifecycleError(
+                f"candidate controller startup failed; {diagnostics}"
+            ) from error
         status = self._run_command(
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
         )
