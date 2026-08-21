@@ -260,12 +260,22 @@ def compose_compatibility_fixtures() -> list[tuple[str, Path]]:
 
 
 def host_command_environment() -> dict[str, str]:
-    return {
+    environment = {
         "HOME": os.environ.get("HOME", "/tmp"),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
     }
+    for name in (
+        "DOCKER_CERT_PATH",
+        "DOCKER_CONFIG",
+        "DOCKER_CONTEXT",
+        "DOCKER_HOST",
+        "DOCKER_TLS_VERIFY",
+    ):
+        if value := os.environ.get(name):
+            environment[name] = value
+    return environment
 
 
 def reference_compose() -> list[str]:
