@@ -50,6 +50,10 @@ SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
 )
+PINNED_IMAGE = re.compile(
+    r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z"
+)
+MUTABLE_IMAGE_TAG = re.compile(r":(?:latest|dev|main|edge)@sha256:")
 
 
 def required_environment(name: str, *, secret: bool = False) -> str:
@@ -173,7 +177,11 @@ def generate_bundle(
     responses: list[tuple[str, str]],
     require_all_prompts: bool = True,
 ) -> Path:
-    root.mkdir(mode=0o700)
+    try:
+        root.mkdir(mode=0o700)
+    except FileExistsError as error:
+        if root.is_symlink() or not root.is_dir():
+            raise AcceptanceError("NAS acceptance target is unsafe") from error
     run_interactive(
         bootstrap_command(candidate_url),
         cwd=root,
@@ -185,6 +193,13 @@ def generate_bundle(
     bundle = root / "vonk-forge"
     assert_bundle_contract(bundle)
     return bundle
+
+
+def is_immutable_image(image: str) -> bool:
+    return (
+        PINNED_IMAGE.fullmatch(image) is not None
+        and MUTABLE_IMAGE_TAG.search(image) is None
+    )
 
 
 def run(
@@ -884,9 +899,7 @@ def exercise_compose(
         raise AcceptanceError("rendered Compose service topology is not canonical")
     images = run([*reference_compose(), "config", "--images"], cwd=bundle).stdout
     for image in images.splitlines():
-        if "@sha256:" not in image or any(
-            mutable in image for mutable in (":latest", ":dev", ":main", ":edge")
-        ):
+        if not is_immutable_image(image):
             raise AcceptanceError(f"Compose image is not immutable: {image}")
 
     try:

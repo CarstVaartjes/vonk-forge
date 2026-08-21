@@ -45,6 +45,7 @@ from tests.acceptance.test_fresh_nas_install import (
     command_environment,
     generate_bundle,
     host_command_environment,
+    is_immutable_image,
     nas_responses,
 )
 
@@ -640,13 +641,7 @@ class SparkLifecycle:
                 raise LifecycleError("Compose image graph differs from publication")
         for service in services.values():
             image = service.get("image") if isinstance(service, dict) else None
-            if (
-                not isinstance(image, str)
-                or "@sha256:" not in image
-                or any(
-                    value in image for value in (":latest", ":dev", ":main", ":edge")
-                )
-            ):
+            if not isinstance(image, str) or not is_immutable_image(image):
                 raise LifecycleError("Compose contains a mutable image")
 
     def _read_secret(self, relative: str) -> str:

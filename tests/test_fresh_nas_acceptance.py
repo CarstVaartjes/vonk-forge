@@ -54,6 +54,52 @@ def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
     assert acceptance.reference_rollout_bundles(default, hermes) == (hermes,)
 
 
+def test_generate_bundle_allows_the_installer_to_reuse_its_target(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    target = tmp_path / "target"
+
+    def install(_command, *, cwd, **_kwargs):
+        (cwd / "vonk-forge").mkdir(exist_ok=True)
+
+    monkeypatch.setattr(acceptance, "run_interactive", install)
+    monkeypatch.setattr(acceptance, "assert_bundle_contract", lambda _bundle: None)
+
+    arguments = {
+        "candidate_url": "https://install.example/bootstraps/nas",
+        "child_environment": {},
+        "responses": [],
+    }
+    first = acceptance.generate_bundle(target, **arguments)
+    second = acceptance.generate_bundle(
+        target, **arguments, require_all_prompts=False
+    )
+
+    assert first == second == target / "vonk-forge"
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        ("dev-203-g479daeacb4a0", True),
+        ("0.1.0-dev.203", True),
+        ("dev", False),
+        ("latest", False),
+    ],
+)
+def test_immutable_image_check_distinguishes_versioned_dev_tags(
+    tag: str, expected: bool
+) -> None:
+    acceptance = _acceptance_module()
+    image = f"ghcr.io/carstvaartjes/vonk-forge-api:{tag}@sha256:{'a' * 64}"
+
+    assert acceptance.is_immutable_image(image) is expected
+    assert not acceptance.is_immutable_image(
+        "ghcr.io/carstvaartjes/vonk-forge-api:0.1.0"
+    )
+
+
 def _serve_status(*, hermes: bool) -> dict[str, object]:
     services: dict[str, object] = {
         "svc:vonk-forge": {
