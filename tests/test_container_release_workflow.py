@@ -716,7 +716,9 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
 
 def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     text = workflow()
+    publisher = job("publish-images")
     for action in (
+        "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8",
         "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
         "docker/login-action@dbcb813823bdd20940b903addbd779551569679f",
         "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
@@ -726,7 +728,15 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     metadata = (ROOT / "scripts/container-release-metadata").read_text()
     for package in ("vonk-forge-api", "vonk-forge-worker", "vonk-forge-hermes"):
         assert package in metadata
-    assert text.count("platforms: linux/amd64") == 1
+    qemu = "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8"
+    buildx = "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c"
+    assert publisher.index(qemu) < publisher.index(buildx)
+    assert (
+        "image: docker.io/tonistiigi/binfmt@sha256:"
+        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+        in publisher
+    )
+    assert publisher.count("platforms: linux/amd64,linux/arm64") == 1
     assert text.count("provenance: mode=max") == 1
     assert text.count("sbom: true") == 1
     assert text.count("push: true") == 1

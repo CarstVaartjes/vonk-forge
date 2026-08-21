@@ -11,6 +11,10 @@ HERMES = ROOT / "scripts/reconcile-hermes-release-image"
 RELEASE = ROOT / "scripts/reconcile-github-release"
 SHA = "a" * 40
 DIGEST = "sha256:" + "b" * 64
+AMD64_DIGEST = "sha256:" + "c" * 64
+ARM64_DIGEST = "sha256:" + "d" * 64
+AMD64_ATTESTATION = "sha256:" + "e" * 64
+ARM64_ATTESTATION = "sha256:" + "f" * 64
 IMAGE = "ghcr.io/carstvaartjes/vonk-forge-hermes"
 REPOSITORY = "CarstVaartjes/vonk-forge"
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
@@ -30,6 +34,7 @@ def _hermes_tools(
     commit_digest: str = DIGEST,
     version_error: str = "",
     commit_error: str = "",
+    extra_platform: bool = False,
 ) -> tuple[Path, Path]:
     tools = tmp_path / "bin"
     tools.mkdir(parents=True)
@@ -41,6 +46,7 @@ def _hermes_tools(
                 "commit": commit_digest,
                 "version_error": version_error,
                 "commit_error": commit_error,
+                "extra_platform": extra_platform,
             }
         )
         + "\n",
@@ -71,15 +77,40 @@ def _hermes_tools(
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "args=sys.argv[1:]\n"
+        "state_path=Path(os.environ['VONK_HERMES_STATE']); state=json.loads(state_path.read_text())\n"
         "if args[:3] == ['buildx', 'imagetools', 'create']:\n"
-        " state_path=Path(os.environ['VONK_HERMES_STATE']); state=json.loads(state_path.read_text())\n"
         " tag=args[args.index('--tag')+1]; digest=args[-1].rsplit('@', 1)[1]\n"
         " state['commit' if ':sha-' in tag else 'version']=digest\n"
         " state['commit_error' if ':sha-' in tag else 'version_error']=''\n"
         " state_path.write_text(json.dumps(state)+'\\n'); raise SystemExit(0)\n"
-        "print(json.dumps({'predicateType': 'https://slsa.dev/provenance/v1', 'revision': '"
+        "fmt=args[args.index('--format')+1] if '--format' in args else ''\n"
+        "if '.Manifest' in fmt:\n"
+        " manifests=[\n"
+        "  {'mediaType':'application/vnd.oci.image.manifest.v1+json','digest':'"
+        + AMD64_DIGEST
+        + "','platform':{'os':'linux','architecture':'amd64'}},\n"
+        "  {'mediaType':'application/vnd.oci.image.manifest.v1+json','digest':'"
+        + ARM64_DIGEST
+        + "','platform':{'os':'linux','architecture':'arm64'}},\n"
+        "  {'mediaType':'application/vnd.oci.image.manifest.v1+json','digest':'"
+        + AMD64_ATTESTATION
+        + "','platform':{'os':'unknown','architecture':'unknown'},'annotations':{'vnd.docker.reference.type':'attestation-manifest','vnd.docker.reference.digest':'"
+        + AMD64_DIGEST
+        + "'}},\n"
+        "  {'mediaType':'application/vnd.oci.image.manifest.v1+json','digest':'"
+        + ARM64_ATTESTATION
+        + "','platform':{'os':'unknown','architecture':'unknown'},'annotations':{'vnd.docker.reference.type':'attestation-manifest','vnd.docker.reference.digest':'"
+        + ARM64_DIGEST
+        + "'}},\n"
+        " ]\n"
+        " if state['extra_platform']: manifests.append({'mediaType':'application/vnd.oci.image.manifest.v1+json','digest':'sha256:'+'1'*64,'platform':{'os':'linux','architecture':'s390x'}})\n"
+        " print(json.dumps({'mediaType':'application/vnd.oci.image.index.v1+json','manifests':manifests})); raise SystemExit(0)\n"
+        "if '.SBOM' in fmt:\n"
+        " print(json.dumps({platform:{'SPDXID':'SPDXRef-DOCUMENT','spdxVersion':'SPDX-2.3'} for platform in ('linux/amd64','linux/arm64')})); raise SystemExit(0)\n"
+        "evidence={'predicateType':'https://slsa.dev/provenance/v1','revision':'"
         + SHA
-        + "'}))\n",
+        + "'}\n"
+        "print(json.dumps({platform:evidence for platform in ('linux/amd64','linux/arm64')}))\n",
     )
     _write_tool(tools / "gh", f"#!/usr/bin/env bash\nexit {attestation_exit}\n")
     return tools, state
@@ -131,6 +162,13 @@ def test_hermes_reconciler_rejects_an_existing_image_from_another_commit(
     tmp_path: Path,
 ) -> None:
     result = _run_hermes(_hermes_tools(tmp_path, revision="c" * 40))
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_hermes_reconciler_rejects_extra_runnable_platforms(tmp_path: Path) -> None:
+    result = _run_hermes(_hermes_tools(tmp_path, extra_platform=True))
 
     assert result.returncode != 0
     assert result.stdout == ""
