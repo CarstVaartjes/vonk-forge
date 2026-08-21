@@ -66,8 +66,13 @@ jobs:
             cargo build --locked --release --package "$binary" --bin "$binary"
             install -m 0555 "target/release/$binary" "$output/$binary"
           done
-          find "$output" -maxdepth 1 -type f -exec sha256sum {} + |
-            LC_ALL=C sort > "$output/SHA256SUMS"
+          (
+            cd "$output"
+            # Hash only the accepted binaries, after changing to the artifact
+            # directory. This keeps paths portable and prevents the redirected
+            # SHA256SUMS file from hashing itself while it is still empty.
+            sha256sum -- $BINARIES | LC_ALL=C sort > SHA256SUMS
+          )
 
       - name: Upload accepted native setup programs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
