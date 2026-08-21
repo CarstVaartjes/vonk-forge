@@ -1104,7 +1104,22 @@ def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None
         temporary.unlink(missing_ok=True)
 
 
+def _rclone_object_exists(remote: str, key: str) -> bool:
+    # `rclone cat` deliberately succeeds with empty output when an exact source
+    # object does not exist. Probe metadata first so a missing object is not
+    # mistaken for an existing object whose digest is SHA-256(empty).
+    result = subprocess.run(
+        ["rclone", "lsjson", f"{remote}/{key}", "--stat"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _rclone_digest(remote: str, key: str) -> str | None:
+    if not _rclone_object_exists(remote, key):
+        return None
     process = subprocess.Popen(
         ["rclone", "cat", f"{remote}/{key}"],
         stdout=subprocess.PIPE,
@@ -1120,6 +1135,8 @@ def _rclone_digest(remote: str, key: str) -> str | None:
 
 
 def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
+    if not _rclone_object_exists(remote, key):
+        return None
     process = subprocess.Popen(
         ["rclone", "cat", f"{remote}/{key}"],
         stdout=subprocess.PIPE,

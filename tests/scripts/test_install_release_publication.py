@@ -301,6 +301,58 @@ def _publish_candidate(publication: Path, destination: Path) -> subprocess.Compl
     )
 
 
+def _fake_rclone_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    executable_root = tmp_path / "bin"
+    executable_root.mkdir()
+    object_root = tmp_path / "r2"
+    object_root.mkdir()
+    executable = executable_root / "rclone"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+command = sys.argv[1]
+arguments = sys.argv[2:]
+object_root = Path(os.environ["FAKE_RCLONE_ROOT"])
+
+def object_path(value: str) -> Path:
+    remote_path = value.split(":", 1)[1]
+    key = remote_path.split("/", 1)[1]
+    return object_root / key
+
+if command == "lsjson":
+    path = object_path(arguments[0])
+    if not path.is_file():
+        raise SystemExit(3)
+    print(json.dumps({"IsDir": False, "Path": path.name, "Size": path.stat().st_size}))
+elif command == "cat":
+    path = object_path(arguments[0])
+    # rclone cat succeeds with no output when its exact source object is absent.
+    if path.is_file():
+        sys.stdout.buffer.write(path.read_bytes())
+elif command == "copyto":
+    source = Path(arguments[-2])
+    destination = object_path(arguments[-1])
+    if "--immutable" in arguments and destination.exists():
+        raise SystemExit(9)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+else:
+    raise SystemExit(64)
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{executable_root}:{environment['PATH']}"
+    environment["FAKE_RCLONE_ROOT"] = str(object_root)
+    return environment, object_root
+
+
 def _gate_report(
     path: Path, publication: Path, gates: set[str], *, run_id: int = 123456
 ) -> Path:
@@ -1036,6 +1088,75 @@ def test_candidate_publication_writes_only_immutable_generation_objects(
     assert not (destination / "nas").exists()
     assert not (destination / "spark").exists()
     assert not (destination / "artifacts/stable/current.manifest").exists()
+
+
+def test_rclone_publication_treats_empty_cat_as_missing_object(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    immutable = [entry for entry in plan["objects"] if entry["phase"] == "immutable"]
+    assert immutable
+    for entry in immutable:
+        published = object_root / entry["key"]
+        assert published.is_file()
+        assert hashlib.sha256(published.read_bytes()).hexdigest() == entry["sha256"]
+
+    receipt, signature, public_key = _acceptance_receipt(tmp_path, publication)
+    encoded_public_key = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    promoted = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "promote",
+            "--bundle",
+            str(publication),
+            "--accepted-evidence",
+            str(receipt),
+            "--accepted-evidence-signature",
+            str(signature),
+            "--acceptance-public-key",
+            str(public_key),
+            "--acceptance-public-key-sha256",
+            hashlib.sha256(encoded_public_key).hexdigest(),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert promoted.returncode == 0, promoted.stderr
+    assert (object_root / "nas").is_file()
+    assert (object_root / "spark").is_file()
+    assert (object_root / "artifacts/stable/current.manifest").is_file()
 
 
 def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(
