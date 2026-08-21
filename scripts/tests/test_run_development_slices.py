@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
+import importlib.machinery
+import importlib.util
 import io
 import json
 import os
@@ -810,7 +813,9 @@ class SliceHandler(BaseHTTPRequestHandler):
             ):
                 self._json(
                     409,
-                    {"detail": "submitted uninstall plan digest does not match preview"},
+                    {
+                        "detail": "submitted uninstall plan digest does not match preview"
+                    },
                 )
                 return
             self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
@@ -853,10 +858,11 @@ class SliceHandler(BaseHTTPRequestHandler):
                 preview_authority = self.server.run_preview_authority_by_digest.get(
                     payload.get("plan_digest")
                 )
-                if (
-                    payload.get("plan_digest") != self.server.run_plan_digest
-                    or preview_authority
-                    != (payload.get("installation_id"), payload.get("alias"))
+                if payload.get(
+                    "plan_digest"
+                ) != self.server.run_plan_digest or preview_authority != (
+                    payload.get("installation_id"),
+                    payload.get("alias"),
                 ):
                     self._json(
                         409,
@@ -1015,6 +1021,94 @@ def test_protocol_client_is_reusable_outside_the_development_slice_runner(
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"schema_version": 1, "status": 200}
+
+
+def test_protocol_client_supports_an_in_memory_browser_transport() -> None:
+    specification = importlib.util.spec_from_file_location(
+        "development_slice_client", ROOT / "scripts/development_slice_client.py"
+    )
+    assert specification is not None and specification.loader is not None
+    client_module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(client_module)
+    observed: list[tuple[str, str, bytes | None, dict[str, str], float]] = []
+
+    def transport(method, path, body, headers, timeout):
+        observed.append((method, path, body, headers, timeout))
+        return 201, b'{"created":true}'
+
+    client = client_module.Client(
+        "https://control.example.test",
+        None,
+        timeout=7,
+        headers={"Cookie": "vonk_session=session", "X-CSRF-Token": "csrf"},
+        transport=transport,
+    )
+
+    status, payload = client.request(
+        "POST", "/api/v1/example", {"value": 1}, query={"generation": 2}
+    )
+
+    assert (status, payload) == (201, {"created": True})
+    assert observed == [
+        (
+            "POST",
+            "/api/v1/example?generation=2",
+            b'{"value":1}',
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cookie": "vonk_session=session",
+                "X-CSRF-Token": "csrf",
+            },
+            7,
+        )
+    ]
+
+
+def test_runner_accepts_injected_clients_without_token_files(tmp_path: Path) -> None:
+    scripts = os.fspath(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        loader = importlib.machinery.SourceFileLoader(
+            "development_slice_runner", os.fspath(RUNNER)
+        )
+        specification = importlib.util.spec_from_loader(
+            "development_slice_runner", loader
+        )
+        assert specification is not None and specification.loader is not None
+        runner_module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(runner_module)
+    finally:
+        sys.path.remove(scripts)
+    control = object()
+    inference = object()
+    arguments = argparse.Namespace(
+        phase="synthetic",
+        api_base="https://control.example.test",
+        inference_base="https://inference.example.test",
+        admin_token_file=None,
+        inference_token_file=None,
+        timeout_seconds=5,
+        recipe=None,
+        catalog=None,
+        library_root=ROOT,
+        builder_node=NODE,
+        target_node=[NODE],
+        failure_node=None,
+        source_context=_synthetic_source_context(tmp_path),
+        qualification_file=None,
+        evidence_file=tmp_path / "evidence.json",
+        poll_seconds=0.1,
+        stop_after=None,
+    )
+
+    runner = runner_module.Runner(
+        arguments, control_client=control, inference_client=inference
+    )
+
+    assert runner.control is control
+    assert runner.inference is inference
+    assert not list(tmp_path.glob("*token*"))
 
 
 def _token(path: Path, value: str) -> Path:
@@ -1412,7 +1506,8 @@ def test_runner_previews_lifecycle_action_before_applying_exact_digest(
     requests = [
         (path, json.loads(body))
         for method, path, body in server.request_bodies
-        if method == "POST" and path in {preview_path, apply_path.format(identifier=selected_id)}
+        if method == "POST"
+        and path in {preview_path, apply_path.format(identifier=selected_id)}
     ]
     assert requests == [
         (preview_path, {identifier: selected_id}),
@@ -1685,12 +1780,8 @@ def test_runner_recovers_once_after_cleaned_failed_start(
     ]
     assert len(run_creations) == 2
     assert [
-        (request["installation_id"], request["alias"])
-        for request in run_previews
-    ] == [
-        (request["installation_id"], request["alias"])
-        for request in run_creations
-    ]
+        (request["installation_id"], request["alias"]) for request in run_previews
+    ] == [(request["installation_id"], request["alias"]) for request in run_creations]
     assert {request["alias"] for request in run_creations} == {server.slug}
     expected_retry_key = str(
         uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), "running:start-retry")
@@ -1949,9 +2040,10 @@ def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
     assert "restart checkpoint identity did not advance" in no_restart.stderr
     retained = json.loads(evidence_path.read_text())
     assert retained["completed_states"] == MODEL_SINGLE_STATES[:9]
-    assert retained["outputs"]["restart_checkpoint"] == checkpoint["outputs"][
-        "restart_checkpoint"
-    ]
+    assert (
+        retained["outputs"]["restart_checkpoint"]
+        == checkpoint["outputs"]["restart_checkpoint"]
+    )
     assert not any(
         method == "POST" and path.endswith("/stop")
         for method, path, _body in server.request_bodies

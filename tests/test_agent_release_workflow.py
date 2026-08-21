@@ -13,6 +13,7 @@ UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
+NATIVE_LIFECYCLE = ROOT / "scripts/test-agent-package-native-lifecycle"
 
 EXPECTED_ACTION_OUTPUTS = {
     "version": "${{ steps.accepted.outputs.version }}",
@@ -408,6 +409,17 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cosign sign-blob --yes --bundle" in text
     assert "agent-release\\.yml@refs/heads/main" in text
     assert "ci\\.yml@refs/tags/v" in text
+
+
+def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
+    text = NATIVE_LIFECYCLE.read_text()
+
+    assert 'chown -R vonk-agent:vonk-agent "$data_dir" "$runtime_dir"' not in text
+    assert (
+        'chown -R vonk-agent:vonk-agent "$data_dir/.config" '
+        '"$credentials" "$runtime_dir"'
+    ) in text
+    assert text.count("stat -c '%U:%G:%a' \"$data_dir/machine-evidence\"") == 2
 
 
 def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:

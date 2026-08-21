@@ -34,8 +34,8 @@ def _run_workflow_shell(
     docker = commands / "docker"
     docker.write_text(
         "#!/bin/sh\n"
-        "printf '%s|%s\\n' \"${DOCKER_HOST:-}\" \"$*\" >> \"$DOCKER_LOG\"\n"
-        "case \"$1\" in\n"
+        'printf \'%s|%s\\n\' "${DOCKER_HOST:-}" "$*" >> "$DOCKER_LOG"\n'
+        'case "$1" in\n'
         "  run) printf '%s\\n' daemon-id ;;\n"
         "  version) printf '%s\\n' \"$DOCKER_SERVER_VERSION\" ;;\n"
         "  inspect) printf '%s\\n' \"$DIND_IP\" ;;\n"
@@ -89,7 +89,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert "publish" not in jobs
 
 
-def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report() -> None:
+def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report() -> (
+    None
+):
     jobs = _workflow()["jobs"]
     nas = jobs["nas-acceptance"]
     assert nas["permissions"] == {"contents": "read"}
@@ -132,11 +134,19 @@ def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_versio
     assert ready.returncode == 0, ready.stderr
     docker_log = ready.docker_log  # type: ignore[attr-defined]
     workspace = tmp_path / "ready/workspace"
-    assert f"--publish 127.0.0.1:2375:2375 --volume {workspace}:{workspace}" in docker_log
+    assert (
+        f"--publish 127.0.0.1:2375:2375 --volume {workspace}:{workspace}" in docker_log
+    )
     assert "--privileged" in docker_log
-    assert "docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495" in docker_log
+    assert (
+        "docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495"
+        in docker_log
+    )
     assert "tcp://127.0.0.1:2375|version --format {{.Server.Version}}" in docker_log
-    assert "|inspect --format {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} vonk-acceptance-dind" in docker_log
+    assert (
+        "|inspect --format {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} vonk-acceptance-dind"
+        in docker_log
+    )
     assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=172.18.0.2\n"  # type: ignore[attr-defined]
 
     wrong = _run_workflow_shell(start, tmp_path / "wrong", server_version="29.4.2")
@@ -176,15 +186,45 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
     spark = _workflow()["jobs"]["spark-acceptance"]
-    run = _steps(spark)[
+    steps = _steps(spark)
+    publication = steps["Download exact Spark publication graph"]
+    assert publication["uses"].startswith("actions/download-artifact@")
+    assert publication["with"] == {
+        "name": (
+            "installer-candidate-${{ needs.authority.outputs.channel }}-"
+            "${{ needs.candidate.outputs.generation }}"
+        ),
+        "path": "${{ runner.temp }}/spark-publication",
+    }
+    run = steps["Run packaged Spark pairing, job, renewal, and upgrade acceptance"][
+        "run"
+    ]
+    environment = steps[
         "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
-    ]["run"]
+    ]["env"]
 
-    assert "linux-amd64) gates='[\"spark_amd64\",\"spark_pairing\"]'" in run
+    immutable_root = '"$RUNNER_TEMP/spark-publication/installer-publication/objects"'
+    assert environment["VONK_ACCEPTANCE_WORKSPACE"] == "${{ github.workspace }}"
+    assert 'test "$VONK_ACCEPTANCE_PLATFORM" = linux-amd64 || ' in run
+    assert 'test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64' in run
+    assert "tests/acceptance/test_spark_lifecycle.py run" in run
+    assert f"--object-root {immutable_root}" in run
     assert (
-        "linux-arm64) gates='[\"spark_arm64\",\"spark_job\","
-        "\"spark_renewal\",\"spark_upgrade\"]'"
+        "--candidate-release "
+        f"{immutable_root[:-1]}/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/"
+        '$VONK_ACCEPTANCE_GENERATION/release.json"'
     ) in run
+    assert (
+        "--baseline-release "
+        f"{immutable_root[:-1]}/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/"
+        '$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json"'
+    ) in run
+    assert (
+        '--output "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"'
+    ) in run
+    assert "jq " not in run
+    assert "schema_version:1" not in run
+    assert "gates=" not in run
 
 
 def test_complete_acceptance_is_signed_before_the_channel_can_advance() -> None:
@@ -227,7 +267,7 @@ def test_acceptance_authority_binds_reports_to_downloaded_candidate_objects() ->
     ) in signing
     assert (
         "--baseline-release "
-        f'{immutable_root[:-1]}/artifacts/$CHANNEL/releases/$GENERATION/'
+        f"{immutable_root[:-1]}/artifacts/$CHANNEL/releases/$GENERATION/"
         'acceptance-baseline/release.json"'
     ) in signing
 
