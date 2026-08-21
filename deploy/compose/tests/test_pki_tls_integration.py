@@ -71,13 +71,37 @@ def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=7))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()),
+            critical=False,
+        )
         .sign(root_key, algorithm=None)
     )
 
     server_key = ed25519.Ed25519PrivateKey.generate()
     server = (
         x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOSTNAMES[0])]))
+        .subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOSTNAMES[0])])
+        )
         .issuer_name(root.subject)
         .public_key(server_key.public_key())
         .serial_number(x509.random_serial_number())
@@ -89,6 +113,10 @@ def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
         )
         .add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()),
             critical=False,
         )
         .sign(root_key, algorithm=None)
@@ -106,6 +134,10 @@ def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()),
             critical=False,
         )
         .sign(root_key, algorithm=None)
@@ -282,7 +314,9 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
             assert response.startswith(b"HTTP/1.1 502")
 
         browser_port = _published_port(docker, container, 8080)
-        with socket.create_connection(("127.0.0.1", browser_port), timeout=5) as browser:
+        with socket.create_connection(
+            ("127.0.0.1", browser_port), timeout=5
+        ) as browser:
             browser.sendall(
                 b"GET / HTTP/1.1\r\nHost: control.test.example\r\nConnection: close\r\n\r\n"
             )

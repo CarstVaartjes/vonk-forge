@@ -196,13 +196,21 @@ def assert_bundle_contract(bundle: Path) -> None:
         metadata = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
             raise AcceptanceError("secret file is unsafe")
-        _require_mode(path, 0o600)
+        relative = path.relative_to(secrets)
+        runtime_config = relative.parts[0] == "runtime-configs"
+        if runtime_config:
+            if stat.S_IMODE(metadata.st_mode) not in {0o644, 0o755}:
+                raise AcceptanceError(f"{relative} has unsafe permissions")
+        else:
+            _require_mode(path, 0o600)
         content = path.read_bytes().strip()
         if not content:
-            raise AcceptanceError(f"secret file {path.relative_to(secrets)} is empty")
-        if content in compose_raw or content in environment_raw:
+            raise AcceptanceError(f"bundle file {relative} is empty")
+        if not runtime_config and (
+            content in compose_raw or content in environment_raw
+        ):
             raise AcceptanceError(
-                f"secret value {path.relative_to(secrets)} leaked into bundle metadata"
+                f"secret value {relative} leaked into bundle metadata"
             )
 
 
@@ -297,8 +305,8 @@ def https_over_command(
     accepted_statuses: set[int] | None = None,
 ) -> bytes:
     request_headers = {} if headers is None else dict(headers)
-    allowed_statuses = set(range(200, 300)) if accepted_statuses is None else set(
-        accepted_statuses
+    allowed_statuses = (
+        set(range(200, 300)) if accepted_statuses is None else set(accepted_statuses)
     )
     if (
         not command
@@ -310,7 +318,9 @@ def https_over_command(
         or (client_certificate is None) != (client_key is None)
         or not allowed_statuses
         or any(
-            not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599
+            not isinstance(status, int)
+            or isinstance(status, bool)
+            or not 100 <= status <= 599
             for status in allowed_statuses
         )
         or any(

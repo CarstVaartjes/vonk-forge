@@ -448,9 +448,9 @@ def test_agent_bootstrap_uses_distinct_https_origins_and_normalized_public_ca() 
 
 def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     adapted = _adapted_development_caddy()
-    health = _server_on_port(adapted, 2019)
+    health = _server_on_port(adapted, 8082)
 
-    assert health["listen"] == ["127.0.0.1:2019"]
+    assert health["listen"] == ["127.0.0.1:8082"]
     assert health["routes"] == [
         {
             "match": [{"host": ["127.0.0.1"]}],
@@ -460,7 +460,19 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
                     "routes": [
                         {
                             "handle": [
-                                {"handler": "static_response", "status_code": 200}
+                                {
+                                    "handler": "subroute",
+                                    "routes": [
+                                        {
+                                            "handle": [
+                                                {
+                                                    "handler": "static_response",
+                                                    "status_code": 200,
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                }
                             ],
                             "match": [{"path": ["/healthz"]}],
                         },
@@ -486,7 +498,7 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
         for server in adapted["apps"]["http"]["servers"].values()
         for listener in server.get("listen", [])
     }
-    assert "127.0.0.1:2019" in listeners
+    assert "127.0.0.1:8082" in listeners
     assert ":2019" not in listeners
     assert "0.0.0.0:2019" not in listeners
     assert "[::]:2019" not in listeners

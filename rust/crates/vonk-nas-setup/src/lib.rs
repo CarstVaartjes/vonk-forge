@@ -7,11 +7,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use base64ct::{Base64UrlUnpadded, Encoding};
+use base64ct::{Base64, Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use pkcs8::LineEnding;
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
@@ -82,6 +82,8 @@ pub struct CanonicalTemplatePayload {
     secrets: Vec<SecretPrompt>,
     #[serde(default)]
     generated_secrets: GeneratedSecrets,
+    #[serde(default)]
+    runtime_files: Vec<RuntimeFile>,
     step_ca_controller: Option<StepCaControllerRequest>,
     hermes: Option<HermesPrompt>,
 }
@@ -129,6 +131,14 @@ struct PostgresUrlRequest {
     host: String,
     port: u16,
     database: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeFile {
+    file: String,
+    content: String,
+    mode: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,6 +321,19 @@ impl CanonicalTemplatePayload {
                 )));
             }
             validate_postgres_url_request(request)?;
+        }
+        for runtime_file in &self.runtime_files {
+            if !runtime_file.file.starts_with("runtime-configs/")
+                || runtime_file.content.contains('\0')
+                || runtime_file.content.len() > 1024 * 1024
+                || !matches!(runtime_file.mode, 0o644 | 0o755)
+            {
+                return Err(SetupError::InvalidPayload(format!(
+                    "runtime file {} is invalid",
+                    runtime_file.file
+                )));
+            }
+            validate_generated_file(&runtime_file.file, &mut secrets)?;
         }
         if let Some(request) = &self.step_ca_controller {
             if request.prompt.trim().is_empty()
@@ -721,9 +744,8 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
             request.prompt
         ))?;
         if import_path.is_empty() {
-            return KeyPair::generate_for(&PKCS_ED25519)
-                .map(|key| key.serialize_pem())
-                .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()));
+            let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
+            return Ok(canonical_ed25519_pkcs8_pem(&signing_key));
         }
         let pem = read_import_file(Path::new(&import_path), 64 * 1024)?;
         validate_ed25519_private_key(&pem, &request.file)?;
@@ -795,15 +817,32 @@ fn read_import_file(path: &Path, maximum_bytes: u64) -> Result<String, SetupErro
 }
 
 fn validate_ed25519_private_key(pem: &str, file: &str) -> Result<(), SetupError> {
-    let key = KeyPair::from_pem(pem).map_err(|_| {
+    let signing_key = ed25519_dalek::SigningKey::from_pkcs8_pem(pem).map_err(|_| {
         SetupError::InvalidSecretMaterial(format!("{file} is not a PKCS#8 PEM private key"))
     })?;
-    if !key.is_compatible(&PKCS_ED25519) {
+    if pem.trim_end_matches(['\r', '\n']) != canonical_ed25519_pkcs8_pem(&signing_key) {
         return Err(SetupError::InvalidSecretMaterial(format!(
-            "{file} is not an Ed25519 private key"
+            "{file} is not a canonical Ed25519 PKCS#8 PEM private key"
         )));
     }
     Ok(())
+}
+
+fn canonical_ed25519_pkcs8_pem(signing_key: &ed25519_dalek::SigningKey) -> String {
+    // RFC 8410 section 7's version-0 PrivateKeyInfo form is accepted by ring,
+    // OpenSSL, and Python cryptography. Some encoders emit the optional public
+    // key as a version-1 extension, which cryptography rejects as trailing ASN.1.
+    const PREFIX: [u8; 16] = [
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
+    ];
+    let mut document = Vec::with_capacity(PREFIX.len() + signing_key.to_bytes().len());
+    document.extend_from_slice(&PREFIX);
+    document.extend_from_slice(&signing_key.to_bytes());
+    format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
+        Base64::encode_string(&document)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -935,6 +974,14 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         for (name, value) in secret_values {
             let content = secret_file_content(value);
             write_secret_file(&secret_directory, &name, &content)?;
+        }
+        for runtime_file in &payload.runtime_files {
+            write_runtime_file(
+                &secret_directory,
+                &runtime_file.file,
+                runtime_file.content.as_bytes(),
+                runtime_file.mode,
+            )?;
         }
         sync_directory(&secret_directory)?;
         sync_directory(&staging)?;
@@ -1068,8 +1115,26 @@ fn generate_pki<G: SecretGenerator>(
 
     let signing_key = ed25519_dalek::SigningKey::from_pkcs8_der(&intermediate_der)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let encrypted_intermediate = signing_key
-        .to_pkcs8_encrypted_pem(&mut OsRng, password.as_bytes(), LineEnding::LF)
+    let plaintext = signing_key
+        .to_pkcs8_der()
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let private_key_info = pkcs8::PrivateKeyInfo::try_from(plaintext.as_bytes())
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let mut salt = [0_u8; 16];
+    let mut initialization_vector = [0_u8; 16];
+    OsRng.fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut initialization_vector);
+    let encryption = pkcs8::pkcs5::pbes2::Parameters::pbkdf2_sha256_aes256cbc(
+        600_000,
+        &salt,
+        &initialization_vector,
+    )
+    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let encrypted_document = private_key_info
+        .encrypt_with_params(encryption, password.as_bytes())
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let encrypted_intermediate = encrypted_document
+        .to_pem("ENCRYPTED PRIVATE KEY", LineEnding::LF)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?
         .to_string();
     let (public_jwk, private_jwk) = generate_es256_jwks()?;
@@ -1685,6 +1750,14 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         let content = secret_file_content(value);
         write_secret_file(&bundle.join("secrets"), &name, &content)?;
     }
+    for runtime_file in &payload.runtime_files {
+        replace_runtime_file(
+            &bundle.join("secrets"),
+            &runtime_file.file,
+            runtime_file.content.as_bytes(),
+            runtime_file.mode,
+        )?;
+    }
     if let Some(replacement) = controller_leaf_replacement {
         atomic_replace_controller_leaf(&bundle.join("secrets"), replacement)?;
     }
@@ -2065,7 +2138,33 @@ fn create_secure_directory(path: &Path) -> Result<(), SetupError> {
 }
 
 fn write_secret_file(root: &Path, relative: &str, content: &[u8]) -> Result<(), SetupError> {
+    write_nested_file(root, relative, content, 0o600)
+}
+
+fn write_runtime_file(
+    root: &Path,
+    relative: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<(), SetupError> {
+    write_nested_file(root, relative, content, mode)
+}
+
+fn write_nested_file(
+    root: &Path,
+    relative: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<(), SetupError> {
     let path = Path::new(relative);
+    ensure_nested_parent(root, path, relative)?;
+    let target = root.join(path);
+    write_new_file(&target, content, mode)?;
+    sync_directory(target.parent().expect("secret has parent"))?;
+    Ok(())
+}
+
+fn ensure_nested_parent(root: &Path, path: &Path, relative: &str) -> Result<(), SetupError> {
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     let mut current = root.to_path_buf();
     for component in parent.components() {
@@ -2089,10 +2188,31 @@ fn write_secret_file(root: &Path, relative: &str, content: &[u8]) -> Result<(), 
             Err(error) => return Err(error.into()),
         }
     }
-    let target = root.join(path);
-    write_new_file(&target, content, 0o600)?;
-    sync_directory(target.parent().expect("secret has parent"))?;
     Ok(())
+}
+
+fn replace_runtime_file(
+    root: &Path,
+    relative: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<(), SetupError> {
+    let relative_path = Path::new(relative);
+    ensure_nested_parent(root, relative_path, relative)?;
+    let target = root.join(relative_path);
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            atomic_replace(&target, content, mode)
+        }
+        Ok(_) => Err(SetupError::UnsafeDestination(format!(
+            "{} is not a regular runtime file",
+            target.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            write_runtime_file(root, relative, content, mode)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn write_new_file(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {

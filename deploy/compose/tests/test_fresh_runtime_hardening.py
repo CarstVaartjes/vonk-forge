@@ -32,10 +32,10 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
 
     assert "litellm-database-password" in postgres["secrets"]
     assert postgres["entrypoint"] == ["/usr/local/bin/vonk-postgres-entrypoint"]
+    assert postgres["command"] == ["postgres"]
     assert (
         "./postgres/entrypoint.sh:"
-        "/usr/local/bin/vonk-postgres-entrypoint:ro"
-        in postgres["volumes"]
+        "/usr/local/bin/vonk-postgres-entrypoint:ro" in postgres["volumes"]
     )
     assert (
         "./postgres/init-databases.sh:"
@@ -48,6 +48,38 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
             "set LiteLLM database password secret file}"
         )
     }
+
+
+def test_preprovisioned_step_ca_bypasses_the_image_initializer() -> None:
+    step_ca = _document("compose.yaml")["services"]["step-ca"]
+
+    assert step_ca["entrypoint"] == ["step-ca"]
+    assert step_ca["command"] == [
+        "/run/vonk-normalized-secrets/step-ca/ca.json",
+        "--password-file",
+        "/run/vonk-normalized-secrets/step-ca/password",
+    ]
+
+
+def test_prometheus_does_not_pass_a_value_to_its_boolean_lifecycle_flag() -> None:
+    command = _document("compose.yaml")["services"]["prometheus"]["command"]
+
+    assert not any(
+        argument.startswith("--web.enable-lifecycle") for argument in command
+    )
+
+
+def test_read_only_litellm_places_prisma_cache_on_tmpfs() -> None:
+    litellm = _document("compose.yaml")["services"]["litellm"]
+
+    assert litellm["read_only"] is True
+    assert "/tmp" in litellm["tmpfs"]
+    assert "/root:exec,mode=0700,uid=10002,gid=10001" in litellm["tmpfs"]
+    assert litellm["environment"]["HOME"] == "/root"
+    assert litellm["environment"]["XDG_CACHE_HOME"] == "/root/.cache"
+    assert litellm["environment"]["PRISMA_QUERY_ENGINE_BINARY"].startswith(
+        "/root/.cache/"
+    )
 
 
 def test_caddy_healthcheck_does_not_depend_on_a_virtual_host() -> None:
@@ -71,10 +103,13 @@ def test_caddy_serves_the_site_controller_certificate() -> None:
         "controller-server-certificate",
         "controller-server-key",
     }
-    assert caddyfile.count(
-        "tls /run/secrets/controller-server-certificate "
-        "/run/secrets/controller-server-key"
-    ) == 3
+    assert (
+        caddyfile.count(
+            "tls /run/secrets/controller-server-certificate "
+            "/run/secrets/controller-server-key"
+        )
+        == 3
+    )
 
 
 def test_control_images_do_not_install_git_or_ssh() -> None:

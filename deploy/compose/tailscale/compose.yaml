@@ -63,6 +63,12 @@ services:
     read_only: true
     network_mode: service:tailscale-gateway
     entrypoint: [/bin/sh, /usr/local/bin/configure-tailscale]
+    environment:
+      # Compose profiles are a client-side selection and are not inherited by
+      # containers. Pass the selection explicitly so the healthcheck cannot
+      # report the default topology healthy while a selected Hermes route is
+      # still absent.
+      VONK_SELECTED_PROFILES: ${COMPOSE_PROFILES:-}
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro

@@ -137,6 +137,13 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
         raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
     try:
         for _ in range(120):
+            logs = subprocess.run(
+                ["docker", "logs", container],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
             probe = subprocess.run(
                 [
                     "docker",
@@ -155,17 +162,19 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 text=True,
                 timeout=10,
             )
-            if probe.returncode == 0 and probe.stdout.strip() == "1":
+            # The official image briefly starts a temporary server while it runs
+            # init scripts, then shuts that server down before starting PostgreSQL
+            # for real.  A successful query alone can therefore race that planned
+            # shutdown.  Require the image's completed-init marker as well.
+            if (
+                "PostgreSQL init process complete; ready for start up."
+                in logs.stdout + logs.stderr
+                and probe.returncode == 0
+                and probe.stdout.strip() == "1"
+            ):
                 break
             time.sleep(0.25)
         else:
-            logs = subprocess.run(
-                ["docker", "logs", container],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
             raise AssertionError(
                 f"PostgreSQL did not become ready:\n{logs.stdout}{logs.stderr}"
             )

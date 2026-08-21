@@ -133,6 +133,97 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
     }
 }
 
+fn runtime_file_payload(compose: &str, content: &str, mode: u32) -> CanonicalTemplatePayload {
+    CanonicalTemplatePayload::from_json(
+        &serde_json::to_vec(&serde_json::json!({
+            "schema_version": 2,
+            "docker_compose_yaml": compose,
+            "required_values": [],
+            "secrets": [],
+            "runtime_files": [
+                {
+                    "file": "runtime-configs/service.conf",
+                    "content": content,
+                    "mode": mode
+                }
+            ]
+        }))
+        .expect("runtime payload JSON"),
+    )
+    .expect("valid runtime-file payload")
+}
+
+#[test]
+fn runtime_files_are_materialized_and_replaced_beneath_the_bundle() {
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::new()), &mut output);
+    let installed = prepare(
+        &runtime_file_payload("services: {}\n", "first\n", 0o644),
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("runtime file installed");
+    let runtime_file = installed.root.join("secrets/runtime-configs/service.conf");
+    assert_eq!(
+        std::fs::read_to_string(&runtime_file).expect("runtime file"),
+        "first\n"
+    );
+
+    let upgraded = prepare(
+        &runtime_file_payload("services:\n  upgraded: {}\n", "second\n", 0o755),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("runtime file upgraded");
+    assert_eq!(upgraded.root, installed.root);
+    assert_eq!(
+        std::fs::read_to_string(&runtime_file).expect("runtime file"),
+        "second\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(upgraded.root.join("docker-compose.yaml"))
+            .expect("upgraded compose"),
+        "services:\n  upgraded: {}\n"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(runtime_file)
+                .expect("runtime file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+}
+
+#[test]
+fn runtime_files_reject_unsafe_paths_and_modes() {
+    for (file, mode) in [
+        ("../outside", 0o644),
+        ("runtime-configs/../outside", 0o644),
+        ("runtime-configs/service.conf", 0o777),
+    ] {
+        let payload = serde_json::json!({
+            "schema_version": 2,
+            "docker_compose_yaml": "services: {}\n",
+            "required_values": [],
+            "secrets": [],
+            "runtime_files": [{"file": file, "content": "safe\n", "mode": mode}]
+        });
+        CanonicalTemplatePayload::from_json(
+            &serde_json::to_vec(&payload).expect("runtime payload JSON"),
+        )
+        .expect_err("unsafe runtime file rejected");
+    }
+}
+
 fn write_existing_bundle(root: &Path) {
     let bundle = root.join("vonk-forge");
     std::fs::create_dir(&bundle).expect("bundle directory");

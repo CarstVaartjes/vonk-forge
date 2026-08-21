@@ -14,6 +14,8 @@ COPY pyproject.toml /vonk-cluster-profiles/
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
 COPY control/pyproject.toml ./
 COPY control/src ./src
+COPY control/alembic.ini ./alembic.ini
+COPY control/migrations ./migrations
 COPY schemas/global/catalog-entity-v1.schema.json /schemas/global/catalog-entity-v1.schema.json
 COPY schemas/global/harness-evidence-v1.schema.json /schemas/global/harness-evidence-v1.schema.json
 COPY schemas/global/recipe-v1.schema.json /schemas/global/recipe-v1.schema.json
@@ -29,9 +31,6 @@ RUN groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control
 COPY --from=build /install /usr/local
 WORKDIR /srv/vonk-control
-COPY control/alembic.ini /srv/vonk-control/alembic.ini
-COPY control/migrations /srv/vonk-control/migrations
-RUN chmod -R a+rX /srv/vonk-control/migrations
 
 FROM runtime-root AS worker-root
 

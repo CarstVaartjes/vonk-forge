@@ -8,6 +8,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import tempfile
 import threading
@@ -33,6 +34,8 @@ STARTUP_ATTEMPTS = 10
 STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
+_PRISMA_CACHE_ROOT = Path("/root")
+_PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _DIRECTORY = re.compile(r"[0-9]{8}-[0-9a-f]{64}\Z")
 _MARKER_FIELDS = {
@@ -62,6 +65,47 @@ class ActiveRequest:
         self.config = config
         self.marker = marker
         self.activation_sha256 = activation_sha256
+
+
+def _prepare_query_engine() -> None:
+    """Populate and validate the non-root executable Prisma cache."""
+    configured = os.environ.get(_PRISMA_QUERY_ENGINE_ENV)
+    if configured is None:
+        return
+    path = Path(configured)
+    try:
+        path.relative_to(_PRISMA_CACHE_ROOT)
+    except ValueError as error:
+        raise RuntimeError("Prisma query engine path is outside its cache") from error
+
+    if not path.exists():
+        environment = os.environ.copy()
+        environment.pop(_PRISMA_QUERY_ENGINE_ENV, None)
+        subprocess.run(
+            ["prisma", "-v"],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+            timeout=120,
+        )
+
+    try:
+        metadata = path.stat(follow_symlinks=False)
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError("Prisma query engine was not populated") from error
+    if (
+        resolved != path
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_uid != os.geteuid()
+        or not 0 < metadata.st_size <= 128 * 1024 * 1024
+        or not os.access(path, os.X_OK)
+    ):
+        raise RuntimeError("Prisma query engine cache is unsafe")
 
 
 @dataclass(frozen=True)
@@ -684,6 +728,7 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
 
 
 def main() -> int:
+    _prepare_query_engine()
     authority = _RouteLeaseAuthority()
     server = _start_route_lease_server(authority)
     try:

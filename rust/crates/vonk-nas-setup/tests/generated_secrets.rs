@@ -113,6 +113,11 @@ fn generated_text_ed25519_keys_and_postgres_urls_are_valid_and_related() {
         .expect("Ed25519 private key");
     let key_pair = KeyPair::from_pem(&private_key).expect("valid PKCS#8 PEM");
     assert!(key_pair.is_compatible(&PKCS_ED25519));
+    ed25519_dalek::SigningKey::from_pkcs8_pem(&private_key).expect("canonical Ed25519 PKCS#8 PEM");
+    assert_eq!(
+        private_key.lines().map(str::len).collect::<Vec<_>>(),
+        [27, 64, 25]
+    );
 }
 
 const PKI_PAYLOAD: &[u8] = br#"{
@@ -582,6 +587,18 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     let password = std::fs::read_to_string(secrets.join("step-ca-password")).expect("CA password");
     let encrypted_intermediate = std::fs::read_to_string(secrets.join("step-ca/intermediate-key"))
         .expect("encrypted intermediate key");
+    let (label, encrypted_document) = pkcs8::SecretDocument::from_pem(&encrypted_intermediate)
+        .expect("encrypted intermediate PEM");
+    assert_eq!(label, "ENCRYPTED PRIVATE KEY");
+    let encrypted_info = pkcs8::EncryptedPrivateKeyInfo::try_from(encrypted_document.as_bytes())
+        .expect("encrypted intermediate PKCS#8");
+    assert!(matches!(
+        encrypted_info.encryption_algorithm,
+        pkcs8::pkcs5::EncryptionScheme::Pbes2(pkcs8::pkcs5::pbes2::Parameters {
+            kdf: pkcs8::pkcs5::pbes2::Kdf::Pbkdf2(_),
+            ..
+        })
+    ));
     ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
         &encrypted_intermediate,
         password.trim().as_bytes(),

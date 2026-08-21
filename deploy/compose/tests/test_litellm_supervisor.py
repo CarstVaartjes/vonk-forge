@@ -39,6 +39,46 @@ def test_supervisor_allows_first_run_database_migrations() -> None:
     assert module.STARTUP_SECONDS == 120
 
 
+def test_supervisor_prepares_the_non_root_prisma_query_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cache = tmp_path / "prisma-cache"
+    engine = cache / "nested" / "query-engine"
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", cache)
+    monkeypatch.setenv(module._PRISMA_QUERY_ENGINE_ENV, str(engine))
+    calls: list[dict[str, object]] = []
+
+    def populate(command, **kwargs) -> None:
+        calls.append({"command": command, **kwargs})
+        engine.parent.mkdir(parents=True)
+        engine.write_bytes(b"query-engine")
+        engine.chmod(0o700)
+
+    monkeypatch.setattr(module.subprocess, "run", populate)
+
+    module._prepare_query_engine()
+
+    assert [call["command"] for call in calls] == [["prisma", "-v"]]
+    assert module._PRISMA_QUERY_ENGINE_ENV not in calls[0]["env"]
+
+
+def test_supervisor_rejects_a_query_engine_outside_its_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", tmp_path / "cache")
+    monkeypatch.setenv(
+        module._PRISMA_QUERY_ENGINE_ENV,
+        str(tmp_path / "outside" / "query-engine"),
+    )
+
+    with pytest.raises(RuntimeError, match="outside its cache"):
+        module._prepare_query_engine()
+
+
 def test_supervisor_recovers_from_a_transient_pre_health_child_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
