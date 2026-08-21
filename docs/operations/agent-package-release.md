@@ -25,30 +25,52 @@ immutable image, package, setup-program, and manifest identities differ.
 
 ## One-time publication authority setup
 
-The repository needs the protected GitHub environments `installer-dev` and
-`installer-stable`. Configure the same values in both environments:
+The workflow separates candidate signing, behavioral canaries, acceptance
+signing, and promotion. Create each environment for both `dev` and `stable`:
 
-- variable `INSTALLER_PUBLIC_ORIGIN=https://install.vonkforge.ai`;
-- variable `R2_INSTALLER_PUBLIC_BUCKET` containing the dedicated public R2
-  bucket name;
-- secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for a
-  token restricted to object read/write in that bucket;
-- secret `VONK_INSTALLER_RELEASE_PRIVATE_KEY` containing one RSA-3072 PEM key;
-  and
-- variable `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` containing the SHA-256 of
-  that key's DER-encoded public key.
+| Environment | Variables | Secrets |
+| --- | --- | --- |
+| `installer-candidate-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
+| `installer-canary-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX` | `VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` |
+| `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
+| `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
-Generate the installer key once on an administrative workstation, record the
-public-key fingerprint, install the private PEM as the protected secret in both
-environments, and then remove the workstation copy:
+Set `INSTALLER_PUBLIC_ORIGIN=https://install.vonkforge.ai`. Use one dedicated
+public R2 bucket and a token restricted to object read/write in only that
+bucket. Configure that token independently in candidate and promotion
+environments; do not substitute repository-wide credentials or copy NAS
+runtime secrets into CI. Prefer workload identity if the selected object-store
+client supports it. The R2 S3 publication path requires an access key, so keep
+that exception bucket-scoped and rotate it deliberately.
+
+Canary credentials must be disposable and limited to the acceptance tailnet
+and external test provider. The Tailscale OAuth client needs only the capability
+to create tagged acceptance nodes. Tailnet policy separately owns Service
+definition, grants, and Service-host auto-approval.
+
+Generate separate RSA-3072 release and acceptance keys on an administrative
+workstation. Record each SHA-256 fingerprint from its DER-encoded public key:
 
 ```sh
 umask 077
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
   -out vonk-installer-release.pem
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+  -out vonk-installer-acceptance.pem
 openssl pkey -in vonk-installer-release.pem -pubout -outform DER \
   | openssl dgst -sha256
+openssl pkey -in vonk-installer-acceptance.pem -pubout -outform DER \
+  | openssl dgst -sha256
 ```
+
+Before installing either private key in GitHub, make two human-controlled
+recovery copies: one encrypted operator backup, optionally in 1Password, and a
+separately encrypted offline escrow. Restore each copy into a temporary
+mode-`0600` file, derive its public fingerprint, and require it to match the
+recorded fingerprint. Only then install the protected GitHub environment
+secrets and remove unencrypted workstation copies. Never rotate or delete an
+existing GitHub signing key until the replacement has passed this recovery
+test and a complete sign/verify publication exercise.
 
 Map `install.vonkforge.ai` to the bucket as an R2 custom domain. The bucket is
 publicly readable but the publication token is write-scoped only to this
