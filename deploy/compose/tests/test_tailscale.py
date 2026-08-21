@@ -798,15 +798,17 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
         }
     }
     assert policy["tests"] == [
-        {"src": "autogroup:admin", "accept": ["svc:vonk-forge:443"]},
-        {"src": "autogroup:member", "deny": ["svc:vonk-forge:443"]},
         {
             "src": "replace-with-your-login@github",
             "accept": ["svc:hermes-api:443", "svc:hermes-dashboard:443"],
         },
         {
-            "src": "autogroup:member",
-            "deny": ["svc:hermes-api:443", "svc:hermes-dashboard:443"],
+            "src": "tag:vonk-gateway",
+            "deny": [
+                "svc:vonk-forge:443",
+                "svc:hermes-api:443",
+                "svc:hermes-dashboard:443",
+            ],
         },
     ]
     rendered = json.dumps(policy)
