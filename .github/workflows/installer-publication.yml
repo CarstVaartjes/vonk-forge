@@ -485,12 +485,11 @@ jobs:
           docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
           docker run --detach --privileged \
             --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
-            --publish 127.0.0.1:2375:2375 \
-            --publish 127.0.0.1:8443:8443 \
+            --network host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             --env DOCKER_TLS_CERTDIR= \
             docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495 \
-            --userland-proxy=false
+            --host=tcp://127.0.0.1:2375
           daemon_ready=false
           for _ in $(seq 1 60); do
             if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
@@ -540,6 +539,7 @@ jobs:
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
