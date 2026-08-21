@@ -26,17 +26,6 @@ next="$test_root/vonk-forge-agent_${candidate_version}_amd64.deb"
 : > "$next"
 : > "$next.sha256"
 
-cat > "$root/etc/vonk-forge-agent/agent.toml" <<'CONFIG'
-enrollment_url = "https://enroll.vonkforge.invalid/"
-controller_url = "https://controller.vonkforge.invalid/"
-ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
-ca_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-data_dir = "/var/lib/vonk-forge-agent"
-node_id = "spk_00000000000000000000000000000000"
-poll_min_seconds = 2
-poll_max_seconds = 60
-CONFIG
-
 cat > "$root/usr/lib/vonk-forge/vonk-agent" <<'AGENT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -179,6 +168,12 @@ grep -Fxq 'version 0.1.0' "$log"
 test "$(grep -Fc 'self-test 0.1.0' "$log")" = 2
 grep -Fq 'refusing downgrade' "$test_root/downgrade.log"
 grep -Fxq '# lifecycle-preserved' "$root/etc/vonk-forge-agent/agent.toml"
+grep -Fxq 'enrollment_url = "https://127.0.0.1:9/"' \
+  "$root/etc/vonk-forge-agent/agent.toml"
+grep -Fxq "ca_path = \"$root/etc/vonk-forge-agent/controller-ca.pem\"" \
+  "$root/etc/vonk-forge-agent/agent.toml"
+grep -Fxq "data_dir = \"$root/var/lib/vonk-forge-agent\"" \
+  "$root/etc/vonk-forge-agent/agent.toml"
 test -f "$root/var/lib/vonk-forge-agent/lifecycle-preserved"
 test "$(cat "$state")" = absent
 

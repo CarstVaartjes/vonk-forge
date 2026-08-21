@@ -154,6 +154,24 @@ install -m 0644 "$temporary/ca.pem" "$ca_path"
 install -m 0600 "$temporary/private-key.pem" "$credentials/private-key.pem"
 install -m 0600 "$temporary/certificate.pem" "$credentials/certificate.pem"
 install -m 0600 "$temporary/ca.pem" "$credentials/chain.pem"
+if [[ ! -e "$config" && ! -L "$config" ]]; then
+  config_new="$temporary/agent.toml"
+  printf '%s\n' \
+    'enrollment_url = "https://127.0.0.1:9/"' \
+    'controller_url = "https://127.0.0.1:9/"' \
+    "ca_path = \"$ca_path\"" \
+    "ca_sha256 = \"$ca_digest\"" \
+    "data_dir = \"$data_dir\"" \
+    "node_id = \"$node_id\"" \
+    'poll_min_seconds = 2' \
+    'poll_max_seconds = 60' \
+    > "$config_new"
+  install -m 0600 "$config_new" "$config"
+fi
+if [[ ! -f "$config" || -L "$config" ]]; then
+  printf '%s\n' 'native lifecycle agent configuration is unsafe' >&2
+  exit 1
+fi
 sed -i \
   -e 's|^controller_url = .*$|controller_url = "https://127.0.0.1:9/"|' \
   -e "s|^ca_sha256 = .*$|ca_sha256 = \"$ca_digest\"|" \
