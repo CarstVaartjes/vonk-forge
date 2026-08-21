@@ -489,7 +489,8 @@ jobs:
             --publish 127.0.0.1:8443:8443 \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             --env DOCKER_TLS_CERTDIR= \
-            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
+            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495 \
+            --userland-proxy=false
           daemon_ready=false
           for _ in $(seq 1 60); do
             if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
