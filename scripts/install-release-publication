@@ -1110,11 +1110,23 @@ def _rclone_object_exists(remote: str, key: str) -> bool:
     # mistaken for an existing object whose digest is SHA-256(empty).
     result = subprocess.run(
         ["rclone", "lsjson", f"{remote}/{key}", "--stat"],
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        text=True,
         check=False,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    try:
+        metadata = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(metadata, dict)
+        and metadata.get("IsDir") is False
+        and isinstance(metadata.get("Size"), int)
+        and metadata["Size"] >= 0
+    )
 
 
 def _rclone_digest(remote: str, key: str) -> str | None:
@@ -1162,7 +1174,7 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
     observed = _rclone_digest(remote, key)
     if immutable and observed is not None:
         if observed != expected:
-            raise PublicationError("refusing to overwrite an immutable object")
+            raise PublicationError(f"refusing to overwrite immutable object {key}")
         return
     command = ["rclone", "copyto"]
     if immutable:

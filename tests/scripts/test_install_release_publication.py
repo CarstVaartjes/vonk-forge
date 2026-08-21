@@ -327,7 +327,10 @@ def object_path(value: str) -> Path:
 if command == "lsjson":
     path = object_path(arguments[0])
     if not path.is_file():
-        raise SystemExit(3)
+        # Some object-store backends represent a missing exact object as a
+        # successful stat with a non-object JSON payload.
+        print("null")
+        raise SystemExit(0)
     print(json.dumps({"IsDir": False, "Path": path.name, "Size": path.stat().st_size}))
 elif command == "cat":
     path = object_path(arguments[0])
