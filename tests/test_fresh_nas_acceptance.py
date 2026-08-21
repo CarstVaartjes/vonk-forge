@@ -79,6 +79,21 @@ def test_generate_bundle_allows_the_installer_to_reuse_its_target(
     assert first == second == target / "vonk-forge"
 
 
+def test_nas_bind_address_can_differ_from_the_reachable_address(monkeypatch) -> None:
+    acceptance = _acceptance_module()
+
+    monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+    monkeypatch.delenv("VONK_ACCEPTANCE_NAS_BIND_IP", raising=False)
+    assert acceptance.nas_bind_ipv4("172.18.0.2") == "0.0.0.0"
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_NAS_BIND_IP", "0.0.0.0")
+    assert acceptance.nas_bind_ipv4("172.18.0.2") == "0.0.0.0"
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_NAS_BIND_IP", "ff02::1")
+    with pytest.raises(AcceptanceError, match="NAS_BIND_IP"):
+        acceptance.nas_bind_ipv4("172.18.0.2")
+
+
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [

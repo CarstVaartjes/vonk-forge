@@ -83,6 +83,23 @@ def host_ipv4() -> str:
     return str(parsed)
 
 
+def nas_bind_ipv4(default: str) -> str:
+    configured = os.environ.get("VONK_ACCEPTANCE_NAS_BIND_IP")
+    if configured is None:
+        configured = (
+            "0.0.0.0"
+            if os.environ.get("DOCKER_HOST", "").startswith("tcp://")
+            else default
+        )
+    try:
+        address = ipaddress.ip_address(configured)
+    except ValueError as error:
+        raise AcceptanceError("VONK_ACCEPTANCE_NAS_BIND_IP is invalid") from error
+    if address.version != 4 or address.is_multicast:
+        raise AcceptanceError("VONK_ACCEPTANCE_NAS_BIND_IP is invalid")
+    return str(address)
+
+
 def command_environment(root: Path) -> dict[str, str]:
     root.mkdir(mode=0o700)
     commands = root / "commands"
@@ -973,6 +990,7 @@ def main() -> None:
     if not workspace.is_absolute() or workspace.is_symlink() or not workspace.is_dir():
         raise AcceptanceError("acceptance workspace is unavailable")
     nas_ip = host_ipv4()
+    nas_bind_ip = nas_bind_ipv4(nas_ip)
     enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
     fixtures = compose_compatibility_fixtures()
 
@@ -982,7 +1000,7 @@ def main() -> None:
         root = Path(directory)
         child_environment = command_environment(root / "workstation")
         common = {
-            "nas_ip": nas_ip,
+            "nas_ip": nas_bind_ip,
             "tailnet_suffix": tailnet_suffix,
             "oauth_client_id": oauth_client_id,
             "oauth_client_secret": oauth_client_secret,
