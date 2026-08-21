@@ -491,12 +491,7 @@ def _http_json(response: bytes, *, label: str) -> object:
 
 def _tailnet_tunnel(hostname: str) -> list[str]:
     return [
-        *reference_compose(),
-        "exec",
-        "-T",
-        "tailscale-gateway",
         "tailscale",
-        "--socket=/var/run/tailscale/tailscaled.sock",
         "nc",
         hostname,
         "443",

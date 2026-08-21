@@ -435,6 +435,12 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         registry_hostname="registry.acceptance.example.test",
     )
 
+    assert all(
+        command
+        == ["tailscale", "nc", "vonk-forge.acceptance.example.test", "443"]
+        for command, kwargs in calls
+        if kwargs["server_hostname"] != "registry.acceptance.example.test"
+    )
     requests = {kwargs["path"]: kwargs for _, kwargs in calls}
     models = requests["/v1/models"]
     assert models["headers"] == {"Authorization": "Bearer litellm-secret"}
