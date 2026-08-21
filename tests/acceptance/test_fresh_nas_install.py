@@ -890,12 +890,7 @@ def verify_tailscale_services(
         hostname, _, path = url.removeprefix("https://").partition("/")
         https_over_command(
             [
-                *reference_compose(),
-                "exec",
-                "-T",
-                "tailscale-gateway",
                 "tailscale",
-                "--socket=/var/run/tailscale/tailscaled.sock",
                 "nc",
                 hostname,
                 "443",

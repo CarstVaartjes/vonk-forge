@@ -167,6 +167,21 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     ]
 
 
+def test_public_controller_uses_the_independent_tailnet_client(tmp_path: Path) -> None:
+    lifecycle = _module()
+    boundary = lifecycle.PublicController(
+        bundle=tmp_path,
+        hostname="vonk-forge.acceptance.example.test",
+    )
+
+    assert boundary._command() == [
+        "tailscale",
+        "nc",
+        "vonk-forge.acceptance.example.test",
+        "443",
+    ]
+
+
 def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
     tmp_path: Path, monkeypatch
 ) -> None:

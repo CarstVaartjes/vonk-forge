@@ -284,6 +284,47 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
         )
 
 
+def test_tailnet_service_probe_uses_an_independent_host_client(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    compose = tmp_path / "compose"
+    compose.write_text("#!/bin/sh\n")
+    compose.chmod(0o755)
+    monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(compose))
+    compose_commands: list[list[str]] = []
+    probe_commands: list[list[str]] = []
+
+    responses = iter(
+        (
+            json.dumps({"BackendState": "Running"}),
+            json.dumps(_serve_status(hermes=True)),
+            json.dumps(_serve_configuration(hermes=True)),
+        )
+    )
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        compose_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=next(responses), stderr="")
+
+    def probe(command: list[str], **_kwargs: object) -> bytes:
+        probe_commands.append(command)
+        return b"HTTP/1.1 200 OK\r\n\r\n"
+
+    monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(acceptance, "https_over_command", probe)
+
+    acceptance.verify_tailscale_services(
+        tmp_path, hermes=True, tailnet_suffix="acceptance.example.test"
+    )
+
+    assert all("tailscale-gateway" in command for command in compose_commands)
+    assert probe_commands == [
+        ["tailscale", "nc", "vonk-forge.acceptance.example.test", "443"],
+        ["tailscale", "nc", "hermes-dashboard.acceptance.example.test", "443"],
+    ]
+
+
 def test_routed_service_checks_require_authentication_and_expected_data(
     tmp_path: Path, monkeypatch
 ) -> None:

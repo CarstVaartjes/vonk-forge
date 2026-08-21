@@ -261,24 +261,14 @@ class PublicController:
         self,
         *,
         bundle: Path,
-        project: str,
         hostname: str,
     ) -> None:
         self.bundle = bundle
-        self.project = project
         self.hostname = hostname
 
     def _command(self) -> list[str]:
         return [
-            "docker",
-            "compose",
-            "--project-name",
-            self.project,
-            "exec",
-            "-T",
-            "tailscale-gateway",
             "tailscale",
-            "--socket=/var/run/tailscale/tailscaled.sock",
             "nc",
             self.hostname,
             "443",
@@ -661,7 +651,6 @@ class SparkLifecycle:
             self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         boundary = PublicController(
             bundle=self.bundle,
-            project=self.project,
             hostname=self.control_hostname,
         )
         password = self._read_secret("admin-password")
