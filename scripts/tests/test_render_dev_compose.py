@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -21,6 +24,15 @@ DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
 
 SCRIPT = ROOT / "scripts/render-dev-compose"
+
+
+def _renderer_module() -> Any:
+    loader = importlib.machinery.SourceFileLoader("render_dev_compose", str(SCRIPT))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 def _run_renderer(
@@ -101,6 +113,19 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
             text=True,
         )
         assert config.returncode == 0, config.stderr
+
+
+def test_runtime_config_identity_changes_with_content(tmp_path: Path) -> None:
+    renderer = _renderer_module()
+    source = tmp_path / "runtime.sh"
+    source.write_text("#!/bin/sh\nprintf first\\n\n", encoding="utf-8")
+    first = renderer._runtime_config_name(source)
+    source.write_text("#!/bin/sh\nprintf second\\n\n", encoding="utf-8")
+    second = renderer._runtime_config_name(source)
+
+    assert first.startswith("vonk_runtime_")
+    assert second.startswith("vonk_runtime_")
+    assert first != second
 
 
 def test_render_preserves_runtime_asset_executability_with_safe_config_modes(

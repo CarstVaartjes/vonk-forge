@@ -175,6 +175,12 @@ grep -Fxq "ca_path = \"$root/etc/vonk-forge-agent/controller-ca.pem\"" \
 grep -Fxq "data_dir = \"$root/var/lib/vonk-forge-agent\"" \
   "$root/etc/vonk-forge-agent/agent.toml"
 test -f "$root/var/lib/vonk-forge-agent/lifecycle-preserved"
+test "$(/usr/bin/openssl x509 \
+  -in "$root/etc/vonk-forge-agent/controller-ca.pem" -noout -text \
+  | grep -Fc 'X509v3 Basic Constraints: critical')" = 1
+test "$(/usr/bin/openssl x509 \
+  -in "$root/var/lib/vonk-forge-agent/credentials/certificate.pem" -noout -text \
+  | grep -Fc 'TLS Web Client Authentication')" = 1
 test "$(cat "$state")" = absent
 
 printf 'native direct-package lifecycle helper: PASS\n'

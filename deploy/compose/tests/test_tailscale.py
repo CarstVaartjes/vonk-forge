@@ -41,6 +41,24 @@ HERMES_MAP = {
 }
 
 
+def _host_status(*services: str) -> str:
+    mappings = {
+        service: [f"100.64.0.{index}"]
+        for index, service in enumerate(services, start=1)
+    }
+    return json.dumps(
+        {
+            "Self": {
+                "CapMap": {"service-host": [mappings]},
+                "PrimaryRoutes": [
+                    f"{addresses[0]}/32" for addresses in mappings.values()
+                ],
+            }
+        },
+        separators=(",", ":"),
+    )
+
+
 def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
     state = tmp_path / "tailscale-state.json"
     calls = tmp_path / "tailscale-calls.log"
@@ -64,7 +82,10 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "    temporary.write_text(json.dumps(value, sort_keys=True, separators=(',', ':')), encoding='utf-8')\n"
         "    temporary.replace(state)\n"
         "if args == ['status', '--json']:\n"
-        "    print(json.dumps({'Self': {'CapMap': {'service-host': [{}]}}}, separators=(',', ':')))\n"
+        "    value = load()\n"
+        "    mappings = {name: [f'100.64.0.{index}'] for index, name in enumerate(value['advertised'], start=1)}\n"
+        "    routes = [addresses[0] + '/32' for addresses in mappings.values()]\n"
+        "    print(json.dumps({'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
         "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
         "    value = load()\n"
@@ -187,6 +208,7 @@ def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> Non
     nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     nc.chmod(0o755)
     expected = json.dumps(DEFAULT_MAP, separators=(",", ":"))
+    host_status = _host_status("svc:vonk-forge")
     fake.write_text(
         "#!/bin/sh\n"
         f"calls={calls}\n"
@@ -197,7 +219,7 @@ def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> Non
         "  *\"serve status --json\"*) printf '%s\\n' "
         '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
+        f"'{host_status}' ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -408,9 +430,11 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert text.count('"HTTPS":true') >= 3
     assert '"HTTP":true' in text
     assert "120" in text
-    assert "service-host" in text
-    assert '"services/hermes-api"' in text
-    assert '"services/hermes-dashboard"' in text
+    assert '"service-host":' in text
+    assert '"PrimaryRoutes":\\[[^]]' in text
+    assert '"svc:hermes-api":' in text
+    assert '"svc:hermes-dashboard":' in text
+    assert '"services/vonk-forge"' not in text
     assert "BusyBox nc exits as soon as piped stdin reaches EOF" in text
     assert "sleep 1" in text
     assert "'[23][0-9][0-9]'" in text
@@ -446,6 +470,42 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     assert configurator["environment"] == {"VONK_SELECTED_PROFILES": "hermes"}
 
 
+def test_client_service_access_does_not_claim_service_host_readiness(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{"services/vonk-forge":[{}]}}}\' ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_HEALTHCHECK_ONLY": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode != 0
+
+
 def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> None:
     socket_path = tmp_path / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
@@ -466,6 +526,7 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
         },
         separators=(",", ":"),
     )
+    host_status = _host_status("svc:vonk-forge")
     fake.write_text(
         "#!/bin/sh\n"
         f"log={log}\n"
@@ -484,7 +545,7 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
         'else printf \'%s\\n\' \'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTP":true}}}}}\'; fi ;;\n'
         '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*)\n'
         '    printf \'%s\\n\' "$*" >>"$log"; touch "$repaired" ;;\n'
-        '  *"status --json"*) printf \'%s\\n\' \'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
+        f"  *\"status --json\"*) printf '%s\\n' '{host_status}' ;;\n"
         '  *) printf \'%s\\n\' "$*" >>"$log" ;;\n'
         "esac\n"
     )
@@ -540,6 +601,7 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
         },
         separators=(",", ":"),
     )
+    host_status = _host_status(*HERMES_MAP["services"])
     fake.write_text(
         "#!/bin/sh\n"
         f"calls={calls}\n"
@@ -555,7 +617,7 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
         '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*) '
         'touch "$repaired" ;;\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
+        f"'{host_status}' ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -579,8 +641,8 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
             timeout=10,
         )
         missing_hermes_capabilities = fake.read_text(encoding="utf-8").replace(
-            '"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]',
-            '"services/vonk-forge":[]',
+            host_status,
+            _host_status("svc:vonk-forge"),
         )
         fake.write_text(missing_hermes_capabilities, encoding="utf-8")
         health = subprocess.run(
