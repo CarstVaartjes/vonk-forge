@@ -201,7 +201,8 @@ baseline_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
   <<< "$baseline_self_test")
 
 if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
-  chown -R vonk-agent:vonk-agent "$data_dir" "$runtime_dir"
+  chown -R vonk-agent:vonk-agent "$data_dir/.config" "$credentials" "$runtime_dir"
+  test "$(stat -c '%U:%G:%a' "$data_dir/machine-evidence")" = root:vonk-agent:640
   getent passwd vonk-agent >/dev/null
   awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
     /etc/subuid
@@ -223,6 +224,9 @@ env SYSTEMD_OFFLINE=1 "$dpkg" --unpack "$next_package"
 [[ "$("$dpkg_query" -W -f="$dpkg_status_format" vonk-forge-agent)" = iU* ]]
 env SYSTEMD_OFFLINE=1 "$dpkg" --configure -a
 test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$next_version"
+if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
+  test "$(stat -c '%U:%G:%a' "$data_dir/machine-evidence")" = root:vonk-agent:640
+fi
 grep -Fx '# lifecycle-preserved' "$config" >/dev/null
 test -f "$data_dir/lifecycle-preserved"
 test "$("$agent" --version)" = "vonk-agent $next_semantic"

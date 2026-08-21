@@ -540,9 +540,7 @@ def _native_catalog_documents(
     load(runtime.get("distribution"))
     if execution.get("patch_bundle") is not None:
         load(execution.get("patch_bundle"))
-    return tuple(
-        (document, identity[3]) for identity, document in resolved.items()
-    )
+    return tuple((document, identity[3]) for identity, document in resolved.items())
 
 
 def _model_qualification(
@@ -598,21 +596,36 @@ def _model_qualification(
 
 
 class Runner:
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        *,
+        control_client: Client | None = None,
+        inference_client: Client | None = None,
+    ) -> None:
         self.args = args
         self.states = PHASE_STATES[args.phase]
         self.api_base = _base_url(args.api_base, "control API")
         self.inference_base = _base_url(
             args.inference_base or args.api_base, "inference API"
         )
-        admin_token = _read_token(args.admin_token_file)
-        inference_token = _read_token(args.inference_token_file)
-        self.control = Client(self.api_base, admin_token, timeout=args.timeout_seconds)
-        self.inference = Client(
-            self.inference_base, inference_token, timeout=args.timeout_seconds
-        )
-        # Tokens remain only inside the clients and are never persisted or printed.
-        del admin_token, inference_token
+        if (control_client is None) != (inference_client is None):
+            raise SliceError("development slice clients are incomplete")
+        if control_client is None:
+            admin_token = _read_token(args.admin_token_file)
+            inference_token = _read_token(args.inference_token_file)
+            self.control = Client(
+                self.api_base, admin_token, timeout=args.timeout_seconds
+            )
+            self.inference = Client(
+                self.inference_base, inference_token, timeout=args.timeout_seconds
+            )
+            # Tokens remain only inside the clients and are never persisted or printed.
+            del admin_token, inference_token
+        else:
+            assert inference_client is not None
+            self.control = control_client
+            self.inference = inference_client
         default_recipes = {
             "synthetic": SYNTHETIC_ROOT / "recipe.json",
             "model-single": ROOT / NATIVE_INPUTS["model-single"]["recipe"],
@@ -657,9 +670,7 @@ class Runner:
         if len(targets) != expected_targets:
             raise SliceError("development phase target count is invalid")
         topology = self.recipe.get("topology")
-        if not isinstance(topology, dict) or not isinstance(
-            topology.get("name"), str
-        ):
+        if not isinstance(topology, dict) or not isinstance(topology.get("name"), str):
             raise SliceError("recipe topology is invalid")
         if args.phase == "model-multinode":
             if args.failure_node not in targets or args.failure_node == targets[0]:
@@ -886,7 +897,8 @@ class Runner:
             or isinstance(cursor, bool)
             or cursor < 0
             or not isinstance(fleet.get("generated_at"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", str(fleet.get("authority_revision"))) is None
+            or re.fullmatch(r"[0-9a-f]{64}", str(fleet.get("authority_revision")))
+            is None
             or not isinstance(nodes, list)
         ):
             raise SliceError("fleet response is invalid")
@@ -1692,7 +1704,9 @@ class Runner:
         for node_id in self.targets:
             node = by_id.get(node_id)
             connection = node.get("connection") if self._node_ready(node) else None
-            value = connection.get("last_seen_at") if isinstance(connection, dict) else None
+            value = (
+                connection.get("last_seen_at") if isinstance(connection, dict) else None
+            )
             before = initial.get(node_id)
             if (
                 not isinstance(value, str)
@@ -1729,7 +1743,11 @@ class Runner:
         )
         preview = _object(preview_payload, "recipe stop preview")
         plan_digest = preview.get("plan_digest")
-        if preview.get("allowed") is not True or not isinstance(plan_digest, str) or not plan_digest:
+        if (
+            preview.get("allowed") is not True
+            or not isinstance(plan_digest, str)
+            or not plan_digest
+        ):
             raise SliceError("recipe stop is not admitted")
         _, response = self.control.request(
             "POST",
@@ -1757,7 +1775,11 @@ class Runner:
         )
         preview = _object(preview_payload, "recipe uninstall preview")
         plan_digest = preview.get("plan_digest")
-        if preview.get("allowed") is not True or not isinstance(plan_digest, str) or not plan_digest:
+        if (
+            preview.get("allowed") is not True
+            or not isinstance(plan_digest, str)
+            or not plan_digest
+        ):
             raise SliceError("recipe uninstall is not admitted")
         _, response = self.control.request(
             "POST",
