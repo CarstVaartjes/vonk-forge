@@ -160,18 +160,42 @@ service_host_is_active() {
     # services/* capabilities authorize this node as a client of a TailVIP;
     # they do not prove that control has approved this tagged node to host it.
     # service-host is the control-plane mapping of approved service names to
-    # their VIPs. PrimaryRoutes proves tailscaled has activated those routes.
-    grep -Fq '"service-host":' "${runtime_dir}/tailscale-status.compact" \
+    # their VIPs and is Tailscale's documented Service-host readiness signal.
+    # Extract that value before matching names so AdvertisedServices cannot
+    # make an unapproved host appear healthy. Userspace Service hosts do not
+    # expose a separate route-activation field that is valid as a readiness gate.
+    service_hosts=${runtime_dir}/tailscale-service-hosts.compact
+    awk '
+        { document = document $0 }
+        END {
+            marker = "\"service-host\":"
+            start = index(document, marker)
+            if (start == 0) exit 1
+            value = substr(document, start + length(marker))
+            if (substr(value, 1, 1) != "[") exit 1
+            depth = 0
+            for (index_value = 1; index_value <= length(value); index_value++) {
+                character = substr(value, index_value, 1)
+                if (character == "[") depth++
+                if (character == "]") {
+                    depth--
+                    if (depth == 0) {
+                        print substr(value, 1, index_value)
+                        exit 0
+                    }
+                }
+            }
+            exit 1
+        }
+    ' "${runtime_dir}/tailscale-status.compact" >"${service_hosts}" \
         || return 1
-    grep -Fq '"svc:vonk-forge":' "${runtime_dir}/tailscale-status.compact" \
-        || return 1
-    grep -Eq '"PrimaryRoutes":\[[^]]' "${runtime_dir}/tailscale-status.compact" \
+    grep -Eq '"svc:vonk-forge":\[[^]]' "${service_hosts}" \
         || return 1
     if [ "${include_hermes}" = "0" ]; then
         return 0
     fi
-    grep -Fq '"svc:hermes-api":' "${runtime_dir}/tailscale-status.compact" \
-        && grep -Fq '"svc:hermes-dashboard":' "${runtime_dir}/tailscale-status.compact"
+    grep -Eq '"svc:hermes-api":\[[^]]' "${service_hosts}" \
+        && grep -Eq '"svc:hermes-dashboard":\[[^]]' "${service_hosts}"
 }
 
 include_hermes=0
@@ -241,7 +265,7 @@ while :; do
         wait_for_exact_services "${desired_hermes}" || exit 1
     fi
     # Configuration advertises the desired services. Control may still require
-    # approval, so health remains failed until service-host and PrimaryRoutes
-    # show that the selected TailVIPs are genuinely active.
+    # approval, so health remains failed until service-host maps the selected
+    # Services to genuine TailVIPs.
     service_host_is_active "${desired_hermes}" || continue
 done

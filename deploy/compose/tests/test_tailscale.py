@@ -50,9 +50,6 @@ def _host_status(*services: str) -> str:
         {
             "Self": {
                 "CapMap": {"service-host": [mappings]},
-                "PrimaryRoutes": [
-                    f"{addresses[0]}/32" for addresses in mappings.values()
-                ],
             }
         },
         separators=(",", ":"),
@@ -430,8 +427,9 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert text.count('"HTTPS":true') >= 3
     assert '"HTTP":true' in text
     assert "120" in text
-    assert '"service-host":' in text
-    assert '"PrimaryRoutes":\\[[^]]' in text
+    assert 'marker = "\\"service-host\\":"' in text
+    assert "PrimaryRoutes" not in text
+    assert "tailscale-service-hosts.compact" in text
     assert '"svc:hermes-api":' in text
     assert '"svc:hermes-dashboard":' in text
     assert '"services/vonk-forge"' not in text
@@ -470,7 +468,7 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     assert configurator["environment"] == {"VONK_SELECTED_PROFILES": "hermes"}
 
 
-def test_client_service_access_does_not_claim_service_host_readiness(
+def test_unapproved_advertisement_does_not_claim_service_host_readiness(
     tmp_path: Path,
 ) -> None:
     socket_path = tmp_path / "tailscaled.sock"
@@ -481,7 +479,7 @@ def test_client_service_access_does_not_claim_service_host_readiness(
         "#!/bin/sh\n"
         'case "$*" in\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{"services/vonk-forge":[{}]}}}\' ;;\n'
+        '\'{"Self":{"AdvertisedServices":["svc:vonk-forge"],"CapMap":{"service-host":[{}],"services/vonk-forge":[{}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )

@@ -91,6 +91,17 @@ def _prepare_query_engine() -> None:
             timeout=120,
         )
 
+    # prisma -v populates the native engine name. On AMD64 that currently
+    # matches the configured Debian fallback, while ARM64 uses a distinct
+    # linux-arm64 filename. Accept only one native engine in the same pinned
+    # cache directory, then retain the strict file checks below.
+    if not path.exists():
+        candidates = sorted(path.parent.glob("query-engine-*"))
+        if len(candidates) != 1:
+            raise RuntimeError("Prisma query engine was not populated")
+        path = candidates[0]
+        os.environ[_PRISMA_QUERY_ENGINE_ENV] = str(path)
+
     try:
         metadata = path.stat(follow_symlinks=False)
         resolved = path.resolve(strict=True)
