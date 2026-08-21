@@ -257,3 +257,15 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         ("darwin-arm64", "macos-15", "vonk-nas-setup"),
     }
     assert all("target" not in entry for entry in matrix)
+
+
+def test_setup_checksums_are_portable_and_exclude_the_manifest_itself() -> None:
+    workflow = _workflow(SETUPS)
+    run = _steps(workflow["jobs"]["build-and-test"])[
+        "Test and build exact native setup programs"
+    ]["run"]
+
+    assert 'cd "$output"' in run
+    assert "sha256sum -- $BINARIES" in run
+    assert "> SHA256SUMS" in run
+    assert 'find "$output"' not in run
