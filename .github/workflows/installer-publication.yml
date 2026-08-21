@@ -486,6 +486,7 @@ jobs:
           docker run --detach --privileged \
             --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
             --publish 127.0.0.1:2375:2375 \
+            --publish 127.0.0.1:8443:8443 \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             --env DOCKER_TLS_CERTDIR= \
             docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
@@ -502,12 +503,7 @@ jobs:
             docker logs "$VONK_ACCEPTANCE_DIND_CONTAINER" >&2 || true
             exit 1
           fi
-          dind_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$VONK_ACCEPTANCE_DIND_CONTAINER")
-          case "$dind_ip" in
-            [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "DIND IPv4 address is unavailable" >&2; exit 1 ;;
-          esac
-          printf 'VONK_ACCEPTANCE_NAS_IP=%s\n' "$dind_ip" >> "$GITHUB_ENV"
+          printf 'VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n' >> "$GITHUB_ENV"
 
       - name: Download verified Compose parser fixtures
         shell: bash

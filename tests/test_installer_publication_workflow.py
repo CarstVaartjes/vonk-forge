@@ -40,7 +40,6 @@ def _run_workflow_shell(
         'case "$1" in\n'
         "  run) printf '%s\\n' daemon-id ;;\n"
         "  version) printf '%s\\n' \"$DOCKER_SERVER_VERSION\" ;;\n"
-        "  inspect) printf '%s\\n' \"$DIND_IP\" ;;\n"
         "  rm) : ;;\n"
         "  *) exit 64 ;;\n"
         "esac\n"
@@ -49,7 +48,6 @@ def _run_workflow_shell(
     environment = os.environ | {
         "DOCKER_LOG": str(log),
         "DOCKER_SERVER_VERSION": server_version,
-        "DIND_IP": "172.18.0.2",
         "GITHUB_ENV": str(github_environment),
         "GITHUB_WORKSPACE": str(workspace),
         "PATH": f"{commands}:{os.environ['PATH']}",
@@ -145,7 +143,8 @@ def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_versio
     docker_log = ready.docker_log  # type: ignore[attr-defined]
     workspace = tmp_path / "ready/workspace"
     assert (
-        f"--publish 127.0.0.1:2375:2375 --volume {workspace}:{workspace}" in docker_log
+        "--publish 127.0.0.1:2375:2375 "
+        f"--publish 127.0.0.1:8443:8443 --volume {workspace}:{workspace}" in docker_log
     )
     assert "--privileged" in docker_log
     assert (
@@ -153,11 +152,8 @@ def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_versio
         in docker_log
     )
     assert "tcp://127.0.0.1:2375|version --format {{.Server.Version}}" in docker_log
-    assert (
-        "|inspect --format {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} vonk-acceptance-dind"
-        in docker_log
-    )
-    assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=172.18.0.2\n"  # type: ignore[attr-defined]
+    assert "|inspect " not in docker_log
+    assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n"  # type: ignore[attr-defined]
 
     wrong = _run_workflow_shell(start, tmp_path / "wrong", server_version="29.4.2")
     assert wrong.returncode != 0
