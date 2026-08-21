@@ -107,6 +107,46 @@ def test_host_commands_preserve_only_explicit_docker_connection(monkeypatch) -> 
     assert "UNRELATED_SECRET" not in environment
 
 
+def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
+    tmp_path: Path,
+) -> None:
+    acceptance = _acceptance_module()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    environment = bundle / ".env"
+    environment.write_text("COMPOSE_PROFILES=\n", encoding="utf-8")
+    environment.chmod(0o600)
+
+    acceptance.configure_tailnet_service_names(
+        bundle,
+        control="svc:vonk-forge-acceptance",
+        hermes_api="svc:hermes-api-acceptance",
+        hermes_dashboard="svc:hermes-dashboard-acceptance",
+    )
+
+    assert environment.stat().st_mode & 0o777 == 0o600
+    assert environment.read_text(encoding="utf-8").splitlines() == [
+        "COMPOSE_PROFILES=",
+        "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge-acceptance",
+        "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api-acceptance",
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard-acceptance",
+    ]
+    assert (
+        acceptance.tailscale_service_hostname(
+            "svc:vonk-forge-acceptance", "acceptance.example.test"
+        )
+        == "vonk-forge-acceptance.acceptance.example.test"
+    )
+
+    with pytest.raises(AcceptanceError, match="Service names"):
+        acceptance.configure_tailnet_service_names(
+            bundle,
+            control="svc:duplicate",
+            hermes_api="svc:duplicate",
+            hermes_dashboard="svc:hermes-dashboard-acceptance",
+        )
+
+
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [

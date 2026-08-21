@@ -50,6 +50,9 @@ SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
 )
+TAILSCALE_SERVICE = re.compile(
+    r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
+)
 PINNED_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z"
 )
@@ -130,9 +133,15 @@ def nas_responses(
     oauth_client_secret: str,
     upstream_key: str,
     hermes: bool,
+    control_service: str = "svc:vonk-forge",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
 ) -> list[tuple[str, str]]:
+    control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
+    hermes_dashboard_hostname = tailscale_service_hostname(
+        hermes_dashboard_service, tailnet_suffix
+    )
     hostnames = {
-        "Control hostname": f"vonk-forge.{tailnet_suffix}",
+        "Control hostname": control_hostname,
         "Agent enrollment hostname": f"enroll.acceptance.{tailnet_suffix}",
         "Agent controller hostname": f"agents.acceptance.{tailnet_suffix}",
         "Registry hostname": f"registry.acceptance.{tailnet_suffix}",
@@ -180,10 +189,54 @@ def nas_responses(
         responses.append(
             (
                 "Hermes dashboard HTTPS origin: ",
-                f"https://hermes-dashboard.{tailnet_suffix}",
+                f"https://{hermes_dashboard_hostname}",
             )
         )
     return responses
+
+
+def tailscale_service_hostname(service: str, tailnet_suffix: str) -> str:
+    if TAILSCALE_SERVICE.fullmatch(service) is None:
+        raise AcceptanceError("acceptance Tailscale Service name is invalid")
+    if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
+        raise AcceptanceError("acceptance tailnet DNS suffix is invalid")
+    return f"{service.removeprefix('svc:')}.{tailnet_suffix}"
+
+
+def configure_tailnet_service_names(
+    bundle: Path,
+    *,
+    control: str,
+    hermes_api: str,
+    hermes_dashboard: str,
+) -> None:
+    services = {
+        "VONK_TAILSCALE_CONTROL_SERVICE": control,
+        "VONK_TAILSCALE_HERMES_API_SERVICE": hermes_api,
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": hermes_dashboard,
+    }
+    if len(set(services.values())) != len(services) or any(
+        TAILSCALE_SERVICE.fullmatch(value) is None for value in services.values()
+    ):
+        raise AcceptanceError("acceptance Tailscale Service names are invalid")
+    environment = bundle / ".env"
+    try:
+        metadata = environment.lstat()
+        source = environment.read_text(encoding="utf-8")
+    except OSError as error:
+        raise AcceptanceError("bundle environment is unavailable") from error
+    if environment.is_symlink() or not environment.is_file() or metadata.st_nlink != 1:
+        raise AcceptanceError("bundle environment is unsafe")
+    if any(f"{name}=" in source for name in services):
+        raise AcceptanceError("bundle already selects Tailscale Service names")
+    suffix = "" if source.endswith("\n") else "\n"
+    environment.write_text(
+        source
+        + suffix
+        + "".join(f"{name}={value}\n" for name, value in services.items()),
+        encoding="utf-8",
+    )
+    os.chmod(environment, metadata.st_mode & 0o777)
 
 
 def generate_bundle(
@@ -741,13 +794,19 @@ def _same_json_shape(actual: object, expected: object) -> bool:
 
 
 def _expected_tailnet_serve_status(
-    *, hermes: bool, tailnet_suffix: str
+    *,
+    hermes: bool,
+    tailnet_suffix: str,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
 ) -> dict[str, object]:
+    control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
     services: dict[str, object] = {
-        "svc:vonk-forge": {
+        control_service: {
             "TCP": {"443": {"HTTPS": True}},
             "Web": {
-                f"vonk-forge.{tailnet_suffix}:443": {
+                f"{control_hostname}:443": {
                     "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
                 }
             },
@@ -756,18 +815,18 @@ def _expected_tailnet_serve_status(
     if hermes:
         services.update(
             {
-                "svc:hermes-api": {
+                hermes_api_service: {
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
-                        f"hermes-api.{tailnet_suffix}:443": {
+                        f"{tailscale_service_hostname(hermes_api_service, tailnet_suffix)}:443": {
                             "Handlers": {"/": {"Proxy": "http://hermes-agent:8642"}}
                         }
                     },
                 },
-                "svc:hermes-dashboard": {
+                hermes_dashboard_service: {
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
-                        f"hermes-dashboard.{tailnet_suffix}:443": {
+                        f"{tailscale_service_hostname(hermes_dashboard_service, tailnet_suffix)}:443": {
                             "Handlers": {"/": {"Proxy": "http://hermes-agent:9119"}}
                         }
                     },
@@ -777,17 +836,23 @@ def _expected_tailnet_serve_status(
     return {"Services": services}
 
 
-def _expected_tailnet_serve_configuration(*, hermes: bool) -> dict[str, object]:
+def _expected_tailnet_serve_configuration(
+    *,
+    hermes: bool,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
+) -> dict[str, object]:
     services: dict[str, object] = {
-        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        control_service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
     }
     if hermes:
         services.update(
             {
-                "svc:hermes-api": {
+                hermes_api_service: {
                     "endpoints": {"tcp:443": "http://hermes-agent:8642"}
                 },
-                "svc:hermes-dashboard": {
+                hermes_dashboard_service: {
                     "endpoints": {"tcp:443": "http://hermes-agent:9119"}
                 },
             }
@@ -806,23 +871,54 @@ def _parse_tailnet_serve_json(raw: str, *, label: str) -> object:
         raise AcceptanceError(f"Tailscale Serve {label} is invalid JSON") from error
 
 
-def assert_tailnet_serve_status(raw: str, *, hermes: bool, tailnet_suffix: str) -> None:
+def assert_tailnet_serve_status(
+    raw: str,
+    *,
+    hermes: bool,
+    tailnet_suffix: str,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
+) -> None:
     if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
         raise AcceptanceError("Tailscale Serve status suffix is invalid")
     document = _parse_tailnet_serve_json(raw, label="status")
     expected = _expected_tailnet_serve_status(
-        hermes=hermes, tailnet_suffix=tailnet_suffix
+        hermes=hermes,
+        tailnet_suffix=tailnet_suffix,
+        control_service=control_service,
+        hermes_api_service=hermes_api_service,
+        hermes_dashboard_service=hermes_dashboard_service,
     )
     if not _same_json_shape(document, expected):
         raise AcceptanceError("Tailscale Serve status does not match selected topology")
 
 
 def assert_tailnet_serve_configuration(
-    status: str, configuration: str, *, hermes: bool, tailnet_suffix: str
+    status: str,
+    configuration: str,
+    *,
+    hermes: bool,
+    tailnet_suffix: str,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
 ) -> None:
-    assert_tailnet_serve_status(status, hermes=hermes, tailnet_suffix=tailnet_suffix)
+    assert_tailnet_serve_status(
+        status,
+        hermes=hermes,
+        tailnet_suffix=tailnet_suffix,
+        control_service=control_service,
+        hermes_api_service=hermes_api_service,
+        hermes_dashboard_service=hermes_dashboard_service,
+    )
     document = _parse_tailnet_serve_json(configuration, label="configuration")
-    expected = _expected_tailnet_serve_configuration(hermes=hermes)
+    expected = _expected_tailnet_serve_configuration(
+        hermes=hermes,
+        control_service=control_service,
+        hermes_api_service=hermes_api_service,
+        hermes_dashboard_service=hermes_dashboard_service,
+    )
     if not _same_json_shape(document, expected):
         raise AcceptanceError(
             "Tailscale Serve configuration does not match selected topology"
@@ -830,7 +926,13 @@ def assert_tailnet_serve_configuration(
 
 
 def verify_tailscale_services(
-    bundle: Path, *, hermes: bool, tailnet_suffix: str
+    bundle: Path,
+    *,
+    hermes: bool,
+    tailnet_suffix: str,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
 ) -> None:
     status = run(
         [
@@ -881,11 +983,18 @@ def verify_tailscale_services(
         configuration,
         hermes=hermes,
         tailnet_suffix=tailnet_suffix,
+        control_service=control_service,
+        hermes_api_service=hermes_api_service,
+        hermes_dashboard_service=hermes_dashboard_service,
     )
 
-    urls = [f"https://vonk-forge.{tailnet_suffix}/healthz"]
+    urls = [
+        f"https://{tailscale_service_hostname(control_service, tailnet_suffix)}/healthz"
+    ]
     if hermes:
-        urls.append(f"https://hermes-dashboard.{tailnet_suffix}/")
+        urls.append(
+            f"https://{tailscale_service_hostname(hermes_dashboard_service, tailnet_suffix)}/"
+        )
     for url in urls:
         hostname, _, path = url.removeprefix("https://").partition("/")
         https_over_command(
@@ -912,6 +1021,9 @@ def exercise_compose(
     registry_hostname: str,
     tailnet_suffix: str,
     hermes: bool,
+    control_service: str = "svc:vonk-forge",
+    hermes_api_service: str = "svc:hermes-api",
+    hermes_dashboard_service: str = "svc:hermes-dashboard",
 ) -> None:
     expected = HERMES_SERVICES if hermes else DEFAULT_SERVICES
     configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
@@ -951,7 +1063,14 @@ def exercise_compose(
             control_hostname=control_hostname,
             registry_hostname=registry_hostname,
         )
-        verify_tailscale_services(bundle, hermes=hermes, tailnet_suffix=tailnet_suffix)
+        verify_tailscale_services(
+            bundle,
+            hermes=hermes,
+            tailnet_suffix=tailnet_suffix,
+            control_service=control_service,
+            hermes_api_service=hermes_api_service,
+            hermes_dashboard_service=hermes_dashboard_service,
+        )
     finally:
         run(
             [
@@ -982,6 +1101,22 @@ def main() -> None:
     tailnet_suffix = required_environment("VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX")
     if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
         raise AcceptanceError("acceptance tailnet DNS suffix is invalid")
+    services = {
+        "control": required_environment(
+            "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE"
+        ),
+        "hermes_api": required_environment(
+            "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE"
+        ),
+        "hermes_dashboard": required_environment(
+            "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE"
+        ),
+    }
+    if len(set(services.values())) != len(services) or any(
+        TAILSCALE_SERVICE.fullmatch(value) is None for value in services.values()
+    ):
+        raise AcceptanceError("acceptance Tailscale Service names are invalid")
+    control_hostname = tailscale_service_hostname(services["control"], tailnet_suffix)
     oauth_client_id = required_environment(
         "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
     )
@@ -1010,6 +1145,8 @@ def main() -> None:
             "oauth_client_id": oauth_client_id,
             "oauth_client_secret": oauth_client_secret,
             "upstream_key": upstream_key,
+            "control_service": services["control"],
+            "hermes_dashboard_service": services["hermes_dashboard"],
         }
         first = generate_bundle(
             root / "default-first",
@@ -1040,6 +1177,8 @@ def main() -> None:
         )
         assert_repeatable(first, second)
         for bundle in (first, hermes):
+            configure_tailnet_service_names(bundle, **services)
+        for bundle in (first, hermes):
             assert_compose_compatibility(
                 bundle,
                 fixtures=fixtures,
@@ -1049,11 +1188,14 @@ def main() -> None:
             exercise_compose(
                 bundle,
                 nas_ip=nas_ip,
-                control_hostname=f"vonk-forge.{tailnet_suffix}",
+                control_hostname=control_hostname,
                 enrollment_hostname=enrollment_hostname,
                 registry_hostname=f"registry.acceptance.{tailnet_suffix}",
                 tailnet_suffix=tailnet_suffix,
                 hermes=True,
+                control_service=services["control"],
+                hermes_api_service=services["hermes_api"],
+                hermes_dashboard_service=services["hermes_dashboard"],
             )
 
 

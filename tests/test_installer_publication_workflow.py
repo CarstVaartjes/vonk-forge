@@ -78,7 +78,26 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     jobs = workflow["jobs"]
     assert set(jobs["candidate"]["needs"]) == {"authority"}
     assert set(jobs["nas-acceptance"]["needs"]) == {"authority", "candidate"}
-    assert set(jobs["spark-acceptance"]["needs"]) == {"authority", "candidate"}
+    assert set(jobs["spark-acceptance"]["needs"]) == {
+        "authority",
+        "candidate",
+        "nas-acceptance",
+    }
+    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "1"
+    expected_services = {
+        "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
+        "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
+        "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
+    }
+    nas_environment = _steps(jobs["nas-acceptance"])[
+        "Run literal clean NAS and Compose acceptance"
+    ]["env"]
+    spark_environment = _steps(jobs["spark-acceptance"])[
+        "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
+    ]["env"]
+    for name, service in expected_services.items():
+        assert nas_environment[name] == service
+        assert spark_environment[name] == service
     assert set(jobs["acceptance"]["needs"]) == {
         "authority",
         "candidate",

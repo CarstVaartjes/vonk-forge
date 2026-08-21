@@ -44,10 +44,12 @@ from tests.acceptance.runtime import (
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
     command_environment,
+    configure_tailnet_service_names,
     generate_bundle,
     host_command_environment,
     is_immutable_image,
     nas_responses,
+    tailscale_service_hostname,
 )
 
 PLATFORMS = ("linux-amd64", "linux-arm64")
@@ -63,7 +65,6 @@ NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-(?:amd64|arm64)\Z")
 CERTIFICATE_LIFETIME_SECONDS = 300
-CONTROL_HOST_PREFIX = "vonk-forge"
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
 REGISTRY_HOST = "registry.spark.localhost"
@@ -375,7 +376,24 @@ class SparkLifecycle:
         self.synthetic_paths: list[Path] = []
         self.agent_installed = False
         self.synthetic_fixture_sha256: str | None = None
-        self.control_hostname = f"{CONTROL_HOST_PREFIX}.{self._required_environment('VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX')}"
+        self.tailnet_services = {
+            "control": self._required_environment(
+                "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE"
+            ),
+            "hermes_api": self._required_environment(
+                "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE"
+            ),
+            "hermes_dashboard": self._required_environment(
+                "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE"
+            ),
+        }
+        try:
+            self.control_hostname = tailscale_service_hostname(
+                self.tailnet_services["control"],
+                self._required_environment("VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"),
+            )
+        except AcceptanceError as error:
+            raise LifecycleError("acceptance Tailscale Service name is invalid") from error
         self.origin = self._required_environment("INSTALLER_PUBLIC_ORIGIN")
         if self.origin != "https://install.vonkforge.ai":
             raise LifecycleError("installer public origin is invalid")
@@ -583,8 +601,8 @@ class SparkLifecycle:
         child_environment = command_environment(self.temporary_root / "workstation")
         responses = nas_responses(
             nas_ip="127.0.0.1",
-            tailnet_suffix=self.control_hostname.removeprefix(
-                f"{CONTROL_HOST_PREFIX}."
+            tailnet_suffix=self._required_environment(
+                "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"
             ),
             oauth_client_id=self._required_environment(
                 "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
@@ -596,6 +614,8 @@ class SparkLifecycle:
                 "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
             ),
             hermes=False,
+            control_service=self.tailnet_services["control"],
+            hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
         )
         replacements = {
             "Agent enrollment hostname: ": ENROLLMENT_HOST,
@@ -615,6 +635,7 @@ class SparkLifecycle:
             child_environment=child_environment,
             responses=responses,
         )
+        configure_tailnet_service_names(self.bundle, **self.tailnet_services)
         _configure_acceptance_renewal(
             self.bundle, lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS
         )
