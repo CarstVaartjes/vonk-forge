@@ -103,21 +103,40 @@ digest=${version_digest:-$commit_digest}
   exit 1
 }
 
-skopeo inspect --config "docker://${image}@${digest}" \
-  | jq -e --arg revision "$source_sha" --arg source "$source_url" --arg version "$version" \
-    '(.config.Labels["org.opencontainers.image.revision"] == $revision)
-     and (.config.Labels["org.opencontainers.image.source"] == $source)
-     and (.config.Labels["org.opencontainers.image.version"] == $version)' \
-    >/dev/null
-docker buildx imagetools inspect "${image}@${digest}" --format '{{ json .Provenance }}' \
-  | jq -e --arg revision "$source_sha" \
-    '([.. | objects | select(
-        ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
-        or (((.SLSA?.buildType? // "") | length) > 0)
-        or (((.buildDefinition?.buildType? // "") | length) > 0)
-      )] | length > 0)
-     and ([.. | strings | select(. == $revision)] | length > 0)' \
-    >/dev/null
+manifest="$scratch/hermes.manifest.json"
+platform_records="$scratch/hermes.platforms.tsv"
+provenance="$scratch/hermes.provenance.json"
+sbom="$scratch/hermes.sbom.json"
+docker buildx imagetools inspect "${image}@${digest}" --format '{{ json .Manifest }}' \
+  > "$manifest"
+scripts/verify-multiarch-image-manifest "$manifest" > "$platform_records"
+docker buildx imagetools inspect "${image}@${digest}" \
+  --format '{{ json .Provenance }}' > "$provenance"
+docker buildx imagetools inspect "${image}@${digest}" \
+  --format '{{ json .SBOM }}' > "$sbom"
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' "$provenance" >/dev/null
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' "$sbom" >/dev/null
+while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
+  skopeo inspect --config "docker://${image}@${runnable_digest}" \
+    | jq -e --arg revision "$source_sha" --arg source "$source_url" --arg version "$version" \
+      '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+       and (.config.Labels["org.opencontainers.image.source"] == $source)
+       and (.config.Labels["org.opencontainers.image.version"] == $version)' \
+      >/dev/null
+  jq -e --arg platform "linux/$architecture" --arg revision "$source_sha" \
+      '(.[$platform] | ([.. | objects | select(
+          ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+          or (((.SLSA?.buildType? // "") | length) > 0)
+          or (((.buildDefinition?.buildType? // "") | length) > 0)
+        )] | length > 0)
+       and ([.. | strings | select(. == $revision)] | length > 0))' \
+      "$provenance" >/dev/null
+  jq -e --arg platform "linux/$architecture" \
+    '.[$platform] | [.. | objects | select(
+        .SPDXID? == "SPDXRef-DOCUMENT"
+        and ((.spdxVersion? // "") | startswith("SPDX-"))
+      )] | length > 0' "$sbom" >/dev/null
+done < "$platform_records"
 if [[ "$require_attestation" -eq 1 ]]; then
   gh attestation verify "oci://${image}@${digest}" \
     --repo "$repository" \
