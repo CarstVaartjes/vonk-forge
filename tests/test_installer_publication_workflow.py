@@ -9,6 +9,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 SETUPS = ROOT / ".github/workflows/installer-setups.yml"
+DEV_IMAGES = ROOT / ".github/workflows/dev-images.yml"
+AGENT_RELEASE = ROOT / ".github/workflows/agent-release.yml"
 
 
 def _workflow(path: Path = WORKFLOW) -> dict[str, object]:
@@ -87,6 +89,14 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     }
     assert set(jobs["promote"]["needs"]) == {"authority", "candidate", "acceptance"}
     assert "publish" not in jobs
+
+
+def test_development_source_generation_runs_for_every_main_commit() -> None:
+    for path in (DEV_IMAGES, AGENT_RELEASE, SETUPS):
+        push = _workflow(path)["on"]["push"]
+        assert push["branches"] == ["main"]
+        assert "paths" not in push
+        assert "paths-ignore" not in push
 
 
 def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report() -> (
