@@ -69,6 +69,7 @@
 # Container readiness must not depend on a virtual host or any upstream. This
 # listener is loopback-only and is never published by Compose.
 http://127.0.0.1:8082 {
+	bind 127.0.0.1
 	handle /healthz {
 		respond 200
 	}

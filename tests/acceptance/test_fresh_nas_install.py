@@ -234,8 +234,10 @@ def host_command_environment() -> dict[str, str]:
 
 def reference_compose() -> list[str]:
     executable = Path(required_environment("VONK_ACCEPTANCE_REFERENCE_COMPOSE"))
-    if not executable.is_absolute() or not executable.is_file() or not os.access(
-        executable, os.X_OK
+    if (
+        not executable.is_absolute()
+        or not executable.is_file()
+        or not os.access(executable, os.X_OK)
     ):
         raise AcceptanceError("reference Compose fixture is unavailable")
     return [str(executable)]
@@ -286,7 +288,7 @@ def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(secrets): path.read_bytes()
         for path in secrets.rglob("*")
-        if path.is_file()
+        if path.is_file() and path.relative_to(secrets).parts[0] != "runtime-configs"
     }
 
 
@@ -445,7 +447,9 @@ def _tailnet_request(
     )
 
 
-def issue_registry_client_certificate(bundle: Path, directory: Path) -> tuple[Path, Path]:
+def issue_registry_client_certificate(
+    bundle: Path, directory: Path
+) -> tuple[Path, Path]:
     secret_root = bundle / "secrets"
     try:
         password = (secret_root / "step-ca-password").read_bytes().strip()
@@ -456,7 +460,9 @@ def issue_registry_client_certificate(bundle: Path, directory: Path) -> tuple[Pa
             (secret_root / "step-ca/intermediate-certificate").read_bytes()
         )
     except (OSError, TypeError, ValueError) as error:
-        raise AcceptanceError("registry client certificate authority is unavailable") from error
+        raise AcceptanceError(
+            "registry client certificate authority is unavailable"
+        ) from error
     if not isinstance(intermediate_key, ed25519.Ed25519PrivateKey):
         raise AcceptanceError("registry client certificate authority is invalid")
     node_id = "spk_" + "a" * 32
@@ -474,10 +480,16 @@ def issue_registry_client_certificate(bundle: Path, directory: Path) -> tuple[Pa
             x509.KeyUsage(True, False, False, False, False, False, False, False, False),
             critical=True,
         )
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
+        )
         .add_extension(
             x509.SubjectAlternativeName(
-                [x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")]
+                [
+                    x509.UniformResourceIdentifier(
+                        f"spiffe://vonk-forge.local/node/{node_id}"
+                    )
+                ]
             ),
             critical=False,
         )
@@ -623,8 +635,12 @@ def verify_routed_service_behavior(
     except AcceptanceError:
         pass
     else:
-        raise AcceptanceError("registry accepted a request without client authentication")
-    with tempfile.TemporaryDirectory(prefix="vonk-registry-client-", dir=bundle.parent) as directory:
+        raise AcceptanceError(
+            "registry accepted a request without client authentication"
+        )
+    with tempfile.TemporaryDirectory(
+        prefix="vonk-registry-client-", dir=bundle.parent
+    ) as directory:
         certificate, key = issue_registry_client_certificate(bundle, Path(directory))
         registry = _http_json(
             https_over_command(
@@ -663,13 +679,17 @@ def _same_json_shape(actual: object, expected: object) -> bool:
         return (
             isinstance(actual, dict)
             and actual.keys() == expected.keys()
-            and all(_same_json_shape(actual[key], value) for key, value in expected.items())
+            and all(
+                _same_json_shape(actual[key], value) for key, value in expected.items()
+            )
         )
     if isinstance(expected, list):
         return (
             isinstance(actual, list)
             and len(actual) == len(expected)
-            and all(_same_json_shape(left, right) for left, right in zip(actual, expected))
+            and all(
+                _same_json_shape(left, right) for left, right in zip(actual, expected)
+            )
         )
     return actual == expected
 
@@ -694,9 +714,7 @@ def _expected_tailnet_serve_status(
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
                         f"hermes-api.{tailnet_suffix}:443": {
-                            "Handlers": {
-                                "/": {"Proxy": "http://hermes-agent:8642"}
-                            }
+                            "Handlers": {"/": {"Proxy": "http://hermes-agent:8642"}}
                         }
                     },
                 },
@@ -704,9 +722,7 @@ def _expected_tailnet_serve_status(
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
                         f"hermes-dashboard.{tailnet_suffix}:443": {
-                            "Handlers": {
-                                "/": {"Proxy": "http://hermes-agent:9119"}
-                            }
+                            "Handlers": {"/": {"Proxy": "http://hermes-agent:9119"}}
                         }
                     },
                 },
@@ -744,9 +760,7 @@ def _parse_tailnet_serve_json(raw: str, *, label: str) -> object:
         raise AcceptanceError(f"Tailscale Serve {label} is invalid JSON") from error
 
 
-def assert_tailnet_serve_status(
-    raw: str, *, hermes: bool, tailnet_suffix: str
-) -> None:
+def assert_tailnet_serve_status(raw: str, *, hermes: bool, tailnet_suffix: str) -> None:
     if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
         raise AcceptanceError("Tailscale Serve status suffix is invalid")
     document = _parse_tailnet_serve_json(raw, label="status")
@@ -760,9 +774,7 @@ def assert_tailnet_serve_status(
 def assert_tailnet_serve_configuration(
     status: str, configuration: str, *, hermes: bool, tailnet_suffix: str
 ) -> None:
-    assert_tailnet_serve_status(
-        status, hermes=hermes, tailnet_suffix=tailnet_suffix
-    )
+    assert_tailnet_serve_status(status, hermes=hermes, tailnet_suffix=tailnet_suffix)
     document = _parse_tailnet_serve_json(configuration, label="configuration")
     expected = _expected_tailnet_serve_configuration(hermes=hermes)
     if not _same_json_shape(document, expected):

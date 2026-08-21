@@ -9,7 +9,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
-_ALEMBIC_CONFIG = Path(__file__).resolve().parents[2] / "alembic.ini"
+_ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
 
 
 def build_engine(database_url: str) -> Engine:

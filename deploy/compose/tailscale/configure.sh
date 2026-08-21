@@ -9,6 +9,7 @@ hermes_api_port=${HERMES_API_PORT:-8642}
 hermes_dashboard_host=${HERMES_DASHBOARD_HOST:-hermes-agent}
 hermes_dashboard_port=${HERMES_DASHBOARD_PORT:-9119}
 hermes_api_key_path=${HERMES_API_KEY_PATH:-/run/secrets/hermes-api-key}
+selected_profiles=${VONK_SELECTED_PROFILES:-}
 default_map_services_first='{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
 default_map_version_first='{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
 hermes_map_services_first='{"services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
@@ -38,6 +39,7 @@ http_probe() {
     path=$3
     authorization=$4
     response_path=$5
+    accepted_statuses=$6
 
     {
         printf 'GET %s HTTP/1.1\r\n' "${path}"
@@ -46,8 +48,12 @@ http_probe() {
             printf 'Authorization: Bearer %s\r\n' "${authorization}"
         fi
         printf 'Connection: close\r\n\r\n'
+        # BusyBox nc exits as soon as piped stdin reaches EOF, which can race
+        # the peer's first response byte. Keep stdin open for one bounded
+        # second so the final-read timeout can observe the HTTP status.
+        sleep 1
     } | nc -w 3 "${host}" "${port}" >"${response_path}" 2>/dev/null \
-        && grep -Eq '^HTTP/1\.[01] 2[0-9][0-9][[:space:]]' "${response_path}"
+        && grep -Eq "^HTTP/1\\.[01] ${accepted_statuses}[[:space:]]" "${response_path}"
 }
 
 hermes_is_available() {
@@ -60,12 +66,14 @@ hermes_is_available() {
         /health \
         "${hermes_api_key}" \
         "${runtime_dir}/hermes-api-response" \
+        '2[0-9][0-9]' \
         && http_probe \
             "${hermes_dashboard_host}" \
             "${hermes_dashboard_port}" \
             / \
             '' \
-            "${runtime_dir}/hermes-dashboard-response"
+            "${runtime_dir}/hermes-dashboard-response" \
+            '[23][0-9][0-9]'
 }
 
 withdraw_hermes_services() {
@@ -143,22 +151,39 @@ wait_for_exact_services() {
 }
 
 capability_is_available() {
-    ts status --json >"${runtime_dir}/tailscale-status.json" \
-        && { grep -Fq '"service-host"' "${runtime_dir}/tailscale-status.json" \
-            || grep -Fq '"services/vonk-forge"' "${runtime_dir}/tailscale-status.json"; }
+    include_hermes=$1
+    ts status --json >"${runtime_dir}/tailscale-status.json" || return 1
+    if grep -Fq '"service-host"' "${runtime_dir}/tailscale-status.json"; then
+        return 0
+    fi
+    grep -Fq '"services/vonk-forge"' "${runtime_dir}/tailscale-status.json" \
+        || return 1
+    if [ "${include_hermes}" = "0" ]; then
+        return 0
+    fi
+    grep -Fq '"services/hermes-api"' "${runtime_dir}/tailscale-status.json" \
+        && grep -Fq '"services/hermes-dashboard"' "${runtime_dir}/tailscale-status.json"
 }
 
 include_hermes=0
 hermes_is_available && include_hermes=1
 
 if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
-    [ -S "${socket}" ] && capability_is_available \
-        && serve_is_exact "${include_hermes}"
+    case ",${selected_profiles}," in
+        *,hermes,*)
+            [ -S "${socket}" ] && capability_is_available 1 \
+                && hermes_is_available && serve_is_exact 1
+            ;;
+        *)
+            [ -S "${socket}" ] && capability_is_available 0 \
+                && serve_is_exact 0
+            ;;
+    esac
     exit
 fi
 
 while [ "${remaining}" -gt 0 ]; do
-    if [ -S "${socket}" ] && capability_is_available; then
+    if [ -S "${socket}" ] && capability_is_available "${include_hermes}"; then
         break
     fi
     sleep 2
@@ -189,6 +214,13 @@ while :; do
     sleep "${reconcile_interval}"
     desired_hermes=0
     hermes_is_available && desired_hermes=1
+    if ! capability_is_available "${desired_hermes}"; then
+        # A service map is not externally reachable until the tailnet grants
+        # this tagged gateway the corresponding services/* capabilities.
+        # Keep the last known map and let health stay failed rather than
+        # claiming a route that control has not authorized.
+        continue
+    fi
     if ! serve_is_exact "${desired_hermes}"; then
         configure_services "${desired_hermes}"
         wait_for_exact_services "${desired_hermes}" || exit 1

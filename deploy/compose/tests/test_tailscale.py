@@ -36,9 +36,7 @@ HERMES_MAP = {
     "services": {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
         "svc:hermes-api": {"endpoints": {"tcp:443": "http://hermes-agent:8642"}},
-        "svc:hermes-dashboard": {
-            "endpoints": {"tcp:443": "http://hermes-agent:9119"}
-        },
+        "svc:hermes-dashboard": {"endpoints": {"tcp:443": "http://hermes-agent:9119"}},
     },
 }
 
@@ -196,10 +194,10 @@ def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> Non
         'case "$*" in\n'
         '  *"serve get-config --all"*) '
         f"printf '%s\\n' '{expected}' ;;\n"
-        '  *"serve status --json"*) printf \'%s\\n\' '
-        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
-        '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[]}}}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' "
+        '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -379,6 +377,7 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
         "/run/secrets/hermes-api-key"
     }
     assert configurator["restart"] == "unless-stopped"
+    assert configurator["environment"] == {"VONK_SELECTED_PROFILES": ""}
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
@@ -410,8 +409,41 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert '"HTTP":true' in text
     assert "120" in text
     assert "service-host" in text
+    assert '"services/hermes-api"' in text
+    assert '"services/hermes-dashboard"' in text
+    assert "BusyBox nc exits as soon as piped stdin reaches EOF" in text
+    assert "sleep 1" in text
+    assert "'[23][0-9][0-9]'" in text
+    health = text.split('if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then', 1)[1].split(
+        "\nfi", 1
+    )[0]
+    assert "*,hermes,*)" in health
+    assert "hermes_is_available && serve_is_exact 1" in health
+    assert "serve_is_exact 0" in health
     for forbidden in ("svc:*", "svc:ai-devbox", "tcp:22", "--tcp=22"):
         assert forbidden not in text
+
+
+def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
+    environment = _environment()
+    environment["COMPOSE_PROFILES"] = "hermes"
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE / "compose.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
+    assert configurator["environment"] == {"VONK_SELECTED_PROFILES": "hermes"}
 
 
 def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> None:
@@ -516,14 +548,14 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
         'case "$*" in\n'
         '  *"serve get-config --all"*) '
         f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{expected_map}'; "
-        "else printf '%s\\n' '{\"version\":\"0.0.1\",\"services\":{}}'; fi ;;\n"
+        'else printf \'%s\\n\' \'{"version":"0.0.1","services":{}}\'; fi ;;\n'
         '  *"serve status --json"*) '
         f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{healthy_status}'; "
         "else printf '%s\\n' '{\"Services\":{}}'; fi ;;\n"
         '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*) '
         'touch "$repaired" ;;\n'
-        '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[]}}}' ;;\n"
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -546,10 +578,34 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
             check=False,
             timeout=10,
         )
+        missing_hermes_capabilities = fake.read_text(encoding="utf-8").replace(
+            '"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]',
+            '"services/vonk-forge":[]',
+        )
+        fake.write_text(missing_hermes_capabilities, encoding="utf-8")
+        health = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_HEALTHCHECK_ONLY": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "VONK_SELECTED_PROFILES": "hermes",
+                "HERMES_API_KEY_PATH": str(key),
+                "HERMES_TEST_KEY": "test-hermes-key",
+                "HERMES_TEST_READY": str(ready),
+                "HERMES_TEST_REQUESTS": str(requests),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
     finally:
         daemon_socket.close()
 
     assert result.returncode == 0, result.stderr
+    assert health.returncode != 0
     invocation_log = calls.read_text(encoding="utf-8")
     for service in HERMES_MAP["services"]:
         assert f"--service={service} --https=443" in invocation_log
@@ -646,7 +702,9 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
     )
     clear_all = next(
         index
-        for index, invocation in enumerate(invocations[clear_dashboard:], clear_dashboard)
+        for index, invocation in enumerate(
+            invocations[clear_dashboard:], clear_dashboard
+        )
         if invocation.startswith("serve set-config --all ")
     )
     assert drain_api < clear_api < drain_dashboard < clear_dashboard < clear_all

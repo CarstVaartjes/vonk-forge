@@ -40,6 +40,7 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db}
     entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
+    command: [postgres]
     restart: unless-stopped
     logging: *bounded-logging
     environment:
@@ -140,7 +141,8 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
-    command: [step-ca, /home/step/config/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
+    entrypoint: [step-ca]
+    command: [/run/vonk-normalized-secrets/step-ca/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
     user: "1000:1000"
     secrets: []
     volumes:
@@ -166,6 +168,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
+      HOME: /root
+      XDG_CACHE_HOME: /root/.cache
+      PRISMA_QUERY_ENGINE_BINARY: /root/.cache/prisma-python/binaries/5.4.2/ac9d7041ed77bcc8a8dbd2ab6616b39013829574/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x
       DISABLE_ADMIN_UI: "False"
       LITELLM_UI_PATH: /tmp/litellm-ui
       LITELLM_MASTER_KEY_FILE: /run/vonk-normalized-secrets/litellm-master-key
@@ -181,7 +186,9 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
-    tmpfs: [/tmp]
+    tmpfs:
+      - /tmp
+      - /root:exec,mode=0700,uid=10002,gid=10001
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
@@ -201,7 +208,6 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --storage.tsdb.retention.size=10GB
-      - --web.enable-lifecycle=false
     read_only: true
     user: "65534:65534"
     secrets: []
