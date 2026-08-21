@@ -102,7 +102,7 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
 ):
     jobs = _workflow()["jobs"]
     nas = jobs["nas-acceptance"]
-    assert nas["permissions"] == {"contents": "read"}
+    assert nas["permissions"] == {"contents": "read", "id-token": "write"}
     assert "services" not in nas
     steps = _steps(nas)
     fixture_step = steps["Download verified Compose parser fixtures"]
@@ -181,6 +181,7 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
 
 def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     spark = _workflow()["jobs"]["spark-acceptance"]
+    assert spark["permissions"] == {"contents": "read", "id-token": "write"}
     assert spark["strategy"]["matrix"]["include"] == [
         {"platform": "linux-amd64", "runner": "ubuntu-24.04"},
         {"platform": "linux-arm64", "runner": "ubuntu-24.04-arm"},
@@ -188,6 +189,22 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     report = _steps(spark)["Upload Spark behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
+
+
+def test_acceptance_jobs_use_the_scoped_oidc_tailnet_client() -> None:
+    jobs = _workflow()["jobs"]
+    for name in ("nas-acceptance", "spark-acceptance"):
+        step = _steps(jobs[name])["Join tailnet as isolated acceptance client"]
+        assert step["uses"] == (
+            "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888"
+        )
+        assert step["with"] == {
+            "oauth-client-id": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_CLIENT_ID }}",
+            "audience": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_AUDIENCE }}",
+            "tags": "tag:vonk-acceptance",
+            "version": "1.98.8",
+            "use-cache": "false",
+        }
 
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
