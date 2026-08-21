@@ -552,6 +552,9 @@ jobs:
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
@@ -590,12 +593,14 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    needs: [authority, candidate]
+    needs: [authority, candidate, nas-acceptance]
     if: >-
       needs.authority.result == 'success' &&
-      needs.candidate.result == 'success'
+      needs.candidate.result == 'success' &&
+      needs['nas-acceptance'].result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: linux-amd64
@@ -647,6 +652,9 @@ jobs:
           VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}

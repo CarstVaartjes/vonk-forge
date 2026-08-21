@@ -10,10 +10,36 @@ hermes_dashboard_host=${HERMES_DASHBOARD_HOST:-hermes-agent}
 hermes_dashboard_port=${HERMES_DASHBOARD_PORT:-9119}
 hermes_api_key_path=${HERMES_API_KEY_PATH:-/run/secrets/hermes-api-key}
 selected_profiles=${VONK_SELECTED_PROFILES:-}
-default_map_services_first='{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
-default_map_version_first='{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
-hermes_map_services_first='{"services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
-hermes_map_version_first='{"version":"0.0.1","services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
+control_service=${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
+hermes_api_service=${VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api}
+hermes_dashboard_service=${VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard}
+
+validate_service_name() {
+    printf '%s\n' "$1" \
+        | grep -Eq '^svc:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+}
+
+validate_service_name "${control_service}" \
+    && validate_service_name "${hermes_api_service}" \
+    && validate_service_name "${hermes_dashboard_service}" \
+    || { echo "ERROR: Tailscale Service names are invalid." >&2; exit 64; }
+[ "${control_service}" != "${hermes_api_service}" ] \
+    && [ "${control_service}" != "${hermes_dashboard_service}" ] \
+    && [ "${hermes_api_service}" != "${hermes_dashboard_service}" ] \
+    || { echo "ERROR: Tailscale Service names must be distinct." >&2; exit 64; }
+
+default_map_services_first=$(printf \
+    '{"services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}' \
+    "${control_service}")
+default_map_version_first=$(printf \
+    '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
+    "${control_service}")
+hermes_map_services_first=$(printf \
+    '{"services":{"%s":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"%s":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}' \
+    "${hermes_api_service}" "${hermes_dashboard_service}" "${control_service}")
+hermes_map_version_first=$(printf \
+    '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"%s":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
+    "${hermes_api_service}" "${hermes_dashboard_service}" "${control_service}")
 
 scratch_root=${TMPDIR:-/tmp}
 runtime_dir=$(mktemp -d "${scratch_root%/}/vonk-tailscale.XXXXXX")
@@ -82,10 +108,10 @@ withdraw_hermes_services() {
     # removed even when there is no corresponding Serve config to inspect.
     # Clear then removes any remaining handler. Both commands are idempotent;
     # suppress their expected informational output while preserving failures.
-    ts serve drain svc:hermes-api >/dev/null 2>&1
-    ts serve clear svc:hermes-api >/dev/null 2>&1
-    ts serve drain svc:hermes-dashboard >/dev/null 2>&1
-    ts serve clear svc:hermes-dashboard >/dev/null 2>&1
+    ts serve drain "${hermes_api_service}" >/dev/null 2>&1
+    ts serve clear "${hermes_api_service}" >/dev/null 2>&1
+    ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1
+    ts serve clear "${hermes_dashboard_service}" >/dev/null 2>&1
 }
 
 serve_is_exact() {
@@ -103,19 +129,20 @@ serve_is_exact() {
         >"${runtime_dir}/tailscale-serve-config.compact"
 
     actual_service_map=$(cat "${runtime_dir}/tailscale-serve-config.compact")
-    grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' \
+    grep -Fq "\"${control_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
         "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"443":{"HTTP":true}' "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"TCPForward"' "${runtime_dir}/tailscale-serve-status.compact" \
         && if [ "${include_hermes}" = "1" ]; then
-            grep -Fq '"svc:hermes-api":{"TCP":{"443":{"HTTPS":true}}' \
+            grep -Fq "\"${hermes_api_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
                 "${runtime_dir}/tailscale-serve-status.compact" \
-                && grep -Fq '"svc:hermes-dashboard":{"TCP":{"443":{"HTTPS":true}}' \
+                && grep -Fq "\"${hermes_dashboard_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
                     "${runtime_dir}/tailscale-serve-status.compact" \
                 && { [ "${actual_service_map}" = "${hermes_map_services_first}" ] \
                     || [ "${actual_service_map}" = "${hermes_map_version_first}" ]; }
         else
-            ! grep -Fq 'svc:hermes-' "${runtime_dir}/tailscale-serve-status.compact" \
+            ! grep -Fq "\"${hermes_api_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
+                && ! grep -Fq "\"${hermes_dashboard_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
                 && { [ "${actual_service_map}" = "${default_map_services_first}" ] \
                     || [ "${actual_service_map}" = "${default_map_version_first}" ]; }
         fi
@@ -130,10 +157,10 @@ configure_services() {
     # and AdvertiseServices. Re-add endpoints through the CLI so port 443 is
     # explicitly HTTPS; each CLI configuration also advertises that service.
     ts serve set-config --all "${empty_service_map}" >/dev/null
-    ts serve --service=svc:vonk-forge --https=443 http://caddy:8080 >/dev/null
+    ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
     if [ "${include_hermes}" = "1" ]; then
-        ts serve --service=svc:hermes-api --https=443 http://hermes-agent:8642 >/dev/null
-        ts serve --service=svc:hermes-dashboard --https=443 http://hermes-agent:9119 >/dev/null
+        ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
+        ts serve --service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119 >/dev/null
     fi
 }
 
@@ -189,13 +216,13 @@ service_host_is_active() {
         }
     ' "${runtime_dir}/tailscale-status.compact" >"${service_hosts}" \
         || return 1
-    grep -Eq '"svc:vonk-forge":\[[^]]' "${service_hosts}" \
+    grep -Eq "\"${control_service}\":\\[[^]]" "${service_hosts}" \
         || return 1
     if [ "${include_hermes}" = "0" ]; then
         return 0
     fi
-    grep -Eq '"svc:hermes-api":\[[^]]' "${service_hosts}" \
-        && grep -Eq '"svc:hermes-dashboard":\[[^]]' "${service_hosts}"
+    grep -Eq "\"${hermes_api_service}\":\\[[^]]" "${service_hosts}" \
+        && grep -Eq "\"${hermes_dashboard_service}\":\\[[^]]" "${service_hosts}"
 }
 
 include_hermes=0

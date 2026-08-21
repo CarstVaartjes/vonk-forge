@@ -396,7 +396,12 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
         "/run/secrets/hermes-api-key"
     }
     assert configurator["restart"] == "unless-stopped"
-    assert configurator["environment"] == {"VONK_SELECTED_PROFILES": ""}
+    assert configurator["environment"] == {
+        "VONK_SELECTED_PROFILES": "",
+        "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
+        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
+    }
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
@@ -415,23 +420,25 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
 
     assert "serve set-config --all" in text
     for command in (
-        "--service=svc:vonk-forge --https=443 http://caddy:8080",
-        "--service=svc:hermes-api --https=443 http://hermes-agent:8642",
-        "--service=svc:hermes-dashboard --https=443 http://hermes-agent:9119",
+        '--service="${control_service}" --https=443 http://caddy:8080',
+        '--service="${hermes_api_service}" --https=443 http://hermes-agent:8642',
+        '--service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119',
     ):
         assert command in text
     assert "serve get-config --all" in text
     assert "serve reset" not in text
-    assert json.dumps(DEFAULT_MAP, sort_keys=True, separators=(",", ":")) in text
-    assert json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":")) in text
-    assert text.count('"HTTPS":true') >= 3
+    assert "VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge" in text
+    assert "VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api" in text
+    assert "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard" in text
+    assert "validate_service_name" in text
+    assert text.count('HTTPS\\":true') >= 3
     assert '"HTTP":true' in text
     assert "120" in text
     assert 'marker = "\\"service-host\\":"' in text
     assert "PrimaryRoutes" not in text
     assert "tailscale-service-hosts.compact" in text
-    assert '"svc:hermes-api":' in text
-    assert '"svc:hermes-dashboard":' in text
+    assert '${hermes_api_service}' in text
+    assert '${hermes_dashboard_service}' in text
     assert '"services/vonk-forge"' not in text
     assert "BusyBox nc exits as soon as piped stdin reaches EOF" in text
     assert "sleep 1" in text
@@ -465,7 +472,86 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
         env=environment,
     )
     configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
-    assert configurator["environment"] == {"VONK_SELECTED_PROFILES": "hermes"}
+    assert configurator["environment"] == {
+        "VONK_SELECTED_PROFILES": "hermes",
+        "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
+        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
+    }
+
+
+def test_configurator_uses_distinct_overridden_service_names(tmp_path: Path) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    state, calls = _write_stateful_tailscale(tmp_path)
+    nc = tmp_path / "nc"
+    nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    nc.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_CONFIGURE_ONCE": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "TS_TEST_STATE": str(state),
+                "TS_TEST_CALLS": str(calls),
+                "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
+                "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
+                "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "config": {
+            "version": "0.0.1",
+            "services": {
+                "svc:vonk-forge-acceptance": {
+                    "endpoints": {"tcp:443": "http://caddy:8080"}
+                }
+            },
+        },
+        "advertised": ["svc:vonk-forge-acceptance"],
+    }
+    invocations = calls.read_text(encoding="utf-8")
+    assert "--service=svc:vonk-forge-acceptance" in invocations
+    assert "serve drain svc:hermes-api-acceptance" in invocations
+    assert "serve drain svc:hermes-dashboard-acceptance" in invocations
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"VONK_TAILSCALE_CONTROL_SERVICE": "svc:Uppercase"},
+        {
+            "VONK_TAILSCALE_CONTROL_SERVICE": "svc:duplicate",
+            "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:duplicate",
+        },
+    ],
+)
+def test_configurator_rejects_invalid_or_duplicate_service_names(
+    environment: dict[str, str],
+) -> None:
+    result = subprocess.run(
+        ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+        env=os.environ | environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 64
+    assert "Tailscale Service names" in result.stderr
 
 
 def test_unapproved_advertisement_does_not_claim_service_host_readiness(
