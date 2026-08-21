@@ -119,6 +119,7 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
     )
     assert acceptance_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
+    assert acceptance_step["env"]["VONK_ACCEPTANCE_NAS_BIND_IP"] == "127.0.0.1"
     assert acceptance_step["env"]["VONK_ACCEPTANCE_REFERENCE_COMPOSE"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
     )
@@ -131,7 +132,7 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     assert report["with"]["path"] == "${{ runner.temp }}/nas-acceptance/report.json"
 
 
-def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_version(
+def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     tmp_path: Path,
 ) -> None:
     nas = _workflow()["jobs"]["nas-acceptance"]
@@ -142,16 +143,14 @@ def test_nas_dind_fixture_starts_a_shared_loopback_daemon_and_fails_wrong_versio
     assert ready.returncode == 0, ready.stderr
     docker_log = ready.docker_log  # type: ignore[attr-defined]
     workspace = tmp_path / "ready/workspace"
-    assert (
-        "--publish 127.0.0.1:2375:2375 "
-        f"--publish 127.0.0.1:8443:8443 --volume {workspace}:{workspace}" in docker_log
-    )
+    assert f"--network host --volume {workspace}:{workspace}" in docker_log
+    assert "--publish" not in docker_log
     assert "--privileged" in docker_log
     assert (
         "docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495"
         in docker_log
     )
-    assert "--userland-proxy=false" in docker_log
+    assert "--host=tcp://127.0.0.1:2375" in docker_log
     assert "tcp://127.0.0.1:2375|version --format {{.Server.Version}}" in docker_log
     assert "|inspect " not in docker_log
     assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n"  # type: ignore[attr-defined]
