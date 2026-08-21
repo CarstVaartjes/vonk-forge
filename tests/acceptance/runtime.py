@@ -21,6 +21,20 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+def bootstrap_command(url: str) -> list[str]:
+    """Download a public bootstrap robustly before executing it interactively."""
+    script = """\
+set -eu
+bootstrap=$(mktemp "${TMPDIR:-/tmp}/vonk-bootstrap.XXXXXX")
+trap 'rm -f -- "$bootstrap"' 0 1 2 15
+curl --fail --location --silent --show-error \\
+  --retry 30 --retry-all-errors --retry-delay 2 --retry-max-time 90 \\
+  --connect-timeout 10 "$1" --output "$bootstrap"
+/bin/sh "$bootstrap"
+"""
+    return ["/bin/sh", "-c", script, "vonk-bootstrap", url]
+
+
 def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
     """Write a complete payload or fail instead of silently truncating it."""
     offset = 0

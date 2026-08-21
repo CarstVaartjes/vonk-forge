@@ -47,10 +47,14 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         interactive=interactive,
     )
 
-    assert observed["command"] == [
-        "/bin/sh",
-        "-c",
-        "curl -fsSL 'https://install.example/artifacts/release/bootstraps/spark' | sh",
+    command = observed["command"]
+    assert command[:2] == ["/bin/sh", "-c"]
+    assert "curl --fail --location --silent --show-error" in command[2]
+    assert "--retry 30 --retry-all-errors" in command[2]
+    assert "| sh" not in command[2]
+    assert command[3:] == [
+        "vonk-bootstrap",
+        "https://install.example/artifacts/release/bootstraps/spark",
     ]
     assert observed["responses"] == [
         ("Enrollment URL: ", "https://enroll.spark.localhost:8443"),

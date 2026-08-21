@@ -27,6 +27,7 @@ from tests.acceptance.runtime import (
     assert_bundle_contract,
     assert_compose_compatibility,
     assert_compose_services_healthy,
+    bootstrap_command,
     https_over_command,
     run_interactive,
 )
@@ -174,7 +175,7 @@ def generate_bundle(
 ) -> Path:
     root.mkdir(mode=0o700)
     run_interactive(
-        ["/bin/sh", "-c", f"curl -fsSL '{candidate_url}' | sh"],
+        bootstrap_command(candidate_url),
         cwd=root,
         environment=child_environment,
         responses=responses,

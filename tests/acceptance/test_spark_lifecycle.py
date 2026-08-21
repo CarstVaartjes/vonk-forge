@@ -36,6 +36,7 @@ from scripts.spark_lifecycle_contract import (
 from tests.acceptance.runtime import (
     AcceptanceError,
     assert_compose_services_healthy,
+    bootstrap_command,
     https_over_command,
     run_interactive,
 )
@@ -118,7 +119,7 @@ def _run_spark_bootstrap(
     )
     forbidden = [str(pairing_token)] if pairing else []
     return interactive(
-        ["/bin/sh", "-c", f"curl -fsSL '{url}' | sh"],
+        bootstrap_command(url),
         cwd=cwd,
         environment=environment,
         responses=responses,
