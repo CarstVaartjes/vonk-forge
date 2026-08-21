@@ -137,13 +137,22 @@ install -d -m 0700 "$data_dir" "$data_dir/.config" "$credentials" "$runtime_dir"
 node_id=spk_00000000000000000000000000000000
 /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -subj /CN=vonk-lifecycle-ca \
+  -addext basicConstraints=critical,CA:TRUE \
+  -addext keyUsage=critical,keyCertSign,cRLSign \
   -keyout "$temporary/ca-key.pem" -out "$temporary/ca.pem" >/dev/null 2>&1
 /usr/bin/openssl genpkey -algorithm ED25519 \
   -out "$temporary/private-key.pem" >/dev/null 2>&1
 /usr/bin/openssl req -new -key "$temporary/private-key.pem" \
   -subj "/CN=$node_id" -out "$temporary/identity.csr" >/dev/null 2>&1
+printf '%s\n' \
+  'basicConstraints=critical,CA:FALSE' \
+  'keyUsage=critical,digitalSignature' \
+  'extendedKeyUsage=clientAuth' \
+  "subjectAltName=URI:spiffe://vonkforge.ai/agent/$node_id" \
+  > "$temporary/identity-extensions.conf"
 /usr/bin/openssl x509 -req -days 1 -in "$temporary/identity.csr" \
   -CA "$temporary/ca.pem" -CAkey "$temporary/ca-key.pem" -CAcreateserial \
+  -extfile "$temporary/identity-extensions.conf" \
   -out "$temporary/certificate.pem" >/dev/null 2>&1
 ca_digest=$(
   /usr/bin/openssl x509 -in "$temporary/ca.pem" -outform DER \

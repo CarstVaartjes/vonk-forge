@@ -115,8 +115,12 @@ def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object
     return value
 
 
-def _runtime_config_name(source: Path) -> str:
-    digest = hashlib.sha256(source.as_posix().encode("utf-8")).hexdigest()[:16]
+def _runtime_config_name(source: Path, *, identity: str | None = None) -> str:
+    digest_builder = hashlib.sha256()
+    digest_builder.update((identity or source.as_posix()).encode("utf-8"))
+    digest_builder.update(b"\0")
+    digest_builder.update(source.read_bytes())
+    digest = digest_builder.hexdigest()[:16]
     return f"vonk_runtime_{digest}"
 
 
@@ -165,7 +169,9 @@ def _config_mounts(
     for file in files:
         relative = file.relative_to(asset).as_posix() if asset.is_dir() else ""
         destination = target if not relative else posixpath.join(target, relative)
-        name = _runtime_config_name(file.relative_to(source_root))
+        name = _runtime_config_name(
+            file, identity=file.relative_to(source_root).as_posix()
+        )
         configs[name] = {"content": _config_content(file)}
         mounts.append(
             {"source": name, "target": destination, "mode": _config_mode(file)}

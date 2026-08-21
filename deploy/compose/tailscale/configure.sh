@@ -150,19 +150,28 @@ wait_for_exact_services() {
     return 1
 }
 
-capability_is_available() {
+service_host_is_active() {
     include_hermes=$1
     ts status --json >"${runtime_dir}/tailscale-status.json" || return 1
-    if grep -Fq '"service-host"' "${runtime_dir}/tailscale-status.json"; then
-        return 0
-    fi
-    grep -Fq '"services/vonk-forge"' "${runtime_dir}/tailscale-status.json" \
+    tr -d '[:space:]' \
+        <"${runtime_dir}/tailscale-status.json" \
+        >"${runtime_dir}/tailscale-status.compact"
+
+    # services/* capabilities authorize this node as a client of a TailVIP;
+    # they do not prove that control has approved this tagged node to host it.
+    # service-host is the control-plane mapping of approved service names to
+    # their VIPs. PrimaryRoutes proves tailscaled has activated those routes.
+    grep -Fq '"service-host":' "${runtime_dir}/tailscale-status.compact" \
+        || return 1
+    grep -Fq '"svc:vonk-forge":' "${runtime_dir}/tailscale-status.compact" \
+        || return 1
+    grep -Eq '"PrimaryRoutes":\[[^]]' "${runtime_dir}/tailscale-status.compact" \
         || return 1
     if [ "${include_hermes}" = "0" ]; then
         return 0
     fi
-    grep -Fq '"services/hermes-api"' "${runtime_dir}/tailscale-status.json" \
-        && grep -Fq '"services/hermes-dashboard"' "${runtime_dir}/tailscale-status.json"
+    grep -Fq '"svc:hermes-api":' "${runtime_dir}/tailscale-status.compact" \
+        && grep -Fq '"svc:hermes-dashboard":' "${runtime_dir}/tailscale-status.compact"
 }
 
 include_hermes=0
@@ -171,11 +180,11 @@ hermes_is_available && include_hermes=1
 if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
     case ",${selected_profiles}," in
         *,hermes,*)
-            [ -S "${socket}" ] && capability_is_available 1 \
+            [ -S "${socket}" ] && service_host_is_active 1 \
                 && hermes_is_available && serve_is_exact 1
             ;;
         *)
-            [ -S "${socket}" ] && capability_is_available 0 \
+            [ -S "${socket}" ] && service_host_is_active 0 \
                 && serve_is_exact 0
             ;;
     esac
@@ -183,7 +192,7 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
 fi
 
 while [ "${remaining}" -gt 0 ]; do
-    if [ -S "${socket}" ] && capability_is_available "${include_hermes}"; then
+    if [ -S "${socket}" ] && ts status --json >/dev/null 2>&1; then
         break
     fi
     sleep 2
@@ -203,6 +212,19 @@ if ! wait_for_exact_services "${include_hermes}"; then
     exit 1
 fi
 
+remaining=120
+while [ "${remaining}" -gt 0 ]; do
+    if service_host_is_active "${include_hermes}"; then
+        break
+    fi
+    sleep 2
+    remaining=$((remaining - 2))
+done
+if [ "${remaining}" -le 0 ]; then
+    echo "ERROR: Tailscale has not approved and activated the selected Service hosts." >&2
+    exit 1
+fi
+
 if [ "${TS_CONFIGURE_ONCE:-0}" = "1" ]; then
     exit 0
 fi
@@ -214,15 +236,12 @@ while :; do
     sleep "${reconcile_interval}"
     desired_hermes=0
     hermes_is_available && desired_hermes=1
-    if ! capability_is_available "${desired_hermes}"; then
-        # A service map is not externally reachable until the tailnet grants
-        # this tagged gateway the corresponding services/* capabilities.
-        # Keep the last known map and let health stay failed rather than
-        # claiming a route that control has not authorized.
-        continue
-    fi
     if ! serve_is_exact "${desired_hermes}"; then
         configure_services "${desired_hermes}"
         wait_for_exact_services "${desired_hermes}" || exit 1
     fi
+    # Configuration advertises the desired services. Control may still require
+    # approval, so health remains failed until service-host and PrimaryRoutes
+    # show that the selected TailVIPs are genuinely active.
+    service_host_is_active "${desired_hermes}" || continue
 done
