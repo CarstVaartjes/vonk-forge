@@ -94,6 +94,19 @@ def test_nas_bind_address_can_differ_from_the_reachable_address(monkeypatch) -> 
         acceptance.nas_bind_ipv4("172.18.0.2")
 
 
+def test_host_commands_preserve_only_explicit_docker_connection(monkeypatch) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+    monkeypatch.setenv("DOCKER_TLS_VERIFY", "1")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
+
+    environment = acceptance.host_command_environment()
+
+    assert environment["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
+    assert environment["DOCKER_TLS_VERIFY"] == "1"
+    assert "UNRELATED_SECRET" not in environment
+
+
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [
