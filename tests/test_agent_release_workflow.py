@@ -641,6 +641,7 @@ def test_development_publication_requires_native_amd64_lifecycle() -> None:
     assert "runs-on: ubuntu-24.04" in lifecycle
     assert "actions/download-artifact@" in lifecycle
     assert 'test "$(uname -m)" = x86_64' in lifecycle
+    assert "podman shellcheck slirp4netns uidmap" in lifecycle
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
     assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
