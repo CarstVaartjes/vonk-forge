@@ -64,6 +64,54 @@ def test_supervisor_prepares_the_non_root_prisma_query_engine(
     assert module._PRISMA_QUERY_ENGINE_ENV not in calls[0]["env"]
 
 
+def test_supervisor_selects_the_single_native_prisma_query_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cache = tmp_path / "prisma-cache"
+    configured = cache / "engines" / "query-engine-debian-openssl-3.0.x"
+    native = cache / "engines" / "query-engine-linux-arm64-openssl-3.0.x"
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", cache)
+    monkeypatch.setenv(module._PRISMA_QUERY_ENGINE_ENV, str(configured))
+
+    def populate(command, **kwargs) -> None:
+        assert command == ["prisma", "-v"]
+        native.parent.mkdir(parents=True)
+        native.write_bytes(b"native-query-engine")
+        native.chmod(0o700)
+
+    monkeypatch.setattr(module.subprocess, "run", populate)
+
+    module._prepare_query_engine()
+
+    assert os.environ[module._PRISMA_QUERY_ENGINE_ENV] == str(native)
+
+
+def test_supervisor_rejects_ambiguous_native_prisma_query_engines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cache = tmp_path / "prisma-cache"
+    configured = cache / "engines" / "query-engine-configured"
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", cache)
+    monkeypatch.setenv(module._PRISMA_QUERY_ENGINE_ENV, str(configured))
+
+    def populate(command, **kwargs) -> None:
+        assert command == ["prisma", "-v"]
+        configured.parent.mkdir(parents=True)
+        for name in ("query-engine-native-a", "query-engine-native-b"):
+            candidate = configured.with_name(name)
+            candidate.write_bytes(b"query-engine")
+            candidate.chmod(0o700)
+
+    monkeypatch.setattr(module.subprocess, "run", populate)
+
+    with pytest.raises(RuntimeError, match="was not populated"):
+        module._prepare_query_engine()
+
+
 def test_supervisor_rejects_a_query_engine_outside_its_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
