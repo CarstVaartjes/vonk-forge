@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +21,27 @@ def _acceptance_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_direct_entrypoint_resolves_repository_imports() -> None:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("VONK_ACCEPTANCE_")
+    }
+
+    result = subprocess.run(
+        [sys.executable, SCRIPT],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.stderr.startswith("fresh NAS acceptance: ")
 
 
 def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
