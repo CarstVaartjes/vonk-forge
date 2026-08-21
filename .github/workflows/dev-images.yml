@@ -501,30 +501,44 @@ jobs:
             docker buildx imagetools inspect "$image@$digest" \
               --format '{{ json .Manifest }}' \
               > "$manifest_file"
+            platform_records=$(mktemp "$RUNNER_TEMP/$identity.platforms.XXXXXX")
+            provenance_file=$(mktemp "$RUNNER_TEMP/$identity.provenance.XXXXXX")
+            sbom_file=$(mktemp "$RUNNER_TEMP/$identity.sbom.XXXXXX")
+            scripts/verify-multiarch-image-manifest "$manifest_file" \
+              > "$platform_records"
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .Provenance }}' \
+              > "$provenance_file"
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .SBOM }}' \
+              > "$sbom_file"
+            jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+              "$provenance_file" >/dev/null
+            jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+              "$sbom_file" >/dev/null
             while IFS=$'\t' read -r architecture runnable_digest \
               attestation_digest; do
               skopeo inspect --config "docker://$image@$runnable_digest" \
                 | jq -e --arg revision "$GITHUB_SHA" \
                   '.config.Labels["org.opencontainers.image.revision"] == $revision' \
                   >/dev/null
-              docker buildx imagetools inspect "$image@$attestation_digest" \
-                --format '{{ json .Provenance }}' \
-                | jq -e --arg revision "$GITHUB_SHA" \
-                  '([.. | objects | select(
+              jq -e --arg platform "linux/$architecture" \
+                --arg revision "$GITHUB_SHA" \
+                '(.[$platform] | ([.. | objects | select(
                     ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
                     or (((.SLSA?.buildType? // "") | length) > 0)
                     or (((.buildDefinition?.buildType? // "") | length) > 0)
-                    )] | length > 0)
-                   and ([.. | strings | select(. == $revision)] | length > 0)' \
-                  >/dev/null
-              docker buildx imagetools inspect "$image@$attestation_digest" \
-                --format '{{ json .SBOM }}' \
-                | jq -e '[.. | objects | select(
+                  )] | length > 0)
+                  and ([.. | strings | select(. == $revision)] | length > 0))' \
+                "$provenance_file" >/dev/null
+              jq -e --arg platform "linux/$architecture" \
+                '.[$platform] | [.. | objects | select(
                     .SPDXID? == "SPDXRef-DOCUMENT"
                     and ((.spdxVersion? // "") | startswith("SPDX-"))
-                  )] | length > 0' >/dev/null
-            done < <(scripts/verify-multiarch-image-manifest "$manifest_file")
-            rm -f -- "$manifest_file"
+                  )] | length > 0' "$sbom_file" >/dev/null
+            done < "$platform_records"
+            rm -f -- "$manifest_file" "$platform_records" \
+              "$provenance_file" "$sbom_file"
           done
 
       - name: Sign accepted API image provenance

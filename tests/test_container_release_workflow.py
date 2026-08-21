@@ -232,7 +232,13 @@ def test_development_image_publication_requires_both_platforms() -> None:
     assert "--format '{{ json .Manifest }}'" in verification
     assert "scripts/verify-multiarch-image-manifest" in verification
     assert '"docker://$image@$runnable_digest"' in verification
-    assert '"$image@$attestation_digest"' in verification
+    assert verification.count('"$image@$digest"') == 3
+    assert 'done < "$platform_records"' in verification
+    assert '--arg platform "linux/$architecture"' in verification
+    assert verification.count('.[$platform]') == 2
+    assert verification.count(
+        'keys | sort == ["linux/amd64", "linux/arm64"]'
+    ) == 2
 
 
 def image_descriptor(architecture: str, marker: str) -> dict[str, object]:
