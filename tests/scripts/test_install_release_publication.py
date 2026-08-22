@@ -996,7 +996,7 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     step = next(
         step
         for step in workflow["jobs"]["nas-acceptance"]["steps"]
-        if step["name"] == "Run literal clean NAS and tailnet acceptance"
+        if step["name"] == "Run literal clean NAS and Tailscale configuration acceptance"
     )
     nas_gates = set(json.loads(step["env"]["VONK_ACCEPTANCE_GATE_NAMES"]))
     reports = [

@@ -90,7 +90,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
     }
     nas_environment = _steps(jobs["nas-acceptance"])[
-        "Run literal clean NAS and tailnet acceptance"
+        "Run literal clean NAS and Tailscale configuration acceptance"
     ]["env"]
     spark_environment = _steps(jobs["spark-acceptance"])[
         "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
@@ -124,7 +124,7 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
 ):
     jobs = _workflow()["jobs"]
     nas = jobs["nas-acceptance"]
-    assert nas["permissions"] == {"contents": "read", "id-token": "write"}
+    assert nas["permissions"] == {"contents": "read"}
     assert "services" not in nas
     steps = _steps(nas)
     fixture_step = steps["Download verified Compose parser fixtures"]
@@ -134,8 +134,8 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         "COMPOSE_UGREEN_SHA256": "a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4",
     }
     compatibility_step = steps["Run Docker 29.4.3 NAS compatibility acceptance"]
-    tailnet_step = steps["Run literal clean NAS and tailnet acceptance"]
-    for acceptance_step in (compatibility_step, tailnet_step):
+    native_step = steps["Run literal clean NAS and Tailscale configuration acceptance"]
+    for acceptance_step in (compatibility_step, native_step):
         assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
             "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
         )
@@ -157,18 +157,20 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind"
     )
-    assert "DOCKER_HOST" not in tailnet_step["env"]
-    assert tailnet_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "true"
-    assert tailnet_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
+    assert "DOCKER_HOST" not in native_step["env"]
+    assert native_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
+    assert native_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
     )
     assert "nas-acceptance/report.json" not in compatibility_step["run"]
-    assert "nas-acceptance/report.json" in tailnet_step["run"]
-    assert "for attempt in 1 2; do" in tailnet_step["run"]
-    assert 'test "$native_accepted" = true' in tailnet_step["run"]
-    assert tailnet_step["run"].count(
-        "uv run python tests/acceptance/test_fresh_nas_install.py"
-    ) == 1
+    assert "nas-acceptance/report.json" in native_step["run"]
+    assert "for attempt in 1 2; do" not in native_step["run"]
+    assert (
+        native_step["run"].count(
+            "uv run python tests/acceptance/test_fresh_nas_install.py"
+        )
+        == 1
+    )
     report = steps["Upload NAS behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
@@ -216,12 +218,18 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
 
     assert "Restore native Docker networking" not in steps
     step_names = [step["name"] for step in nas_steps]
-    assert step_names.index("Download verified Compose parser fixtures") < step_names.index(
-        "Run literal clean NAS and tailnet acceptance"
-    ) < step_names.index("Start Docker 29.4.3 compatibility daemon")
-    assert step_names.index("Run Docker 29.4.3 NAS compatibility acceptance") < (
-        step_names.index("Remove Docker 29.4.3 compatibility daemon")
-    ) < step_names.index("Upload NAS behavioral gate report")
+    assert (
+        step_names.index("Download verified Compose parser fixtures")
+        < step_names.index(
+            "Run literal clean NAS and Tailscale configuration acceptance"
+        )
+        < step_names.index("Start Docker 29.4.3 compatibility daemon")
+    )
+    assert (
+        step_names.index("Run Docker 29.4.3 NAS compatibility acceptance")
+        < (step_names.index("Remove Docker 29.4.3 compatibility daemon"))
+        < step_names.index("Upload NAS behavioral gate report")
+    )
 
     candidate = _steps(jobs["candidate"])[
         "Upload immutable publication bundle and candidate receipt"
@@ -234,7 +242,7 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
 
 def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     spark = _workflow()["jobs"]["spark-acceptance"]
-    assert spark["permissions"] == {"contents": "read", "id-token": "write"}
+    assert spark["permissions"] == {"contents": "read"}
     assert spark["strategy"]["matrix"]["include"] == [
         {"platform": "linux-amd64", "runner": "ubuntu-24.04"},
         {"platform": "linux-arm64", "runner": "ubuntu-24.04-arm"},
@@ -244,23 +252,15 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     assert report["with"]["if-no-files-found"] == "error"
 
 
-def test_acceptance_jobs_use_the_scoped_oidc_tailnet_client() -> None:
+def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() -> None:
     jobs = _workflow()["jobs"]
     for name in ("nas-acceptance", "spark-acceptance"):
-        step = _steps(jobs[name])["Join tailnet as isolated acceptance client"]
-        assert step["uses"] == (
-            "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888"
-        )
-        expected = {
-            "oauth-client-id": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_CLIENT_ID }}",
-            "audience": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_AUDIENCE }}",
-            "tags": "tag:vonk-acceptance",
-            "version": "1.98.8",
-            "use-cache": "false",
-        }
-        if name == "nas-acceptance":
-            expected["statedir"] = "${{ runner.temp }}/tailscale-state"
-        assert step["with"] == expected
+        assert "Join tailnet as isolated acceptance client" not in _steps(jobs[name])
+        assert jobs[name]["permissions"] == {"contents": "read"}
+    native = _steps(jobs["nas-acceptance"])[
+        "Run literal clean NAS and Tailscale configuration acceptance"
+    ]
+    assert native["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
 
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
