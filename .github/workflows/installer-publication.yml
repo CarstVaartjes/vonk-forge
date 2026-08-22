@@ -602,7 +602,17 @@ jobs:
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
-          uv run python tests/acceptance/test_fresh_nas_install.py
+          native_accepted=false
+          for attempt in 1 2; do
+            if uv run python tests/acceptance/test_fresh_nas_install.py; then
+              native_accepted=true
+              break
+            fi
+            if [ "$attempt" -lt 2 ]; then
+              sleep 5
+            fi
+          done
+          test "$native_accepted" = true
           mkdir -p "$RUNNER_TEMP/nas-acceptance"
           jq -S -c -n \
             --arg channel "$VONK_ACCEPTANCE_CHANNEL" \

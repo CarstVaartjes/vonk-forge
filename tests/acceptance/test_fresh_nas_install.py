@@ -1240,8 +1240,9 @@ def exercise_compose(
             )
         except (AcceptanceError, subprocess.TimeoutExpired) as error:
             diagnostics = compose_startup_diagnostics(bundle)
+            cause = _redact_diagnostics(str(error)) or type(error).__name__
             raise AcceptanceError(
-                f"NAS Compose startup failed; {diagnostics}"
+                f"NAS Compose startup failed; cause: {cause}; {diagnostics}"
             ) from error
         status = run(
             [*reference_compose(), "ps", "--all", "--format", "json"],

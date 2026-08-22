@@ -169,6 +169,11 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     assert "postgres=running/healthy/exit-0" in diagnostics
     assert "tailscale-configurator=running/unhealthy/exit-1" in diagnostics
 
+    cause = acceptance._redact_diagnostics(
+        f"image pull failed while using {secret}"
+    )
+    assert cause == "image pull failed while using <redacted>"
+
 
 def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
     tmp_path: Path,
