@@ -191,6 +191,7 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut observation_failures = 0_u32;
     let mut next_inventory = tokio::time::Instant::now();
+    let mut readiness_published = false;
     loop {
         if tokio::time::Instant::now() >= next_inventory {
             if rotate_if_due(config).await? {
@@ -237,7 +238,11 @@ async fn run_control_lane(
             },
         };
         let observations = executor.runtime.recipe_run_observations()?;
-        let wait_seconds = claim_wait_seconds(config.poll_max_seconds, observations.len());
+        let wait_seconds = claim_wait_seconds(
+            config.poll_max_seconds,
+            observations.len(),
+            readiness_published,
+        );
         let observation_entropy =
             SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
         let operation = async {
@@ -277,6 +282,7 @@ async fn run_control_lane(
         match operation.await {
             Ok(()) => {
                 failures = 0;
+                readiness_published = true;
             }
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
@@ -451,7 +457,14 @@ fn observation_failure_action(error: &ClientError) -> ObservationFailureAction {
     }
 }
 
-fn claim_wait_seconds(configured_maximum: u64, managed_run_count: usize) -> u64 {
+fn claim_wait_seconds(
+    configured_maximum: u64,
+    managed_run_count: usize,
+    readiness_published: bool,
+) -> u64 {
+    if !readiness_published {
+        return 0;
+    }
     let existing_wait = configured_maximum.min(60);
     if managed_run_count == 0 {
         existing_wait
@@ -471,14 +484,20 @@ mod tests {
 
     #[test]
     fn managed_runs_cap_claim_long_poll_at_ten_seconds() {
-        assert_eq!(claim_wait_seconds(60, 1), 10);
-        assert_eq!(claim_wait_seconds(7, 1), 7);
+        assert_eq!(claim_wait_seconds(60, 1, true), 10);
+        assert_eq!(claim_wait_seconds(7, 1, true), 7);
     }
 
     #[test]
     fn no_managed_runs_retain_existing_claim_long_poll_behavior() {
-        assert_eq!(claim_wait_seconds(300, 0), 60);
-        assert_eq!(claim_wait_seconds(7, 0), 7);
+        assert_eq!(claim_wait_seconds(300, 0, true), 60);
+        assert_eq!(claim_wait_seconds(7, 0, true), 7);
+    }
+
+    #[test]
+    fn first_claim_returns_immediately_to_publish_controller_readiness() {
+        assert_eq!(claim_wait_seconds(60, 0, false), 0);
+        assert_eq!(claim_wait_seconds(60, 1, false), 0);
     }
 
     #[test]
