@@ -108,6 +108,19 @@ def test_host_commands_preserve_only_explicit_docker_connection(monkeypatch) -> 
     assert "UNRELATED_SECRET" not in environment
 
 
+def test_tailnet_client_requirement_is_explicit_and_fail_closed(monkeypatch) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.delenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", raising=False)
+    assert acceptance.require_tailnet_client() is True
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "false")
+    assert acceptance.require_tailnet_client() is False
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "False")
+    with pytest.raises(AcceptanceError, match="must be true or false"):
+        acceptance.require_tailnet_client()
+
+
 def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -432,6 +445,24 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
         acceptance._tcp_tunnel("100.64.0.10", 443),
         acceptance._tcp_tunnel("100.64.0.12", 443),
     ]
+
+    responses = iter(
+        (
+            json.dumps({"BackendState": "Running"}),
+            json.dumps(_serve_status(hermes=True)),
+            json.dumps(_serve_configuration(hermes=True)),
+        )
+    )
+    compose_commands.clear()
+    probe_commands.clear()
+    acceptance.verify_tailscale_services(
+        tmp_path,
+        hermes=True,
+        tailnet_suffix="acceptance.example.test",
+        service_addresses=None,
+    )
+    assert all("tailscale-gateway" in command for command in compose_commands)
+    assert probe_commands == []
 
 
 def test_wait_for_tailnet_services_polls_until_all_are_visible(

@@ -70,6 +70,15 @@ def required_environment(name: str, *, secret: bool = False) -> str:
     return value
 
 
+def require_tailnet_client() -> bool:
+    value = os.environ.get("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "true")
+    if value not in {"true", "false"}:
+        raise AcceptanceError(
+            "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT must be true or false"
+        )
+    return value == "true"
+
+
 def host_ipv4() -> str:
     configured = os.environ.get("VONK_ACCEPTANCE_NAS_IP")
     if configured:
@@ -1099,7 +1108,7 @@ def verify_tailscale_services(
     control_service: str = "svc:vonk-forge",
     hermes_api_service: str = "svc:hermes-api",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
-    service_addresses: dict[str, str],
+    service_addresses: dict[str, str] | None,
 ) -> None:
     status = run(
         [
@@ -1155,6 +1164,9 @@ def verify_tailscale_services(
         hermes_dashboard_service=hermes_dashboard_service,
     )
 
+    if service_addresses is None:
+        return
+
     routes = [
         (
             control_service,
@@ -1198,6 +1210,7 @@ def exercise_compose(
     control_service: str = "svc:vonk-forge",
     hermes_api_service: str = "svc:hermes-api",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
+    require_external_tailnet_client: bool = True,
 ) -> None:
     expected = HERMES_SERVICES if hermes else DEFAULT_SERVICES
     configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
@@ -1237,6 +1250,17 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
+        if not require_external_tailnet_client:
+            verify_tailscale_services(
+                bundle,
+                hermes=hermes,
+                tailnet_suffix=tailnet_suffix,
+                control_service=control_service,
+                hermes_api_service=hermes_api_service,
+                hermes_dashboard_service=hermes_dashboard_service,
+                service_addresses=None,
+            )
+            return
         expected_tailnet_services = {
             control_service: control_hostname,
         }
@@ -1344,6 +1368,7 @@ def main() -> None:
     nas_bind_ip = nas_bind_ipv4(nas_ip)
     enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
     fixtures = compose_compatibility_fixtures()
+    require_external_tailnet_client = require_tailnet_client()
 
     with tempfile.TemporaryDirectory(
         prefix="vonk-nas-acceptance-", dir=workspace
@@ -1411,6 +1436,7 @@ def main() -> None:
                 control_service=services["control"],
                 hermes_api_service=services["hermes_api"],
                 hermes_dashboard_service=services["hermes_dashboard"],
+                require_external_tailnet_client=require_external_tailnet_client,
             )
 
 
