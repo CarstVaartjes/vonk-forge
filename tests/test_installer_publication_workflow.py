@@ -90,7 +90,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
     }
     nas_environment = _steps(jobs["nas-acceptance"])[
-        "Run literal clean NAS and Compose acceptance"
+        "Run literal clean NAS and tailnet acceptance"
     ]["env"]
     spark_environment = _steps(jobs["spark-acceptance"])[
         "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
@@ -99,7 +99,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         assert nas_environment[name] == service
         assert spark_environment[name] == service
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
-        "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+        "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native"
     )
     assert set(jobs["acceptance"]["needs"]) == {
         "authority",
@@ -133,21 +133,36 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         "COMPOSE_LOWER_SHA256": "eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310",
         "COMPOSE_UGREEN_SHA256": "a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4",
     }
-    acceptance_step = steps["Run literal clean NAS and Compose acceptance"]
-    assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
+    compatibility_step = steps["Run Docker 29.4.3 NAS compatibility acceptance"]
+    tailnet_step = steps["Run literal clean NAS and tailnet acceptance"]
+    for acceptance_step in (compatibility_step, tailnet_step):
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
+            "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
+        )
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_UGREEN"] == (
+            "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
+        )
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_REFERENCE_COMPOSE"] == (
+            "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
+        )
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_NAS_BIND_IP"] == "127.0.0.1"
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_WORKSPACE"] == (
+            "${{ github.workspace }}"
+        )
+    assert compatibility_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
+    assert compatibility_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == (
+        "false"
+    )
+    assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
+        "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind"
+    )
+    assert "DOCKER_HOST" not in tailnet_step["env"]
+    assert tailnet_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "true"
+    assert tailnet_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
     )
-    assert acceptance_step["env"]["VONK_ACCEPTANCE_COMPOSE_UGREEN"] == (
-        "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
-    )
-    assert acceptance_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
-    assert acceptance_step["env"]["VONK_ACCEPTANCE_NAS_BIND_IP"] == "127.0.0.1"
-    assert acceptance_step["env"]["VONK_ACCEPTANCE_REFERENCE_COMPOSE"] == (
-        "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
-    )
-    assert acceptance_step["env"]["VONK_ACCEPTANCE_WORKSPACE"] == (
-        "${{ github.workspace }}"
-    )
+    assert "nas-acceptance/report.json" not in compatibility_step["run"]
+    assert "nas-acceptance/report.json" in tailnet_step["run"]
     report = steps["Upload NAS behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
