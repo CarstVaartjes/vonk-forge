@@ -101,6 +101,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native"
     )
+    assert spark_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
+        "vonk-spark-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
+    )
     assert set(jobs["acceptance"]["needs"]) == {
         "authority",
         "candidate",

@@ -636,7 +636,13 @@ class SparkLifecycle:
             child_environment=child_environment,
             responses=responses,
         )
-        configure_tailnet_service_names(self.bundle, **self.tailnet_services)
+        configure_tailnet_service_names(
+            self.bundle,
+            gateway_hostname=self._required_environment(
+                "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"
+            ),
+            **self.tailnet_services,
+        )
         _configure_acceptance_renewal(
             self.bundle, lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS
         )
