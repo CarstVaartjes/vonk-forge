@@ -32,7 +32,12 @@ Merge the reviewed sections of `deploy/compose/tailscale/grants.example.hujson`
 into tailnet policy after replacing the GitHub-login placeholder. Administrators
 reach only the `vonk-forge` Service through its grant. `group:hermes-users` reaches
 only the two Hermes Services. Auto-approval permits only `tag:vonk-gateway` to
-advertise the three named Services. Never use `svc:*` or an allow-all ACL.
+advertise the three named Services. The exact TCP 443 grant from
+`tag:vonk-gateway` to those same Services is also required: it gives the
+already-connected proxy no backend access it does not already have, while
+allowing Tailscale to assign the Service TailVIP `PrimaryRoutes`. Without it,
+the console can show an approved online host while clients still report
+`no matching peer`. Never use `svc:*` or an allow-all ACL.
 Development uses only `svc:vonk-forge`; the two Hermes Services belong to the
 full production graph. In both graphs, Tailscale Funnel is forbidden and no
 human-facing LAN port is a fallback.
@@ -41,10 +46,14 @@ The Services page must show at least one connected host for every Service in
 use. A defined Service showing `0 hosts` has no active ingress. Allow the
 configurator's bounded two-minute approval window to complete, then verify the
 gateway carries `tag:vonk-gateway` and the exact named Service is present under
-`autoApprovers.services`. If the console shows a pending host, approve that
-specific gateway advertisement. Never add the `funnel` node attribute as a
-workaround; it enables public internet exposure rather than approving a
-tailnet-only Service host.
+`autoApprovers.services`. Also verify the gateway tag has TCP 443 access to
+every Service it hosts. If the console shows a pending host, approve that
+specific gateway advertisement. If it shows an online host but the
+configurator remains unhealthy, inspect `.Self.PrimaryRoutes` in `tailscale
+status --json`; do not repeatedly recreate an approved host to mask a missing
+self-access grant. Never add the `funnel` node attribute as a workaround; it
+enables public internet exposure rather than approving a tailnet-only Service
+host.
 
 ## Secrets and unattended startup
 
@@ -140,6 +149,10 @@ docker compose exec tailscale-gateway tailscale status --json
 docker compose exec tailscale-gateway tailscale serve status --json
 docker compose logs --since 30m tailscale-configurator
 ```
+
+`Self.PrimaryRoutes` must contain each mapped Service IPv4 as `/32` and IPv6 as
+`/128`. An approved `service-host` mapping without those routes is fail-closed,
+not ready.
 
 Development must report exactly one Service: `svc:vonk-forge` with `HTTPS:
 true`, never `HTTP: true`, and only the `http://caddy:8080` upstream. Production

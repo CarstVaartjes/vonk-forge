@@ -334,7 +334,9 @@ while [ "${remaining}" -gt 0 ]; do
     route_repair_remaining=$((route_repair_remaining - 2))
 done
 if [ "${remaining}" -le 0 ]; then
-    echo "ERROR: Tailscale has not approved and activated the selected Service hosts." >&2
+    echo "ERROR: Tailscale has not approved and activated the selected Service hosts;" \
+        "verify auto-approval and grant tag:vonk-gateway TCP 443 access" \
+        "to every hosted Service." >&2
     exit 1
 fi
 
