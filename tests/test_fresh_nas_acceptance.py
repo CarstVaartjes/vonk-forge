@@ -121,6 +121,7 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
     acceptance.configure_tailnet_service_names(
         bundle,
         control="svc:vonk-forge-acceptance",
+        gateway_hostname="vonk-forge-ci-123-1",
         hermes_api="svc:hermes-api-acceptance",
         hermes_dashboard="svc:hermes-dashboard-acceptance",
     )
@@ -131,6 +132,7 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
         "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge-acceptance",
         "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api-acceptance",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard-acceptance",
+        "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
     ]
     assert (
         acceptance.tailscale_service_hostname(
@@ -143,7 +145,17 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
         acceptance.configure_tailnet_service_names(
             bundle,
             control="svc:duplicate",
+            gateway_hostname="vonk-forge-ci-123-1",
             hermes_api="svc:duplicate",
+            hermes_dashboard="svc:hermes-dashboard-acceptance",
+        )
+
+    with pytest.raises(AcceptanceError, match="gateway hostname"):
+        acceptance.configure_tailnet_service_names(
+            bundle,
+            control="svc:vonk-forge-acceptance",
+            gateway_hostname="INVALID HOSTNAME",
+            hermes_api="svc:hermes-api-acceptance",
             hermes_dashboard="svc:hermes-dashboard-acceptance",
         )
 

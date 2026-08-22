@@ -54,6 +54,7 @@ SAFE_DNS_SUFFIX = re.compile(
 TAILSCALE_SERVICE = re.compile(
     r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
 )
+TAILSCALE_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 PINNED_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z"
 )
@@ -208,6 +209,7 @@ def configure_tailnet_service_names(
     bundle: Path,
     *,
     control: str,
+    gateway_hostname: str,
     hermes_api: str,
     hermes_dashboard: str,
 ) -> None:
@@ -220,6 +222,11 @@ def configure_tailnet_service_names(
         TAILSCALE_SERVICE.fullmatch(value) is None for value in services.values()
     ):
         raise AcceptanceError("acceptance Tailscale Service names are invalid")
+    if TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None:
+        raise AcceptanceError("acceptance Tailscale gateway hostname is invalid")
+    settings = services | {
+        "VONK_TAILSCALE_GATEWAY_HOSTNAME": gateway_hostname,
+    }
     environment = bundle / ".env"
     try:
         metadata = environment.lstat()
@@ -228,13 +235,13 @@ def configure_tailnet_service_names(
         raise AcceptanceError("bundle environment is unavailable") from error
     if environment.is_symlink() or not environment.is_file() or metadata.st_nlink != 1:
         raise AcceptanceError("bundle environment is unsafe")
-    if any(f"{name}=" in source for name in services):
-        raise AcceptanceError("bundle already selects Tailscale Service names")
+    if any(f"{name}=" in source for name in settings):
+        raise AcceptanceError("bundle already selects Tailscale acceptance settings")
     suffix = "" if source.endswith("\n") else "\n"
     environment.write_text(
         source
         + suffix
-        + "".join(f"{name}={value}\n" for name, value in services.items()),
+        + "".join(f"{name}={value}\n" for name, value in settings.items()),
         encoding="utf-8",
     )
     os.chmod(environment, metadata.st_mode & 0o777)
@@ -1238,6 +1245,11 @@ def main() -> None:
     ):
         raise AcceptanceError("acceptance Tailscale Service names are invalid")
     control_hostname = tailscale_service_hostname(services["control"], tailnet_suffix)
+    gateway_hostname = required_environment(
+        "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"
+    )
+    if TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None:
+        raise AcceptanceError("acceptance Tailscale gateway hostname is invalid")
     oauth_client_id = required_environment(
         "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
     )
@@ -1298,7 +1310,11 @@ def main() -> None:
         )
         assert_repeatable(first, second)
         for bundle in (first, hermes):
-            configure_tailnet_service_names(bundle, **services)
+            configure_tailnet_service_names(
+                bundle,
+                gateway_hostname=gateway_hostname,
+                **services,
+            )
         for bundle in (first, hermes):
             assert_compose_compatibility(
                 bundle,

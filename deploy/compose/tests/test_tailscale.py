@@ -384,6 +384,30 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     }
 
 
+def test_gateway_hostname_can_be_isolated_for_acceptance() -> None:
+    environment = _environment()
+    environment["VONK_TAILSCALE_GATEWAY_HOSTNAME"] = "vonk-forge-ci-123-1"
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE / "compose.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    gateway = json.loads(result.stdout)["services"]["tailscale-gateway"]
+    assert gateway["hostname"] == "vonk-forge-ci-123-1"
+    assert gateway["environment"]["TS_HOSTNAME"] == "vonk-forge-ci-123-1"
+
+
 def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -> None:
     configurator = _rendered()["services"]["tailscale-configurator"]
 

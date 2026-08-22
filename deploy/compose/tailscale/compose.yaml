@@ -7,7 +7,7 @@ x-tailscale-logging: &tailscale-logging
 services:
   tailscale-gateway:
     image: ${TAILSCALE_IMAGE:-tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f}
-    hostname: vonk-forge-gateway
+    hostname: ${VONK_TAILSCALE_GATEWAY_HOSTNAME:-vonk-forge-gateway}
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
@@ -15,7 +15,7 @@ services:
       TS_AUTH_ONCE: "true"
       TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
       TS_EXTRA_ARGS: --advertise-tags=tag:vonk-gateway
-      TS_HOSTNAME: vonk-forge-gateway
+      TS_HOSTNAME: ${VONK_TAILSCALE_GATEWAY_HOSTNAME:-vonk-forge-gateway}
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
