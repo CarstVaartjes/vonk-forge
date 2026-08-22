@@ -695,7 +695,6 @@ def verify_routed_service_behavior(
     *,
     nas_ip: str,
     control_hostname: str,
-    control_address: str,
     registry_hostname: str,
 ) -> None:
     litellm_key = _bundle_secret(bundle, "litellm-master-key")
@@ -708,7 +707,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/v1/models",
             headers=headers,
             accepted_statuses={401, 403},
@@ -717,7 +716,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/v1/models",
             headers={"Authorization": f"Bearer {litellm_key}"},
             accepted_statuses={200},
@@ -731,7 +730,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/grafana/api/user",
             headers={} if not authorization else {"Authorization": authorization},
             accepted_statuses={401, 403},
@@ -740,7 +739,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/grafana/api/user",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -753,7 +752,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/grafana/api/datasources/uid/vonk-prometheus",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -766,7 +765,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path="/grafana/api/search?query=Vonk%20Forge",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -781,7 +780,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
-            connect_host=control_address,
+            connect_host=control_hostname,
             path=(
                 "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
                 "query=up%7Bjob%3D%22vonk-control%22%7D"
@@ -958,7 +957,7 @@ def wait_for_tailnet_https(
             ) from last_error
         try:
             https_over_command(
-                _tailnet_tunnel(address, 443),
+                _tailnet_tunnel(hostname, 443),
                 cwd=bundle,
                 server_hostname=hostname,
                 path=path,
@@ -1194,7 +1193,7 @@ def verify_tailscale_services(
         if address is None:
             raise AcceptanceError("Tailscale Service address is unavailable")
         https_over_command(
-            _tailnet_tunnel(address, 443),
+            _tailnet_tunnel(hostname, 443),
             cwd=bundle,
             server_hostname=hostname,
             path=path,
@@ -1295,7 +1294,6 @@ def exercise_compose(
             bundle,
             nas_ip=nas_ip,
             control_hostname=control_hostname,
-            control_address=service_addresses[control_service],
             registry_hostname=registry_hostname,
         )
         verify_tailscale_services(

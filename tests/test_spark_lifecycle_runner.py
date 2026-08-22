@@ -172,11 +172,11 @@ def test_public_controller_uses_the_independent_tailnet_client(tmp_path: Path) -
     boundary = lifecycle.PublicController(
         bundle=tmp_path,
         hostname="vonk-forge.acceptance.example.test",
-        connect_host="100.64.0.10",
+        connect_host="vonk-forge.acceptance.example.test",
     )
 
     assert boundary._command() == lifecycle._tailnet_tunnel(
-        "100.64.0.10", 443
+        "vonk-forge.acceptance.example.test", 443
     )
 
 

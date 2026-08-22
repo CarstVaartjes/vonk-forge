@@ -447,8 +447,8 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     assert all("tailscale-gateway" in command for command in compose_commands)
     assert probe_commands == [
-        acceptance._tailnet_tunnel("100.64.0.10", 443),
-        acceptance._tailnet_tunnel("100.64.0.12", 443),
+        acceptance._tailnet_tunnel("vonk-forge.acceptance.example.test", 443),
+        acceptance._tailnet_tunnel("hermes-dashboard.acceptance.example.test", 443),
     ]
 
     responses = iter(
@@ -513,7 +513,7 @@ def test_wait_for_tailnet_services_polls_until_all_are_visible(
     }
 
 
-def test_wait_for_tailnet_https_retries_with_tailvip_and_tls_hostname(
+def test_wait_for_tailnet_https_retries_with_service_hostname(
     tmp_path: Path, monkeypatch
 ) -> None:
     acceptance = _acceptance_module()
@@ -538,7 +538,10 @@ def test_wait_for_tailnet_https_retries_with_tailvip_and_tls_hostname(
 
     assert len(calls) == 2
     assert all(
-        command == acceptance._tailnet_tunnel("100.64.0.10", 443)
+        command
+        == acceptance._tailnet_tunnel(
+            "vonk-forge-acceptance.example.ts.net", 443
+        )
         and kwargs["server_hostname"]
         == "vonk-forge-acceptance.example.ts.net"
         and kwargs["timeout"] <= 10
@@ -613,13 +616,14 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         tmp_path,
         nas_ip="192.0.2.20",
         control_hostname="vonk-forge.acceptance.example.test",
-        control_address="100.64.0.10",
         registry_hostname="registry.acceptance.example.test",
     )
 
     assert all(
         command
-        == acceptance._tailnet_tunnel("100.64.0.10", 443)
+        == acceptance._tailnet_tunnel(
+            "vonk-forge.acceptance.example.test", 443
+        )
         for command, kwargs in calls
         if kwargs["server_hostname"] != "registry.acceptance.example.test"
     )
