@@ -193,8 +193,8 @@ def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> Non
 
 
 def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
-    if platform_name != "linux-arm64":
-        raise LifecycleError("synthetic device fixture is ARM64-only")
+    if platform_name not in PLATFORMS:
+        raise LifecycleError("synthetic device fixture platform is invalid")
     raw = json.dumps(
         {
             "cdiVersion": "0.5.0",
@@ -683,8 +683,7 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
-        if self.arguments.platform == "linux-arm64":
-            self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
+        self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         verify_tailscale_services(
             self.bundle,
             hermes=False,

@@ -117,12 +117,13 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "127.0.0.1::8080" in compose
 
 
-def test_synthetic_device_fixture_is_native_arm64_only() -> None:
+def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
     lifecycle = _module()
 
-    raw, digest = lifecycle._synthetic_device_fixture("linux-arm64")
+    arm64_raw, arm64_digest = lifecycle._synthetic_device_fixture("linux-arm64")
+    amd64_raw, amd64_digest = lifecycle._synthetic_device_fixture("linux-amd64")
 
-    document = json.loads(raw)
+    document = json.loads(arm64_raw)
     assert document["kind"] == "nvidia.com/gpu"
     assert document["devices"] == [
         {
@@ -130,9 +131,11 @@ def test_synthetic_device_fixture_is_native_arm64_only() -> None:
             "name": "all",
         }
     ]
-    assert len(digest) == 64
-    with pytest.raises(lifecycle.LifecycleError, match="ARM64"):
-        lifecycle._synthetic_device_fixture("linux-amd64")
+    assert amd64_raw == arm64_raw
+    assert len(arm64_digest) == 64
+    assert amd64_digest == arm64_digest
+    with pytest.raises(lifecycle.LifecycleError, match="platform"):
+        lifecycle._synthetic_device_fixture("linux-riscv64")
 
 
 def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
