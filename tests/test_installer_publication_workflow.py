@@ -146,6 +146,7 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
             "${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3"
         )
         assert acceptance_step["env"]["VONK_ACCEPTANCE_NAS_BIND_IP"] == "127.0.0.1"
+        assert acceptance_step["env"]["VONK_ACCEPTANCE_NAS_IP"] == "127.0.0.1"
         assert acceptance_step["env"]["VONK_ACCEPTANCE_WORKSPACE"] == (
             "${{ github.workspace }}"
         )
@@ -195,7 +196,7 @@ def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     assert "dockerd --host=tcp://127.0.0.1:2375" in docker_log
     assert "tcp://127.0.0.1:2375|version --format {{.Server.Version}}" in docker_log
     assert "|inspect " not in docker_log
-    assert ready.github_environment.read_text() == "VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n"  # type: ignore[attr-defined]
+    assert not ready.github_environment.exists()  # type: ignore[attr-defined]
 
     wrong = _run_workflow_shell(start, tmp_path / "wrong", server_version="29.4.2")
     assert wrong.returncode != 0
@@ -213,25 +214,14 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     assert result.returncode == 0, result.stderr
     assert "|rm --force vonk-acceptance-dind" in result.docker_log  # type: ignore[attr-defined]
 
-    restore = steps["Restore native Docker networking"]
-    assert restore["if"] == "always()"
-    assert "sudo systemctl restart docker" in restore["run"]
-    assert "docker info" in restore["run"]
-    assert restore["run"].index("sudo systemctl restart docker") < restore[
-        "run"
-    ].index('tailscale_state_dir=$RUNNER_TEMP/tailscale-state')
-    assert "systemctl restart tailscaled" not in restore["run"]
-    assert 'sudo pkill -P "$old_tailscaled_parent"' in restore["run"]
-    assert 'tailscaled --statedir="$tailscale_state_dir"' in restore["run"]
-    assert 'printf \'%s\\n\' "$new_tailscaled_parent" > "$tailscale_pid_file"' in restore[
-        "run"
-    ]
-    assert "tailscale status --json" in restore["run"]
-    assert '.BackendState == "Running"' in restore["run"]
+    assert "Restore native Docker networking" not in steps
     step_names = [step["name"] for step in nas_steps]
-    assert step_names.index("Remove Docker 29.4.3 compatibility daemon") < (
-        step_names.index("Restore native Docker networking")
-    ) < step_names.index("Run literal clean NAS and tailnet acceptance")
+    assert step_names.index("Download verified Compose parser fixtures") < step_names.index(
+        "Run literal clean NAS and tailnet acceptance"
+    ) < step_names.index("Start Docker 29.4.3 compatibility daemon")
+    assert step_names.index("Run Docker 29.4.3 NAS compatibility acceptance") < (
+        step_names.index("Remove Docker 29.4.3 compatibility daemon")
+    ) < step_names.index("Upload NAS behavioral gate report")
 
     candidate = _steps(jobs["candidate"])[
         "Upload immutable publication bundle and candidate receipt"

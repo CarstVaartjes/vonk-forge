@@ -487,35 +487,6 @@ jobs:
           version: 1.98.8
           use-cache: "false"
 
-      - name: Start Docker 29.4.3 compatibility daemon
-        shell: bash
-        env:
-          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
-        run: |
-          set -euo pipefail
-          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
-          docker run --detach --privileged \
-            --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
-            --network host \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
-            --env DOCKER_TLS_CERTDIR= \
-            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495 \
-            dockerd --host=tcp://127.0.0.1:2375
-          daemon_ready=false
-          for _ in $(seq 1 60); do
-            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
-              test "$server_version" = 29.4.3
-              daemon_ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$daemon_ready" != true ]; then
-            docker logs "$VONK_ACCEPTANCE_DIND_CONTAINER" >&2 || true
-            exit 1
-          fi
-          printf 'VONK_ACCEPTANCE_NAS_IP=127.0.0.1\n' >> "$GITHUB_ENV"
-
       - name: Download verified Compose parser fixtures
         shell: bash
         env:
@@ -538,98 +509,6 @@ jobs:
           chmod 0755 "$fixture_dir/docker-compose-v5.1.3" \
             "$fixture_dir/docker-compose-v2.24.6"
 
-      - name: Run Docker 29.4.3 NAS compatibility acceptance
-        shell: bash
-        env:
-          DOCKER_HOST: tcp://127.0.0.1:2375
-          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
-          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
-          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
-          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
-          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
-          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
-          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
-          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
-          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
-          VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
-          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
-          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
-          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
-          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
-          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
-        run: |
-          set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
-          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
-          uv run python tests/acceptance/test_fresh_nas_install.py
-
-      - name: Remove Docker 29.4.3 compatibility daemon
-        if: always()
-        shell: bash
-        env:
-          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
-        run: |
-          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
-
-      - name: Restore native Docker networking
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo systemctl restart docker
-          native_daemon_ready=false
-          for _ in $(seq 1 60); do
-            if docker info >/dev/null 2>&1; then
-              native_daemon_ready=true
-              break
-            fi
-            sleep 1
-          done
-          test "$native_daemon_ready" = true
-          # The pinned Tailscale action owns its daemon directly; it does not
-          # install a systemd unit. Restart that daemon against the action's
-          # job-scoped state only after Docker has rebuilt its chains, then
-          # replace the action PID file so post-job cleanup owns the new child.
-          tailscale_state_dir=$RUNNER_TEMP/tailscale-state
-          tailscale_pid_file=${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/tailscaled.pid
-          test -d "$tailscale_state_dir"
-          test -s "$tailscale_pid_file"
-          old_tailscaled_parent=$(cat "$tailscale_pid_file")
-          [[ "$old_tailscaled_parent" =~ ^[1-9][0-9]*$ ]]
-          sudo pkill -P "$old_tailscaled_parent"
-          tailscaled_stopped=false
-          for _ in $(seq 1 30); do
-            if ! pgrep -P "$old_tailscaled_parent" >/dev/null; then
-              tailscaled_stopped=true
-              break
-            fi
-            sleep 1
-          done
-          test "$tailscaled_stopped" = true
-          sudo -E tailscaled --statedir="$tailscale_state_dir" \
-            >/dev/null 2>"$RUNNER_TEMP/tailscaled-restart.log" &
-          new_tailscaled_parent=$!
-          [[ "$new_tailscaled_parent" =~ ^[1-9][0-9]*$ ]]
-          printf '%s\n' "$new_tailscaled_parent" > "$tailscale_pid_file"
-          tailnet_ready=false
-          for _ in $(seq 1 60); do
-            if tailscale status --json 2>/dev/null \
-              | jq -e '.BackendState == "Running"' >/dev/null; then
-              tailnet_ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$tailnet_ready" != true ]; then
-            cat "$RUNNER_TEMP/tailscaled-restart.log" >&2
-          fi
-          test "$tailnet_ready" = true
-
       - name: Run literal clean NAS and tailnet acceptance
         shell: bash
         env:
@@ -642,6 +521,7 @@ jobs:
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
+          VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "true"
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
@@ -678,6 +558,76 @@ jobs:
             --arg version "$VONK_ACCEPTANCE_VERSION" \
           '{channel:$channel,gates:$gates,generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
             > "$RUNNER_TEMP/nas-acceptance/report.json"
+
+      - name: Start Docker 29.4.3 compatibility daemon
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          set -euo pipefail
+          # This daemon shares the host network namespace so its inner stack is
+          # reachable on loopback. Keep it after the native tailnet gate because
+          # dockerd rebuilds netfilter rules while initializing.
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+          docker run --detach --privileged \
+            --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
+            --network host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --env DOCKER_TLS_CERTDIR= \
+            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495 \
+            dockerd --host=tcp://127.0.0.1:2375
+          daemon_ready=false
+          for _ in $(seq 1 60); do
+            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
+              test "$server_version" = 29.4.3
+              daemon_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$daemon_ready" != true ]; then
+            docker logs "$VONK_ACCEPTANCE_DIND_CONTAINER" >&2 || true
+            exit 1
+          fi
+
+      - name: Run Docker 29.4.3 NAS compatibility acceptance
+        shell: bash
+        env:
+          DOCKER_HOST: tcp://127.0.0.1:2375
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
+          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
+          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
+          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
+          VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
+          VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
+          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          uv run python tests/acceptance/test_fresh_nas_install.py
+
+      - name: Remove Docker 29.4.3 compatibility daemon
+        if: always()
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
 
       - name: Upload NAS behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
