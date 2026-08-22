@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import importlib.machinery
 import importlib.util
 import json
@@ -24,7 +25,12 @@ import yaml
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
-from scripts.development_slice_client import Client, SliceError, require_object
+from scripts.development_slice_client import (
+    MAXIMUM_RESPONSE_BYTES,
+    Client,
+    SliceError,
+    require_object,
+)
 from scripts.spark_lifecycle_contract import (
     GATES,
     PHASES,
@@ -37,12 +43,10 @@ from tests.acceptance.runtime import (
     _compose_rows,
     assert_compose_services_healthy,
     bootstrap_command,
-    https_over_command,
     run_interactive,
 )
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
-    _tcp_tunnel,
     command_environment,
     configure_tailnet_service_names,
     generate_bundle,
@@ -170,6 +174,13 @@ def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> Non
     ):
         raise LifecycleError("Compose controller environment is invalid")
     environment["VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS"] = str(lifetime_seconds)
+    try:
+        caddy_ports = compose["services"]["caddy"]["ports"]
+    except (KeyError, TypeError) as error:
+        raise LifecycleError("Compose browser boundary is invalid") from error
+    if not isinstance(caddy_ports, list) or "127.0.0.1::8080" in caddy_ports:
+        raise LifecycleError("Compose browser boundary is invalid")
+    caddy_ports.append("127.0.0.1::8080")
     compose_path.write_text(
         yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
@@ -201,77 +212,23 @@ def _semantic_version(package_version: str) -> str:
     return package_version.split("~", 1)[0].split("+", 1)[0]
 
 
-def _http_response(raw: bytes) -> tuple[int, dict[str, list[str]], bytes]:
-    head, separator, body = raw.partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    if not separator or not lines:
-        raise LifecycleError("HTTPS response is invalid")
-    matched = re.fullmatch(rb"HTTP/1\.[01] ([0-9]{3})(?: .*)?", lines[0])
-    if matched is None:
-        raise LifecycleError("HTTPS response status is invalid")
-    headers: dict[str, list[str]] = {}
-    for line in lines[1:]:
-        name, marker, value = line.partition(b":")
-        if not marker:
-            raise LifecycleError("HTTPS response headers are invalid")
-        try:
-            decoded_name = name.decode("ascii").strip().lower()
-            decoded_value = value.decode("latin-1").strip()
-        except UnicodeDecodeError as error:
-            raise LifecycleError("HTTPS response headers are invalid") from error
-        if not decoded_name:
-            raise LifecycleError("HTTPS response headers are invalid")
-        headers.setdefault(decoded_name, []).append(decoded_value)
-    transfer = headers.get("transfer-encoding", [])
-    if transfer:
-        if transfer != ["chunked"]:
-            raise LifecycleError("HTTPS response transfer encoding is invalid")
-        body = _decode_chunked(body)
-    elif "content-length" in headers:
-        try:
-            length = int(headers["content-length"][0])
-        except (ValueError, IndexError) as error:
-            raise LifecycleError("HTTPS response length is invalid") from error
-        if length != len(body):
-            raise LifecycleError("HTTPS response body is truncated")
-    return int(matched.group(1)), headers, body
-
-
-def _decode_chunked(raw: bytes) -> bytes:
-    decoded = bytearray()
-    remaining = raw
-    while True:
-        size_line, marker, remaining = remaining.partition(b"\r\n")
-        if not marker:
-            raise LifecycleError("chunked HTTPS response is invalid")
-        try:
-            size = int(size_line.partition(b";")[0], 16)
-        except ValueError as error:
-            raise LifecycleError("chunked HTTPS response is invalid") from error
-        if size == 0:
-            if remaining not in {b"\r\n", b""} and not remaining.endswith(b"\r\n\r\n"):
-                raise LifecycleError("chunked HTTPS response trailer is invalid")
-            return bytes(decoded)
-        if len(remaining) < size + 2 or remaining[size : size + 2] != b"\r\n":
-            raise LifecycleError("chunked HTTPS response is truncated")
-        decoded.extend(remaining[:size])
-        remaining = remaining[size + 2 :]
-
-
-class PublicController:
+class LocalBrowserController:
     def __init__(
         self,
         *,
-        bundle: Path,
         hostname: str,
-        connect_host: str,
+        port: int,
     ) -> None:
-        self.bundle = bundle
+        if (
+            not hostname
+            or any(character in hostname for character in "\0\r\n /:")
+            or not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+        ):
+            raise LifecycleError("local browser port is invalid")
         self.hostname = hostname
-        self.connect_host = connect_host
-
-    def _command(self) -> list[str]:
-        return _tcp_tunnel(self.connect_host, 443)
+        self.port = port
 
     def raw_request(
         self,
@@ -281,22 +238,45 @@ class PublicController:
         headers: dict[str, str],
         timeout: float,
     ) -> tuple[int, dict[str, list[str]], bytes]:
-        try:
-            raw = https_over_command(
-                self._command(),
-                server_hostname=self.hostname,
-                path=path,
-                cwd=self.bundle,
-                environment=host_command_environment(),
-                timeout=timeout,
-                headers=headers,
-                accepted_statuses=set(range(100, 600)),
-                method=method,
-                body=body,
+        if (
+            timeout <= 0
+            or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
+            or not path.startswith("/")
+            or any(character in path for character in "\0\r\n")
+            or (body is not None and not isinstance(body, bytes))
+            or (body is not None and len(body) > MAXIMUM_RESPONSE_BYTES)
+            or (method == "GET" and body is not None)
+            or any(
+                not isinstance(name, str)
+                or not isinstance(value, str)
+                or not name
+                or name.lower() in {"connection", "content-length", "host"}
+                or any(character in name for character in "\0\r\n:")
+                or any(character in value for character in "\0\r\n")
+                for name, value in headers.items()
             )
-        except AcceptanceError as error:
-            raise LifecycleError("public controller boundary is unavailable") from error
-        return _http_response(raw)
+        ):
+            raise LifecycleError("local browser request is invalid")
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        try:
+            connection.request(
+                method,
+                path,
+                body=body,
+                headers={"Host": self.hostname, **headers},
+            )
+            response = connection.getresponse()
+            response_headers: dict[str, list[str]] = {}
+            for name, value in response.getheaders():
+                response_headers.setdefault(name.lower(), []).append(value)
+            content = response.read(MAXIMUM_RESPONSE_BYTES + 1)
+            if len(content) > MAXIMUM_RESPONSE_BYTES:
+                raise LifecycleError("local browser response is too large")
+            return response.status, response_headers, content
+        except (OSError, http.client.HTTPException) as error:
+            raise LifecycleError("local browser boundary is unavailable") from error
+        finally:
+            connection.close()
 
     def login(self, password: str, *, timeout: float) -> Client:
         body = json.dumps(
@@ -687,14 +667,26 @@ class SparkLifecycle:
             service_addresses=None,
             compose_command=self._compose(),
         )
-        boundary = PublicController(
-            bundle=self.bundle,
+        boundary = LocalBrowserController(
             hostname=self.control_hostname,
-            connect_host="127.0.0.1",
+            port=self._local_browser_port(),
         )
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _local_browser_port(self) -> int:
+        assert self.bundle is not None
+        result = self._run_command(
+            self._compose("port", "caddy", "8080"), cwd=self.bundle
+        )
+        matched = re.fullmatch(r"127\.0\.0\.1:([1-9][0-9]{0,4})\n?", result.stdout)
+        if matched is None:
+            raise LifecycleError("local browser publication is invalid")
+        port = int(matched.group(1))
+        if port > 65535:
+            raise LifecycleError("local browser publication is invalid")
+        return port
 
     def _assert_project_is_empty(self) -> None:
         assert self.bundle is not None
