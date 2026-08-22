@@ -355,14 +355,118 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     monkeypatch.setattr(acceptance, "https_over_command", probe)
 
     acceptance.verify_tailscale_services(
-        tmp_path, hermes=True, tailnet_suffix="acceptance.example.test"
+        tmp_path,
+        hermes=True,
+        tailnet_suffix="acceptance.example.test",
+        service_addresses={
+            "svc:vonk-forge": "100.64.0.10",
+            "svc:hermes-api": "100.64.0.11",
+            "svc:hermes-dashboard": "100.64.0.12",
+        },
     )
 
     assert all("tailscale-gateway" in command for command in compose_commands)
     assert probe_commands == [
-        acceptance._tcp_tunnel("vonk-forge.acceptance.example.test", 443),
-        acceptance._tcp_tunnel("hermes-dashboard.acceptance.example.test", 443),
+        acceptance._tcp_tunnel("100.64.0.10", 443),
+        acceptance._tcp_tunnel("100.64.0.12", 443),
     ]
+
+
+def test_tailnet_service_addresses_require_effective_client_visibility() -> None:
+    acceptance = _acceptance_module()
+    expected = {
+        "svc:vonk-forge-acceptance": "vonk-forge-acceptance.example.ts.net",
+        "svc:hermes-api-acceptance": "hermes-api-acceptance.example.ts.net",
+    }
+    listed = [
+        {
+            "Name": "svc:vonk-forge-acceptance",
+            "Hostname": "vonk-forge-acceptance.example.ts.net",
+            "Addrs": ["fd7a:115c:a1e0::1", "100.64.0.10"],
+        },
+        {
+            "Name": "svc:unrelated",
+            "Hostname": "unrelated.example.ts.net",
+            "Addrs": ["100.64.0.99"],
+        },
+    ]
+
+    assert acceptance._tailnet_service_addresses(
+        json.dumps(listed), expected
+    ) == {"svc:vonk-forge-acceptance": "100.64.0.10"}
+
+    listed[0]["Hostname"] = "wrong.example.ts.net"
+    with pytest.raises(AcceptanceError, match="hostname"):
+        acceptance._tailnet_service_addresses(json.dumps(listed), expected)
+
+
+def test_wait_for_tailnet_services_polls_until_all_are_visible(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    expected = {
+        "svc:vonk-forge-acceptance": "vonk-forge-acceptance.example.ts.net"
+    }
+    outputs = iter(
+        (
+            "[]",
+            json.dumps(
+                [
+                    {
+                        "Name": "svc:vonk-forge-acceptance",
+                        "Hostname": "vonk-forge-acceptance.example.ts.net",
+                        "Addrs": ["100.64.0.10"],
+                    }
+                ]
+            ),
+        )
+    )
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=next(outputs), stderr="")
+
+    monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(acceptance.time, "sleep", lambda _seconds: None)
+
+    assert acceptance.wait_for_tailnet_services(tmp_path, expected) == {
+        "svc:vonk-forge-acceptance": "100.64.0.10"
+    }
+    assert commands == [["tailscale", "service", "list", "--json"]] * 2
+
+
+def test_wait_for_tailnet_https_retries_with_tailvip_and_tls_hostname(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def request(command: list[str], **kwargs: object) -> bytes:
+        calls.append((command, kwargs))
+        if len(calls) == 1:
+            raise AcceptanceError("HTTPS tunnel timed out")
+        return b"HTTP/1.1 200 OK\r\n\r\n"
+
+    monkeypatch.setattr(acceptance, "https_over_command", request)
+    monkeypatch.setattr(acceptance.time, "sleep", lambda _seconds: None)
+
+    acceptance.wait_for_tailnet_https(
+        tmp_path,
+        service="svc:vonk-forge-acceptance",
+        hostname="vonk-forge-acceptance.example.ts.net",
+        address="100.64.0.10",
+        path="/healthz",
+    )
+
+    assert len(calls) == 2
+    assert all(
+        command == acceptance._tcp_tunnel("100.64.0.10", 443)
+        and kwargs["server_hostname"]
+        == "vonk-forge-acceptance.example.ts.net"
+        and kwargs["timeout"] <= 10
+        for command, kwargs in calls
+    )
 
 
 def test_routed_service_checks_require_authentication_and_expected_data(
@@ -432,12 +536,13 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         tmp_path,
         nas_ip="192.0.2.20",
         control_hostname="vonk-forge.acceptance.example.test",
+        control_address="100.64.0.10",
         registry_hostname="registry.acceptance.example.test",
     )
 
     assert all(
         command
-        == acceptance._tcp_tunnel("vonk-forge.acceptance.example.test", 443)
+        == acceptance._tcp_tunnel("100.64.0.10", 443)
         for command, kwargs in calls
         if kwargs["server_hostname"] != "registry.acceptance.example.test"
     )

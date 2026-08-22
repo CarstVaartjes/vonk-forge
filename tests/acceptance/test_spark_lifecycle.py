@@ -51,6 +51,8 @@ from tests.acceptance.test_fresh_nas_install import (
     is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
+    wait_for_tailnet_https,
+    wait_for_tailnet_services,
 )
 
 PLATFORMS = ("linux-amd64", "linux-arm64")
@@ -264,12 +266,14 @@ class PublicController:
         *,
         bundle: Path,
         hostname: str,
+        connect_host: str,
     ) -> None:
         self.bundle = bundle
         self.hostname = hostname
+        self.connect_host = connect_host
 
     def _command(self) -> list[str]:
-        return _tcp_tunnel(self.hostname, 443)
+        return _tcp_tunnel(self.connect_host, 443)
 
     def raw_request(
         self,
@@ -666,9 +670,27 @@ class SparkLifecycle:
             ) from error
         if self.arguments.platform == "linux-arm64":
             self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
+        try:
+            service_addresses = wait_for_tailnet_services(
+                self.bundle,
+                {self.tailnet_services["control"]: self.control_hostname},
+            )
+            control_address = service_addresses[self.tailnet_services["control"]]
+            wait_for_tailnet_https(
+                self.bundle,
+                service=self.tailnet_services["control"],
+                hostname=self.control_hostname,
+                address=control_address,
+                path="/healthz",
+            )
+        except AcceptanceError as error:
+            raise LifecycleError(
+                "acceptance client cannot access the public controller Service"
+            ) from error
         boundary = PublicController(
             bundle=self.bundle,
             hostname=self.control_hostname,
+            connect_host=control_address,
         )
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
