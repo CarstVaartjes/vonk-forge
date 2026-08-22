@@ -483,6 +483,7 @@ jobs:
           oauth-client-id: ${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_CLIENT_ID }}
           audience: ${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_AUDIENCE }}
           tags: tag:vonk-acceptance
+          statedir: ${{ runner.temp }}/tailscale-state
           version: 1.98.8
           use-cache: "false"
 
@@ -591,11 +592,30 @@ jobs:
           done
           test "$native_daemon_ready" = true
           # The pinned Tailscale action owns its daemon directly; it does not
-          # install a systemd unit. Reconnect through that live daemon only
-          # after Docker has rebuilt its chains so Tailscale reapplies its
-          # netfilter state against the final host-network configuration.
-          sudo -E tailscale down
-          sudo -E tailscale up
+          # install a systemd unit. Restart that daemon against the action's
+          # job-scoped state only after Docker has rebuilt its chains, then
+          # replace the action PID file so post-job cleanup owns the new child.
+          tailscale_state_dir=$RUNNER_TEMP/tailscale-state
+          tailscale_pid_file=${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/tailscaled.pid
+          test -d "$tailscale_state_dir"
+          test -s "$tailscale_pid_file"
+          old_tailscaled_parent=$(cat "$tailscale_pid_file")
+          [[ "$old_tailscaled_parent" =~ ^[1-9][0-9]*$ ]]
+          sudo pkill -P "$old_tailscaled_parent"
+          tailscaled_stopped=false
+          for _ in $(seq 1 30); do
+            if ! pgrep -P "$old_tailscaled_parent" >/dev/null; then
+              tailscaled_stopped=true
+              break
+            fi
+            sleep 1
+          done
+          test "$tailscaled_stopped" = true
+          sudo -E tailscaled --statedir="$tailscale_state_dir" \
+            >/dev/null 2>"$RUNNER_TEMP/tailscaled-restart.log" &
+          new_tailscaled_parent=$!
+          [[ "$new_tailscaled_parent" =~ ^[1-9][0-9]*$ ]]
+          printf '%s\n' "$new_tailscaled_parent" > "$tailscale_pid_file"
           tailnet_ready=false
           for _ in $(seq 1 60); do
             if tailscale status --json 2>/dev/null \
@@ -605,6 +625,9 @@ jobs:
             fi
             sleep 1
           done
+          if [ "$tailnet_ready" != true ]; then
+            cat "$RUNNER_TEMP/tailscaled-restart.log" >&2
+          fi
           test "$tailnet_ready" = true
 
       - name: Run literal clean NAS and tailnet acceptance

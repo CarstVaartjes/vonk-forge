@@ -219,11 +219,13 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     assert "docker info" in restore["run"]
     assert restore["run"].index("sudo systemctl restart docker") < restore[
         "run"
-    ].index("sudo -E tailscale down")
-    assert restore["run"].index("sudo -E tailscale down") < restore["run"].index(
-        "sudo -E tailscale up"
-    )
+    ].index('tailscale_state_dir=$RUNNER_TEMP/tailscale-state')
     assert "systemctl restart tailscaled" not in restore["run"]
+    assert 'sudo pkill -P "$old_tailscaled_parent"' in restore["run"]
+    assert 'tailscaled --statedir="$tailscale_state_dir"' in restore["run"]
+    assert 'printf \'%s\\n\' "$new_tailscaled_parent" > "$tailscale_pid_file"' in restore[
+        "run"
+    ]
     assert "tailscale status --json" in restore["run"]
     assert '.BackendState == "Running"' in restore["run"]
     step_names = [step["name"] for step in nas_steps]
@@ -259,13 +261,16 @@ def test_acceptance_jobs_use_the_scoped_oidc_tailnet_client() -> None:
         assert step["uses"] == (
             "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888"
         )
-        assert step["with"] == {
+        expected = {
             "oauth-client-id": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_CLIENT_ID }}",
             "audience": "${{ vars.VONK_ACCEPTANCE_TAILSCALE_OIDC_AUDIENCE }}",
             "tags": "tag:vonk-acceptance",
             "version": "1.98.8",
             "use-cache": "false",
         }
+        if name == "nas-acceptance":
+            expected["statedir"] = "${{ runner.temp }}/tailscale-state"
+        assert step["with"] == expected
 
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
