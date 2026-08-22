@@ -187,6 +187,8 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "a".repeat(64),
+    controller_address: "192.168.1.231",
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
   });
   render(<FleetPage api={api}/>);
   await flush();
@@ -197,10 +199,12 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   expect(api.createEnrollmentGrant).toHaveBeenCalledWith(ENROLLMENT_GRANT_TTL_SECONDS);
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
-  expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | sh");
+  expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
   expect(command).not.toHaveTextContent("sudo");
   expect(command).not.toHaveTextContent("vonk-agent pair");
   expect(screen.getByText("https://controller.example.test:9443")).toBeVisible();
   expect(screen.getByText("https://enrollment.example.test:9444")).toBeVisible();
   expect(screen.getByText("secret-token")).toBeVisible();
+  expect(screen.getByText("NAS LAN address")).toBeVisible();
+  expect(screen.getByText("192.168.1.231")).toBeVisible();
 });

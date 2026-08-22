@@ -199,6 +199,8 @@ def build_agent_services(
         controller_endpoint=settings.agent_controller_origin,
         enrollment_endpoint=settings.agent_enrollment_origin,
         controller_ca_path=settings.controller_ca_path,
+        controller_address=settings.agent_controller_address,
+        service_hostnames=settings.agent_service_hostnames,
     )
     if (
         settings.agent_ca_root_path is None

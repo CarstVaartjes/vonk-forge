@@ -35,6 +35,7 @@ def _run_bootstrap(
         "  if [ \"$previous\" = --package ]; then printf 'package-mode=%s\\n' \"$(stat -c %a \"$argument\" 2>/dev/null || stat -f %Lp \"$argument\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
         "  previous=$argument\ndone\n"
         "if [ \"${1:-}\" = --template ]; then printf 'payload=%s\\n' \"$(cat \"$2\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
+        "printf 'controller-address=%s\\n' \"${VONK_CONTROLLER_ADDRESS:-}\" >> \"$VONK_TEST_RECEIPT\"\n"
     )
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     package = tmp_path / "vonk-forge-agent.deb"
@@ -103,6 +104,7 @@ def _run_bootstrap(
         "VONK_TEST_FORBIDDEN": str(forbidden),
         "VONK_INSTALL_RELEASE_MANIFEST": str(release_manifest),
         "VONK_INSTALL_RELEASE_SIGNATURE": str(release_signature),
+        "VONK_CONTROLLER_ADDRESS": "192.168.1.231",
     }
     result = subprocess.run(
         ["sh", str(rendered), *arguments],
@@ -153,6 +155,7 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
         assert Path(invocation[7]).name == "vonk-spark-setup.sig"
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"
+        assert receipt.read_text().splitlines()[-1] == "controller-address=192.168.1.231"
     assert not forbidden.exists()
 
 

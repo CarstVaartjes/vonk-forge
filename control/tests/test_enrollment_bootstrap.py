@@ -50,6 +50,64 @@ def test_from_paths_returns_the_public_controller_ca_sha256_fingerprint(
     )
 
 
+def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> None:
+    certificate, pem = _controller_ca()
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_bytes(pem)
+
+    bootstrap = EnrollmentBootstrapConfig.from_paths(
+        controller_endpoint="https://agents.example.test:8443",
+        enrollment_endpoint="https://enroll.example.test:8443",
+        controller_ca_path=controller_ca,
+        controller_address="192.168.1.231",
+        service_hostnames=(
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test",
+        ),
+    )
+
+    assert bootstrap == EnrollmentBootstrapConfig(
+        controller_endpoint="https://agents.example.test:8443",
+        enrollment_endpoint="https://enroll.example.test:8443",
+        ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        ca_pem=pem.decode("ascii"),
+        controller_address="192.168.1.231",
+        service_hostnames=(
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("address", "hostnames"),
+    (
+        ("not-an-ip", ("agents.example.test", "enroll.example.test")),
+        ("192.168.1.231", ("agents.example.test",)),
+        ("192.168.1.231", ("AGENTS.example.test", "enroll.example.test")),
+        (None, ("agents.example.test", "enroll.example.test")),
+    ),
+)
+def test_private_controller_route_fails_closed(
+    address: str | None,
+    hostnames: tuple[str, ...],
+) -> None:
+    certificate, pem = _controller_ca()
+
+    with pytest.raises(ValueError):
+        EnrollmentBootstrapConfig(
+            controller_endpoint="https://agents.example.test:8443",
+            enrollment_endpoint="https://enroll.example.test:8443",
+            ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+            ca_pem=pem.decode("ascii"),
+            controller_address=address,
+            service_hostnames=hostnames,
+        )
+
 def test_from_paths_rejects_a_non_ca_certificate(tmp_path: Path) -> None:
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name(

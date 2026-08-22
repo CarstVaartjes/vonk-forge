@@ -147,6 +147,8 @@ class Settings:
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
+    agent_controller_address: str | None = None
+    agent_service_hostnames: tuple[str, ...] = ()
 
     @property
     def database_host(self) -> str | None:
@@ -227,6 +229,22 @@ class Settings:
             )
             if agent_enabled
             else ""
+        )
+        agent_controller_address = (
+            os.environ.get("VONK_AGENT_CONTROLLER_ADDRESS", "").strip() or None
+            if agent_enabled
+            else None
+        )
+        agent_service_hostnames = (
+            tuple(
+                value.strip()
+                for value in os.environ.get(
+                    "VONK_AGENT_SERVICE_HOSTNAMES", ""
+                ).split(",")
+                if value.strip()
+            )
+            if agent_enabled
+            else ()
         )
         controller_ca_path = (
             _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
@@ -379,6 +397,8 @@ class Settings:
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             global_catalog_url=global_catalog_url,
+            agent_controller_address=agent_controller_address,
+            agent_service_hostnames=agent_service_hostnames,
         )
 
 

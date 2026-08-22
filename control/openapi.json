@@ -622,6 +622,17 @@
             "title": "Ca Fingerprint",
             "type": "string"
           },
+          "controller_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Address"
+          },
           "controller_endpoint": {
             "maxLength": 2048,
             "minLength": 1,
@@ -650,6 +661,14 @@
             "const": "new-node",
             "title": "Purpose",
             "type": "string"
+          },
+          "service_hostnames": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Service Hostnames",
+            "type": "array"
           },
           "token": {
             "maxLength": 64,

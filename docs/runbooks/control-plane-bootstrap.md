@@ -22,12 +22,17 @@ project has no exited setup containers. Neither API nor worker mounts a source
 checkout.
 
 After startup, get the private browser URL from `tailscale-configurator` logs.
-Create a one-use Spark pairing token in that interface, then install each Spark
-with its own one-command flow:
+Create a one-use Spark pairing grant in that interface, then copy its generated
+command to each Spark. The command includes the reserved NAS LAN address when
+the private service hostnames do not resolve directly:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
 ```
+
+The installer verifies the controller CA before trusting its bootstrap data and
+manages the Spark's hostname mapping automatically. Tailscale remains on the
+NAS gateway; it is not required on the Sparks.
 
 Rerun the NAS command from the existing bundle's parent directory to prepare a
 NAS upgrade. Rerun the Spark command on an installed Spark to upgrade it. No

@@ -278,6 +278,13 @@ def agent_system(tmp_path):
             enrollment_endpoint="https://enroll.example.test:8443",
             ca_fingerprint=controller_ca_fingerprint,
             ca_pem=controller_ca_pem,
+            controller_address="192.168.1.231",
+            service_hostnames=(
+                "control.example.test",
+                "enroll.example.test",
+                "agents.example.test",
+                "registry.example.test",
+            ),
         ),
     )
     services.artifact_root.mkdir()
@@ -1895,6 +1902,13 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
         "ca_pem": services.bootstrap.ca_pem,
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
+        "controller_address": "192.168.1.231",
+        "service_hostnames": [
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test",
+        ],
     }
     assert len(response.content) < 64 * 1024
     assert "PRIVATE KEY" not in response.text
@@ -1958,11 +1972,24 @@ def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerpri
     body = grant.json()
     assert {
         key: body[key]
-        for key in ("controller_endpoint", "enrollment_endpoint", "ca_fingerprint")
+        for key in (
+            "controller_endpoint",
+            "enrollment_endpoint",
+            "ca_fingerprint",
+            "controller_address",
+            "service_hostnames",
+        )
     } == {
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
         "ca_fingerprint": services.bootstrap.ca_fingerprint,
+        "controller_address": "192.168.1.231",
+        "service_hostnames": [
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test",
+        ],
     }
 
 

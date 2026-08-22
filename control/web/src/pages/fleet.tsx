@@ -13,8 +13,11 @@ function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
-function bootstrapCommand(): string {
-  return "curl -fsSL https://install.vonkforge.ai/spark | sh";
+function bootstrapCommand(grant: EnrollmentGrantResponse): string {
+  const address = grant.controller_address;
+  return address
+    ? `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=${address} sh`
+    : "curl -fsSL https://install.vonkforge.ai/spark | sh";
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {
@@ -54,9 +57,9 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
         </>}
         {grant && <>
           <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
-          <p>Run this command on the Spark. Enter the enrollment URL, CA fingerprint, and one-time token below when prompted; the installer discovers the controller endpoint.</p>
-          <code className="onboarding-command">{bootstrapCommand()}</code>
-          <dl className="grant-facts"><div><dt>One-time token</dt><dd><code>{grant.token}</code></dd></div><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
+          <p>Run this command on the Spark. Enter the enrollment URL, CA fingerprint, and one-time token below when prompted. The installer pins the controller CA and configures the NAS LAN route automatically.</p>
+          <code className="onboarding-command">{bootstrapCommand(grant)}</code>
+          <dl className="grant-facts"><div><dt>One-time token</dt><dd><code>{grant.token}</code></dd></div><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div>{grant.controller_address && <div><dt>NAS LAN address</dt><dd><code>{grant.controller_address}</code></dd></div>}<div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
       </div>
       <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
