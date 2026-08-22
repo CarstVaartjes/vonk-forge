@@ -18,6 +18,9 @@ Service-host approval remain separate. State persists in
 `tailscale-state`; the configurator continuously reconciles and advertises only
 the three explicit Services. It uses the explicit `--https=443` CLI form and
 verifies that Serve status reports HTTPS, never plaintext HTTP, on port 443.
+The tailnet policy also grants `tag:vonk-gateway` TCP 443 access to those exact
+Services. Tailscale uses that self-access when assigning the Service TailVIP
+`PrimaryRoutes`; omitting it can leave an approved, online host unroutable.
 
 Before use, define all three Services in the Tailscale admin console, apply a
 reviewed version of `grants.example.hujson`, and replace the GitHub-login

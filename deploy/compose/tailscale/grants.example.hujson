@@ -16,6 +16,11 @@
       "src": ["group:hermes-users"],
       "dst": ["svc:hermes-api", "svc:hermes-dashboard"],
       "ip": ["tcp:443"]
+    },
+    {
+      "src": ["tag:vonk-gateway"],
+      "dst": ["svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"],
+      "ip": ["tcp:443"]
     }
   ],
   "autoApprovers": {
@@ -32,7 +37,7 @@
     },
     {
       "src": "tag:vonk-gateway",
-      "deny": ["svc:vonk-forge:443", "svc:hermes-api:443", "svc:hermes-dashboard:443"]
+      "accept": ["svc:vonk-forge:443", "svc:hermes-api:443", "svc:hermes-dashboard:443"]
     }
   ]
 }

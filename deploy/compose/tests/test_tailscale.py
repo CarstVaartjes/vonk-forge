@@ -441,6 +441,7 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert "120" in text
     assert "extract_json_array service-host" in text
     assert "PrimaryRoutes" in text
+    assert "grant tag:vonk-gateway TCP 443 access" in text
     assert "tailscale-service-hosts.compact" in text
     assert '${hermes_api_service}' in text
     assert '${hermes_dashboard_service}' in text
@@ -962,6 +963,11 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
             "dst": ["svc:hermes-api", "svc:hermes-dashboard"],
             "ip": ["tcp:443"],
         },
+        {
+            "src": ["tag:vonk-gateway"],
+            "dst": ["svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"],
+            "ip": ["tcp:443"],
+        },
     ]
     assert policy["autoApprovers"] == {
         "services": {
@@ -975,7 +981,7 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
         },
         {
             "src": "tag:vonk-gateway",
-            "deny": [
+            "accept": [
                 "svc:vonk-forge:443",
                 "svc:hermes-api:443",
                 "svc:hermes-dashboard:443",

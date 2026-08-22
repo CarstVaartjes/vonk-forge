@@ -154,6 +154,8 @@ Tailnet policy:
 - defines the `svc:vonk-forge` Service;
 - allows only the exact administrator identity or administrator group to reach
   `svc:vonk-forge:443`;
+- grants `tag:vonk-gateway` TCP 443 access to that exact Service so the
+  advertising host receives its Service TailVIP `PrimaryRoutes`;
 - auto-approves only `tag:vonk-gateway` for `svc:vonk-forge`; and
 - never uses `svc:*`, an allow-all grant, or a public Funnel rule.
 
