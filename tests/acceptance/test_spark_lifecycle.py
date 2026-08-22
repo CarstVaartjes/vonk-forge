@@ -954,11 +954,13 @@ class SparkLifecycle:
             ) from error
         expected = {
             "ca_fingerprint",
+            "controller_address",
             "controller_endpoint",
             "enrollment_endpoint",
             "expires_at",
             "id",
             "purpose",
+            "service_hostnames",
             "token",
         }
         grant_id = grant.get("id")
@@ -972,6 +974,14 @@ class SparkLifecycle:
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
+            or grant.get("controller_address") != "127.0.0.1"
+            or grant.get("service_hostnames")
+            != [
+                self.control_hostname,
+                ENROLLMENT_HOST,
+                AGENT_HOST,
+                REGISTRY_HOST,
+            ]
             or not isinstance(ca_sha256, str)
             or SHA256.fullmatch(ca_sha256) is None
             or not isinstance(token, str)

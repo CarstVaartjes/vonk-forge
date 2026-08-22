@@ -255,6 +255,47 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
     ]
 
 
+def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control_hostname = "vonk-forge-acceptance.tailnet.example"
+    grant = {
+        "ca_fingerprint": "a" * 64,
+        "controller_address": "127.0.0.1",
+        "controller_endpoint": "https://agents.spark.localhost:8443",
+        "enrollment_endpoint": "https://enroll.spark.localhost:8443",
+        "expires_at": "2026-08-22T20:00:00Z",
+        "id": "11111111-1111-1111-1111-111111111111",
+        "purpose": "new-node",
+        "service_hostnames": [
+            "vonk-forge-acceptance.tailnet.example",
+            "enroll.spark.localhost",
+            "agents.spark.localhost",
+            "registry.spark.localhost",
+        ],
+        "token": "t" * 43,
+    }
+
+    class Control:
+        @staticmethod
+        def request(method, path, body):
+            assert (method, path, body) == (
+                "POST",
+                "/api/v1/agents/enrollments/grants",
+                {"ttl_seconds": 600},
+            )
+            return 201, dict(grant)
+
+    run.control = Control()
+
+    assert run._create_grant() == (
+        grant["id"],
+        grant["enrollment_endpoint"],
+        grant["ca_fingerprint"],
+        grant["token"],
+    )
+
+
 def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
     tmp_path: Path, monkeypatch
 ) -> None:
