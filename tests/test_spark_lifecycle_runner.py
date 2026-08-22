@@ -399,6 +399,52 @@ def test_installer_failure_diagnostics_are_bounded_and_redact_secrets(
     assert "setup command failed for <redacted>" in rendered
 
 
+def test_installer_failure_includes_redacted_controller_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    secret = "tskey-client-sensitive-value"
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret)
+    observed: list[list[str]] = []
+
+    def diagnostics(command):
+        observed.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"control enrollment failed for {secret}\n",
+            stderr="",
+        )
+
+    run._diagnostic_command = diagnostics
+
+    failure = run._installation_failure(
+        "baseline Spark installation", lifecycle.AcceptanceError("Error: Status(500)")
+    )
+
+    assert secret not in str(failure)
+    assert "Error: Status(500)" in str(failure)
+    assert "control enrollment failed for <redacted>" in str(failure)
+    assert observed == [
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "vonk-spark-42-arm64",
+            "logs",
+            "--no-color",
+            "--tail",
+            "120",
+            "control-api",
+            "step-ca",
+            "caddy",
+        ]
+    ]
+
+
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (
     None
 ):

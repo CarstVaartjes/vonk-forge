@@ -533,7 +533,22 @@ class SparkLifecycle:
     def _installation_failure(
         self, stage: str, error: AcceptanceError
     ) -> LifecycleError:
-        diagnostics = self._redact_diagnostics(str(error))
+        raw = str(error)
+        if getattr(self, "bundle", None) is not None:
+            logs = self._diagnostic_command(
+                self._compose(
+                    "logs",
+                    "--no-color",
+                    "--tail",
+                    "120",
+                    "control-api",
+                    "step-ca",
+                    "caddy",
+                )
+            )
+            if logs is not None:
+                raw += "\ncontroller diagnostics:\n" + (logs.stdout or logs.stderr)
+        diagnostics = self._redact_diagnostics(raw)
         return LifecycleError(
             f"{stage} failed; {diagnostics or 'installer diagnostics unavailable'}"
         )
