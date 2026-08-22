@@ -174,12 +174,9 @@ def test_public_controller_uses_the_independent_tailnet_client(tmp_path: Path) -
         hostname="vonk-forge.acceptance.example.test",
     )
 
-    assert boundary._command() == [
-        "tailscale",
-        "nc",
-        "vonk-forge.acceptance.example.test",
-        "443",
-    ]
+    assert boundary._command() == lifecycle._tcp_tunnel(
+        "vonk-forge.acceptance.example.test", 443
+    )
 
 
 def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(

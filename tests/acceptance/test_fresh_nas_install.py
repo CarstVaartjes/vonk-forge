@@ -490,12 +490,7 @@ def _http_json(response: bytes, *, label: str) -> object:
 
 
 def _tailnet_tunnel(hostname: str) -> list[str]:
-    return [
-        "tailscale",
-        "nc",
-        hostname,
-        "443",
-    ]
+    return _tcp_tunnel(hostname, 443)
 
 
 def _tcp_tunnel(host: str, port: int) -> list[str]:
@@ -993,12 +988,7 @@ def verify_tailscale_services(
     for url in urls:
         hostname, _, path = url.removeprefix("https://").partition("/")
         https_over_command(
-            [
-                "tailscale",
-                "nc",
-                hostname,
-                "443",
-            ],
+            _tcp_tunnel(hostname, 443),
             cwd=bundle,
             server_hostname=hostname,
             path=f"/{path}",

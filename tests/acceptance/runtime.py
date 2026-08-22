@@ -471,7 +471,10 @@ def https_over_command(
             raise AcceptanceError(f"HTTPS tunnel exited with {exit_code}")
         return bytes(response)
     except (BrokenPipeError, ConnectionError, OSError, ssl.SSLError) as error:
-        raise AcceptanceError("tailnet HTTPS endpoint is unavailable") from error
+        raise AcceptanceError(
+            "tailnet HTTPS endpoint is unavailable "
+            f"({type(error).__name__}: {error})"
+        ) from error
     finally:
         try:
             process.stdin.close()
