@@ -163,6 +163,11 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     )
     assert "nas-acceptance/report.json" not in compatibility_step["run"]
     assert "nas-acceptance/report.json" in tailnet_step["run"]
+    assert "for attempt in 1 2; do" in tailnet_step["run"]
+    assert 'test "$native_accepted" = true' in tailnet_step["run"]
+    assert tailnet_step["run"].count(
+        "uv run python tests/acceptance/test_fresh_nas_install.py"
+    ) == 1
     report = steps["Upload NAS behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
