@@ -19,4 +19,4 @@ read_secret() {
 read_secret LITELLM_MASTER_KEY "${LITELLM_MASTER_KEY_FILE:-/run/secrets/litellm-master-key}"
 read_secret LITELLM_UPSTREAM_KEY "${LITELLM_UPSTREAM_KEY_FILE:-/run/secrets/litellm-upstream-key}"
 read_secret LITELLM_DATABASE_URL "${LITELLM_DATABASE_URL_FILE:-/run/secrets/litellm-database-url}"
-exec python /app/config-supervisor.py
+exec python /run/vonk-normalized-secrets/runtime-assets/litellm/config_supervisor.py

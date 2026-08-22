@@ -1385,9 +1385,18 @@ def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor
     source = SUPERVISOR.read_text()
 
     assert "route-publications:/routes" in compose
-    assert "config_supervisor.py:/app/config-supervisor.py:ro" in compose
-    assert "bootstrap-config.json:/app/bootstrap-config.json:ro" in compose
-    assert "exec python /app/config-supervisor.py" in entrypoint
+    assert (
+        "config_supervisor.py:/run/vonk-source-assets/litellm/config_supervisor.py:ro"
+        in compose
+    )
+    assert (
+        "bootstrap-config.json:/run/vonk-source-assets/litellm/bootstrap-config.json:ro"
+        in compose
+    )
+    assert (
+        "exec python /run/vonk-normalized-secrets/runtime-assets/litellm/config_supervisor.py"
+        in entrypoint
+    )
     assert "POLL_SECONDS = 2" in source
     assert "TERMINATE_SECONDS = 30" in source
     assert "shell=True" not in source
@@ -1473,7 +1482,10 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     worker = services["control-worker"]
     volumes = {volume["target"]: volume for volume in litellm["volumes"]}
 
-    assert litellm["entrypoint"] == ["/bin/sh", "/app/vonk-entrypoint"]
+    assert litellm["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh",
+    ]
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False
     assert volumes["/run/vonk-normalized-secrets"]["read_only"] is True

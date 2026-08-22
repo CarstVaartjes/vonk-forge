@@ -163,10 +163,13 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         )
 
 
-def test_litellm_runs_the_bind_mounted_entrypoint_through_shell() -> None:
+def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
     litellm = _rendered()["services"]["litellm"]
 
-    assert litellm["entrypoint"] == ["/bin/sh", "/app/vonk-entrypoint"]
+    assert litellm["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh",
+    ]
 
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
@@ -315,8 +318,6 @@ def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
         }
 
 
-
-
 def test_caddy_has_readiness_checks() -> None:
     services = _rendered()["services"]
 
@@ -370,9 +371,9 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
 def test_postgres_mounts_the_parent_directory_for_postgres_18() -> None:
     postgres_volumes = _rendered()["services"]["postgres"]["volumes"]
 
-    assert {
-        volume["source"]: volume["target"] for volume in postgres_volumes
-    }["postgres-data"] == "/var/lib/postgresql"
+    assert {volume["source"]: volume["target"] for volume in postgres_volumes}[
+        "postgres-data"
+    ] == "/var/lib/postgresql"
 
 
 def test_caddy_disables_admin_and_sets_edge_guards() -> None:
