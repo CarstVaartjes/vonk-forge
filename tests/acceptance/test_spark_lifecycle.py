@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Executable, fail-closed Spark lifecycle acceptance entry point."""
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ from tests.acceptance.runtime import (
 )
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
-    _tailnet_tunnel,
+    _tcp_tunnel,
     command_environment,
     configure_tailnet_service_names,
     generate_bundle,
@@ -51,8 +50,7 @@ from tests.acceptance.test_fresh_nas_install import (
     is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
-    wait_for_tailnet_https,
-    wait_for_tailnet_services,
+    verify_tailscale_services,
 )
 
 PLATFORMS = ("linux-amd64", "linux-arm64")
@@ -273,7 +271,7 @@ class PublicController:
         self.connect_host = connect_host
 
     def _command(self) -> list[str]:
-        return _tailnet_tunnel(self.connect_host, 443)
+        return _tcp_tunnel(self.connect_host, 443)
 
     def raw_request(
         self,
@@ -393,7 +391,9 @@ class SparkLifecycle:
                 self._required_environment("VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"),
             )
         except AcceptanceError as error:
-            raise LifecycleError("acceptance Tailscale Service name is invalid") from error
+            raise LifecycleError(
+                "acceptance Tailscale Service name is invalid"
+            ) from error
         self.origin = self._required_environment("INSTALLER_PUBLIC_ORIGIN")
         if self.origin != "https://install.vonkforge.ai":
             raise LifecycleError("installer public origin is invalid")
@@ -599,11 +599,12 @@ class SparkLifecycle:
             tempfile.mkdtemp(prefix="vonk-spark-lifecycle-", dir=self.workspace)
         )
         child_environment = command_environment(self.temporary_root / "workstation")
+        tailnet_suffix = self._required_environment(
+            "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"
+        )
         responses = nas_responses(
             nas_ip="127.0.0.1",
-            tailnet_suffix=self._required_environment(
-                "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"
-            ),
+            tailnet_suffix=tailnet_suffix,
             oauth_client_id=self._required_environment(
                 "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
             ),
@@ -670,27 +671,19 @@ class SparkLifecycle:
             ) from error
         if self.arguments.platform == "linux-arm64":
             self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
-        try:
-            service_addresses = wait_for_tailnet_services(
-                self.bundle,
-                {self.tailnet_services["control"]: self.control_hostname},
-            )
-            control_address = service_addresses[self.tailnet_services["control"]]
-            wait_for_tailnet_https(
-                self.bundle,
-                service=self.tailnet_services["control"],
-                hostname=self.control_hostname,
-                address=control_address,
-                path="/healthz",
-            )
-        except AcceptanceError as error:
-            raise LifecycleError(
-                "acceptance client cannot access the public controller Service"
-            ) from error
+        verify_tailscale_services(
+            self.bundle,
+            hermes=False,
+            tailnet_suffix=tailnet_suffix,
+            control_service=self.tailnet_services["control"],
+            hermes_api_service=self.tailnet_services["hermes_api"],
+            hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
+            service_addresses=None,
+        )
         boundary = PublicController(
             bundle=self.bundle,
             hostname=self.control_hostname,
-            connect_host=self.control_hostname,
+            connect_host="127.0.0.1",
         )
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)

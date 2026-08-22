@@ -167,17 +167,15 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     ]
 
 
-def test_public_controller_uses_the_independent_tailnet_client(tmp_path: Path) -> None:
+def test_public_controller_uses_the_published_https_boundary(tmp_path: Path) -> None:
     lifecycle = _module()
     boundary = lifecycle.PublicController(
         bundle=tmp_path,
         hostname="vonk-forge.acceptance.example.test",
-        connect_host="vonk-forge.acceptance.example.test",
+        connect_host="127.0.0.1",
     )
 
-    assert boundary._command() == lifecycle._tailnet_tunnel(
-        "vonk-forge.acceptance.example.test", 443
-    )
+    assert boundary._command() == lifecycle._tcp_tunnel("127.0.0.1", 443)
 
 
 def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
