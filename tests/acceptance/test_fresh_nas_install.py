@@ -25,6 +25,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests.acceptance.runtime import (
     AcceptanceError,
+    _compose_rows,
     assert_bundle_contract,
     assert_compose_compatibility,
     assert_compose_services_healthy,
@@ -305,6 +306,77 @@ def run(
     if not allow_output and (result.stdout or result.stderr):
         raise AcceptanceError(f"command emitted unexpected output: {' '.join(command)}")
     return result
+
+
+def _redact_diagnostics(raw: str) -> str:
+    redacted = raw
+    for name in (
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+        "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY",
+    ):
+        value = os.environ.get(name)
+        if value:
+            redacted = redacted.replace(value, "<redacted>")
+    redacted = re.sub(r"\x1b\[[0-9;]*m", "", redacted)
+    return redacted[-8_000:]
+
+
+def _diagnostic_command(
+    bundle: Path, command: list[str]
+) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            command,
+            cwd=bundle,
+            env=host_command_environment(),
+            stdin=subprocess.DEVNULL,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def compose_startup_diagnostics(bundle: Path) -> str:
+    status = _diagnostic_command(
+        bundle, [*reference_compose(), "ps", "--all", "--format", "json"]
+    )
+    if status is None:
+        return "NAS Compose diagnostics unavailable"
+    if status.returncode != 0:
+        output = _redact_diagnostics(status.stderr or status.stdout)
+        return f"NAS Compose status unavailable: {output or 'no output'}"
+    try:
+        rows = _compose_rows(status.stdout)
+    except AcceptanceError:
+        output = _redact_diagnostics(status.stdout)
+        return f"NAS Compose status invalid: {output or 'no output'}"
+    states: list[str] = []
+    broken: list[str] = []
+    for row in sorted(rows, key=lambda item: str(item.get("Service", ""))):
+        service = row.get("Service")
+        if not isinstance(service, str) or not service:
+            continue
+        state = str(row.get("State", "unknown"))
+        health = str(row.get("Health", "none")) or "none"
+        exit_code = str(row.get("ExitCode", "unknown"))
+        states.append(f"{service}={state}/{health}/exit-{exit_code}")
+        if state != "running" or health != "healthy":
+            broken.append(service)
+    details = f"states: {', '.join(states) or 'none'}"
+    if not broken:
+        return details
+    logs = _diagnostic_command(
+        bundle,
+        [*reference_compose(), "logs", "--no-color", "--tail", "80", *broken],
+    )
+    if logs is None:
+        return f"{details}; logs unavailable"
+    output = _redact_diagnostics(logs.stdout or logs.stderr)
+    return f"{details}; failing service logs:\n{output or 'no output'}"
 
 
 def compose_compatibility_fixtures() -> list[tuple[str, Path]]:
@@ -1139,19 +1211,25 @@ def exercise_compose(
             raise AcceptanceError(f"Compose image is not immutable: {image}")
 
     try:
-        run(
-            [
-                *reference_compose(),
-                "up",
-                "-d",
-                "--wait",
-                "--wait-timeout",
-                "360",
-                "--remove-orphans",
-            ],
-            cwd=bundle,
-            timeout=420,
-        )
+        try:
+            run(
+                [
+                    *reference_compose(),
+                    "up",
+                    "-d",
+                    "--wait",
+                    "--wait-timeout",
+                    "360",
+                    "--remove-orphans",
+                ],
+                cwd=bundle,
+                timeout=420,
+            )
+        except (AcceptanceError, subprocess.TimeoutExpired) as error:
+            diagnostics = compose_startup_diagnostics(bundle)
+            raise AcceptanceError(
+                f"NAS Compose startup failed; {diagnostics}"
+            ) from error
         status = run(
             [*reference_compose(), "ps", "--all", "--format", "json"],
             cwd=bundle,
