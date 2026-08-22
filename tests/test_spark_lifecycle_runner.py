@@ -445,6 +445,29 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
     ]
 
 
+def test_installer_error_survives_bounded_controller_diagnostics(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-amd64"
+    run._diagnostic_command = lambda command: subprocess.CompletedProcess(
+        command,
+        0,
+        stdout="controller-log\n" * 1_000,
+        stderr="",
+    )
+
+    failure = run._installation_failure(
+        "baseline Spark installation", lifecycle.AcceptanceError("Error: Certificate")
+    )
+
+    rendered = str(failure)
+    assert len(rendered) < 8_500
+    assert "Error: Certificate" in rendered
+
+
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (
     None
 ):
