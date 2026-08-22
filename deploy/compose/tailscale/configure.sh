@@ -177,25 +177,14 @@ wait_for_exact_services() {
     return 1
 }
 
-service_host_is_active() {
-    include_hermes=$1
-    ts status --json >"${runtime_dir}/tailscale-status.json" || return 1
-    tr -d '[:space:]' \
-        <"${runtime_dir}/tailscale-status.json" \
-        >"${runtime_dir}/tailscale-status.compact"
-
-    # services/* capabilities authorize this node as a client of a TailVIP;
-    # they do not prove that control has approved this tagged node to host it.
-    # service-host is the control-plane mapping of approved service names to
-    # their VIPs and is Tailscale's documented Service-host readiness signal.
-    # Extract that value before matching names so AdvertisedServices cannot
-    # make an unapproved host appear healthy. Userspace Service hosts do not
-    # expose a separate route-activation field that is valid as a readiness gate.
-    service_hosts=${runtime_dir}/tailscale-service-hosts.compact
-    awk '
+extract_json_array() {
+    key=$1
+    source=$2
+    destination=$3
+    awk -v key="${key}" '
+        BEGIN { marker = "\"" key "\":" }
         { document = document $0 }
         END {
-            marker = "\"service-host\":"
             start = index(document, marker)
             if (start == 0) exit 1
             value = substr(document, start + length(marker))
@@ -214,15 +203,80 @@ service_host_is_active() {
             }
             exit 1
         }
-    ' "${runtime_dir}/tailscale-status.compact" >"${service_hosts}" \
+    ' "${source}" >"${destination}"
+}
+
+service_has_mapped_addresses() {
+    service_name=$1
+    addresses=$(sed -n \
+        "s/.*\"${service_name}\":\\[\\([^]]*\\)\\].*/\\1/p" \
+        "${service_hosts}")
+    [ -n "${addresses}" ] || return 1
+}
+
+service_host_is_approved() {
+    include_hermes=$1
+    service_has_mapped_addresses "${control_service}" || return 1
+    if [ "${include_hermes}" = "0" ]; then
+        return 0
+    fi
+    service_has_mapped_addresses "${hermes_api_service}" \
+        && service_has_mapped_addresses "${hermes_dashboard_service}"
+}
+
+service_has_primary_routes() {
+    service_name=$1
+    service_has_mapped_addresses "${service_name}" || return 1
+    previous_ifs=$IFS
+    IFS=,
+    set -- ${addresses}
+    IFS=${previous_ifs}
+    [ "$#" -gt 0 ] || return 1
+    for quoted_address in "$@"; do
+        case "${quoted_address}" in
+            \"*\")
+                address=${quoted_address#\"}
+                address=${address%\"}
+                ;;
+            *) return 1 ;;
+        esac
+        case "${address}" in
+            ''|*[!0-9a-fA-F:.]*) return 1 ;;
+            *:*) prefix=128 ;;
+            *) prefix=32 ;;
+        esac
+        grep -Fq "\"${address}/${prefix}\"" "${primary_routes}" \
+            || return 1
+    done
+}
+
+service_host_is_active() {
+    include_hermes=$1
+    ts status --json >"${runtime_dir}/tailscale-status.json" || return 1
+    tr -d '[:space:]' \
+        <"${runtime_dir}/tailscale-status.json" \
+        >"${runtime_dir}/tailscale-status.compact"
+
+    # services/* capabilities authorize this node as a client of a TailVIP;
+    # they do not prove that control has approved this tagged node to host it.
+    # service-host maps approved names to TailVIPs. PrimaryRoutes proves the
+    # userspace host actually owns those routes; without it, clients resolve
+    # the VIP but report "no matching peer" and HTTPS silently times out.
+    service_hosts=${runtime_dir}/tailscale-service-hosts.compact
+    primary_routes=${runtime_dir}/tailscale-primary-routes.compact
+    extract_json_array service-host \
+        "${runtime_dir}/tailscale-status.compact" "${service_hosts}" \
         || return 1
-    grep -Eq "\"${control_service}\":\\[[^]]" "${service_hosts}" \
+    extract_json_array PrimaryRoutes \
+        "${runtime_dir}/tailscale-status.compact" "${primary_routes}" \
+        || return 1
+    service_has_primary_routes "${control_service}" \
         || return 1
     if [ "${include_hermes}" = "0" ]; then
         return 0
     fi
-    grep -Eq "\"${hermes_api_service}\":\\[[^]]" "${service_hosts}" \
-        && grep -Eq "\"${hermes_dashboard_service}\":\\[[^]]" "${service_hosts}"
+    service_has_primary_routes "${hermes_api_service}" \
+        && service_has_primary_routes "${hermes_dashboard_service}"
 }
 
 include_hermes=0
@@ -264,12 +318,20 @@ if ! wait_for_exact_services "${include_hermes}"; then
 fi
 
 remaining=120
+route_repair_remaining=0
 while [ "${remaining}" -gt 0 ]; do
     if service_host_is_active "${include_hermes}"; then
         break
     fi
+    if [ "${route_repair_remaining}" -le 0 ] \
+        && service_host_is_approved "${include_hermes}"; then
+        configure_services "${include_hermes}"
+        wait_for_exact_services "${include_hermes}" || exit 1
+        route_repair_remaining=30
+    fi
     sleep 2
     remaining=$((remaining - 2))
+    route_repair_remaining=$((route_repair_remaining - 2))
 done
 if [ "${remaining}" -le 0 ]; then
     echo "ERROR: Tailscale has not approved and activated the selected Service hosts." >&2
@@ -291,8 +353,14 @@ while :; do
         configure_services "${desired_hermes}"
         wait_for_exact_services "${desired_hermes}" || exit 1
     fi
-    # Configuration advertises the desired services. Control may still require
-    # approval, so health remains failed until service-host maps the selected
-    # Services to genuine TailVIPs.
-    service_host_is_active "${desired_hermes}" || continue
+    # Re-advertise when control has mapped the TailVIPs but tailscaled has not
+    # activated their PrimaryRoutes. This repairs the userspace-host race seen
+    # after a container is created or restored.
+    if ! service_host_is_active "${desired_hermes}"; then
+        if service_host_is_approved "${desired_hermes}"; then
+            configure_services "${desired_hermes}"
+            wait_for_exact_services "${desired_hermes}" || exit 1
+        fi
+        continue
+    fi
 done

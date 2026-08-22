@@ -789,54 +789,26 @@ def _same_json_shape(actual: object, expected: object) -> bool:
     return actual == expected
 
 
-def _tailnet_service_addresses(
-    raw: str, expected: dict[str, str]
-) -> dict[str, str]:
+def _tailnet_hostname_address(hostname: str) -> str | None:
     try:
-        document = json.loads(
-            raw,
-            object_pairs_hook=_json_object_without_duplicate_keys,
+        results = socket.getaddrinfo(
+            hostname,
+            443,
+            type=socket.SOCK_STREAM,
         )
-    except (json.JSONDecodeError, ValueError) as error:
-        raise AcceptanceError("Tailscale Service list is invalid JSON") from error
-    if not isinstance(document, list):
-        raise AcceptanceError("Tailscale Service list is invalid")
-
-    addresses: dict[str, str] = {}
-    seen: set[str] = set()
-    for entry in document:
-        if not isinstance(entry, dict):
-            raise AcceptanceError("Tailscale Service list is invalid")
-        name = entry.get("Name")
-        if not isinstance(name, str):
-            raise AcceptanceError("Tailscale Service list is invalid")
-        if name not in expected:
+    except socket.gaierror:
+        return None
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for _family, _type, _protocol, _canonical, sockaddr in results:
+        try:
+            address = ipaddress.ip_address(sockaddr[0])
+        except (IndexError, ValueError):
             continue
-        if name in seen:
-            raise AcceptanceError("Tailscale Service list contains a duplicate Service")
-        seen.add(name)
-        hostname = entry.get("Hostname")
-        if hostname not in {None, "", expected[name]}:
-            raise AcceptanceError("Tailscale Service hostname does not match acceptance")
-        raw_addresses = entry.get("Addrs", [])
-        if not isinstance(raw_addresses, list):
-            raise AcceptanceError("Tailscale Service address list is invalid")
-        parsed: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
-        for value in raw_addresses:
-            if not isinstance(value, str):
-                raise AcceptanceError("Tailscale Service address is invalid")
-            try:
-                address = ipaddress.ip_address(value)
-            except ValueError as error:
-                raise AcceptanceError("Tailscale Service address is invalid") from error
-            if address.is_unspecified or address.is_multicast:
-                raise AcceptanceError("Tailscale Service address is invalid")
-            parsed.append(address)
-        if hostname == expected[name] and parsed:
-            addresses[name] = str(
-                next((address for address in parsed if address.version == 4), parsed[0])
-            )
-    return addresses
+        if not address.is_unspecified and not address.is_multicast:
+            addresses.append(address)
+    if not addresses:
+        return None
+    return str(next((address for address in addresses if address.version == 4), addresses[0]))
 
 
 def wait_for_tailnet_services(
@@ -845,16 +817,21 @@ def wait_for_tailnet_services(
     *,
     timeout: float = 120,
 ) -> dict[str, str]:
-    if not expected or len(set(expected.values())) != len(expected):
+    if (
+        not expected
+        or not bundle.is_dir()
+        or len(set(expected.values())) != len(expected)
+        or any(TAILSCALE_SERVICE.fullmatch(service) is None for service in expected)
+        or any(SAFE_DNS_SUFFIX.fullmatch(hostname) is None for hostname in expected.values())
+    ):
         raise AcceptanceError("expected Tailscale Services are invalid")
     deadline = time.monotonic() + timeout
     while True:
-        listed = run(
-            ["tailscale", "service", "list", "--json"],
-            cwd=bundle,
-            timeout=30,
-        )
-        addresses = _tailnet_service_addresses(listed.stdout, expected)
+        addresses = {
+            service: address
+            for service, hostname in expected.items()
+            if (address := _tailnet_hostname_address(hostname)) is not None
+        }
         missing = expected.keys() - addresses.keys()
         if not missing:
             return addresses
@@ -862,7 +839,7 @@ def wait_for_tailnet_services(
         if remaining <= 0:
             names = ", ".join(sorted(missing))
             raise AcceptanceError(
-                f"acceptance client cannot access Tailscale Services: {names}"
+                f"acceptance client cannot resolve Tailscale Services: {names}"
             )
         time.sleep(min(2, remaining))
 
