@@ -217,6 +217,11 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     assert restore["if"] == "always()"
     assert "sudo systemctl restart docker" in restore["run"]
     assert "docker info" in restore["run"]
+    assert restore["run"].index("sudo systemctl restart docker") < restore[
+        "run"
+    ].index("sudo systemctl restart tailscaled")
+    assert "tailscale status --json" in restore["run"]
+    assert '.BackendState == "Running"' in restore["run"]
     step_names = [step["name"] for step in nas_steps]
     assert step_names.index("Remove Docker 29.4.3 compatibility daemon") < (
         step_names.index("Restore native Docker networking")

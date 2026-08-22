@@ -590,6 +590,21 @@ jobs:
             sleep 1
           done
           test "$native_daemon_ready" = true
+          # The privileged host-network DIND fixture can also invalidate the
+          # acceptance client's netfilter state. Reconcile tailscaled only
+          # after Docker has rebuilt its chains so the external tailnet probe
+          # uses the final host-network configuration.
+          sudo systemctl restart tailscaled
+          tailnet_ready=false
+          for _ in $(seq 1 60); do
+            if tailscale status --json 2>/dev/null \
+              | jq -e '.BackendState == "Running"' >/dev/null; then
+              tailnet_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$tailnet_ready" = true
 
       - name: Run literal clean NAS and tailnet acceptance
         shell: bash
