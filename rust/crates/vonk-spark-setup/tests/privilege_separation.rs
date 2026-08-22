@@ -331,6 +331,7 @@ fn paths(root: &std::path::Path) -> InstallPaths {
     InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        hosts: root.join("etc/hosts"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: root.join("var/tmp"),
         sudo: PathBuf::from("/usr/bin/sudo"),
@@ -479,9 +480,34 @@ fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
     });
     RecordingRunner {
         commands: Vec::new(),
-        outputs: [CommandOutput::success(
-            serde_json::to_vec(&bootstrap).unwrap(),
-        )]
+        outputs: [
+            CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
+            CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
+        ]
+        .into(),
+    }
+}
+
+fn runner_with_private_controller_bootstrap(ca: &[u8]) -> RecordingRunner {
+    let bootstrap = serde_json::json!({
+        "controller_endpoint": "https://controller.example.test",
+        "enrollment_endpoint": "https://enroll.example.test",
+        "ca_fingerprint": ca_fingerprint(ca),
+        "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
+        "controller_address": "192.168.1.231",
+        "service_hostnames": [
+            "control.example.test",
+            "enroll.example.test",
+            "controller.example.test",
+            "registry.example.test",
+        ],
+    });
+    RecordingRunner {
+        commands: Vec::new(),
+        outputs: [
+            CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
+            CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
+        ]
         .into(),
     }
 }
@@ -660,10 +686,22 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
     )
     .unwrap();
 
-    assert_eq!(prepare_runner.commands.len(), 1);
-    assert_eq!(
-        prepare_runner.commands[0].program,
-        std::path::Path::new("/usr/bin/curl")
+    assert_eq!(prepare_runner.commands.len(), 2);
+    assert!(
+        prepare_runner
+            .commands
+            .iter()
+            .all(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+    );
+    assert!(
+        prepare_runner.commands[0]
+            .args
+            .contains(&"--insecure".to_owned())
+    );
+    assert!(
+        prepare_runner.commands[1]
+            .args
+            .contains(&"--cacert".to_owned())
     );
 
     let mut root_runner = RecordingRunner::default();
@@ -709,16 +747,34 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     let install_paths = paths(temporary.path());
     fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     let ca = controller_ca();
-    let mut prepare_runner = runner_with_bootstrap(&ca);
+    fs::write(&install_paths.hosts, "127.0.0.1 localhost\n").unwrap();
+    let mut prepare_runner = runner_with_private_controller_bootstrap(&ca);
     let mut prompt = fresh_answers(&ca);
     let prepared = prepare_setup(
-        &request(temporary.path()),
+        &request(temporary.path())
+            .with_controller_address(Some("192.168.1.231"))
+            .unwrap(),
         &install_paths,
         &mut prompt,
         &mut prepare_runner,
         CallerIdentity::unprivileged(1000),
     )
     .unwrap();
+    for command in &prepare_runner.commands {
+        assert!(command.args.windows(2).any(|arguments| {
+            arguments == ["--resolve", "enroll.example.test:443:192.168.1.231"]
+        }));
+    }
+    assert!(
+        prepare_runner.commands[0]
+            .args
+            .contains(&"--insecure".to_owned())
+    );
+    assert!(
+        prepare_runner.commands[1]
+            .args
+            .contains(&"--cacert".to_owned())
+    );
     let mut handoff_runner = RecordingRunner::default();
     handoff_to_root(&prepared, &mut handoff_runner).unwrap();
     let frame = handoff_runner.commands[0].stdin.clone();
@@ -761,6 +817,10 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     }));
     assert!(install_paths.config.is_file());
     assert!(install_paths.ca.is_file());
+    assert_eq!(
+        fs::read_to_string(&install_paths.hosts).unwrap(),
+        "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n192.168.1.231 control.example.test enroll.example.test controller.example.test registry.example.test\n# END VONK FORGE MANAGED HOSTS\n"
+    );
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "paired-v1\n"
@@ -1339,6 +1399,7 @@ fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting(
     let install_paths = InstallPaths {
         config: unsafe_directory.join("agent.toml"),
         ca: unsafe_directory.join("controller-ca.pem"),
+        hosts: temporary.path().join("etc/hosts"),
         agent: temporary.path().join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: temporary.path().join("var/tmp"),
         sudo: PathBuf::from("/usr/bin/sudo"),

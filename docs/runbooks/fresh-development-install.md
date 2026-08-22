@@ -19,8 +19,9 @@ checkout, Docker daemon, sudo, SSH, or NAS mount is needed to prepare it.
 
 ## Add each Spark
 
-Create a one-use pairing token in Vonk Forge, then run this on the Spark as its
-normal administrator account:
+Create a one-use pairing grant in Vonk Forge, then copy its generated command to
+the Spark as its normal administrator account. It includes
+`VONK_CONTROLLER_ADDRESS=<reserved NAS LAN IP>` when required:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/dev/spark | sh
@@ -28,8 +29,9 @@ curl -fsSL https://install.vonkforge.ai/dev/spark | sh
 
 The command verifies the development release before requesting sudo, installs
 the direct Rust agent, exchanges the token for the Spark certificate, starts
-the service, and verifies sustained readiness. Repeat it later to upgrade the
-same Spark.
+the service, configures the verified NAS hostname mapping without Spark-side
+Tailscale or manual DNS changes, and verifies sustained readiness. Repeat the
+controller-generated command later to upgrade the same Spark.
 
 Stable installation uses the same two commands without `/dev`; that channel
 selection is the only installation-flow difference.

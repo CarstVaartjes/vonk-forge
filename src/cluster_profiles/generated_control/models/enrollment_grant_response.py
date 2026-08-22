@@ -6,7 +6,11 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
+from typing import cast
+from typing import cast, Union
 from typing import Literal, cast
+from typing import Union
 
 
 
@@ -28,6 +32,8 @@ class EnrollmentGrantResponse:
             id (str):
             purpose (Literal['new-node']):
             token (str):
+            controller_address (Union[None, Unset, str]):
+            service_hostnames (Union[Unset, list[str]]):
      """
 
     ca_fingerprint: str
@@ -37,6 +43,8 @@ class EnrollmentGrantResponse:
     id: str
     purpose: Literal['new-node']
     token: str
+    controller_address: Union[None, Unset, str] = UNSET
+    service_hostnames: Union[Unset, list[str]] = UNSET
 
 
 
@@ -57,6 +65,18 @@ class EnrollmentGrantResponse:
 
         token = self.token
 
+        controller_address: Union[None, Unset, str]
+        if isinstance(self.controller_address, Unset):
+            controller_address = UNSET
+        else:
+            controller_address = self.controller_address
+
+        service_hostnames: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.service_hostnames, Unset):
+            service_hostnames = self.service_hostnames
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -69,6 +89,10 @@ class EnrollmentGrantResponse:
             "purpose": purpose,
             "token": token,
         })
+        if controller_address is not UNSET:
+            field_dict["controller_address"] = controller_address
+        if service_hostnames is not UNSET:
+            field_dict["service_hostnames"] = service_hostnames
 
         return field_dict
 
@@ -93,6 +117,19 @@ class EnrollmentGrantResponse:
 
         token = d.pop("token")
 
+        def _parse_controller_address(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        controller_address = _parse_controller_address(d.pop("controller_address", UNSET))
+
+
+        service_hostnames = cast(list[str], d.pop("service_hostnames", UNSET))
+
+
         enrollment_grant_response = cls(
             ca_fingerprint=ca_fingerprint,
             controller_endpoint=controller_endpoint,
@@ -101,6 +138,8 @@ class EnrollmentGrantResponse:
             id=id,
             purpose=purpose,
             token=token,
+            controller_address=controller_address,
+            service_hostnames=service_hostnames,
         )
 
         return enrollment_grant_response

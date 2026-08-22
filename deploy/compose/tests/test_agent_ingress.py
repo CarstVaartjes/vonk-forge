@@ -396,6 +396,10 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
 
     assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
     assert api["environment"]["VONK_MANAGEMENT_CIDRS"] == "10.0.0.0/24"
+    assert api["environment"]["VONK_AGENT_CONTROLLER_ADDRESS"] == "10.0.0.2"
+    assert api["environment"]["VONK_AGENT_SERVICE_HOSTNAMES"] == (
+        "control.test.example,enroll.test.example,agents.test.example,registry.test.example"
+    )
     assert set(caddy["networks"]) == {
         "agent-proxy",
         "hermes-inference",

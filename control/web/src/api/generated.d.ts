@@ -1270,6 +1270,8 @@ export interface components {
         EnrollmentGrantResponse: {
             /** Ca Fingerprint */
             ca_fingerprint: string;
+            /** Controller Address */
+            controller_address?: string | null;
             /** Controller Endpoint */
             controller_endpoint: string;
             /** Enrollment Endpoint */
@@ -1283,6 +1285,8 @@ export interface components {
              * @constant
              */
             purpose: "new-node";
+            /** Service Hostnames */
+            service_hostnames?: string[];
             /** Token */
             token: string;
         };

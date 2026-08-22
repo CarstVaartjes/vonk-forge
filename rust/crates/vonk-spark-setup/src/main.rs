@@ -66,7 +66,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         cli.setup_signature
             .ok_or("signed setup signature is required")?,
         std::env::current_exe()?,
-    )?;
+    )?
+    .with_controller_address(std::env::var("VONK_CONTROLLER_ADDRESS").ok().as_deref())?;
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
     let mut prompt = TtyPrompt::new();

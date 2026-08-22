@@ -284,6 +284,7 @@ fn install_paths(root: &Path) -> InstallPaths {
     InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        hosts: root.join("etc/hosts"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: root.join("var/tmp"),
         sudo: root.join("fake-sudo"),

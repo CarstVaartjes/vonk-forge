@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import stat
@@ -18,6 +19,10 @@ _ONE_PEM_CERTIFICATE = re.compile(
     rb"-----END CERTIFICATE-----[ \t\r\n]*\Z"
 )
 _MAX_CONTROLLER_CA_BYTES = 64 * 1024
+_HOSTNAME = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
+)
 
 
 def _fixed_https_origin(value: str, *, name: str) -> str:
@@ -49,6 +54,8 @@ class EnrollmentBootstrapConfig:
     enrollment_endpoint: str
     ca_fingerprint: str
     ca_pem: str
+    controller_address: str | None = None
+    service_hostnames: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         controller_endpoint = _fixed_https_origin(
@@ -61,9 +68,41 @@ class EnrollmentBootstrapConfig:
         fingerprint = certificate.fingerprint(hashes.SHA256()).hex()
         if self.ca_fingerprint != fingerprint:
             raise ValueError("controller CA fingerprint does not match certificate")
+        address = self.controller_address
+        hostnames = tuple(self.service_hostnames)
+        if address is None and hostnames or address is not None and not hostnames:
+            raise ValueError(
+                "controller address and service hostnames must be configured together"
+            )
+        if address is not None:
+            try:
+                parsed_address = ipaddress.ip_address(address)
+            except ValueError as error:
+                raise ValueError("controller address must be an IP address") from error
+            if parsed_address.is_unspecified or parsed_address.is_multicast:
+                raise ValueError("controller address must be a usable IP address")
+            address = str(parsed_address)
+            if (
+                len(hostnames) > 16
+                or len(set(hostnames)) != len(hostnames)
+                or any(
+                    hostname != hostname.lower()
+                    or _HOSTNAME.fullmatch(hostname) is None
+                    for hostname in hostnames
+                )
+            ):
+                raise ValueError("service hostnames are invalid")
+            endpoint_hostnames = {
+                urlsplit(controller_endpoint).hostname,
+                urlsplit(enrollment_endpoint).hostname,
+            }
+            if not endpoint_hostnames.issubset(hostnames):
+                raise ValueError("service hostnames must include both agent endpoints")
         object.__setattr__(self, "controller_endpoint", controller_endpoint)
         object.__setattr__(self, "enrollment_endpoint", enrollment_endpoint)
         object.__setattr__(self, "ca_pem", canonical_pem.decode("ascii"))
+        object.__setattr__(self, "controller_address", address)
+        object.__setattr__(self, "service_hostnames", hostnames)
 
     @classmethod
     def from_paths(
@@ -72,6 +111,8 @@ class EnrollmentBootstrapConfig:
         controller_endpoint: str,
         enrollment_endpoint: str,
         controller_ca_path: Path,
+        controller_address: str | None = None,
+        service_hostnames: tuple[str, ...] = (),
     ) -> EnrollmentBootstrapConfig:
         pem = _read_public_ca(Path(controller_ca_path))
         certificate, canonical_pem = _public_ca(pem)
@@ -86,6 +127,8 @@ class EnrollmentBootstrapConfig:
             ),
             ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
             ca_pem=canonical_pem.decode("ascii"),
+            controller_address=controller_address,
+            service_hostnames=service_hostnames,
         )
 
 

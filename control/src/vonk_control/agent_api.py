@@ -223,6 +223,8 @@ class EnrollmentGrantResponse(BaseModel):
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    controller_address: str | None = None
+    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
 
 
 class EnrollmentBootstrapResponse(BaseModel):
@@ -231,6 +233,8 @@ class EnrollmentBootstrapResponse(BaseModel):
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     ca_pem: str = Field(min_length=1, max_length=64 * 1024)
+    controller_address: str | None = None
+    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
 
 
 class EnrollmentSummary(BaseModel):
@@ -1090,6 +1094,8 @@ def install_agent_routes(
         "/enrollments/grants",
         status_code=status.HTTP_201_CREATED,
         response_model=EnrollmentGrantResponse,
+        response_model_exclude_none=True,
+        response_model_exclude_defaults=True,
         responses=bounded_error_responses(401, 403, 503),
     )
     def create_grant(
@@ -1127,6 +1133,8 @@ def install_agent_routes(
             controller_endpoint=required.bootstrap.controller_endpoint,
             enrollment_endpoint=required.bootstrap.enrollment_endpoint,
             ca_fingerprint=required.bootstrap.ca_fingerprint,
+            controller_address=required.bootstrap.controller_address,
+            service_hostnames=list(required.bootstrap.service_hostnames),
         )
 
     @human.get(
@@ -1232,7 +1240,9 @@ def install_agent_routes(
                 enrollment_endpoint=required.bootstrap.enrollment_endpoint,
                 ca_fingerprint=required.bootstrap.ca_fingerprint,
                 ca_pem=required.bootstrap.ca_pem,
-            ).model_dump()
+                controller_address=required.bootstrap.controller_address,
+                service_hostnames=list(required.bootstrap.service_hostnames),
+            ).model_dump(exclude_none=True, exclude_defaults=True)
         )
 
     @agent.post("/enroll")

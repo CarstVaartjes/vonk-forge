@@ -4,6 +4,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, Read, Write},
+    net::Ipv4Addr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Stdio},
@@ -25,6 +26,7 @@ const MAX_RELEASE_BYTES: usize = 1024 * 1024;
 const MAX_RELEASE_SIGNATURE_BYTES: usize = 16 * 1024;
 const CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
 const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
+const HOSTS_PATH: &str = "/etc/hosts";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
@@ -103,6 +105,7 @@ pub struct SetupRequest {
     release_signature: PathBuf,
     setup_signature: PathBuf,
     executable: PathBuf,
+    controller_address: Option<Ipv4Addr>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,7 +271,7 @@ impl CallerIdentity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum ApplyOperation {
     Fresh {
@@ -278,6 +281,7 @@ enum ApplyOperation {
         ca_pem: Vec<u8>,
         node_id: String,
         pairing_token: String,
+        host_mapping: Option<HostMapping>,
     },
     Pair {
         enrollment_url: Url,
@@ -285,6 +289,13 @@ enum ApplyOperation {
         pairing_token: String,
     },
     Upgrade,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostMapping {
+    address: String,
+    hostnames: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,7 +385,19 @@ impl SetupRequest {
             release_signature,
             setup_signature,
             executable,
+            controller_address: None,
         })
+    }
+
+    pub fn with_controller_address(mut self, value: Option<&str>) -> Result<Self, SetupError> {
+        self.controller_address = value
+            .map(|value| {
+                value
+                    .parse::<Ipv4Addr>()
+                    .map_err(|_| SetupError::UnsafeInput("controller network address"))
+            })
+            .transpose()?;
+        Ok(self)
     }
 }
 
@@ -455,6 +478,7 @@ public_key=$root/installer-release-public.pem
 pub struct InstallPaths {
     pub config: PathBuf,
     pub ca: PathBuf,
+    pub hosts: PathBuf,
     pub agent: PathBuf,
     pub staging_root: PathBuf,
     pub sudo: PathBuf,
@@ -467,6 +491,7 @@ impl InstallPaths {
         Self {
             config: PathBuf::from(CONFIG_PATH),
             ca: PathBuf::from(CA_PATH),
+            hosts: PathBuf::from(HOSTS_PATH),
             agent: PathBuf::from(AGENT_PATH),
             staging_root: PathBuf::from("/var/tmp"),
             sudo: PathBuf::from("/usr/bin/sudo"),
@@ -619,8 +644,12 @@ pub fn prepare_setup_with_authority(
             if !valid_token(&pairing_token) {
                 return Err(SetupError::UnsafeInput("pairing token"));
             }
-            let (controller_url, ca_pem) =
-                discover_enrollment(&enrollment_url, &ca_sha256, runner)?;
+            let (controller_url, ca_pem, host_mapping) = discover_enrollment(
+                &enrollment_url,
+                &ca_sha256,
+                request.controller_address,
+                runner,
+            )?;
             ApplyOperation::Fresh {
                 enrollment_url,
                 controller_url,
@@ -628,6 +657,7 @@ pub fn prepare_setup_with_authority(
                 ca_pem,
                 node_id: format!("spk_{}", Uuid::new_v4().simple()),
                 pairing_token,
+                host_mapping,
             }
         }
         InstallState::ConfiguredUnpaired => {
@@ -928,6 +958,7 @@ pub fn apply_setup_from_with_authority(
             ca_pem,
             node_id,
             pairing_token,
+            host_mapping,
         } => {
             install_package(runner, &staged)?;
             let config = GeneratedConfig {
@@ -938,6 +969,9 @@ pub fn apply_setup_from_with_authority(
                 node_id,
             };
             install_configuration(paths, &config, &ca_pem, owner)?;
+            if let Some(mapping) = host_mapping {
+                install_host_mapping(paths, &mapping, owner)?;
+            }
             write_setup_state(paths, b"unpaired-v1\n", owner)?;
             pair_agent(
                 paths,
@@ -1025,12 +1059,14 @@ fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
             ca_pem,
             node_id,
             pairing_token,
+            host_mapping,
         } => {
             if !valid_origin(enrollment_url)
                 || !valid_origin(controller_url)
                 || !valid_sha256(ca_sha256)
                 || !valid_node_id(node_id)
                 || !valid_token(pairing_token)
+                || !valid_host_mapping(host_mapping.as_ref())
             {
                 return Err(SetupError::PrivilegedInput);
             }
@@ -1067,6 +1103,66 @@ fn install_configuration(
     }
     atomic_root_write(&paths.ca, ca, owner, 0o644)?;
     atomic_root_write(&paths.config, rendered.as_bytes(), owner, 0o644)
+}
+
+const HOSTS_BEGIN: &str = "# BEGIN VONK FORGE MANAGED HOSTS";
+const HOSTS_END: &str = "# END VONK FORGE MANAGED HOSTS";
+const MAX_HOSTS_BYTES: u64 = 1024 * 1024;
+
+fn install_host_mapping(
+    paths: &InstallPaths,
+    mapping: &HostMapping,
+    owner: u32,
+) -> Result<(), SetupError> {
+    if !valid_host_mapping(Some(mapping)) {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let metadata = fs::symlink_metadata(&paths.hosts).map_err(SetupError::PrivilegedWrite)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != owner
+        || metadata.len() > MAX_HOSTS_BYTES
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let existing = fs::read_to_string(&paths.hosts).map_err(SetupError::PrivilegedWrite)?;
+    let mut retained = Vec::new();
+    let mut managed = false;
+    for line in existing.lines() {
+        if line == HOSTS_BEGIN {
+            if managed {
+                return Err(SetupError::PrivilegedInput);
+            }
+            managed = true;
+        } else if line == HOSTS_END {
+            if !managed {
+                return Err(SetupError::PrivilegedInput);
+            }
+            managed = false;
+        } else if !managed {
+            retained.push(line);
+        }
+    }
+    if managed {
+        return Err(SetupError::PrivilegedInput);
+    }
+    while retained.last().is_some_and(|line| line.is_empty()) {
+        retained.pop();
+    }
+    let mut rendered = retained.join("\n");
+    if !rendered.is_empty() {
+        rendered.push('\n');
+    }
+    rendered.push_str(HOSTS_BEGIN);
+    rendered.push('\n');
+    rendered.push_str(&mapping.address);
+    rendered.push(' ');
+    rendered.push_str(&mapping.hostnames.join(" "));
+    rendered.push('\n');
+    rendered.push_str(HOSTS_END);
+    rendered.push('\n');
+    atomic_root_write(&paths.hosts, rendered.as_bytes(), owner, 0o644)
 }
 
 fn setup_state_path(paths: &InstallPaths) -> PathBuf {
@@ -1120,17 +1216,6 @@ fn start_and_verify(
         runner,
         Command::new("/usr/bin/systemctl", ["enable", "--now", &paths.service]),
     )?;
-    run_checked(
-        runner,
-        Command::new(
-            &paths.agent,
-            [
-                "--config",
-                paths.config.to_string_lossy().as_ref(),
-                "self-test",
-            ],
-        ),
-    )?;
     verify_sustained_readiness(paths, runner)
 }
 
@@ -1169,17 +1254,6 @@ fn upgrade_existing(
     run_checked(
         runner,
         Command::new("/usr/bin/systemctl", ["restart", &paths.service]),
-    )?;
-    run_checked(
-        runner,
-        Command::new(
-            &paths.agent,
-            [
-                "--config",
-                paths.config.to_string_lossy().as_ref(),
-                "self-test",
-            ],
-        ),
     )?;
     verify_sustained_readiness(paths, runner)
 }
@@ -1635,32 +1709,23 @@ struct EnrollmentBootstrap {
     enrollment_endpoint: String,
     ca_fingerprint: String,
     ca_pem: String,
+    #[serde(default)]
+    controller_address: Option<String>,
+    #[serde(default)]
+    service_hostnames: Vec<String>,
 }
 
 fn discover_enrollment(
     expected_enrollment: &Url,
     expected_ca_sha256: &str,
+    expected_controller_address: Option<Ipv4Addr>,
     runner: &mut dyn CommandRunner,
-) -> Result<(Url, Vec<u8>), SetupError> {
+) -> Result<(Url, Vec<u8>, Option<HostMapping>), SetupError> {
     let mut bootstrap_url = expected_enrollment.clone();
     bootstrap_url.set_path("/agent/v1/bootstrap");
     let output = run_checked(
         runner,
-        Command::new(
-            "/usr/bin/curl",
-            [
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--proto",
-                "=https",
-                "--tlsv1.2",
-                "--insecure",
-                "--max-filesize",
-                "131072",
-                bootstrap_url.as_str(),
-            ],
-        ),
+        bootstrap_curl(&bootstrap_url, expected_controller_address, None),
     )?
     .stdout;
     if output.is_empty() || output.len() > MAX_BOOTSTRAP_BYTES {
@@ -1668,6 +1733,88 @@ fn discover_enrollment(
     }
     let bootstrap: EnrollmentBootstrap =
         serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let (controller, ca, mapping) = validate_enrollment_bootstrap(
+        bootstrap,
+        expected_enrollment,
+        expected_ca_sha256,
+        expected_controller_address,
+    )?;
+    let directory = secure_tempdir("vonk-enrollment-ca.")?;
+    let ca_path = directory.path().join("controller-ca.pem");
+    fs::write(&ca_path, &ca).map_err(SetupError::PrivilegedWrite)?;
+    let authenticated = run_checked(
+        runner,
+        bootstrap_curl(
+            &bootstrap_url,
+            mapping.as_ref().map(|value| {
+                value
+                    .address
+                    .parse::<Ipv4Addr>()
+                    .expect("validated controller address")
+            }),
+            Some(&ca_path),
+        ),
+    )?
+    .stdout;
+    if authenticated.is_empty() || authenticated.len() > MAX_BOOTSTRAP_BYTES {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
+    let authenticated: EnrollmentBootstrap =
+        serde_json::from_slice(&authenticated).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let verified = validate_enrollment_bootstrap(
+        authenticated,
+        expected_enrollment,
+        expected_ca_sha256,
+        mapping
+            .as_ref()
+            .map(|value| value.address.parse().expect("validated controller address")),
+    )?;
+    if verified.0 != controller || verified.1 != ca || verified.2 != mapping {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
+    Ok(verified)
+}
+
+fn bootstrap_curl(
+    bootstrap_url: &Url,
+    controller_address: Option<Ipv4Addr>,
+    ca_path: Option<&Path>,
+) -> Command {
+    let mut arguments = vec![
+        "--fail".to_owned(),
+        "--silent".to_owned(),
+        "--show-error".to_owned(),
+        "--proto".to_owned(),
+        "=https".to_owned(),
+        "--tlsv1.2".to_owned(),
+    ];
+    if let Some(address) = controller_address {
+        let hostname = bootstrap_url.host_str().expect("validated HTTPS origin");
+        let port = bootstrap_url.port_or_known_default().unwrap_or(443);
+        arguments.extend([
+            "--resolve".to_owned(),
+            format!("{hostname}:{port}:{address}"),
+        ]);
+    }
+    if let Some(path) = ca_path {
+        arguments.extend(["--cacert".to_owned(), path.display().to_string()]);
+    } else {
+        arguments.push("--insecure".to_owned());
+    }
+    arguments.extend([
+        "--max-filesize".to_owned(),
+        MAX_BOOTSTRAP_BYTES.to_string(),
+        bootstrap_url.as_str().to_owned(),
+    ]);
+    Command::new("/usr/bin/curl", arguments)
+}
+
+fn validate_enrollment_bootstrap(
+    bootstrap: EnrollmentBootstrap,
+    expected_enrollment: &Url,
+    expected_ca_sha256: &str,
+    expected_controller_address: Option<Ipv4Addr>,
+) -> Result<(Url, Vec<u8>, Option<HostMapping>), SetupError> {
     let enrollment =
         Url::parse(&bootstrap.enrollment_endpoint).map_err(|_| SetupError::EnrollmentBootstrap)?;
     let controller =
@@ -1682,7 +1829,38 @@ fn discover_enrollment(
     }
     let ca = bootstrap.ca_pem.into_bytes();
     verify_ca(&ca, expected_ca_sha256).map_err(|_| SetupError::EnrollmentBootstrap)?;
-    Ok((controller, ca))
+    let mapping = match bootstrap.controller_address {
+        Some(address) => {
+            let address = address
+                .parse::<Ipv4Addr>()
+                .map_err(|_| SetupError::EnrollmentBootstrap)?;
+            if expected_controller_address.is_some_and(|expected| expected != address) {
+                return Err(SetupError::EnrollmentBootstrap);
+            }
+            let mapping = HostMapping {
+                address: address.to_string(),
+                hostnames: bootstrap.service_hostnames,
+            };
+            if !valid_host_mapping(Some(&mapping))
+                || !mapping
+                    .hostnames
+                    .iter()
+                    .any(|value| Some(value.as_str()) == enrollment.host_str())
+                || !mapping
+                    .hostnames
+                    .iter()
+                    .any(|value| Some(value.as_str()) == controller.host_str())
+            {
+                return Err(SetupError::EnrollmentBootstrap);
+            }
+            Some(mapping)
+        }
+        None if bootstrap.service_hostnames.is_empty() && expected_controller_address.is_none() => {
+            None
+        }
+        None => return Err(SetupError::EnrollmentBootstrap),
+    };
+    Ok((controller, ca, mapping))
 }
 
 fn required_sha256(prompt: &mut dyn Prompt, label: &str) -> Result<String, SetupError> {
@@ -1702,6 +1880,43 @@ fn valid_origin(url: &Url) -> bool {
         && url.query().is_none()
         && url.fragment().is_none()
         && url.path() == "/"
+}
+
+fn valid_host_mapping(mapping: Option<&HostMapping>) -> bool {
+    let Some(mapping) = mapping else {
+        return true;
+    };
+    mapping.address.parse::<Ipv4Addr>().is_ok()
+        && !mapping.hostnames.is_empty()
+        && mapping.hostnames.len() <= 16
+        && mapping
+            .hostnames
+            .iter()
+            .enumerate()
+            .all(|(index, hostname)| {
+                valid_hostname(hostname) && !mapping.hostnames[..index].contains(hostname)
+            })
+}
+
+fn valid_hostname(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
+        })
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+        })
+        && value.parse::<Ipv4Addr>().is_err()
 }
 
 fn valid_sha256(value: &str) -> bool {

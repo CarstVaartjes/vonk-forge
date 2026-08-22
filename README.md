@@ -27,16 +27,20 @@ Docker runner. The installer does not need Docker, root, Git, SSH, a mounted NAS
 or direct NAS access. Running the same command again prepares an upgrade while
 preserving locally owned identity and secrets.
 
-Install, pair, or upgrade a Spark directly on the Spark:
+Create a one-use grant in the Vonk Forge Fleet page, then copy its generated
+command onto the Spark. For a NAS reached through its reserved LAN address the
+command has this shape:
 
 ```bash
-curl -fsSL https://install.vonkforge.ai/spark | sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
 ```
 
 The script downloads as the current user, verifies the immutable release before
 using `sudo`, installs the direct Rust agent service, completes pairing through
-interactive prompts, and verifies that the service is healthy. The same command
-performs an in-place upgrade on an installed Spark.
+interactive prompts, and verifies that the service is healthy. It keeps the
+controller hostnames for TLS while configuring their NAS LAN mapping
+automatically; the Spark does not need Tailscale or manual DNS changes. The same
+command performs an in-place upgrade on an installed Spark.
 
 Development and production use the same services, networks, volumes, security
 settings, and behavior. Only the selected immutable image and package identities

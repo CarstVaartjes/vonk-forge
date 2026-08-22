@@ -156,6 +156,11 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
     monkeypatch.setenv(
         "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
     )
+    monkeypatch.setenv("VONK_AGENT_CONTROLLER_ADDRESS", "192.168.1.231")
+    monkeypatch.setenv(
+        "VONK_AGENT_SERVICE_HOSTNAMES",
+        "control.example.test,enroll.example.test,agents.example.test,registry.example.test",
+    )
     monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
 
     settings = Settings.from_env_and_secrets()
@@ -164,6 +169,13 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
     assert settings.agent_enrollment_origin == "https://enroll.example.test:8443"
     assert settings.controller_ca_path == controller_ca
     assert settings.agent_ca_url == "https://step-ca:9000"
+    assert settings.agent_controller_address == "192.168.1.231"
+    assert settings.agent_service_hostnames == (
+        "control.example.test",
+        "enroll.example.test",
+        "agents.example.test",
+        "registry.example.test",
+    )
 
 
 def test_enabled_agent_runtime_rejects_non_https_controller_origin(
