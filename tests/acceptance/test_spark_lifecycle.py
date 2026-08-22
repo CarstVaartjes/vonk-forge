@@ -530,6 +530,14 @@ class SparkLifecycle:
         output = self._redact_diagnostics(logs.stdout or logs.stderr)
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
+    def _installation_failure(
+        self, stage: str, error: AcceptanceError
+    ) -> LifecycleError:
+        diagnostics = self._redact_diagnostics(str(error))
+        return LifecycleError(
+            f"{stage} failed; {diagnostics or 'installer diagnostics unavailable'}"
+        )
+
     def _cleanup(self) -> None:
         failures: list[BaseException] = []
         if getattr(self, "agent_installed", False):
@@ -871,7 +879,9 @@ class SparkLifecycle:
                 pairing_token=pairing_token,
             )
         except AcceptanceError as error:
-            raise LifecycleError("baseline Spark installation failed") from error
+            raise self._installation_failure(
+                "baseline Spark installation", error
+            ) from error
         finally:
             del pairing_token
         self.agent_installed = True
@@ -906,7 +916,7 @@ class SparkLifecycle:
                 environment=self._installer_environment(baseline=False),
             )
         except AcceptanceError as error:
-            raise LifecycleError("candidate Spark upgrade failed") from error
+            raise self._installation_failure("candidate Spark upgrade", error) from error
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
         )

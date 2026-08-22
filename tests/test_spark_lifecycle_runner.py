@@ -377,6 +377,28 @@ def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
     assert "tailscale-gateway=restarting/none/exit-1" in diagnostics
 
 
+def test_installer_failure_diagnostics_are_bounded_and_redact_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    secret = "tskey-client-sensitive-value"
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret)
+    error = lifecycle.AcceptanceError(
+        f"discarded diagnostic beginning{'x' * 9_000}\n"
+        f"setup command failed for {secret}\n"
+    )
+
+    failure = run._installation_failure("baseline Spark installation", error)
+    rendered = str(failure)
+
+    assert secret not in rendered
+    assert "discarded diagnostic beginning" not in rendered
+    assert len(rendered) < 8_500
+    assert "baseline Spark installation failed" in rendered
+    assert "setup command failed for <redacted>" in rendered
+
+
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (
     None
 ):
