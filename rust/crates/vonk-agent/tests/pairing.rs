@@ -135,6 +135,22 @@ fn expired_or_reused_token_responses_fail_closed() {
 }
 
 #[test]
+fn unexpected_pairing_status_is_reported_without_exposing_the_body() {
+    let error = validate_enrollment_response(
+        422,
+        br#"{"detail":"request-specific-sensitive-diagnostic"}"#,
+        NODE_ID,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "controller pairing returned unexpected HTTP status 422"
+    );
+    assert!(!error.to_string().contains("request-specific"));
+}
+
+#[test]
 fn pending_enrollment_never_publishes_credentials() {
     let outcome = validate_enrollment_response(
         202,

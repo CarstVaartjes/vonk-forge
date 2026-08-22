@@ -43,6 +43,8 @@ pub enum PairingError {
     ApprovalTimeout,
     #[error("controller pairing response is invalid")]
     Response,
+    #[error("controller pairing returned unexpected HTTP status {0}")]
+    Status(u16),
     #[error("issued certificate is not bound to this node and key")]
     Certificate,
     #[error("local identity operation failed")]
@@ -239,7 +241,7 @@ pub fn validate_enrollment_response(
             Ok(EnrollmentOutcome::Issued)
         }
         401 | 403 | 409 | 410 => Err(PairingError::Rejected),
-        _ => Err(PairingError::Response),
+        _ => Err(PairingError::Status(status)),
     }
 }
 
