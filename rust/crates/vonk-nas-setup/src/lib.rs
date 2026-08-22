@@ -2221,7 +2221,7 @@ fn write_new_file(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
     set_open_mode(&mut options, mode);
     let mut file = options.open(path)?;
     file.write_all(content)?;
-    file.sync_all()?;
+    sync_file(&file)?;
     set_file_mode(path, mode)?;
     Ok(())
 }
@@ -2307,8 +2307,34 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupErr
 }
 
 fn sync_directory(path: &Path) -> Result<(), SetupError> {
-    File::open(path)?.sync_all()?;
-    Ok(())
+    let directory = File::open(path)?;
+    sync_file(&directory)
+}
+
+fn sync_file(file: &File) -> Result<(), SetupError> {
+    complete_sync(file.sync_all(), || {
+        rustix::fs::fsync(file).map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))
+    })
+}
+
+fn complete_sync<F>(full_sync: io::Result<()>, posix_sync: F) -> Result<(), SetupError>
+where
+    F: FnOnce() -> io::Result<()>,
+{
+    match full_sync {
+        Ok(()) => Ok(()),
+        // std uses F_FULLFSYNC on macOS. SMB mounts can reject that stronger
+        // operation with ENOTSUP while supporting POSIX fsync, which still
+        // flushes file data and metadata to the NAS. Preserve the durability
+        // boundary by falling back to fsync instead of skipping synchronization.
+        Err(error) if full_sync_is_unsupported(&error) => posix_sync().map_err(Into::into),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn full_sync_is_unsupported(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Unsupported
+        || (cfg!(target_os = "macos") && error.raw_os_error() == Some(45))
 }
 
 #[cfg(unix)]
@@ -2342,4 +2368,73 @@ fn set_file_mode(path: &Path, mode: u32) -> Result<(), SetupError> {
 #[cfg(not(unix))]
 fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), SetupError> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SetupError, complete_sync};
+    use std::cell::Cell;
+    use std::io;
+
+    #[test]
+    fn unsupported_full_sync_falls_back_to_posix_fsync() {
+        let fallback_called = Cell::new(false);
+        complete_sync(
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "full sync is unavailable",
+            )),
+            || {
+                fallback_called.set(true);
+                Ok(())
+            },
+        )
+        .expect("POSIX fsync preserves the durability boundary");
+        assert!(fallback_called.get());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_enotsup_falls_back_even_when_rust_does_not_classify_it() {
+        let fallback_called = Cell::new(false);
+        complete_sync(Err(io::Error::from_raw_os_error(45)), || {
+            fallback_called.set(true);
+            Ok(())
+        })
+        .expect("macOS SMB ENOTSUP falls back to POSIX fsync");
+        assert!(fallback_called.get());
+    }
+
+    #[test]
+    fn full_sync_rejects_other_io_failures_without_fallback() {
+        let fallback_called = Cell::new(false);
+        let error = complete_sync(
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "file cannot be synced",
+            )),
+            || {
+                fallback_called.set(true);
+                Ok(())
+            },
+        )
+        .expect_err("real sync failures remain fatal");
+        assert!(!fallback_called.get());
+        assert!(
+            matches!(error, SetupError::Io(inner) if inner.kind() == io::ErrorKind::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn posix_fsync_failure_remains_fatal() {
+        let error = complete_sync(
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "full sync is unavailable",
+            )),
+            || Err(io::Error::other("POSIX fsync failed")),
+        )
+        .expect_err("fallback sync failures remain fatal");
+        assert!(matches!(error, SetupError::Io(_)));
+    }
 }

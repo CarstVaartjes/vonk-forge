@@ -16,6 +16,7 @@ rand_core.workspace = true
 rcgen.workspace = true
 ring.workspace = true
 rpassword.workspace = true
+rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
