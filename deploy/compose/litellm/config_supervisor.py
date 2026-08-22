@@ -24,7 +24,9 @@ from pathlib import Path
 ROOT = Path("/routes")
 ACTIVATION = ROOT / "activation.json"
 GENERATIONS = ROOT / "generations"
-BOOTSTRAP = Path("/app/bootstrap-config.json")
+BOOTSTRAP = Path(
+    "/run/vonk-normalized-secrets/runtime-assets/litellm/bootstrap-config.json"
+)
 ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2

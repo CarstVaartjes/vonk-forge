@@ -143,10 +143,12 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
             "/etc/caddy/Caddyfile": "0444",
             "/usr/local/bin/vonk-caddy-entrypoint": "0555",
         },
-        "litellm": {
-            "/app/bootstrap-config.json": "0444",
-            "/app/vonk-entrypoint": "0555",
-            "/app/config-supervisor.py": "0555",
+        "control-api": {
+            "/run/vonk-source-assets/litellm/bootstrap-config.json": "0444",
+            "/run/vonk-source-assets/litellm/entrypoint.sh": "0555",
+            "/run/vonk-source-assets/litellm/config_supervisor.py": "0555",
+            "/run/vonk-source-assets/prometheus/prometheus.yml": "0444",
+            "/run/vonk-source-assets/prometheus/alerts.yaml": "0444",
         },
         "tailscale-configurator": {
             "/usr/local/bin/configure-tailscale": "0555",

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
+_MAX_RUNTIME_FILE_BYTES = 64 * 1024
 
 
 class RuntimeSecretError(RuntimeError):
@@ -30,6 +31,12 @@ def read_runtime_secret(
     """Read one bounded regular Compose secret without following a symlink."""
     if not 0 < maximum_bytes <= _MAX_PRIVATE_KEY_BYTES:
         raise RuntimeSecretError("runtime secret size bound is invalid")
+    return _read_runtime_file(source, maximum_bytes=maximum_bytes)
+
+
+def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
+    if not 0 < maximum_bytes <= _MAX_RUNTIME_FILE_BYTES:
+        raise RuntimeSecretError("runtime file size bound is invalid")
     source = Path(source)
     try:
         descriptor = os.open(
@@ -65,16 +72,17 @@ def read_runtime_secret(
     return bytes(content)
 
 
-def stage_private_key(
+def stage_runtime_file(
     source: Path,
     destination: Path,
     *,
     owner_uid: int = 0,
     owner_gid: int = 0,
     mode: int = 0o444,
+    maximum_bytes: int = _MAX_RUNTIME_FILE_BYTES,
 ) -> Path:
-    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
-    content = read_runtime_secret(source)
+    """Copy file-backed runtime material into a Docker-managed volume atomically."""
+    content = _read_runtime_file(source, maximum_bytes=maximum_bytes)
     destination = Path(destination)
 
     parent = destination.parent
@@ -108,6 +116,61 @@ def stage_private_key(
         except FileNotFoundError:
             pass
         raise RuntimeSecretError("runtime secret staging failed") from error
+
+
+def stage_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o444,
+) -> Path:
+    """Copy one bounded private file into a Docker-managed volume atomically."""
+    return stage_runtime_file(
+        source,
+        destination,
+        owner_uid=owner_uid,
+        owner_gid=owner_gid,
+        mode=mode,
+        maximum_bytes=_MAX_PRIVATE_KEY_BYTES,
+    )
+
+
+def stage_runtime_assets(
+    source_root: Path = Path("/run/vonk-source-assets"),
+    destination_root: Path = Path("/normalized/runtime-assets"),
+) -> None:
+    """Project NAS-hosted public configs into the Docker-owned runtime volume."""
+    source_root = Path(source_root)
+    destination_root = Path(destination_root)
+    consumers = {
+        (10002, 10001): (
+            "litellm/bootstrap-config.json",
+            "litellm/entrypoint.sh",
+            "litellm/config_supervisor.py",
+        ),
+        (65534, 65534): (
+            "prometheus/prometheus.yml",
+            "prometheus/alerts.yaml",
+        ),
+        (472, 472): (
+            "grafana/provisioning/datasources/prometheus.yaml",
+            "grafana/provisioning/dashboards/default.yaml",
+            "grafana/dashboards/jobs.json",
+            "grafana/dashboards/fleet.json",
+        ),
+    }
+    for (owner_uid, owner_gid), files in consumers.items():
+        for relative in files:
+            stage_runtime_file(
+                source_root / relative,
+                destination_root / relative,
+                owner_uid=owner_uid,
+                owner_gid=owner_gid,
+                mode=0o400,
+                maximum_bytes=_MAX_RUNTIME_FILE_BYTES,
+            )
 
 
 def stage_compose_secrets(

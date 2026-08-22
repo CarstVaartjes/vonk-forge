@@ -93,6 +93,13 @@ services:
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
+      - ./litellm/bootstrap-config.json:/run/vonk-source-assets/litellm/bootstrap-config.json:ro
+      - ./litellm/entrypoint.sh:/run/vonk-source-assets/litellm/entrypoint.sh:ro
+      - ./litellm/config_supervisor.py:/run/vonk-source-assets/litellm/config_supervisor.py:ro
+      - ./prometheus/prometheus.yml:/run/vonk-source-assets/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yaml:/run/vonk-source-assets/prometheus/alerts.yaml:ro
+      - ./grafana/provisioning:/run/vonk-source-assets/grafana/provisioning:ro
+      - ./grafana/dashboards:/run/vonk-source-assets/grafana/dashboards:ro
     # OCI archives are transfer staging only; PostgreSQL owns the build
     # authority and the enrolled node owns the imported runtime image. Never
     # make the controller's temporary upload bytes part of persistent state.
@@ -162,7 +169,7 @@ services:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
     restart: unless-stopped
     logging: *bounded-logging
-    entrypoint: [/bin/sh, /app/vonk-entrypoint]
+    entrypoint: [/bin/sh, /run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh]
     read_only: true
     user: "10002:10001"
     cap_drop: [ALL]
@@ -180,9 +187,6 @@ services:
       STORE_MODEL_IN_DB: "False"
     secrets: []
     volumes:
-      - ./litellm/bootstrap-config.json:/app/bootstrap-config.json:ro
-      - ./litellm/entrypoint.sh:/app/vonk-entrypoint:ro
-      - ./litellm/config_supervisor.py:/app/config-supervisor.py:ro
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
@@ -204,7 +208,7 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.file=/run/vonk-normalized-secrets/runtime-assets/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --storage.tsdb.retention.size=10GB
@@ -212,8 +216,6 @@ services:
     user: "65534:65534"
     secrets: []
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/alerts.yaml:/etc/prometheus/alerts.yaml:ro
       - prometheus-data:/prometheus
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
@@ -236,13 +238,12 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/vonk-normalized-secrets/grafana-admin-password
+      GF_PATHS_PROVISIONING: /run/vonk-normalized-secrets/runtime-assets/grafana/provisioning
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
     secrets: []
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]

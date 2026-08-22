@@ -13,6 +13,7 @@ from .runtime_init import (
     prepare_shared_volumes,
     read_runtime_secret,
     stage_compose_secrets,
+    stage_runtime_assets,
 )
 
 _API_UID = 10001
@@ -26,10 +27,11 @@ def prepare_owned_state() -> None:
     if os.geteuid() != 0:
         raise RuntimeError("control API pre-exec must start as root")
     stage_compose_secrets(_SOURCE_SECRETS, _NORMALIZED_SECRETS)
+    stage_runtime_assets()
     prepare_shared_volumes()
-    database_url = (_NORMALIZED_SECRETS / "database-url").read_text(
-        encoding="utf-8"
-    ).strip()
+    database_url = (
+        (_NORMALIZED_SECRETS / "database-url").read_text(encoding="utf-8").strip()
+    )
     initialize_database(database_url)
     initialize_administrator(database_url, _SOURCE_SECRETS / "admin-password")
 

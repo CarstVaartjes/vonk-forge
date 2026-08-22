@@ -122,6 +122,9 @@ def test_owned_state_initializes_database_then_the_single_administrator(
         ),
     )
     monkeypatch.setattr(
+        api_preexec, "stage_runtime_assets", lambda: events.append("assets")
+    )
+    monkeypatch.setattr(
         api_preexec, "prepare_shared_volumes", lambda: events.append("volumes")
     )
     monkeypatch.setattr(
@@ -142,6 +145,7 @@ def test_owned_state_initializes_database_then_the_single_administrator(
 
     assert events == [
         ("stage", source, normalized),
+        "assets",
         "volumes",
         ("database", "postgresql://control/database"),
         ("administrator", "postgresql://control/database", source / "admin-password"),

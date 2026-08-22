@@ -11,6 +11,8 @@ from vonk_control.runtime_init import (
     prepare_shared_volumes,
     stage_compose_secrets,
     stage_private_key,
+    stage_runtime_assets,
+    stage_runtime_file,
 )
 
 
@@ -51,6 +53,24 @@ def test_staged_api_private_key_is_owned_by_the_api_and_private(
     assert destination.stat().st_mode & 0o777 == 0o400
 
 
+def test_public_runtime_file_can_use_the_larger_bounded_asset_limit(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "dashboard.json"
+    source.write_bytes(b"x" * (16 * 1024 + 1))
+    destination = tmp_path / "normalized" / "dashboard.json"
+
+    stage_runtime_file(
+        source,
+        destination,
+        owner_uid=os.geteuid(),
+        owner_gid=os.getegid(),
+        mode=0o400,
+    )
+
+    assert destination.stat().st_size == 16 * 1024 + 1
+
+
 def test_compose_secret_staging_gives_step_ca_its_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -80,6 +100,48 @@ def test_compose_secret_staging_gives_step_ca_its_config(
         1000,
         0o400,
     ) in staged
+
+
+def test_runtime_assets_are_staged_for_their_unprivileged_consumers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staged: list[tuple[Path, Path, int, int, int, int]] = []
+
+    def record(
+        source: Path,
+        destination: Path,
+        *,
+        owner_uid: int = 0,
+        owner_gid: int = 0,
+        mode: int = 0o444,
+        maximum_bytes: int,
+    ) -> Path:
+        staged.append((source, destination, owner_uid, owner_gid, mode, maximum_bytes))
+        return destination
+
+    monkeypatch.setattr(runtime_init, "stage_runtime_file", record)
+    source = tmp_path / "nas-files"
+    destination = tmp_path / "docker-volume"
+
+    stage_runtime_assets(source, destination)
+
+    assert len(staged) == 9
+    assert {
+        (item[0].relative_to(source).as_posix(), item[2], item[3], item[4])
+        for item in staged
+    } == {
+        ("litellm/bootstrap-config.json", 10002, 10001, 0o400),
+        ("litellm/entrypoint.sh", 10002, 10001, 0o400),
+        ("litellm/config_supervisor.py", 10002, 10001, 0o400),
+        ("prometheus/prometheus.yml", 65534, 65534, 0o400),
+        ("prometheus/alerts.yaml", 65534, 65534, 0o400),
+        ("grafana/provisioning/datasources/prometheus.yaml", 472, 472, 0o400),
+        ("grafana/provisioning/dashboards/default.yaml", 472, 472, 0o400),
+        ("grafana/dashboards/jobs.json", 472, 472, 0o400),
+        ("grafana/dashboards/fleet.json", 472, 472, 0o400),
+    }
+    assert all(item[1] == destination / item[0].relative_to(source) for item in staged)
+    assert len({item[5] for item in staged}) == 1
 
 
 def test_shared_volume_preparation_preserves_each_consumer_boundary(
