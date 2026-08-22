@@ -590,11 +590,12 @@ jobs:
             sleep 1
           done
           test "$native_daemon_ready" = true
-          # The privileged host-network DIND fixture can also invalidate the
-          # acceptance client's netfilter state. Reconcile tailscaled only
-          # after Docker has rebuilt its chains so the external tailnet probe
-          # uses the final host-network configuration.
-          sudo systemctl restart tailscaled
+          # The pinned Tailscale action owns its daemon directly; it does not
+          # install a systemd unit. Reconnect through that live daemon only
+          # after Docker has rebuilt its chains so Tailscale reapplies its
+          # netfilter state against the final host-network configuration.
+          sudo -E tailscale down
+          sudo -E tailscale up
           tailnet_ready=false
           for _ in $(seq 1 60); do
             if tailscale status --json 2>/dev/null \

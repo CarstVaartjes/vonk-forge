@@ -219,7 +219,11 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     assert "docker info" in restore["run"]
     assert restore["run"].index("sudo systemctl restart docker") < restore[
         "run"
-    ].index("sudo systemctl restart tailscaled")
+    ].index("sudo -E tailscale down")
+    assert restore["run"].index("sudo -E tailscale down") < restore["run"].index(
+        "sudo -E tailscale up"
+    )
+    assert "systemctl restart tailscaled" not in restore["run"]
     assert "tailscale status --json" in restore["run"]
     assert '.BackendState == "Running"' in restore["run"]
     step_names = [step["name"] for step in nas_steps]
