@@ -575,6 +575,22 @@ jobs:
         run: |
           docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
 
+      - name: Restore native Docker networking
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo systemctl restart docker
+          native_daemon_ready=false
+          for _ in $(seq 1 60); do
+            if docker info >/dev/null 2>&1; then
+              native_daemon_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$native_daemon_ready" = true
+
       - name: Run literal clean NAS and tailnet acceptance
         shell: bash
         env:

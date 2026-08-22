@@ -205,12 +205,22 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     tmp_path: Path,
 ) -> None:
     jobs = _workflow()["jobs"]
+    nas_steps = jobs["nas-acceptance"]["steps"]
     steps = _steps(jobs["nas-acceptance"])
     cleanup = steps["Remove Docker 29.4.3 compatibility daemon"]
     assert cleanup["if"] == "always()"
     result = _run_workflow_shell(cleanup, tmp_path, server_version="29.4.3")
     assert result.returncode == 0, result.stderr
     assert "|rm --force vonk-acceptance-dind" in result.docker_log  # type: ignore[attr-defined]
+
+    restore = steps["Restore native Docker networking"]
+    assert restore["if"] == "always()"
+    assert "sudo systemctl restart docker" in restore["run"]
+    assert "docker info" in restore["run"]
+    step_names = [step["name"] for step in nas_steps]
+    assert step_names.index("Remove Docker 29.4.3 compatibility daemon") < (
+        step_names.index("Restore native Docker networking")
+    ) < step_names.index("Run literal clean NAS and tailnet acceptance")
 
     candidate = _steps(jobs["candidate"])[
         "Upload immutable publication bundle and candidate receipt"
