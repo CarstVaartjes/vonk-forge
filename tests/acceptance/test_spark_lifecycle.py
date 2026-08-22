@@ -690,7 +690,7 @@ class SparkLifecycle:
         boundary = PublicController(
             bundle=self.bundle,
             hostname=self.control_hostname,
-            connect_host=control_address,
+            connect_host=self.control_hostname,
         )
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
