@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -293,6 +294,37 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         grant["enrollment_endpoint"],
         grant["ca_fingerprint"],
         grant["token"],
+    )
+
+
+def test_installer_environment_routes_spark_bootstrap_to_acceptance_controller(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    candidate = tmp_path / "candidate/release.json"
+    baseline = tmp_path / "baseline/release.json"
+    for release in (candidate, baseline):
+        release.parent.mkdir(parents=True)
+        release.write_text("{}")
+        (release.parent / "release.sig").write_text("signature")
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.temporary_root = tmp_path
+    run.origin = "https://install.example"
+    run.arguments = SimpleNamespace(
+        baseline_release=baseline,
+        candidate_release=candidate,
+        channel="dev",
+        generation="a" * 64,
+    )
+
+    candidate_environment = run._installer_environment(baseline=False)
+    baseline_environment = run._installer_environment(baseline=True)
+
+    assert candidate_environment["VONK_CONTROLLER_ADDRESS"] == "127.0.0.1"
+    assert baseline_environment["VONK_CONTROLLER_ADDRESS"] == "127.0.0.1"
+    assert candidate_environment["VONK_INSTALL_BASE_URL"].endswith("/" + "a" * 64)
+    assert baseline_environment["VONK_INSTALL_BASE_URL"].endswith(
+        "/" + "a" * 64 + "/acceptance-baseline"
     )
 
 
