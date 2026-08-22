@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -372,34 +373,6 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     ]
 
 
-def test_tailnet_service_addresses_require_effective_client_visibility() -> None:
-    acceptance = _acceptance_module()
-    expected = {
-        "svc:vonk-forge-acceptance": "vonk-forge-acceptance.example.ts.net",
-        "svc:hermes-api-acceptance": "hermes-api-acceptance.example.ts.net",
-    }
-    listed = [
-        {
-            "Name": "svc:vonk-forge-acceptance",
-            "Hostname": "vonk-forge-acceptance.example.ts.net",
-            "Addrs": ["fd7a:115c:a1e0::1", "100.64.0.10"],
-        },
-        {
-            "Name": "svc:unrelated",
-            "Hostname": "unrelated.example.ts.net",
-            "Addrs": ["100.64.0.99"],
-        },
-    ]
-
-    assert acceptance._tailnet_service_addresses(
-        json.dumps(listed), expected
-    ) == {"svc:vonk-forge-acceptance": "100.64.0.10"}
-
-    listed[0]["Hostname"] = "wrong.example.ts.net"
-    with pytest.raises(AcceptanceError, match="hostname"):
-        acceptance._tailnet_service_addresses(json.dumps(listed), expected)
-
-
 def test_wait_for_tailnet_services_polls_until_all_are_visible(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -409,31 +382,38 @@ def test_wait_for_tailnet_services_polls_until_all_are_visible(
     }
     outputs = iter(
         (
-            "[]",
-            json.dumps(
-                [
-                    {
-                        "Name": "svc:vonk-forge-acceptance",
-                        "Hostname": "vonk-forge-acceptance.example.ts.net",
-                        "Addrs": ["100.64.0.10"],
-                    }
-                ]
-            ),
+            socket.gaierror(),
+            [
+                (
+                    socket.AF_INET6,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    ("fd7a:115c:a1e0::1", 443, 0, 0),
+                ),
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    ("100.64.0.10", 443),
+                ),
+            ],
         )
     )
-    commands: list[list[str]] = []
 
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        commands.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout=next(outputs), stderr="")
+    def resolve(*_args: object, **_kwargs: object) -> object:
+        result = next(outputs)
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
-    monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(acceptance.socket, "getaddrinfo", resolve)
     monkeypatch.setattr(acceptance.time, "sleep", lambda _seconds: None)
 
     assert acceptance.wait_for_tailnet_services(tmp_path, expected) == {
         "svc:vonk-forge-acceptance": "100.64.0.10"
     }
-    assert commands == [["tailscale", "service", "list", "--json"]] * 2
 
 
 def test_wait_for_tailnet_https_retries_with_tailvip_and_tls_hostname(
