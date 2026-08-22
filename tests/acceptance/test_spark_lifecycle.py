@@ -685,6 +685,7 @@ class SparkLifecycle:
             hermes_api_service=self.tailnet_services["hermes_api"],
             hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
             service_addresses=None,
+            compose_command=self._compose(),
         )
         boundary = PublicController(
             bundle=self.bundle,

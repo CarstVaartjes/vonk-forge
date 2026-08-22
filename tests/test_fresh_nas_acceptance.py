@@ -443,9 +443,13 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
             "svc:hermes-api": "100.64.0.11",
             "svc:hermes-dashboard": "100.64.0.12",
         },
+        compose_command=["docker", "compose", "--project-name", "isolated"],
     )
 
-    assert all("tailscale-gateway" in command for command in compose_commands)
+    assert all(
+        command[:4] == ["docker", "compose", "--project-name", "isolated"]
+        for command in compose_commands
+    )
     assert probe_commands == [
         acceptance._tailnet_tunnel("vonk-forge.acceptance.example.test", 443),
         acceptance._tailnet_tunnel("hermes-dashboard.acceptance.example.test", 443),
@@ -466,7 +470,7 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
         tailnet_suffix="acceptance.example.test",
         service_addresses=None,
     )
-    assert all("tailscale-gateway" in command for command in compose_commands)
+    assert all(command[0] == str(compose) for command in compose_commands)
     assert probe_commands == []
 
 

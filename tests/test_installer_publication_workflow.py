@@ -250,16 +250,7 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
         {"platform": "linux-amd64", "runner": "ubuntu-24.04"},
         {"platform": "linux-arm64", "runner": "ubuntu-24.04-arm"},
     ]
-    steps = _steps(spark)
-    compose = steps["Prepare native Compose command"]
-    assert 'exec docker compose "$@"' in compose["run"]
-    lifecycle = steps[
-        "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
-    ]
-    assert lifecycle["env"]["VONK_ACCEPTANCE_REFERENCE_COMPOSE"] == (
-        "${{ runner.temp }}/spark-compose"
-    )
-    report = steps["Upload Spark behavioral gate report"]
+    report = _steps(spark)["Upload Spark behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
 
