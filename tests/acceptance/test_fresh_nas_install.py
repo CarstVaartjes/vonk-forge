@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -489,10 +490,6 @@ def _http_json(response: bytes, *, label: str) -> object:
         raise AcceptanceError(f"{label} response is not JSON") from error
 
 
-def _tailnet_tunnel(hostname: str) -> list[str]:
-    return _tcp_tunnel(hostname, 443)
-
-
 def _tcp_tunnel(host: str, port: int) -> list[str]:
     return [
         sys.executable,
@@ -520,12 +517,13 @@ def _tailnet_request(
     bundle: Path,
     *,
     hostname: str,
+    connect_host: str,
     path: str,
     headers: dict[str, str],
     accepted_statuses: set[int],
 ) -> bytes:
     return https_over_command(
-        _tailnet_tunnel(hostname),
+        _tcp_tunnel(connect_host, 443),
         server_hostname=hostname,
         path=path,
         cwd=bundle,
@@ -604,6 +602,7 @@ def verify_routed_service_behavior(
     *,
     nas_ip: str,
     control_hostname: str,
+    control_address: str,
     registry_hostname: str,
 ) -> None:
     litellm_key = _bundle_secret(bundle, "litellm-master-key")
@@ -616,6 +615,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/v1/models",
             headers=headers,
             accepted_statuses={401, 403},
@@ -624,6 +624,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/v1/models",
             headers={"Authorization": f"Bearer {litellm_key}"},
             accepted_statuses={200},
@@ -637,6 +638,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/grafana/api/user",
             headers={} if not authorization else {"Authorization": authorization},
             accepted_statuses={401, 403},
@@ -645,6 +647,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/grafana/api/user",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -657,6 +660,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/grafana/api/datasources/uid/vonk-prometheus",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -669,6 +673,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path="/grafana/api/search?query=Vonk%20Forge",
             headers={"Authorization": grafana_authorization},
             accepted_statuses={200},
@@ -683,6 +688,7 @@ def verify_routed_service_behavior(
         _tailnet_request(
             bundle,
             hostname=control_hostname,
+            connect_host=control_address,
             path=(
                 "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
                 "query=up%7Bjob%3D%22vonk-control%22%7D"
@@ -781,6 +787,120 @@ def _same_json_shape(actual: object, expected: object) -> bool:
             )
         )
     return actual == expected
+
+
+def _tailnet_service_addresses(
+    raw: str, expected: dict[str, str]
+) -> dict[str, str]:
+    try:
+        document = json.loads(
+            raw,
+            object_pairs_hook=_json_object_without_duplicate_keys,
+        )
+    except (json.JSONDecodeError, ValueError) as error:
+        raise AcceptanceError("Tailscale Service list is invalid JSON") from error
+    if not isinstance(document, list):
+        raise AcceptanceError("Tailscale Service list is invalid")
+
+    addresses: dict[str, str] = {}
+    seen: set[str] = set()
+    for entry in document:
+        if not isinstance(entry, dict):
+            raise AcceptanceError("Tailscale Service list is invalid")
+        name = entry.get("Name")
+        if not isinstance(name, str):
+            raise AcceptanceError("Tailscale Service list is invalid")
+        if name not in expected:
+            continue
+        if name in seen:
+            raise AcceptanceError("Tailscale Service list contains a duplicate Service")
+        seen.add(name)
+        hostname = entry.get("Hostname")
+        if hostname not in {None, "", expected[name]}:
+            raise AcceptanceError("Tailscale Service hostname does not match acceptance")
+        raw_addresses = entry.get("Addrs", [])
+        if not isinstance(raw_addresses, list):
+            raise AcceptanceError("Tailscale Service address list is invalid")
+        parsed: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+        for value in raw_addresses:
+            if not isinstance(value, str):
+                raise AcceptanceError("Tailscale Service address is invalid")
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError as error:
+                raise AcceptanceError("Tailscale Service address is invalid") from error
+            if address.is_unspecified or address.is_multicast:
+                raise AcceptanceError("Tailscale Service address is invalid")
+            parsed.append(address)
+        if hostname == expected[name] and parsed:
+            addresses[name] = str(
+                next((address for address in parsed if address.version == 4), parsed[0])
+            )
+    return addresses
+
+
+def wait_for_tailnet_services(
+    bundle: Path,
+    expected: dict[str, str],
+    *,
+    timeout: float = 120,
+) -> dict[str, str]:
+    if not expected or len(set(expected.values())) != len(expected):
+        raise AcceptanceError("expected Tailscale Services are invalid")
+    deadline = time.monotonic() + timeout
+    while True:
+        listed = run(
+            ["tailscale", "service", "list", "--json"],
+            cwd=bundle,
+            timeout=30,
+        )
+        addresses = _tailnet_service_addresses(listed.stdout, expected)
+        missing = expected.keys() - addresses.keys()
+        if not missing:
+            return addresses
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            names = ", ".join(sorted(missing))
+            raise AcceptanceError(
+                f"acceptance client cannot access Tailscale Services: {names}"
+            )
+        time.sleep(min(2, remaining))
+
+
+def wait_for_tailnet_https(
+    bundle: Path,
+    *,
+    service: str,
+    hostname: str,
+    address: str,
+    path: str,
+    timeout: float = 120,
+) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: AcceptanceError | None = None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            detail = "unknown failure" if last_error is None else str(last_error)
+            raise AcceptanceError(
+                f"Tailscale Service {service} at {address} did not become "
+                f"HTTPS-ready: {detail}"
+            ) from last_error
+        try:
+            https_over_command(
+                _tcp_tunnel(address, 443),
+                cwd=bundle,
+                server_hostname=hostname,
+                path=path,
+                environment=host_command_environment(),
+                timeout=min(10, remaining),
+            )
+            return
+        except AcceptanceError as error:
+            last_error = error
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(2, remaining))
 
 
 def _expected_tailnet_serve_status(
@@ -923,6 +1043,7 @@ def verify_tailscale_services(
     control_service: str = "svc:vonk-forge",
     hermes_api_service: str = "svc:hermes-api",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
+    service_addresses: dict[str, str],
 ) -> None:
     status = run(
         [
@@ -978,20 +1099,32 @@ def verify_tailscale_services(
         hermes_dashboard_service=hermes_dashboard_service,
     )
 
-    urls = [
-        f"https://{tailscale_service_hostname(control_service, tailnet_suffix)}/healthz"
+    routes = [
+        (
+            control_service,
+            tailscale_service_hostname(control_service, tailnet_suffix),
+            "/healthz",
+        )
     ]
     if hermes:
-        urls.append(
-            f"https://{tailscale_service_hostname(hermes_dashboard_service, tailnet_suffix)}/"
+        routes.append(
+            (
+                hermes_dashboard_service,
+                tailscale_service_hostname(
+                    hermes_dashboard_service, tailnet_suffix
+                ),
+                "/",
+            )
         )
-    for url in urls:
-        hostname, _, path = url.removeprefix("https://").partition("/")
+    for service, hostname, path in routes:
+        address = service_addresses.get(service)
+        if address is None:
+            raise AcceptanceError("Tailscale Service address is unavailable")
         https_over_command(
-            _tcp_tunnel(hostname, 443),
+            _tcp_tunnel(address, 443),
             cwd=bundle,
             server_hostname=hostname,
-            path=f"/{path}",
+            path=path,
             environment=host_command_environment(),
             timeout=30,
         )
@@ -1042,10 +1175,35 @@ def exercise_compose(
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
+        expected_tailnet_services = {
+            control_service: control_hostname,
+        }
+        if hermes:
+            expected_tailnet_services.update(
+                {
+                    hermes_api_service: tailscale_service_hostname(
+                        hermes_api_service, tailnet_suffix
+                    ),
+                    hermes_dashboard_service: tailscale_service_hostname(
+                        hermes_dashboard_service, tailnet_suffix
+                    ),
+                }
+            )
+        service_addresses = wait_for_tailnet_services(
+            bundle, expected_tailnet_services
+        )
+        wait_for_tailnet_https(
+            bundle,
+            service=control_service,
+            hostname=control_hostname,
+            address=service_addresses[control_service],
+            path="/healthz",
+        )
         verify_routed_service_behavior(
             bundle,
             nas_ip=nas_ip,
             control_hostname=control_hostname,
+            control_address=service_addresses[control_service],
             registry_hostname=registry_hostname,
         )
         verify_tailscale_services(
@@ -1055,6 +1213,7 @@ def exercise_compose(
             control_service=control_service,
             hermes_api_service=hermes_api_service,
             hermes_dashboard_service=hermes_dashboard_service,
+            service_addresses=service_addresses,
         )
     finally:
         run(
