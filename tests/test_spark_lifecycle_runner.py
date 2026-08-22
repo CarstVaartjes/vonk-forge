@@ -95,6 +95,8 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         "services:\n  control-api:\n    image: ghcr.io/vonk/api@sha256:"
         + "a" * 64
         + "\n    environment:\n      VONK_DEPLOYMENT_MODE: production\n"
+        + "  caddy:\n    image: caddy:acceptance\n    ports:\n"
+        + "      - target: 8443\n        published: 8443\n"
     )
 
     lifecycle._configure_acceptance_renewal(bundle, lifetime_seconds=300)
@@ -109,6 +111,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     }
     compose = (bundle / "docker-compose.yaml").read_text()
     assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '300'" in compose
+    assert "127.0.0.1::8080" in compose
 
 
 def test_synthetic_device_fixture_is_native_arm64_only() -> None:
@@ -167,15 +170,89 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     ]
 
 
-def test_public_controller_uses_the_published_https_boundary(tmp_path: Path) -> None:
+def test_local_browser_controller_uses_only_the_loopback_publication(monkeypatch) -> None:
     lifecycle = _module()
-    boundary = lifecycle.PublicController(
-        bundle=tmp_path,
+    observed: dict[str, object] = {}
+
+    class Response:
+        status = 200
+
+        @staticmethod
+        def getheaders():
+            return [("Content-Type", "application/json")]
+
+        @staticmethod
+        def read(limit):
+            observed["limit"] = limit
+            return b"{}"
+
+    class Connection:
+        def __init__(self, host, port, *, timeout):
+            observed.update(host=host, port=port, timeout=timeout)
+
+        def request(self, method, path, *, body, headers):
+            observed.update(method=method, path=path, body=body, headers=headers)
+
+        @staticmethod
+        def getresponse():
+            return Response()
+
+        @staticmethod
+        def close():
+            observed["closed"] = True
+
+    monkeypatch.setattr(lifecycle.http.client, "HTTPConnection", Connection)
+    boundary = lifecycle.LocalBrowserController(
         hostname="vonk-forge.acceptance.example.test",
-        connect_host="127.0.0.1",
+        port=49152,
     )
 
-    assert boundary._command() == lifecycle._tcp_tunnel("127.0.0.1", 443)
+    assert boundary.raw_request("GET", "/healthz", None, {}, 5) == (
+        200,
+        {"content-type": ["application/json"]},
+        b"{}",
+    )
+    assert observed == {
+        "host": "127.0.0.1",
+        "port": 49152,
+        "timeout": 5,
+        "method": "GET",
+        "path": "/healthz",
+        "body": None,
+        "headers": {"Host": "vonk-forge.acceptance.example.test"},
+        "limit": lifecycle.MAXIMUM_RESPONSE_BYTES + 1,
+        "closed": True,
+    }
+
+
+def test_local_browser_port_is_discovered_from_the_isolated_project(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-amd64"
+    observed: list[list[str]] = []
+
+    def command(argv, *, cwd, timeout=300):
+        observed.append(argv)
+        assert cwd == tmp_path
+        return subprocess.CompletedProcess(argv, 0, stdout="127.0.0.1:49152\n")
+
+    run._run_command = command
+
+    assert run._local_browser_port() == 49152
+    assert observed == [
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "vonk-spark-42-amd64",
+            "port",
+            "caddy",
+            "8080",
+        ]
+    ]
 
 
 def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
