@@ -175,7 +175,7 @@ def test_public_controller_uses_the_independent_tailnet_client(tmp_path: Path) -
         connect_host="100.64.0.10",
     )
 
-    assert boundary._command() == lifecycle._tcp_tunnel(
+    assert boundary._command() == lifecycle._tailnet_tunnel(
         "100.64.0.10", 443
     )
 

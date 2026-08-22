@@ -447,8 +447,8 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     assert all("tailscale-gateway" in command for command in compose_commands)
     assert probe_commands == [
-        acceptance._tcp_tunnel("100.64.0.10", 443),
-        acceptance._tcp_tunnel("100.64.0.12", 443),
+        acceptance._tailnet_tunnel("100.64.0.10", 443),
+        acceptance._tailnet_tunnel("100.64.0.12", 443),
     ]
 
     responses = iter(
@@ -538,7 +538,7 @@ def test_wait_for_tailnet_https_retries_with_tailvip_and_tls_hostname(
 
     assert len(calls) == 2
     assert all(
-        command == acceptance._tcp_tunnel("100.64.0.10", 443)
+        command == acceptance._tailnet_tunnel("100.64.0.10", 443)
         and kwargs["server_hostname"]
         == "vonk-forge-acceptance.example.ts.net"
         and kwargs["timeout"] <= 10
@@ -619,7 +619,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
 
     assert all(
         command
-        == acceptance._tcp_tunnel("100.64.0.10", 443)
+        == acceptance._tailnet_tunnel("100.64.0.10", 443)
         for command, kwargs in calls
         if kwargs["server_hostname"] != "registry.acceptance.example.test"
     )
