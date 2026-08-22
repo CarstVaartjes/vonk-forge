@@ -661,6 +661,15 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/spark-publication
 
+      - name: Prepare native Compose command
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose_command="$RUNNER_TEMP/spark-compose"
+          printf '%s\n' '#!/bin/sh' 'exec docker compose "$@"' > "$compose_command"
+          chmod 0755 "$compose_command"
+          "$compose_command" version
+
       - name: Run packaged Spark pairing, job, renewal, and upgrade acceptance
         shell: bash
         env:
@@ -669,6 +678,7 @@ jobs:
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/spark-compose
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
