@@ -360,8 +360,8 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     assert all("tailscale-gateway" in command for command in compose_commands)
     assert probe_commands == [
-        ["tailscale", "nc", "vonk-forge.acceptance.example.test", "443"],
-        ["tailscale", "nc", "hermes-dashboard.acceptance.example.test", "443"],
+        acceptance._tcp_tunnel("vonk-forge.acceptance.example.test", 443),
+        acceptance._tcp_tunnel("hermes-dashboard.acceptance.example.test", 443),
     ]
 
 
@@ -437,7 +437,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
 
     assert all(
         command
-        == ["tailscale", "nc", "vonk-forge.acceptance.example.test", "443"]
+        == acceptance._tcp_tunnel("vonk-forge.acceptance.example.test", 443)
         for command, kwargs in calls
         if kwargs["server_hostname"] != "registry.acceptance.example.test"
     )
