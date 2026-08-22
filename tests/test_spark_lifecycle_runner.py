@@ -85,6 +85,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
                                 "maxTLSCertDuration": "24h",
                                 "defaultTLSCertDuration": "24h",
                                 "disableRenewal": True,
+                                "disableSmallstepExtensions": True,
                             },
                         }
                     ]
@@ -107,6 +108,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert claims == {
         "defaultTLSCertDuration": "300s",
         "disableRenewal": True,
+        "disableSmallstepExtensions": True,
         "maxTLSCertDuration": "300s",
         "minTLSCertDuration": "300s",
     }

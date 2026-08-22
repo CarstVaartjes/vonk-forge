@@ -151,15 +151,18 @@ def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> Non
         claims = provisioner["claims"]
     except (KeyError, StopIteration, TypeError) as error:
         raise LifecycleError("Step CA provisioner configuration is invalid") from error
-    if not isinstance(claims, dict) or claims.get("disableRenewal") is not True:
+    if (
+        not isinstance(claims, dict)
+        or claims.get("disableRenewal") is not True
+        or claims.get("disableSmallstepExtensions") is not True
+    ):
         raise LifecycleError("Step CA provisioner claims are invalid")
     duration = f"{lifetime_seconds}s"
-    provisioner["claims"] = {
-        "defaultTLSCertDuration": duration,
-        "disableRenewal": True,
-        "maxTLSCertDuration": duration,
-        "minTLSCertDuration": duration,
-    }
+    claims.update(
+        defaultTLSCertDuration=duration,
+        maxTLSCertDuration=duration,
+        minTLSCertDuration=duration,
+    )
     ca_path.write_bytes(_canonical(ca))
     os.chmod(ca_path, 0o600)
 
