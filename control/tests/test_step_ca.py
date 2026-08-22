@@ -157,6 +157,13 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
         agent_runtime="enabled",
         agent_controller_origin="https://agents.example.test:8443",
         agent_enrollment_origin="https://enroll.example.test:8443",
+        agent_controller_address="192.168.1.231",
+        agent_service_hostnames=(
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+            "registry.example.test",
+        ),
         controller_ca_path=material["root_path"],
         agent_intermediate_certificate_path=material["intermediate_path"],
         agent_ca_root_path=material["root_path"],
