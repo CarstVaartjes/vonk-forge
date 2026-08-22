@@ -73,6 +73,7 @@ CERTIFICATE_LIFETIME_SECONDS = 300
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
 REGISTRY_HOST = "registry.spark.localhost"
+CONTROLLER_ADDRESS = "127.0.0.1"
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
@@ -841,6 +842,7 @@ class SparkLifecycle:
             "LC_ALL": "C.UTF-8",
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TMPDIR": os.fspath(self.temporary_root),
+            "VONK_CONTROLLER_ADDRESS": CONTROLLER_ADDRESS,
             "VONK_INSTALL_BASE_URL": base,
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(local_release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(signature),
@@ -974,7 +976,7 @@ class SparkLifecycle:
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
-            or grant.get("controller_address") != "127.0.0.1"
+            or grant.get("controller_address") != CONTROLLER_ADDRESS
             or grant.get("service_hostnames")
             != [
                 self.control_hostname,
