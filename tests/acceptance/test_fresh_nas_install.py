@@ -1113,10 +1113,12 @@ def verify_tailscale_services(
     hermes_api_service: str = "svc:hermes-api",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
     service_addresses: dict[str, str] | None,
+    compose_command: list[str] | None = None,
 ) -> None:
+    compose = compose_command if compose_command is not None else reference_compose()
     status = run(
         [
-            *reference_compose(),
+            *compose,
             "exec",
             "-T",
             "tailscale-gateway",
@@ -1132,7 +1134,7 @@ def verify_tailscale_services(
         raise AcceptanceError("Tailscale gateway is not running")
     serve = run(
         [
-            *reference_compose(),
+            *compose,
             "exec",
             "-T",
             "tailscale-gateway",
@@ -1146,7 +1148,7 @@ def verify_tailscale_services(
     ).stdout
     configuration = run(
         [
-            *reference_compose(),
+            *compose,
             "exec",
             "-T",
             "tailscale-gateway",
