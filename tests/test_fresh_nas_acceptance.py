@@ -108,6 +108,55 @@ def test_host_commands_preserve_only_explicit_docker_connection(monkeypatch) -> 
     assert "UNRELATED_SECRET" not in environment
 
 
+def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    secret = "tskey-client-sensitive-value"
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret)
+    status = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=json.dumps(
+            [
+                {
+                    "ExitCode": 0,
+                    "Health": "healthy",
+                    "Service": "postgres",
+                    "State": "running",
+                },
+                {
+                    "ExitCode": 1,
+                    "Health": "unhealthy",
+                    "Service": "tailscale-configurator",
+                    "State": "running",
+                },
+            ]
+        ),
+        stderr="",
+    )
+    logs = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=f"authentication failed for {secret}\n",
+        stderr="",
+    )
+    outputs = iter((status, logs))
+    monkeypatch.setattr(
+        acceptance, "_diagnostic_command", lambda _bundle, _command: next(outputs)
+    )
+    monkeypatch.setattr(
+        acceptance, "reference_compose", lambda: ["docker", "compose"]
+    )
+
+    diagnostics = acceptance.compose_startup_diagnostics(tmp_path)
+
+    assert secret not in diagnostics
+    assert "authentication failed for <redacted>" in diagnostics
+    assert "postgres=running/healthy/exit-0" in diagnostics
+    assert "tailscale-configurator=running/unhealthy/exit-1" in diagnostics
+
+
 def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
     tmp_path: Path,
 ) -> None:
