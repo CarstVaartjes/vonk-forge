@@ -601,6 +601,11 @@ def _tcp_tunnel(host: str, port: int) -> list[str]:
     ]
 
 
+def _tailnet_tunnel(host: str, port: int) -> list[str]:
+    """Use tailscaled's own dialer instead of the runner's kernel route."""
+    return ["tailscale", "nc", host, str(port)]
+
+
 def _tailnet_request(
     bundle: Path,
     *,
@@ -611,7 +616,7 @@ def _tailnet_request(
     accepted_statuses: set[int],
 ) -> bytes:
     return https_over_command(
-        _tcp_tunnel(connect_host, 443),
+        _tailnet_tunnel(connect_host, 443),
         server_hostname=hostname,
         path=path,
         cwd=bundle,
@@ -953,7 +958,7 @@ def wait_for_tailnet_https(
             ) from last_error
         try:
             https_over_command(
-                _tcp_tunnel(address, 443),
+                _tailnet_tunnel(address, 443),
                 cwd=bundle,
                 server_hostname=hostname,
                 path=path,
@@ -1189,7 +1194,7 @@ def verify_tailscale_services(
         if address is None:
             raise AcceptanceError("Tailscale Service address is unavailable")
         https_over_command(
-            _tcp_tunnel(address, 443),
+            _tailnet_tunnel(address, 443),
             cwd=bundle,
             server_hostname=hostname,
             path=path,

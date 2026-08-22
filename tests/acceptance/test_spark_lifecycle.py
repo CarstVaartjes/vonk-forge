@@ -43,7 +43,7 @@ from tests.acceptance.runtime import (
 )
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
-    _tcp_tunnel,
+    _tailnet_tunnel,
     command_environment,
     configure_tailnet_service_names,
     generate_bundle,
@@ -273,7 +273,7 @@ class PublicController:
         self.connect_host = connect_host
 
     def _command(self) -> list[str]:
-        return _tcp_tunnel(self.connect_host, 443)
+        return _tailnet_tunnel(self.connect_host, 443)
 
     def raw_request(
         self,
