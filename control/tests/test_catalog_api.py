@@ -15,7 +15,10 @@ from sqlalchemy.orm import sessionmaker
 from starlette.responses import JSONResponse
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AuthError, TokenCodec
-from vonk_control.catalog_api import install_catalog_routes
+from vonk_control.catalog_api import (
+    _canonical_source_repository,
+    install_catalog_routes,
+)
 from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
@@ -727,6 +730,8 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
 
     assert listed.status_code == 200
     assert listed.json()["recipes"][0]["title"] == "Synthetic Tiny OpenAI"
+    assert listed.json()["recipes"][0]["source_owner"] is None
+    assert listed.json()["recipes"][0]["source_repository"] is None
     assert preview.status_code == 200
     assert preview.json()["uri"] == remote.uri
     assert imported.status_code == 201, imported.text
@@ -739,6 +744,10 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
 ) -> None:
     fixture = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
     document = json.loads((fixture / "recipe.json").read_text(encoding="utf-8"))
+    document["provenance"]["source_reference"] = (
+        "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks/"
+        "tree/0123456789abcdef0123456789abcdef01234567"
+    )
     dependencies = tuple(
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted((fixture / "entities").glob("*.json"))
@@ -814,6 +823,10 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed_recipe["model_publisher"] == "vonk"
     assert listed_recipe["model_slug"] == "dev-http-smoke"
     assert listed_recipe["model_title"] == "Development HTTP smoke model"
+    assert listed_recipe["source_owner"] == "MiaAI-Lab"
+    assert listed_recipe["source_repository"] == (
+        "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks"
+    )
     assert listed_recipe["capabilities"] == ["chat"]
     assert listed_recipe["qualification"] == "cataloged"
     assert listed_recipe["runtime_distribution"] == "development-vllm-shim-arm64"
@@ -824,9 +837,43 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed_recipe["maximum_runtime_memory_bytes_per_node"] > 0
     assert preview_recipe["model_slug"] == listed_recipe["model_slug"]
     assert preview_recipe["capabilities"] == listed_recipe["capabilities"]
+    assert preview_recipe["source_owner"] == listed_recipe["source_owner"]
+    assert preview_recipe["source_repository"] == listed_recipe["source_repository"]
     assert imported.json()["origin"] == "recipe_library"
     assert len(service.entities.list_entities(limit=100)[0]) == 5
     assert service.read_source_bundle(bundle.sha256) == bundle.archive
+
+
+@pytest.mark.parametrize(
+    ("source_reference", "expected"),
+    [
+        (
+            "https://github.com/MiaAI-Lab/model-recipe/tree/" + "a" * 40,
+            ("MiaAI-Lab", "https://github.com/MiaAI-Lab/model-recipe"),
+        ),
+        (
+            "https://gitlab.com/research/models/recipe/-/tree/" + "b" * 40,
+            ("research", "https://gitlab.com/research/models/recipe"),
+        ),
+        (
+            "https://huggingface.co/datasets/bigscience/catalog/tree/" + "c" * 40,
+            ("bigscience", "https://huggingface.co/datasets/bigscience/catalog"),
+        ),
+        (
+            "https://huggingface.co/Qwen/Qwen3-32B/commit/" + "d" * 40,
+            ("Qwen", "https://huggingface.co/Qwen/Qwen3-32B"),
+        ),
+        ("http://github.com/MiaAI-Lab/model-recipe", None),
+        ("https://user@github.com/MiaAI-Lab/model-recipe", None),
+        ("https://example.com/MiaAI-Lab/model-recipe", None),
+        ("https://gitlab.com/research/models/recipe/tree/main", None),
+    ],
+)
+def test_canonical_source_repository_accepts_only_safe_known_repository_urls(
+    source_reference: str,
+    expected: tuple[str, str] | None,
+) -> None:
+    assert _canonical_source_repository(source_reference) == expected
 
 
 def test_publication_report_and_export_are_local_json_only(

@@ -4187,6 +4187,32 @@
             "title": "Source Bundle Sha256",
             "type": "string"
           },
+          "source_owner": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Owner"
+          },
+          "source_repository": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Repository"
+          },
           "tags": {
             "items": {
               "type": "string"
@@ -4405,6 +4431,32 @@
             "pattern": "^[0-9a-f]{64}$",
             "title": "Source Bundle Sha256",
             "type": "string"
+          },
+          "source_owner": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Owner"
+          },
+          "source_repository": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Repository"
           },
           "tags": {
             "items": {

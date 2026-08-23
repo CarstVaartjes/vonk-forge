@@ -2426,6 +2426,10 @@ export interface components {
             slug: string;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
+            /** Source Owner */
+            source_owner?: string | null;
+            /** Source Repository */
+            source_repository?: string | null;
             /** Tags */
             tags: string[];
             /** Title */
@@ -2492,6 +2496,10 @@ export interface components {
             source: "global" | "recipe_library";
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
+            /** Source Owner */
+            source_owner?: string | null;
+            /** Source Repository */
+            source_repository?: string | null;
             /** Tags */
             tags: string[];
             /** Title */

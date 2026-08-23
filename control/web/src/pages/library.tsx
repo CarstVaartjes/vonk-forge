@@ -255,6 +255,7 @@ export function LibraryPage({api, path, onNavigate}: {
   const [publicRecipesCommit, setPublicRecipesCommit] = useState("");
   const [publicRecipeQuery, setPublicRecipeQuery] = useState("");
   const [publicRecipeModel, setPublicRecipeModel] = useState("");
+  const [publicRecipeSourceOwner, setPublicRecipeSourceOwner] = useState("");
   const [publicRecipeSparks, setPublicRecipeSparks] = useState<PublicRecipeSparkFilter>("");
   const [publicRecipeRuntime, setPublicRecipeRuntime] = useState("");
   const [publicRecipePrecision, setPublicRecipePrecision] = useState("");
@@ -272,22 +273,24 @@ export function LibraryPage({api, path, onNavigate}: {
   const heading = useRef<HTMLHeadingElement>(null);
   const route = libraryRoute(path);
   const publicRecipeModels = useMemo(() => Array.from(new Map(publicRecipes.map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries()).sort((left, right) => left[1].localeCompare(right[1])), [publicRecipes]);
+  const publicRecipeSourceOwners = useMemo(() => Array.from(new Set(publicRecipes.flatMap(recipe => recipe.source_owner ? [recipe.source_owner] : []))).sort((left, right) => left.localeCompare(right)), [publicRecipes]);
   const publicRecipeRuntimes = useMemo(() => Array.from(new Set(publicRecipes.map(recipe => recipe.runtime_distribution))).sort(), [publicRecipes]);
   const publicRecipePrecisions = useMemo(() => Array.from(new Set(publicRecipes.flatMap(recipe => recipe.precision ? [recipe.precision] : []))).sort(), [publicRecipes]);
   const publicRecipeTopologies = useMemo(() => Array.from(new Set(publicRecipes.map(recipe => recipe.topology_mode))).sort(), [publicRecipes]);
   const publicRecipeCapabilityCounts = useMemo(() => Object.fromEntries(PUBLIC_RECIPE_CAPABILITIES.map(option => [option.value, publicRecipes.filter(recipe => recipe.capabilities.includes(option.value)).length])) as Record<PublicRecipeCapability, number>, [publicRecipes]);
-  const publicRecipeFiltersActive = Boolean(publicRecipeQuery.trim() || publicRecipeModel || publicRecipeSparks || publicRecipeRuntime || publicRecipePrecision || publicRecipeTopology || publicRecipeQualification || publicRecipeCapabilities.length || publicRecipeSort !== "recommended");
+  const publicRecipeFiltersActive = Boolean(publicRecipeQuery.trim() || publicRecipeModel || publicRecipeSourceOwner || publicRecipeSparks || publicRecipeRuntime || publicRecipePrecision || publicRecipeTopology || publicRecipeQualification || publicRecipeCapabilities.length || publicRecipeSort !== "recommended");
   const filteredPublicRecipes = useMemo(() => {
     const normalized = publicRecipeQuery.trim().toLowerCase();
     const filtered = publicRecipes.filter(recipe => {
-      const matchesQuery = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, recipe.runtime_distribution, recipe.precision ?? "", ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
+      const matchesQuery = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, recipe.precision ?? "", ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
       const matchesModel = !publicRecipeModel || `${recipe.model_publisher}/${recipe.model_slug}` === publicRecipeModel;
+      const matchesSourceOwner = !publicRecipeSourceOwner || recipe.source_owner === publicRecipeSourceOwner;
       const matchesRuntime = !publicRecipeRuntime || recipe.runtime_distribution === publicRecipeRuntime;
       const matchesPrecision = !publicRecipePrecision || recipe.precision === publicRecipePrecision;
       const matchesTopology = !publicRecipeTopology || recipe.topology_mode === publicRecipeTopology;
       const matchesQualification = !publicRecipeQualification || recipe.qualification === publicRecipeQualification;
       const matchesCapabilities = publicRecipeCapabilities.every(capability => recipe.capabilities.includes(capability));
-      return matchesQuery && matchesModel && matchesRuntime && matchesPrecision && matchesTopology && matchesQualification && matchesCapabilities && sparkFilterMatches(recipe.node_count, publicRecipeSparks);
+      return matchesQuery && matchesModel && matchesSourceOwner && matchesRuntime && matchesPrecision && matchesTopology && matchesQualification && matchesCapabilities && sparkFilterMatches(recipe.node_count, publicRecipeSparks);
     });
     if (publicRecipeSort === "recommended") return filtered;
     return [...filtered].sort((left, right) => {
@@ -295,7 +298,7 @@ export function LibraryPage({api, path, onNavigate}: {
       if (publicRecipeSort === "sparks") return left.node_count - right.node_count || left.title.localeCompare(right.title);
       return left.expected_download_bytes - right.expected_download_bytes || left.title.localeCompare(right.title);
     });
-  }, [publicRecipeCapabilities, publicRecipeModel, publicRecipePrecision, publicRecipeQualification, publicRecipeQuery, publicRecipeRuntime, publicRecipeSort, publicRecipeSparks, publicRecipeTopology, publicRecipes]);
+  }, [publicRecipeCapabilities, publicRecipeModel, publicRecipePrecision, publicRecipeQualification, publicRecipeQuery, publicRecipeRuntime, publicRecipeSort, publicRecipeSourceOwner, publicRecipeSparks, publicRecipeTopology, publicRecipes]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -436,6 +439,7 @@ export function LibraryPage({api, path, onNavigate}: {
     setImportPreview(undefined);
     setPublicRecipeQuery("");
     setPublicRecipeModel("");
+    setPublicRecipeSourceOwner("");
     setPublicRecipeSparks("");
     setPublicRecipeRuntime("");
     setPublicRecipePrecision("");
@@ -449,6 +453,7 @@ export function LibraryPage({api, path, onNavigate}: {
   function clearPublicRecipeFilters() {
     setPublicRecipeQuery("");
     setPublicRecipeModel("");
+    setPublicRecipeSourceOwner("");
     setPublicRecipeSparks("");
     setPublicRecipeRuntime("");
     setPublicRecipePrecision("");
@@ -509,7 +514,7 @@ export function LibraryPage({api, path, onNavigate}: {
         <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close authoring</button>
       </section>}
       {authoring === "import" && <section className="library-section library-import-panel" aria-label="Public recipe import">
-        <div className="library-panel-heading"><div><p className="fleet-kicker">Public recipe catalog</p><h3>Import public recipe</h3><p>Find a verified, immutable recipe definition by model, capability, runtime, or required Spark count. Every option is previewed before it is saved locally.</p></div><span className="library-panel-badge">Digest-bound</span></div>
+        <div className="library-panel-heading"><div><p className="fleet-kicker">Public recipe catalog</p><h3>Import public recipe</h3><p>Find a verified, immutable recipe definition by model, creator, capability, runtime, or required Spark count. Every option is previewed before it is saved locally.</p></div><span className="library-panel-badge">Digest-bound</span></div>
         <div className="library-import-source">
           <div className="library-import-source-heading"><div><span className="library-import-eyebrow">Recommended</span><h4>Public recipe library</h4></div><div className="library-import-catalog-meta"><span className="library-import-count">{publicRecipesLoading ? "Refreshing…" : `${publicRecipes.length} recipes`}</span>{publicRecipesCommit && <code title={publicRecipesCommit}>@{publicRecipesCommit.slice(0, 8)}</code>}</div></div>
           {publicRecipesLoading && publicRecipes.length === 0 && <div className="library-import-loading" role="status"><span aria-hidden="true" /><div><strong>Loading the public catalog</strong><small>Resolving one immutable library snapshot…</small></div></div>}
@@ -518,6 +523,7 @@ export function LibraryPage({api, path, onNavigate}: {
             <label className="library-import-search"><span>Find a recipe</span><input type="search" aria-label="Search public recipes" value={publicRecipeQuery} onChange={event => setPublicRecipeQuery(event.target.value)} placeholder="Search model, modality, runtime, or tag…" /></label>
             <div className="library-import-filters">
               <label><span>Model</span><select aria-label="Filter by model" value={publicRecipeModel} onChange={event => setPublicRecipeModel(event.target.value)}><option value="">All models</option>{publicRecipeModels.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+              <label><span>Creator / source</span><select aria-label="Filter by creator or source" value={publicRecipeSourceOwner} onChange={event => setPublicRecipeSourceOwner(event.target.value)}><option value="">All creators</option>{publicRecipeSourceOwners.map(owner => <option value={owner} key={owner}>{owner}</option>)}</select></label>
               <label><span>Sparks</span><select aria-label="Filter by required Sparks" value={publicRecipeSparks} onChange={event => setPublicRecipeSparks(event.target.value as PublicRecipeSparkFilter)}><option value="">Any count</option><option value="1">1 Spark</option><option value="2">2 Sparks</option><option value="3">3 Sparks</option><option value="4+">4+ Sparks</option></select></label>
               <label><span>Runtime</span><select aria-label="Filter by runtime" value={publicRecipeRuntime} onChange={event => setPublicRecipeRuntime(event.target.value)}><option value="">All runtimes</option>{publicRecipeRuntimes.map(runtime => <option value={runtime} key={runtime}>{runtimeLabel(runtime)}</option>)}</select></label>
               <label><span>Precision</span><select aria-label="Filter by precision" value={publicRecipePrecision} onChange={event => setPublicRecipePrecision(event.target.value)}><option value="">Any precision</option>{publicRecipePrecisions.map(precision => <option value={precision} key={precision}>{precision}</option>)}</select></label>
@@ -529,18 +535,18 @@ export function LibraryPage({api, path, onNavigate}: {
             <div className="library-import-filter-summary"><p className="library-import-helper" role="status">Showing {filteredPublicRecipes.length} of {publicRecipes.length} recipes from <code>{publicRecipesCommit.slice(0, 8)}</code>.</p><button type="button" className="button secondary" disabled={!publicRecipeFiltersActive} onClick={clearPublicRecipeFilters}>Clear filters</button></div>
             <div className="library-import-grid" aria-label="Default catalog recipes">
               {filteredPublicRecipes.map(recipe => <article className={`library-import-card${importUri === recipe.uri ? " selected" : ""}`} key={recipe.uri}>
-                <div><span className="library-import-eyebrow">{recipe.qualification === "candidate" ? "Candidate" : "Cataloged"}</span><h5>{recipe.title}</h5><span className="library-import-model">{recipe.model_title}{recipe.precision ? ` · ${recipe.precision}` : ""}</span><p>{recipe.description}</p></div>
+                <div><span className="library-import-eyebrow">{recipe.qualification === "candidate" ? "Candidate" : "Cataloged"}</span><h5>{recipe.title}</h5><span className="library-import-model">{recipe.model_title}{recipe.precision ? ` · ${recipe.precision}` : ""}</span>{recipe.source_owner && <span className="library-import-source-owner">By {recipe.source_repository ? <a href={recipe.source_repository} target="_blank" rel="noreferrer">{recipe.source_owner}<span className="sr-only"> (opens original repository in a new tab)</span></a> : recipe.source_owner}</span>}<p>{recipe.description}</p></div>
                 <dl className="library-import-card-facts"><div><dt>Topology</dt><dd>{sparkLabel(recipe.node_count)}</dd></div><div><dt>Download</dt><dd>{formatBytes(recipe.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(recipe.runtime_distribution)}</dd></div></dl>
                 <div className="library-import-tags" aria-label={`${recipe.title} capabilities`}>{recipe.capabilities.map(capability => <span className="library-import-tag" key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
                 <button type="button" className="button secondary" aria-pressed={importUri === recipe.uri} onClick={() => void previewPublicImport(recipe.uri)}>{importUri === recipe.uri && importPreviewLoading ? "Loading preview…" : "Review recipe"}</button>
               </article>)}
             </div>
-            {filteredPublicRecipes.length === 0 && <div className="library-import-empty"><strong>No matching recipes</strong><p>Remove a capability or broaden the model, Spark, runtime, precision, topology, or qualification filters.</p><button type="button" className="button secondary" onClick={clearPublicRecipeFilters}>Clear filters</button></div>}
+            {filteredPublicRecipes.length === 0 && <div className="library-import-empty"><strong>No matching recipes</strong><p>Remove a capability or broaden the model, creator, Spark, runtime, precision, topology, or qualification filters.</p><button type="button" className="button secondary" onClick={clearPublicRecipeFilters}>Clear filters</button></div>}
           </>}
         </div>
         <details className="library-import-manual"><summary>Import a public recipe URI</summary><div className="library-import-manual-content"><div><span className="library-import-eyebrow">Advanced</span><h4>Manual URI</h4></div><label>Public recipe URI<input aria-label="Public recipe URI" value={importUri} onChange={event => { setImportUri(event.target.value); setImportPreview(undefined); setImportError(""); }} placeholder="vonk://catalog/publisher/slug@sha256:…" /></label><div className="library-import-actions"><button type="button" className="button secondary" disabled={!catalog.previewPublicRecipe || !importUri || importPreviewLoading} onClick={() => void previewPublicImport()}>{importPreviewLoading ? "Loading preview…" : "Review URI"}</button><span>Use this for another publisher or an immutable URI you already have.</span></div></div></details>
         {importError && <p role="alert">{importError}</p>}
-        {importPreview && <section className="library-import-preview" aria-label="Public recipe import preview"><div className="library-import-preview-heading"><div><span className="library-import-eyebrow">Ready for review</span><h4>{importPreview.title}</h4><p>{importPreview.publisher}/{importPreview.slug}</p></div><span className="library-import-status">Immutable</span></div><p className="library-import-description">{importPreview.description || "No description provided."}</p><div className="library-import-tags" aria-label="Recipe capabilities">{importPreview.capabilities.map(capability => <span className="library-import-tag" key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div><dl className="library-import-facts"><div><dt>Source</dt><dd>{importPreview.source === "recipe_library" ? "Public recipe library" : "Public catalog"}</dd></div><div><dt>Identity</dt><dd>{importPreview.publisher}/{importPreview.slug}</dd></div><div><dt>Model</dt><dd>{importPreview.model_title}{importPreview.precision ? ` · ${importPreview.precision}` : ""}</dd></div><div><dt>Topology</dt><dd>{sparkLabel(importPreview.node_count)} · {importPreview.topology_mode}</dd></div><div><dt>Download</dt><dd>{formatBytes(importPreview.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(importPreview.maximum_runtime_memory_bytes_per_node)}</dd></div><div><dt>Installed / Spark</dt><dd>{formatBytes(importPreview.maximum_installed_bytes_per_node)}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(importPreview.runtime_distribution)}</dd></div><div><dt>Execution</dt><dd>{runtimeLabel(importPreview.execution_harness)}</dd></div><div><dt>Artifacts</dt><dd>{importPreview.artifact_count}</dd></div></dl><p className="library-import-digest"><span>Immutable content digest</span><code>sha256:{importPreview.content_sha256}</code></p><button type="button" className="button" disabled={!catalog.importPublicRecipe || importSaving} onClick={() => void savePublicImport()}>{importSaving ? "Importing…" : "Import recipe"}</button></section>}
+        {importPreview && <section className="library-import-preview" aria-label="Public recipe import preview"><div className="library-import-preview-heading"><div><span className="library-import-eyebrow">Ready for review</span><h4>{importPreview.title}</h4><p>{importPreview.publisher}/{importPreview.slug}</p></div><span className="library-import-status">Immutable</span></div><p className="library-import-description">{importPreview.description || "No description provided."}</p><div className="library-import-tags" aria-label="Recipe capabilities">{importPreview.capabilities.map(capability => <span className="library-import-tag" key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div><dl className="library-import-facts"><div><dt>Catalog source</dt><dd>{importPreview.source === "recipe_library" ? "Public recipe library" : "Public catalog"}</dd></div><div><dt>Creator / source</dt><dd>{importPreview.source_owner ?? "Not specified"}</dd></div>{importPreview.source_repository && <div><dt>Original repository</dt><dd><a href={importPreview.source_repository} target="_blank" rel="noreferrer">View source<span className="sr-only"> (opens in a new tab)</span></a></dd></div>}<div><dt>Identity</dt><dd>{importPreview.publisher}/{importPreview.slug}</dd></div><div><dt>Model</dt><dd>{importPreview.model_title}{importPreview.precision ? ` · ${importPreview.precision}` : ""}</dd></div><div><dt>Topology</dt><dd>{sparkLabel(importPreview.node_count)} · {importPreview.topology_mode}</dd></div><div><dt>Download</dt><dd>{formatBytes(importPreview.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(importPreview.maximum_runtime_memory_bytes_per_node)}</dd></div><div><dt>Installed / Spark</dt><dd>{formatBytes(importPreview.maximum_installed_bytes_per_node)}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(importPreview.runtime_distribution)}</dd></div><div><dt>Execution</dt><dd>{runtimeLabel(importPreview.execution_harness)}</dd></div><div><dt>Artifacts</dt><dd>{importPreview.artifact_count}</dd></div></dl><p className="library-import-digest"><span>Immutable content digest</span><code>sha256:{importPreview.content_sha256}</code></p><button type="button" className="button" disabled={!catalog.importPublicRecipe || importSaving} onClick={() => void savePublicImport()}>{importSaving ? "Importing…" : "Import recipe"}</button></section>}
         {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
         <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close import</button>
       </section>}
