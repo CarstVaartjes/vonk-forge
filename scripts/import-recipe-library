@@ -130,9 +130,12 @@ def _files(context: Path) -> dict[str, bytes]:
     result: dict[str, bytes] = {}
     for path in sorted(context.rglob("*"), key=lambda item: item.as_posix().encode()):
         relative = path.relative_to(context).as_posix()
+        if path.is_symlink():
+            raise ImportError(f"unsafe recipe build-context entry: {relative}")
+        if path.is_dir():
+            continue
         if (
-            path.is_symlink()
-            or not path.is_file()
+            not path.is_file()
             or "__pycache__" in path.parts
             or path.suffix == ".pyc"
         ):

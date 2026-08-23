@@ -1055,12 +1055,29 @@ def install_catalog_routes(
                 )
             if source == "recipe_library":
                 assert isinstance(value, RecipeLibraryItem)
+                if value.source_bundle is not None:
+                    build = value.document.get("build")
+                    context = build.get("context") if isinstance(build, dict) else None
+                    source_sha256 = (
+                        context.get("sha256") if isinstance(context, dict) else None
+                    )
+                    if not isinstance(source_sha256, str):
+                        raise CatalogValidationError(
+                            "recipe_library.source_invalid",
+                            "recipe library source identity is invalid",
+                        )
+                    catalog().store_source_bundle(
+                        source_sha256,
+                        io.BytesIO(value.source_bundle),
+                        actor.subject,
+                    )
                 result = catalog().import_recipe_library(
                     actor.subject,
                     library_commit=value.library_commit,
                     source_path=value.source_path,
                     document=value.document,
                     expected_content_sha256=value.content_sha256,
+                    dependency_documents=value.dependencies,
                 )
                 action = "catalog.public.import"
             else:

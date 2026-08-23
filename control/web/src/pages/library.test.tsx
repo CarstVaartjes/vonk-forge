@@ -442,8 +442,9 @@ test("previews a public recipe import with exact identity and persists only afte
   const user = userEvent.setup();
   render(<App api={api}/>);
   await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
+  await user.click(screen.getByText("Import a public recipe URI"));
   await user.type(screen.getByRole("textbox", {name: "Public recipe URI"}), "vonk://catalog/vonk/service@sha256:" + "a".repeat(64));
-  await user.click(screen.getByRole("button", {name: "Preview public import"}));
+  await user.click(screen.getByRole("button", {name: "Review URI"}));
   const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
   expect(within(preview).getAllByText("vonk/service")).toHaveLength(2);
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
@@ -465,8 +466,32 @@ test("loads the current default catalog recipes when public import opens", async
   await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
 
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
-  const select = await screen.findByRole("combobox", {name: "Default catalog recipe"});
-  expect(within(select).getByRole("option", {name: /Qwen 3\.5/})).toBeVisible();
-  await user.selectOptions(select, uri);
-  expect(screen.getByRole("textbox", {name: "Public recipe URI"})).toHaveValue(uri);
+  expect(await screen.findByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
+  expect(screen.getByText("@cccccccc")).toBeVisible();
+  await user.type(screen.getByRole("searchbox", {name: "Search public recipes"}), "video");
+  expect(screen.getByText("No matching recipes")).toBeVisible();
+});
+
+test("keeps the API client binding and leaves loading state on a synchronous catalog failure", async () => {
+  history.replaceState(null, "", "/library");
+  class ApiWithBoundCatalogState {
+    calls = 0;
+    async librarySnapshot() { return {...librarySnapshot, models: [], unlinked_recipes: []}; }
+    async listPublicRecipes() {
+      this.calls += 1;
+      if (this.calls === 1) throw new Error("catalog temporarily unavailable");
+      return {repository: "CarstVaartjes/vonk-forge-recipes", commit: "d".repeat(40), recipes: []};
+    }
+  }
+  const boundApi = new ApiWithBoundCatalogState();
+  const api = boundApi as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("catalog temporarily unavailable");
+  expect(screen.queryByText("Looking up the latest recipes now…")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Try again"}));
+  expect(await screen.findByText("0 recipes")).toBeVisible();
+  expect(boundApi.calls).toBe(2);
 });

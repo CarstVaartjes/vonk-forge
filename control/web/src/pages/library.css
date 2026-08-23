@@ -244,6 +244,18 @@
   background: #0c1815;
 }
 
+.library-import-manual summary {
+  color: var(--mint-strong);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.library-import-manual-content {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.8rem;
+}
+
 .library-import-source-heading,
 .library-import-preview-heading {
   align-items: start;
@@ -271,6 +283,142 @@
 .library-import-actions > span {
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.library-import-catalog-meta {
+  align-items: flex-end;
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+}
+
+.library-import-catalog-meta code,
+.library-import-helper code {
+  color: var(--text-subtle);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.library-import-loading,
+.library-import-error,
+.library-import-empty {
+  align-items: center;
+  background: #0c1815;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-height: 3.75rem;
+  padding: 0.8rem;
+}
+
+.library-import-loading > span {
+  animation: library-import-spin 0.8s linear infinite;
+  border: 2px solid #68e5b338;
+  border-radius: 50%;
+  border-top-color: var(--mint);
+  flex: 0 0 auto;
+  height: 1.2rem;
+  width: 1.2rem;
+}
+
+.library-import-loading div,
+.library-import-error div {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+}
+
+.library-import-loading small,
+.library-import-empty p,
+.library-import-error p {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.library-import-error {
+  border-color: #db765f66;
+}
+
+.library-import-error .button {
+  flex: 0 0 auto;
+}
+
+.library-import-search {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.library-import-search > span {
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.library-import-search input {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.library-import-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: min(36rem, 58vh);
+  overflow: auto;
+  padding: 0.1rem 0.2rem 0.1rem 0.1rem;
+}
+
+.library-import-card {
+  background: linear-gradient(145deg, #10201b, #0b1613);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.85rem;
+}
+
+.library-import-card.selected {
+  border-color: var(--mint);
+  box-shadow: inset 3px 0 var(--mint);
+}
+
+.library-import-card h5 {
+  font-size: 0.96rem;
+  line-height: 1.25;
+  margin: 0.2rem 0 0;
+}
+
+.library-import-card p {
+  color: var(--text-muted);
+  display: -webkit-box;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.library-import-card .button {
+  justify-self: start;
+  min-height: 2.3rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.library-import-empty {
+  align-items: start;
+  display: grid;
+  justify-content: stretch;
+}
+
+@keyframes library-import-spin {
+  to { transform: rotate(360deg); }
 }
 
 .library-import-helper {
@@ -656,8 +804,13 @@
   .custom-recipe-fields-two,
   .custom-recipe-fields-three,
   .custom-recipe-card-grid,
-  .library-import-facts {
+  .library-import-facts,
+  .library-import-grid {
     grid-template-columns: 1fr;
+  }
+
+  .library-import-catalog-meta {
+    justify-items: start;
   }
 
   .custom-recipe-wide {
@@ -671,6 +824,12 @@
 
   .library-import-actions .button {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-import-loading > span {
+    animation: none;
   }
 }
 
