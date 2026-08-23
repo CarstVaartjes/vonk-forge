@@ -832,6 +832,16 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
                 .iter()
                 .any(|argument| argument == "verify-readiness")
     }));
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args
+                == [
+                    "enable",
+                    "--now",
+                    "vonk-forge-package-helper.socket",
+                    "vonk-forge-agent.service",
+                ]
+    }));
 }
 
 #[test]
@@ -918,6 +928,16 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
     assert!(apply_runner.commands.iter().any(|command| {
         command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args == ["restart", "vonk-forge-agent.service"]
+    }));
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args
+                == [
+                    "enable",
+                    "--now",
+                    "vonk-forge-package-helper.socket",
+                    "vonk-forge-agent.service",
+                ]
     }));
     assert!(
         apply_runner
