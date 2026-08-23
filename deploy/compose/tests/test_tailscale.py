@@ -131,7 +131,6 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "    upstream = args[-1]\n"
         "    value = load()\n"
         "    value['config']['services'][service] = {'endpoints': {'tcp:443': upstream}}\n"
-        "    value['advertised'] = sorted(set(value['advertised']) | {service})\n"
         "    save(value)\n"
         "    print(f'Available within your tailnet: https://{service[4:]}')\n",
         encoding="utf-8",
@@ -464,6 +463,9 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
         '--service="${control_service}" --https=443 http://caddy:8080',
         '--service="${hermes_api_service}" --https=443 http://hermes-agent:8642',
         '--service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119',
+        'serve advertise "${control_service}"',
+        'serve advertise "${hermes_api_service}"',
+        'serve advertise "${hermes_dashboard_service}"',
     ):
         assert command in text
     assert "serve get-config --all" in text
