@@ -390,6 +390,24 @@ fn container_arguments_are_typed_and_hardened() {
             "{required}"
         );
     }
+    for environment in [
+        "VONK_RANK=1",
+        "VONK_WORLD_SIZE=2",
+        "VONK_MASTER_ADDR=192.168.100.10",
+        "VONK_LOCAL_ADDR=192.168.100.11",
+        "VONK_MASTER_PORT=29500",
+        "VONK_RUNTIME_SPEC=/run/vonk/runtime.json",
+        "VONK_MODEL_ROOT=/models",
+        "VONK_LISTEN_HOST=0.0.0.0",
+        "VONK_LISTEN_PORT=8000",
+    ] {
+        assert!(
+            arguments
+                .windows(2)
+                .any(|values| values == ["--env", environment]),
+            "{environment}"
+        );
+    }
     assert!(
         !arguments.iter().any(|value| value == "--privileged"
             || value == "--network=host"
