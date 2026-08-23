@@ -182,13 +182,6 @@ def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
             stdout = container + "\n"
         elif argv[:4] == ["docker", "inspect", "--format", "{{.Config.Image}}"]:
             stdout = image + "\n"
-        elif argv[:4] == [
-            "docker",
-            "inspect",
-            "--format",
-            "{{json .Config.Env}}",
-        ]:
-            stdout = '["PATH=/usr/bin","VONK_SYNTHETIC_CDI=1"]\n'
         else:
             stdout = ""
         return subprocess.CompletedProcess(argv, 0, stdout=stdout)
@@ -199,19 +192,26 @@ def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
 
     assert [
         "docker",
-        "create",
+        "run",
+        "--rm",
         "--name",
         "vonk-cdi-probe-vonk-spark-42-arm64",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         "--device",
         "nvidia.com/gpu=all",
+        "--entrypoint",
+        "/bin/sh",
         image,
+        "-eu",
+        "-c",
+        'test "${VONK_SYNTHETIC_CDI:-}" = 1',
     ] in observed
-    assert observed[-1] == [
-        "docker",
-        "rm",
-        "--force",
-        "vonk-cdi-probe-vonk-spark-42-arm64",
-    ]
 
 
 def test_embedded_development_runner_reuses_the_shared_client_exception() -> None:
