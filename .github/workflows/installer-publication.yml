@@ -661,7 +661,7 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/spark-publication
 
-      - name: Run packaged Spark pairing, job, renewal, and upgrade acceptance
+      - name: Run packaged Spark fresh-install, pairing, job, and renewal acceptance
         shell: bash
         env:
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}

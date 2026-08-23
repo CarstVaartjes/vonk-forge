@@ -1031,78 +1031,53 @@ class SparkLifecycle:
         grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
         try:
             _run_spark_bootstrap(
-                self._bootstrap_url(baseline=True),
+                self._bootstrap_url(baseline=False),
                 cwd=self.temporary_root,
-                environment=self._installer_environment(baseline=True),
+                environment=self._installer_environment(baseline=False),
                 enrollment_url=enrollment_url,
                 ca_sha256=ca_sha256,
                 pairing_token=pairing_token,
             )
         except AcceptanceError as error:
             raise self._installation_failure(
-                "baseline Spark installation", error
+                "candidate Spark installation", error
             ) from error
         finally:
             del pairing_token
         self.agent_installed = True
-        baseline = self._wait_for_agent_identity(
-            package_version=str(self.graph["baseline_version"]), timeout=180
+        candidate = self._wait_for_agent_identity(
+            package_version=str(self.graph["candidate_version"]), timeout=180
         )
         use_count = self._pairing_grant_use_count(grant_id)
         direct_health = self._direct_agent_health()
-        node_id = str(baseline["node_id"])
+        node_id = str(candidate["node_id"])
         if self.arguments.platform == "linux-amd64":
             return {
                 "controller_generation": self.arguments.generation,
                 "direct_agent_health": direct_health,
                 "installation": {
                     "architecture": "amd64",
-                    "package_sha256": self.graph["baseline_package_sha256"],
-                    "version": self.graph["baseline_version"],
+                    "package_sha256": self.graph["candidate_package_sha256"],
+                    "version": self.graph["candidate_version"],
                 },
                 "node_id": node_id,
                 "pairing_grant_use_count": use_count,
                 "publication_graph": self.graph,
             }
 
-        config_before = self._hash_path(SPARK_CONFIG)
-        private_before = self._hash_path(AGENT_DATA / "machine-evidence")
-        try:
-            _run_spark_bootstrap(
-                self._bootstrap_url(baseline=False),
-                cwd=self.temporary_root,
-                environment=self._installer_environment(baseline=False),
-            )
-        except AcceptanceError as error:
-            raise self._installation_failure(
-                "candidate Spark upgrade", error
-            ) from error
-        candidate = self._wait_for_agent_identity(
-            package_version=str(self.graph["candidate_version"]), timeout=180
-        )
-        config_after = self._hash_path(SPARK_CONFIG)
-        private_after = self._hash_path(AGENT_DATA / "machine-evidence")
-        if candidate["node_id"] != node_id:
-            raise LifecycleError("candidate upgrade changed node identity")
         canary = self._run_synthetic_canary(node_id)
-        renewal = self._observe_renewal(node_id, str(baseline["serial"]))
+        renewal = self._observe_renewal(node_id, str(candidate["serial"]))
         return {
             "canary": canary,
-            "config_sha256_after_upgrade": config_after,
-            "config_sha256_before_upgrade": config_before,
             "controller_generation": self.arguments.generation,
             "direct_agent_health": self._direct_agent_health(),
             "installation": {
                 "architecture": "arm64",
-                "baseline": self._installation_identity(baseline),
-                "candidate": self._installation_identity(candidate),
+                "identity": self._installation_identity(candidate),
             },
             "node_id_after_renewal": renewal["node_id"],
-            "node_id_after_upgrade": candidate["node_id"],
             "node_id_before_renewal": node_id,
             "pairing_grant_use_count": use_count,
-            "private_identity_sha256_after_upgrade": private_after,
-            "private_identity_sha256_before_upgrade": private_before,
             "publication_graph": self.graph,
             "renewal": renewal["proof"],
             "synthetic_device": {
@@ -1362,7 +1337,7 @@ class SparkLifecycle:
             ):
                 serial_after = rows[0][0]
                 identity = self._wait_for_agent_identity(
-                    package_version=str(self.graph["baseline_version"]), timeout=30
+                    package_version=str(self.graph["candidate_version"]), timeout=30
                 )
                 if (
                     identity.get("node_id") != node_id

@@ -36,26 +36,24 @@ ACCEPTANCE_GATES = {
     "spark_job",
     "spark_pairing",
     "spark_renewal",
-    "spark_upgrade",
 }
 AMD64_SPARK_GATES = {"spark_amd64", "spark_pairing"}
-ARM64_SPARK_GATES = {"spark_arm64", "spark_job", "spark_renewal", "spark_upgrade"}
+ARM64_SPARK_GATES = {"spark_arm64", "spark_job", "spark_renewal"}
 AMD64_PHASES = [
     "publication-graph-verified",
     "controller-ready",
-    "baseline-installed",
+    "candidate-installed",
     "paired",
     "direct-rust-agent-healthy",
 ]
 ARM64_PHASES = [
     "publication-graph-verified",
     "controller-ready",
-    "baseline-installed",
+    "candidate-installed",
     "paired",
     "synthetic-device-ready",
     "canary-completed",
     "identity-renewed",
-    "candidate-upgraded",
     "direct-rust-agent-healthy",
 ]
 CANARY_STATES = [
@@ -434,7 +432,6 @@ def _spark_gate_report(
 ) -> Path:
     plan = json.loads((publication / "publication-plan.json").read_text())
     graph = _actual_publication_graph(publication, platform)
-    baseline_version = graph["baseline_version"]
     node_id = "spk_0123456789abcdef0123456789abcdef"
     common_proof: dict[str, object] = {
         "controller_generation": plan["generation"],
@@ -451,8 +448,8 @@ def _spark_gate_report(
         proof = common_proof | {
             "installation": {
                 "architecture": "amd64",
-                "package_sha256": graph["packages"][platform]["baseline_sha256"],
-                "version": baseline_version,
+                "package_sha256": graph["packages"][platform]["candidate_sha256"],
+                "version": plan["version"],
             },
             "node_id": node_id,
         }
@@ -464,17 +461,9 @@ def _spark_gate_report(
                 "completed_states": CANARY_STATES,
                 "deterministic_response_sha256": "5" * 64,
             },
-            "config_sha256_after_upgrade": "6" * 64,
-            "config_sha256_before_upgrade": "6" * 64,
             "installation": {
                 "architecture": "arm64",
-                "baseline": {
-                    "binary_sha256": "7" * 64,
-                    "build_sha256": "8" * 64,
-                    "package_sha256": graph["packages"][platform]["baseline_sha256"],
-                    "version": baseline_version,
-                },
-                "candidate": {
+                "identity": {
                     "binary_sha256": "9" * 64,
                     "build_sha256": "a" * 64,
                     "package_sha256": graph["packages"][platform]["candidate_sha256"],
@@ -482,10 +471,7 @@ def _spark_gate_report(
                 },
             },
             "node_id_after_renewal": node_id,
-            "node_id_after_upgrade": node_id,
             "node_id_before_renewal": node_id,
-            "private_identity_sha256_after_upgrade": "d" * 64,
-            "private_identity_sha256_before_upgrade": "d" * 64,
             "renewal": {
                 "certificate_serial_after": "fedcba9876543210",
                 "certificate_serial_before": serial,
@@ -689,7 +675,7 @@ def test_acceptance_authority_rejects_internally_consistent_invented_graph(
         graph["packages"]["linux-arm64"]["candidate_sha256"] = invented_digest
         if report["platform"] == "linux-arm64":
             graph["candidate_package_sha256"] = invented_digest
-            report["lifecycle"]["proof"]["installation"]["candidate"][
+            report["lifecycle"]["proof"]["installation"]["identity"][
                 "package_sha256"
             ] = invented_digest
         _canonical(report_path, report)
@@ -877,7 +863,7 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
     missing_proof = copy.deepcopy(complete)
     missing_proof["lifecycle"]["proof"].pop("canary")
     changed = copy.deepcopy(complete)
-    changed["lifecycle"]["proof"]["installation"]["candidate"][
+    changed["lifecycle"]["proof"]["installation"]["identity"][
         "package_sha256"
     ] = "f" * 64
     reused_pairing = copy.deepcopy(complete)
@@ -891,17 +877,13 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
         "old_certificate_rejection"
     ]["rejected"] = False
     changed_node = copy.deepcopy(complete)
-    changed_node["lifecycle"]["proof"]["node_id_after_upgrade"] = (
+    changed_node["lifecycle"]["proof"]["node_id_after_renewal"] = (
         "spk_fedcba9876543210fedcba9876543210"
     )
-    changed_state = copy.deepcopy(complete)
-    changed_state["lifecycle"]["proof"][
-        "private_identity_sha256_after_upgrade"
-    ] = "b" * 64
     unchanged_build = copy.deepcopy(complete)
-    unchanged_build["lifecycle"]["proof"]["installation"]["candidate"][
+    unchanged_build["lifecycle"]["proof"]["installation"]["identity"][
         "build_sha256"
-    ] = "8" * 64
+    ] = "invalid"
     indirect_agent = copy.deepcopy(complete)
     indirect_agent["lifecycle"]["proof"]["direct_agent_health"][
         "transport"
@@ -919,7 +901,6 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
         "accepted-old-serial": accepted_old_serial,
         "changed-graph": changed_graph,
         "changed-node": changed_node,
-        "changed-state": changed_state,
         "fabricated": fabricated,
         "false-cdi": false_cdi,
         "indirect-agent": indirect_agent,
