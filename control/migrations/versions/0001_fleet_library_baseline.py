@@ -984,11 +984,11 @@ def upgrade() -> None:
     sa.CheckConstraint('route_generation IS NULL OR route_generation>=1', name='ck_recipe_runs_route_generation'),
     sa.ForeignKeyConstraint(['installation_id'], ['recipe_installations.id'], ondelete='RESTRICT'),
     sa.ForeignKeyConstraint(['mapping_id'], ['cluster_mappings.id'], ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_digest')
+    sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_recipe_runs_installation_id'), 'recipe_runs', ['installation_id'], unique=False)
     op.create_index(op.f('ix_recipe_runs_mapping_id'), 'recipe_runs', ['mapping_id'], unique=False)
+    op.create_index(op.f('ix_recipe_runs_plan_digest'), 'recipe_runs', ['plan_digest'], unique=False)
     op.create_table('run_nodes',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('run_id', sa.String(length=36), nullable=False),
@@ -1019,6 +1019,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_run_nodes_run_id'), table_name='run_nodes')
     op.drop_index(op.f('ix_run_nodes_node_id'), table_name='run_nodes')
     op.drop_table('run_nodes')
+    op.drop_index(op.f('ix_recipe_runs_plan_digest'), table_name='recipe_runs')
     op.drop_index(op.f('ix_recipe_runs_mapping_id'), table_name='recipe_runs')
     op.drop_index(op.f('ix_recipe_runs_installation_id'), table_name='recipe_runs')
     op.drop_table('recipe_runs')

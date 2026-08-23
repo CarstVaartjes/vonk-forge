@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
@@ -24,6 +24,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
 
@@ -193,6 +194,49 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert run.alias == plan.alias == run.plan["alias"]
+
+
+def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:
+    sessions, now, _node, installation = setup(tmp_path, free_memory=300)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    first_run_id = service.accept_run(plan, actor="admin", now=now)
+    with sessions.begin() as session:
+        first_run = session.get(RecipeRun, first_run_id)
+        assert first_run is not None
+        first_run.state = "stopped"
+        first_run.stopped_at = now
+        for node in session.scalars(
+            select(RunNode).where(RunNode.run_id == first_run_id)
+        ):
+            node.state = "stopped"
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == first_run_id,
+            )
+        ):
+            reservation.state = "released"
+            reservation.released_at = now
+
+    repeated_plan = service.plan_run(installation, alias="qwen", now=now)
+    assert repeated_plan.plan_digest == plan.plan_digest
+
+    second_run_id = service.accept_run(repeated_plan, actor="admin", now=now)
+
+    assert second_run_id != first_run_id
+    with sessions() as session:
+        repeated_runs = tuple(
+            session.scalars(
+                select(RecipeRun)
+                .where(RecipeRun.plan_digest == plan.plan_digest)
+                .order_by(RecipeRun.id)
+            )
+        )
+        assert {run.id for run in repeated_runs} == {first_run_id, second_run_id}
+        assert {run.state for run in repeated_runs} == {"planned", "stopped"}
 
 
 def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
