@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use vonk_spark_setup::{
-    CallerIdentity, InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt, apply_setup_from,
-    handoff_to_root, prepare_setup, validate_system_host,
+    CallerIdentity, FirewallInputs, InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt,
+    apply_setup_from, handoff_to_root, prepare_setup, validate_system_host,
 };
 
 #[derive(Parser)]
@@ -67,7 +67,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("signed setup signature is required")?,
         std::env::current_exe()?,
     )?
-    .with_controller_address(std::env::var("VONK_CONTROLLER_ADDRESS").ok().as_deref())?;
+    .with_controller_address(std::env::var("VONK_CONTROLLER_ADDRESS").ok().as_deref())?
+    .with_firewall_inputs(FirewallInputs::from_environment()?);
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
     let mut prompt = TtyPrompt::new();

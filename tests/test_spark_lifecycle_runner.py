@@ -97,8 +97,9 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         "services:\n  control-api:\n    image: ghcr.io/vonk/api@sha256:"
         + "a" * 64
         + "\n    environment:\n      VONK_DEPLOYMENT_MODE: production\n"
-        + "  caddy:\n    image: caddy:acceptance\n    ports:\n"
+        + "  caddy:\n    image: caddy:acceptance\n    networks: [ingress]\n    ports:\n"
         + "      - target: 8443\n        published: 8443\n"
+        + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
     )
 
     lifecycle._configure_acceptance_renewal(bundle, lifetime_seconds=300)
@@ -115,6 +116,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     compose = (bundle / "docker-compose.yaml").read_text()
     assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '300'" in compose
     assert "127.0.0.1::8080" in compose
+    assert "- cluster-egress" in compose
 
 
 def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
@@ -158,6 +160,18 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     run._cleanup()
 
     assert observed == [
+        (
+            [
+                "sudo",
+                "/usr/bin/rm",
+                "-rf",
+                "--",
+                "/etc/vonk-forge-agent",
+                "/var/lib/vonk-forge-agent",
+            ],
+            Path("/"),
+            60,
+        ),
         (
             [
                 "docker",

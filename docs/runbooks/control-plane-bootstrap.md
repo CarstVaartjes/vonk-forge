@@ -31,8 +31,11 @@ curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.
 ```
 
 The installer verifies the controller CA before trusting its bootstrap data and
-manages the Spark's hostname mapping automatically. Tailscale remains on the
-NAS gateway; it is not required on the Sparks.
+manages the Spark's hostname mapping automatically. On each fresh Spark it also
+asks for that node's management and fabric addresses plus its peer's fabric
+address, then writes the agent and firewall configuration itself. The NAS
+address comes from the generated command. Tailscale remains on the NAS gateway;
+it is not required on the Sparks.
 
 Rerun the NAS command from the existing bundle's parent directory to prepare a
 NAS upgrade. Rerun the Spark command on an installed Spark to upgrade it. No

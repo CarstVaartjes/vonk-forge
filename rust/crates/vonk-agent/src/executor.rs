@@ -231,12 +231,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(spec) => spec,
                     Err(_) => return failed("digest-bound recipe specification is unavailable"),
                 };
-                if image_digest(&spec.runtime.image)
-                    .map(|value| format!("sha256:{value}"))
-                    .as_deref()
-                    != Some(request.image_digest.as_str())
+                if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                    || spec.topology.role != request.role
+                    || spec.topology.rank != request.rank
+                    || image_digest(&spec.runtime.image)
+                        .map(|value| format!("sha256:{value}"))
+                        .as_deref()
+                        != Some(request.image_digest.as_str())
                 {
-                    return failed("installed image digest does not match the accepted build");
+                    return failed("recipe specification does not match the accepted install");
                 }
                 if self
                     .execute_host_runtime(

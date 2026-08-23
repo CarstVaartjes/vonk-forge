@@ -37,10 +37,15 @@ curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.
 
 The script downloads as the current user, verifies the immutable release before
 using `sudo`, installs the direct Rust agent service, completes pairing through
-interactive prompts, and verifies that the service is healthy. It keeps the
-controller hostnames for TLS while configuring their NAS LAN mapping
-automatically; the Spark does not need Tailscale or manual DNS changes. The same
-command performs an in-place upgrade on an installed Spark.
+interactive prompts, and verifies that the service is healthy. On a fresh Spark,
+the NAS address is taken from `VONK_CONTROLLER_ADDRESS`; the wizard asks only for
+the Spark management address, this Spark's fabric address, and its peer's fabric
+address in addition to the enrollment values. It writes the agent and firewall
+configuration itself, using the published endpoint, rendezvous, and validated
+200 Gbit/s fabric defaults. It keeps the controller hostnames for TLS while
+configuring their NAS LAN mapping automatically; the Spark does not need
+Tailscale, manual DNS changes, or a separate configuration step. The same command
+performs an in-place upgrade on an installed Spark.
 
 Development and production use the same services, networks, volumes, security
 settings, and behavior. Only the selected immutable image and package identities

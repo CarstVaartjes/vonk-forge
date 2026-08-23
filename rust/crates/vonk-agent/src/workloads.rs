@@ -12,11 +12,42 @@ pub enum WorkloadError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkloadSpec {
+    pub identity: WorkloadIdentitySpec,
+    pub model_dependencies: Vec<ModelDependencySpec>,
     pub runtime: RuntimeSpec,
     pub artifacts: Vec<ArtifactSpec>,
     pub endpoint: EndpointSpec,
     pub security: SecuritySpec,
     pub lifecycle: LifecycleSpec,
+    pub topology: TopologySpec,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkloadIdentitySpec {
+    pub recipe_revision_sha256: String,
+    pub model_version_sha256: String,
+    pub harness_sha256: String,
+    pub runtime_distribution_sha256: String,
+    pub patch_bundle_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelDependencySpec {
+    pub kind: String,
+    pub publisher: String,
+    pub slug: String,
+    pub content_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TopologySpec {
+    pub name: String,
+    pub node_count: u32,
+    pub rank: u32,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,6 +169,29 @@ pub struct Placement {
 
 impl WorkloadSpec {
     pub fn validate(&self) -> Result<(), WorkloadError> {
+        if !lower_hex(&self.identity.recipe_revision_sha256, 64)
+            || !lower_hex(&self.identity.model_version_sha256, 64)
+            || !lower_hex(&self.identity.harness_sha256, 64)
+            || !lower_hex(&self.identity.runtime_distribution_sha256, 64)
+            || self
+                .identity
+                .patch_bundle_sha256
+                .as_ref()
+                .is_some_and(|value| !lower_hex(value, 64))
+            || self.model_dependencies.len() > 16
+            || self.model_dependencies.iter().any(|dependency| {
+                dependency.kind != "model-version"
+                    || !valid_name(&dependency.publisher)
+                    || !valid_name(&dependency.slug)
+                    || !lower_hex(&dependency.content_sha256, 64)
+            })
+            || !valid_name(&self.topology.name)
+            || !(1..=128).contains(&self.topology.node_count)
+            || self.topology.rank >= self.topology.node_count
+            || !valid_role(&self.topology.role)
+        {
+            return Err(WorkloadError::Invalid("authority binding"));
+        }
         self.runtime.validate()?;
         if self.artifacts.is_empty() || self.artifacts.len() > 16 {
             return Err(WorkloadError::Invalid("artifacts"));

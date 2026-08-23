@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     fs,
     io::Write,
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command as ProcessCommand, Stdio},
 };
@@ -287,6 +288,10 @@ fn fresh_answers(ca: &[u8]) -> FreshAnswers {
         values: [
             "https://enroll.example.test/".to_owned(),
             ca_fingerprint(ca),
+            "192.168.1.231".to_owned(),
+            "192.168.1.211".to_owned(),
+            "192.168.100.10".to_owned(),
+            "192.168.100.11".to_owned(),
         ]
         .into(),
     }
@@ -331,6 +336,8 @@ fn paths(root: &std::path::Path) -> InstallPaths {
     InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        firewall_config: root.join("etc/vonk-forge-agent/docker-firewall.conf"),
+        helper_authority: root.join("etc/vonk-forge-agent/host-helper-authority.pub"),
         hosts: root.join("etc/hosts"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: root.join("var/tmp"),
@@ -477,6 +484,7 @@ fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
         "enrollment_endpoint": "https://enroll.example.test",
         "ca_fingerprint": ca_fingerprint(ca),
         "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
+        "host_helper_authority_public_key": "11".repeat(32),
     });
     RecordingRunner {
         commands: Vec::new(),
@@ -494,6 +502,7 @@ fn runner_with_private_controller_bootstrap(ca: &[u8]) -> RecordingRunner {
         "enrollment_endpoint": "https://enroll.example.test",
         "ca_fingerprint": ca_fingerprint(ca),
         "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
+        "host_helper_authority_public_key": "11".repeat(32),
         "controller_address": "192.168.1.231",
         "service_hostnames": [
             "control.example.test",
@@ -518,13 +527,19 @@ fn configured_install(paths: &InstallPaths, ca: &[u8], state: &str) {
     fs::write(
         &paths.config,
         format!(
-            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
             paths.ca.display(),
             ca_fingerprint(ca),
         ),
     )
     .unwrap();
     fs::write(&paths.ca, ca).unwrap();
+    fs::write(
+        &paths.firewall_config,
+        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
+    )
+    .unwrap();
+    fs::write(&paths.helper_authority, format!("{}\n", "11".repeat(32))).unwrap();
     fs::write(&paths.agent, "installed agent").unwrap();
     fs::write(paths.config.with_file_name("setup-state"), state).unwrap();
 }
@@ -750,6 +765,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     fs::write(&install_paths.hosts, "127.0.0.1 localhost\n").unwrap();
     let mut prepare_runner = runner_with_private_controller_bootstrap(&ca);
     let mut prompt = fresh_answers(&ca);
+    prompt.values.remove(2);
     let prepared = prepare_setup(
         &request(temporary.path())
             .with_controller_address(Some("192.168.1.231"))
@@ -818,6 +834,25 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     assert!(install_paths.config.is_file());
     assert!(install_paths.ca.is_file());
     assert_eq!(
+        fs::read_to_string(&install_paths.firewall_config).unwrap(),
+        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n"
+    );
+    assert_eq!(
+        fs::metadata(&install_paths.firewall_config)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::read_to_string(&install_paths.helper_authority).unwrap(),
+        format!("{}\n", "11".repeat(32))
+    );
+    let agent_config = fs::read_to_string(&install_paths.config).unwrap();
+    assert!(agent_config.contains("fabric_address = \"192.168.100.10\"\n"));
+    assert!(agent_config.contains("fabric_bandwidth_mbps = 200000\n"));
+    assert_eq!(
         fs::read_to_string(&install_paths.hosts).unwrap(),
         "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n192.168.1.231 control.example.test enroll.example.test controller.example.test registry.example.test\n# END VONK FORGE MANAGED HOSTS\n"
     );
@@ -838,6 +873,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
                 == [
                     "enable",
                     "--now",
+                    "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
                 ]
@@ -935,6 +971,7 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
                 == [
                     "enable",
                     "--now",
+                    "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
                 ]
@@ -1234,6 +1271,7 @@ fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
         "enrollment_endpoint": "https://enroll.example.test",
         "ca_fingerprint": "0".repeat(64),
         "ca_pem": String::from_utf8(ca.clone()).unwrap(),
+        "host_helper_authority_public_key": "11".repeat(32),
     });
     let mut runner = RecordingRunner {
         commands: Vec::new(),
@@ -1419,6 +1457,8 @@ fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting(
     let install_paths = InstallPaths {
         config: unsafe_directory.join("agent.toml"),
         ca: unsafe_directory.join("controller-ca.pem"),
+        firewall_config: unsafe_directory.join("docker-firewall.conf"),
+        helper_authority: unsafe_directory.join("host-helper-authority.pub"),
         hosts: temporary.path().join("etc/hosts"),
         agent: temporary.path().join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: temporary.path().join("var/tmp"),

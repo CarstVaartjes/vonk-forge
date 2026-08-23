@@ -284,6 +284,8 @@ fn install_paths(root: &Path) -> InstallPaths {
     InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
+        firewall_config: root.join("etc/vonk-forge-agent/docker-firewall.conf"),
+        helper_authority: root.join("etc/vonk-forge-agent/host-helper-authority.pub"),
         hosts: root.join("etc/hosts"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
         staging_root: root.join("var/tmp"),
@@ -307,12 +309,18 @@ fn configured_upgrade(paths: &InstallPaths) {
     fs::write(
         &paths.config,
         format!(
-            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{fingerprint}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{fingerprint}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
             paths.ca.display(),
         ),
     )
     .unwrap();
     fs::write(&paths.ca, ca).unwrap();
+    fs::write(
+        &paths.firewall_config,
+        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
+    )
+    .unwrap();
+    fs::write(&paths.helper_authority, format!("{}\n", "11".repeat(32))).unwrap();
     fs::write(&paths.agent, b"installed agent").unwrap();
     fs::write(paths.config.with_file_name("setup-state"), b"paired-v1\n").unwrap();
 }
@@ -363,6 +371,10 @@ fn run_fresh_handoff_process(root: PathBuf) {
         values: [
             "https://enroll.example.test/".to_owned(),
             fingerprint.clone(),
+            "192.168.1.231".to_owned(),
+            "192.168.1.211".to_owned(),
+            "192.168.100.10".to_owned(),
+            "192.168.100.11".to_owned(),
         ]
         .into(),
     };
@@ -371,6 +383,7 @@ fn run_fresh_handoff_process(root: PathBuf) {
         "enrollment_endpoint": "https://enroll.example.test",
         "ca_fingerprint": fingerprint,
         "ca_pem": String::from_utf8(ca).unwrap(),
+        "host_helper_authority_public_key": "11".repeat(32),
     }))
     .unwrap();
     let receipt = root.join("sudo-receipt");

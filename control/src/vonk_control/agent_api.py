@@ -235,6 +235,9 @@ class EnrollmentBootstrapResponse(BaseModel):
     ca_pem: str = Field(min_length=1, max_length=64 * 1024)
     controller_address: str | None = None
     service_hostnames: list[str] = Field(default_factory=list, max_length=16)
+    host_helper_authority_public_key: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
 
 
 class EnrollmentSummary(BaseModel):
@@ -1227,13 +1230,31 @@ def install_agent_routes(
         response_model=EnrollmentBootstrapResponse,
         responses=bounded_error_responses(503),
     )
-    def enrollment_bootstrap() -> Response:
+    def enrollment_bootstrap(setup_schema: Literal["1", "2"] = "1") -> Response:
         required = _require_services(services)
         if required.bootstrap is None:
             raise HTTPException(
                 status_code=503,
                 detail="agent enrollment bootstrap is unavailable",
             )
+        helper_public_key = None
+        if setup_schema == "2":
+            if required.host_runtime_authority is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="host runtime authority is unavailable",
+                )
+            helper_public_key = required.host_runtime_authority.public_key_document.get(
+                "public_key"
+            )
+            if (
+                not isinstance(helper_public_key, str)
+                or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="host runtime authority is unavailable",
+                )
         return _json_response(
             EnrollmentBootstrapResponse(
                 controller_endpoint=required.bootstrap.controller_endpoint,
@@ -1242,6 +1263,7 @@ def install_agent_routes(
                 ca_pem=required.bootstrap.ca_pem,
                 controller_address=required.bootstrap.controller_address,
                 service_hostnames=list(required.bootstrap.service_hostnames),
+                host_helper_authority_public_key=helper_public_key,
             ).model_dump(exclude_none=True, exclude_defaults=True)
         )
 
