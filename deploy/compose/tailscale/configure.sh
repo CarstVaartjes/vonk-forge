@@ -155,12 +155,17 @@ configure_services() {
     # listener protocol explicitly through the CLI instead.
     # Applying an empty all-services file clears both the complete Serve map
     # and AdvertiseServices. Re-add endpoints through the CLI so port 443 is
-    # explicitly HTTPS; each CLI configuration also advertises that service.
+    # explicitly HTTPS. Advertise each completed endpoint map explicitly: this
+    # is idempotent and avoids depending on the configuration command's
+    # asynchronous implicit advertisement reaching control.
     ts serve set-config --all "${empty_service_map}" >/dev/null
     ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
+    ts serve advertise "${control_service}" >/dev/null
     if [ "${include_hermes}" = "1" ]; then
         ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
+        ts serve advertise "${hermes_api_service}" >/dev/null
         ts serve --service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119 >/dev/null
+        ts serve advertise "${hermes_dashboard_service}" >/dev/null
     fi
 }
 
