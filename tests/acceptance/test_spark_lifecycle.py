@@ -381,6 +381,7 @@ class SparkLifecycle:
         self.control: Client | None = None
         self.synthetic_paths: list[Path] = []
         self.synthetic_interfaces: list[str] = []
+        self.synthetic_fabric_octet = os.getpid() % 200 + 20
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.synthetic_fixture_sha256: str | None = None
@@ -665,6 +666,17 @@ class SparkLifecycle:
         ):
             raise LifecycleError("Spark lifecycle target is not fresh")
 
+    def _controller_response_replacements(self) -> dict[str, str]:
+        return {
+            "Trusted Spark management CIDRs: ": "172.16.0.0/12",
+            "Direct GPU fabric CIDRs []: ": (
+                f"198.19.{self.synthetic_fabric_octet}.0/24"
+            ),
+            "Agent enrollment hostname: ": ENROLLMENT_HOST,
+            "Agent controller hostname: ": AGENT_HOST,
+            "Registry hostname: ": REGISTRY_HOST,
+        }
+
     def _start_controller(self) -> None:
         self.temporary_root = Path(
             tempfile.mkdtemp(prefix="vonk-spark-lifecycle-", dir=self.workspace)
@@ -689,11 +701,7 @@ class SparkLifecycle:
             control_service=self.tailnet_services["control"],
             hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
         )
-        replacements = {
-            "Agent enrollment hostname: ": ENROLLMENT_HOST,
-            "Agent controller hostname: ": AGENT_HOST,
-            "Registry hostname: ": REGISTRY_HOST,
-        }
+        replacements = self._controller_response_replacements()
         responses = [
             (prompt, replacements.get(prompt, answer)) for prompt, answer in responses
         ]
@@ -944,7 +952,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("synthetic firewall management topology is invalid")
 
-        suffix = os.getpid() % 200 + 20
+        suffix = self.synthetic_fabric_octet
         interface = f"vfab{os.getpid() % 100000}"
         node_fabric_ip = f"198.19.{suffix}.1"
         peer_fabric_ip = f"198.19.{suffix}.2"
