@@ -163,6 +163,57 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
         lifecycle._synthetic_device_fixture("linux-riscv64")
 
 
+def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.temporary_root = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    container = "a" * 64
+    image = "ghcr.io/example/caddy@sha256:" + "b" * 64
+    observed: list[list[str]] = []
+
+    def command(argv, *, cwd, timeout=300):
+        assert cwd == tmp_path
+        observed.append(argv)
+        if argv[-3:] == ["ps", "--quiet", "caddy"]:
+            stdout = container + "\n"
+        elif argv[:4] == ["docker", "inspect", "--format", "{{.Config.Image}}"]:
+            stdout = image + "\n"
+        elif argv[:4] == [
+            "docker",
+            "inspect",
+            "--format",
+            "{{json .Config.Env}}",
+        ]:
+            stdout = '["PATH=/usr/bin","VONK_SYNTHETIC_CDI=1"]\n'
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout)
+
+    run._run_command = command
+
+    run._verify_synthetic_docker_device()
+
+    assert [
+        "docker",
+        "create",
+        "--name",
+        "vonk-cdi-probe-vonk-spark-42-arm64",
+        "--device",
+        "nvidia.com/gpu=all",
+        image,
+    ] in observed
+    assert observed[-1] == [
+        "docker",
+        "rm",
+        "--force",
+        "vonk-cdi-probe-vonk-spark-42-arm64",
+    ]
+
+
 def test_embedded_development_runner_reuses_the_shared_client_exception() -> None:
     lifecycle = _module()
 
