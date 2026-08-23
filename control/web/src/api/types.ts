@@ -56,9 +56,15 @@ export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
+export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d";
 export type PublicRecipe = {
   publisher: string; slug: string; title: string; description: string; tags: string[];
   uri: string; content_sha256: string;
+  model_publisher: string; model_slug: string; model_title: string;
+  capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged"; precision: string | null;
+  execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
+  topology_name: string; topology_mode: string; node_count: number;
+  expected_download_bytes: number; maximum_installed_bytes_per_node: number; maximum_runtime_memory_bytes_per_node: number;
 };
 export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
 export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"};

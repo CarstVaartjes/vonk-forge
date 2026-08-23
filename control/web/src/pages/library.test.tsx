@@ -1,11 +1,44 @@
 import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ControlApi} from "../api/types";
+import type {ControlApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {App} from "../app";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../test-fixtures/library";
 
 const qwenModel = `qwen/3@${"e".repeat(64)}`;
 const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
+
+const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
+  publisher: "vonk-forge",
+  slug: "qwen",
+  title: "Qwen 3.5 · vLLM · single Spark",
+  description: "A fast language recipe.",
+  tags: ["qwen", "vllm"],
+  uri: "vonk://catalog/vonk-forge/qwen@sha256:" + "b".repeat(64),
+  content_sha256: "b".repeat(64),
+  model_publisher: "qwen",
+  model_slug: "qwen-3-5",
+  model_title: "Qwen 3.5",
+  capabilities: ["chat"],
+  qualification: "candidate",
+  precision: "BF16",
+  execution_harness: "vllm-openai",
+  runtime_distribution: "vllm-0-27-1",
+  source_bundle_sha256: "9".repeat(64),
+  artifact_count: 1,
+  topology_name: "single-spark",
+  topology_mode: "single",
+  node_count: 1,
+  expected_download_bytes: 80 * 1024 ** 3,
+  maximum_installed_bytes_per_node: 100 * 1024 ** 3,
+  maximum_runtime_memory_bytes_per_node: 72 * 1024 ** 3,
+  ...overrides,
+});
+
+const publicRecipePreview = (overrides: Partial<PublicRecipePreview> = {}): PublicRecipePreview => ({
+  ...publicRecipe(),
+  source: "recipe_library",
+  ...overrides,
+});
 
 afterEach(() => {
   history.replaceState(null, "", "/");
@@ -436,7 +469,7 @@ test("offers custom recipe authoring with validation and save", async () => {
 
 test("previews a public recipe import with exact identity and persists only after confirmation", async () => {
   history.replaceState(null, "", "/library");
-  const previewPublicRecipe = vi.fn(async () => ({publisher: "vonk", slug: "service", title: "Service", description: "", tags: [], uri: "vonk://catalog/vonk/service@sha256:" + "a".repeat(64), content_sha256: "a".repeat(64), source: "global"}));
+  const previewPublicRecipe = vi.fn(async () => publicRecipePreview({publisher: "vonk", slug: "service", title: "Service", description: "", tags: [], uri: "vonk://catalog/vonk/service@sha256:" + "a".repeat(64), content_sha256: "a".repeat(64), source: "global"}));
   const importPublicRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
   const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes: async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "a".repeat(40), recipes: []}), previewPublicRecipe, importPublicRecipe} as unknown as ControlApi;
   const user = userEvent.setup();
@@ -448,7 +481,7 @@ test("previews a public recipe import with exact identity and persists only afte
   const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
   expect(within(preview).getAllByText("vonk/service")).toHaveLength(2);
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
-  await user.click(within(preview).getByRole("button", {name: "Import reviewed recipe"}));
+  await user.click(within(preview).getByRole("button", {name: "Import recipe"}));
   expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
 });
 
@@ -458,7 +491,46 @@ test("loads the current default catalog recipes when public import opens", async
   const listPublicRecipes = vi.fn(async () => ({
     repository: "CarstVaartjes/vonk-forge-recipes",
     commit: "c".repeat(40),
-    recipes: [{publisher: "vonk-forge", slug: "qwen", title: "Qwen 3.5 · vLLM · single Spark", description: "A fast language recipe.", tags: ["qwen", "vllm"], uri, content_sha256: "b".repeat(64)}],
+    recipes: [
+      publicRecipe({uri, capabilities: ["chat", "reasoning", "vision"]}),
+      publicRecipe({
+        slug: "qwen-vision-pair",
+        title: "Qwen Vision · two Sparks",
+        uri: "vonk://catalog/vonk-forge/qwen-vision-pair@sha256:" + "d".repeat(64),
+        content_sha256: "d".repeat(64),
+        capabilities: ["chat", "vision"],
+        node_count: 2,
+        topology_mode: "tensor-parallel",
+      }),
+      publicRecipe({
+        slug: "wan-video-four",
+        title: "Wan Video · four Sparks",
+        uri: "vonk://catalog/vonk-forge/wan-video-four@sha256:" + "e".repeat(64),
+        content_sha256: "e".repeat(64),
+        model_publisher: "wan-ai",
+        model_slug: "wan-2-2",
+        model_title: "Wan 2.2",
+        capabilities: ["video"],
+        runtime_distribution: "diffusers-0-40",
+        precision: "FP8",
+        node_count: 4,
+        topology_mode: "distributed",
+      }),
+      publicRecipe({
+        slug: "audio-five",
+        title: "Audio model · five Sparks",
+        uri: "vonk://catalog/vonk-forge/audio-five@sha256:" + "f".repeat(64),
+        content_sha256: "f".repeat(64),
+        model_publisher: "qwen",
+        model_slug: "qwen-audio",
+        model_title: "Qwen Audio",
+        capabilities: ["audio"],
+        runtime_distribution: "pytorch-2-13",
+        node_count: 5,
+        topology_mode: "distributed",
+        qualification: "cataloged",
+      }),
+    ],
   }));
   const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes} as unknown as ControlApi;
   const user = userEvent.setup();
@@ -468,7 +540,53 @@ test("loads the current default catalog recipes when public import opens", async
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
   expect(await screen.findByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
   expect(screen.getByText("@cccccccc")).toBeVisible();
-  await user.type(screen.getByRole("searchbox", {name: "Search public recipes"}), "video");
+
+  const sparks = screen.getByRole("combobox", {name: "Filter by required Sparks"});
+  expect(within(sparks).getByRole("option", {name: "1 Spark"})).toBeVisible();
+  expect(within(sparks).getByRole("option", {name: "2 Sparks"})).toBeVisible();
+  expect(within(sparks).getByRole("option", {name: "3 Sparks"})).toBeVisible();
+  expect(within(sparks).queryByRole("option", {name: "4 Sparks"})).not.toBeInTheDocument();
+  expect(within(sparks).getByRole("option", {name: "4+ Sparks"})).toBeVisible();
+  await user.selectOptions(sparks, "2");
+  expect(screen.getByRole("heading", {name: /Qwen Vision/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  await user.selectOptions(sparks, "3");
+  expect(screen.getByText("No matching recipes")).toBeVisible();
+  await user.selectOptions(sparks, "4+");
+  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen Vision/, level: 5})).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.click(screen.getByRole("button", {name: /^Vision/}));
+  await user.click(screen.getByRole("button", {name: /^Reasoning/}));
+  expect(screen.getByRole("button", {name: /^Vision/})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", {name: /^Reasoning/})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen Vision/, level: 5})).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by model"}), "qwen/qwen-audio");
+  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Wan Video/, level: 5})).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by precision"}), "FP8");
+  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Audio model/, level: 5})).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by topology"}), "distributed");
+  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.selectOptions(screen.getByRole("combobox", {name: "Sort recipes"}), "model");
+  expect(screen.getByRole("button", {name: "Clear filters"})).toBeEnabled();
+
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.type(screen.getByRole("searchbox", {name: "Search public recipes"}), "nonexistent model");
   expect(screen.getByText("No matching recipes")).toBeVisible();
 });
 

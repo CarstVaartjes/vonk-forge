@@ -809,6 +809,21 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed.status_code == 200
     assert preview.status_code == 200
     assert imported.status_code == 201, imported.text
+    listed_recipe = listed.json()["recipes"][0]
+    preview_recipe = preview.json()
+    assert listed_recipe["model_publisher"] == "vonk"
+    assert listed_recipe["model_slug"] == "dev-http-smoke"
+    assert listed_recipe["model_title"] == "Development HTTP smoke model"
+    assert listed_recipe["capabilities"] == ["chat"]
+    assert listed_recipe["qualification"] == "cataloged"
+    assert listed_recipe["runtime_distribution"] == "development-vllm-shim-arm64"
+    assert listed_recipe["topology_mode"] == "single"
+    assert listed_recipe["node_count"] == 1
+    assert listed_recipe["expected_download_bytes"] == 10
+    assert listed_recipe["maximum_installed_bytes_per_node"] > 0
+    assert listed_recipe["maximum_runtime_memory_bytes_per_node"] > 0
+    assert preview_recipe["model_slug"] == listed_recipe["model_slug"]
+    assert preview_recipe["capabilities"] == listed_recipe["capabilities"]
     assert imported.json()["origin"] == "recipe_library"
     assert len(service.entities.list_entities(limit=100)[0]) == 5
     assert service.read_source_bundle(bundle.sha256) == bundle.archive
