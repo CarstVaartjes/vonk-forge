@@ -1846,7 +1846,7 @@ class RecipeRun(Base):
     )
     mapping_generation: Mapped[int] = mapped_column(Integer, nullable=False)
     alias: Mapped[str] = mapped_column(String(128), nullable=False)
-    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     route_state: Mapped[str] = mapped_column(
