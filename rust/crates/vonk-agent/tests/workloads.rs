@@ -17,9 +17,9 @@ use vonk_agent::{
     oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
-        ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, LifecycleSpec, MountSpec,
-        Placement, PlacementEnvironmentSpec, RuntimeArgument, RuntimeSpec, SecuritySpec,
-        WorkloadSpec,
+        ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, LifecycleSpec,
+        ModelDependencySpec, MountSpec, Placement, PlacementEnvironmentSpec, RuntimeArgument,
+        RuntimeSpec, SecuritySpec, TopologySpec, WorkloadIdentitySpec, WorkloadSpec,
     },
 };
 
@@ -108,6 +108,14 @@ impl ProcessRunner for BudgetRunner {
 
 fn spec() -> WorkloadSpec {
     WorkloadSpec {
+        identity: WorkloadIdentitySpec {
+            recipe_revision_sha256: DIGEST.to_owned(),
+            model_version_sha256: DIGEST.to_owned(),
+            harness_sha256: DIGEST.to_owned(),
+            runtime_distribution_sha256: DIGEST.to_owned(),
+            patch_bundle_sha256: None,
+        },
+        model_dependencies: Vec::<ModelDependencySpec>::new(),
         runtime: RuntimeSpec {
             interface: "vonk.runtime.v1".to_owned(),
             adapter: "vllm".to_owned(),
@@ -172,6 +180,12 @@ fn spec() -> WorkloadSpec {
             pre_start: vec![],
             post_stop: vec![],
             stop_timeout_seconds: 30,
+        },
+        topology: TopologySpec {
+            name: "solo".to_owned(),
+            node_count: 1,
+            rank: 0,
+            role: "entrypoint".to_owned(),
         },
     }
 }
@@ -260,6 +274,28 @@ fn workload_schema_rejects_shell_privilege_environment_and_host_paths() {
     let mut incomplete_mounts = spec();
     incomplete_mounts.security.mounts.pop();
     assert!(incomplete_mounts.validate().is_err());
+}
+
+#[test]
+fn workload_authority_bindings_are_strictly_validated() {
+    let mut invalid_identity = spec();
+    invalid_identity.identity.recipe_revision_sha256 = "A".repeat(64);
+    assert!(invalid_identity.validate().is_err());
+
+    let mut invalid_dependency = spec();
+    invalid_dependency
+        .model_dependencies
+        .push(ModelDependencySpec {
+            kind: "mutable-model".to_owned(),
+            publisher: "publisher".to_owned(),
+            slug: "model".to_owned(),
+            content_sha256: DIGEST.to_owned(),
+        });
+    assert!(invalid_dependency.validate().is_err());
+
+    let mut invalid_topology = spec();
+    invalid_topology.topology.rank = invalid_topology.topology.node_count;
+    assert!(invalid_topology.validate().is_err());
 }
 
 #[test]

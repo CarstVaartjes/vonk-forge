@@ -22,6 +22,12 @@ from pathlib import Path
 from typing import Protocol, Self
 
 import yaml
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    PublicFormat,
+    load_pem_private_key,
+)
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -75,6 +81,8 @@ AGENT_HOST = "agents.spark.localhost"
 REGISTRY_HOST = "registry.spark.localhost"
 CONTROLLER_ADDRESS = "127.0.0.1"
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
+FIREWALL_CONFIG = Path("/etc/vonk-forge-agent/docker-firewall.conf")
+HELPER_AUTHORITY = Path("/etc/vonk-forge-agent/host-helper-authority.pub")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
 COMPOSE_IMAGE_ROLES = {
@@ -185,6 +193,14 @@ def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> Non
     if not isinstance(caddy_ports, list) or "127.0.0.1::8080" in caddy_ports:
         raise LifecycleError("Compose browser boundary is invalid")
     caddy_ports.append("127.0.0.1::8080")
+    caddy_networks = compose["services"]["caddy"].get("networks")
+    if (
+        not isinstance(caddy_networks, list)
+        or "cluster-egress" in caddy_networks
+        or "cluster-egress" not in compose.get("networks", {})
+    ):
+        raise LifecycleError("Compose acceptance network topology is invalid")
+    caddy_networks.append("cluster-egress")
     compose_path.write_text(
         yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
@@ -210,6 +226,22 @@ def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
         separators=(",", ":"),
     ).encode("ascii")
     return raw, hashlib.sha256(raw).hexdigest()
+
+
+def _agent_package_installed() -> bool:
+    query = Path("/usr/bin/dpkg-query")
+    if not query.is_file() or not os.access(query, os.X_OK):
+        return False
+    return (
+        subprocess.run(
+            [query, "--show", "vonk-forge-agent"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
 
 
 def _semantic_version(package_version: str) -> str:
@@ -356,6 +388,8 @@ class SparkLifecycle:
         self.bundle: Path | None = None
         self.control: Client | None = None
         self.synthetic_paths: list[Path] = []
+        self.synthetic_interfaces: list[str] = []
+        self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.synthetic_fixture_sha256: str | None = None
         self.tailnet_services = {
@@ -414,6 +448,7 @@ class SparkLifecycle:
         return workspace
 
     def __enter__(self) -> Self:
+        self._assert_spark_target_is_fresh()
         try:
             self._start_controller()
             return self
@@ -559,7 +594,7 @@ class SparkLifecycle:
 
     def _cleanup(self) -> None:
         failures: list[BaseException] = []
-        if getattr(self, "agent_installed", False):
+        if _agent_package_installed():
             try:
                 self._run_command(
                     ["sudo", "/usr/bin/dpkg", "--purge", "vonk-forge-agent"],
@@ -572,6 +607,30 @@ class SparkLifecycle:
             try:
                 self._run_command(
                     ["sudo", "/usr/bin/rm", "--", os.fspath(path)],
+                    cwd=Path("/"),
+                    timeout=30,
+                )
+            except BaseException as error:  # noqa: BLE001 - continue cleanup.
+                failures.append(error)
+        try:
+            self._run_command(
+                [
+                    "sudo",
+                    "/usr/bin/rm",
+                    "-rf",
+                    "--",
+                    "/etc/vonk-forge-agent",
+                    "/var/lib/vonk-forge-agent",
+                ],
+                cwd=Path("/"),
+                timeout=60,
+            )
+        except BaseException as error:  # noqa: BLE001 - continue cleanup.
+            failures.append(error)
+        for interface in reversed(getattr(self, "synthetic_interfaces", [])):
+            try:
+                self._run_command(
+                    ["sudo", "/usr/sbin/ip", "link", "delete", interface],
                     cwd=Path("/"),
                     timeout=30,
                 )
@@ -601,6 +660,18 @@ class SparkLifecycle:
             raise LifecycleError(
                 "isolated Spark lifecycle cleanup failed"
             ) from failures[0]
+
+    @staticmethod
+    def _assert_spark_target_is_fresh() -> None:
+        if _agent_package_installed() or any(
+            path.exists() or path.is_symlink()
+            for path in (
+                Path("/etc/vonk-forge-agent"),
+                Path("/var/lib/vonk-forge-agent"),
+                AGENT_BINARY,
+            )
+        ):
+            raise LifecycleError("Spark lifecycle target is not fresh")
 
     def _start_controller(self) -> None:
         self.temporary_root = Path(
@@ -684,6 +755,7 @@ class SparkLifecycle:
                 "candidate controller services are not healthy"
             ) from error
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
+        self._materialize_synthetic_firewall()
         verify_tailscale_services(
             self.bundle,
             hermes=False,
@@ -842,6 +914,145 @@ class SparkLifecycle:
             raise LifecycleError("synthetic CDI device was not discovered")
         return digest
 
+    def _materialize_synthetic_firewall(self) -> None:
+        assert self.bundle is not None and self.temporary_root is not None
+        network = f"{self.project}_cluster-egress"
+        node_management_ip = self._run_command(
+            [
+                "docker",
+                "network",
+                "inspect",
+                "--format",
+                "{{(index .IPAM.Config 0).Gateway}}",
+                network,
+            ],
+            cwd=self.bundle,
+        ).stdout.strip()
+        litellm_container = self._run_command(
+            self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
+        ).stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
+            raise LifecycleError("synthetic firewall source container is invalid")
+        nas_management_ip = self._run_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                (
+                    f"{{{{with index .NetworkSettings.Networks {json.dumps(network)}}}}}"
+                    "{{.IPAddress}}{{end}}"
+                ),
+                litellm_container,
+            ],
+            cwd=self.bundle,
+        ).stdout.strip()
+        if any(
+            re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None
+            for value in (node_management_ip, nas_management_ip)
+        ):
+            raise LifecycleError("synthetic firewall management topology is invalid")
+
+        suffix = os.getpid() % 200 + 20
+        interface = f"vfab{os.getpid() % 100000}"
+        node_fabric_ip = f"198.19.{suffix}.1"
+        peer_fabric_ip = f"198.19.{suffix}.2"
+        if len(interface) > 15:
+            raise LifecycleError("synthetic firewall interface identity is invalid")
+        self._run_command(
+            ["sudo", "/usr/sbin/ip", "link", "add", interface, "type", "dummy"],
+            cwd=self.temporary_root,
+        )
+        self.synthetic_interfaces.append(interface)
+        self._run_command(
+            [
+                "sudo",
+                "/usr/sbin/ip",
+                "address",
+                "add",
+                f"{node_fabric_ip}/24",
+                "dev",
+                interface,
+            ],
+            cwd=self.temporary_root,
+        )
+        self._run_command(
+            ["sudo", "/usr/sbin/ip", "link", "set", interface, "up"],
+            cwd=self.temporary_root,
+        )
+        self.firewall_environment = {
+            "VONK_NAS_MANAGEMENT_IP": nas_management_ip,
+            "VONK_NODE_MANAGEMENT_IP": node_management_ip,
+            "VONK_NODE_FABRIC_IP": node_fabric_ip,
+            "VONK_PEER_FABRIC_IP": peer_fabric_ip,
+            "VONK_ENDPOINT_HOST_PORTS": "8000,8101",
+            "VONK_HOST_ENDPOINT_PORTS": "8888",
+            "VONK_RENDEZVOUS_PORT": "29500",
+            "VONK_FABRIC_BANDWIDTH_MBPS": "200000",
+        }
+        source = self.temporary_root / "docker-firewall.conf"
+        source.write_text(
+            "".join(
+                f"{name}={self.firewall_environment[name]}\n"
+                for name in (
+                    "VONK_NAS_MANAGEMENT_IP",
+                    "VONK_NODE_MANAGEMENT_IP",
+                    "VONK_NODE_FABRIC_IP",
+                    "VONK_PEER_FABRIC_IP",
+                    "VONK_ENDPOINT_HOST_PORTS",
+                    "VONK_HOST_ENDPOINT_PORTS",
+                    "VONK_RENDEZVOUS_PORT",
+                )
+            ),
+            encoding="ascii",
+        )
+        os.chmod(source, 0o600)
+        if FIREWALL_CONFIG.exists() or FIREWALL_CONFIG.is_symlink():
+            raise LifecycleError("synthetic firewall fixture target already exists")
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/install",
+                "-D",
+                "-m",
+                "0600",
+                source,
+                FIREWALL_CONFIG,
+            ],
+            cwd=self.temporary_root,
+        )
+        self.synthetic_paths.append(FIREWALL_CONFIG)
+        private_path = self.bundle / "secrets/host-runtime-grant-private-key.pem"
+        try:
+            private_key = load_pem_private_key(private_path.read_bytes(), password=None)
+        except (OSError, ValueError, TypeError) as error:
+            raise LifecycleError("synthetic helper authority is unavailable") from error
+        if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+            raise LifecycleError("synthetic helper authority is invalid")
+        public_source = self.temporary_root / "host-helper-authority.pub"
+        public_source.write_text(
+            private_key.public_key()
+            .public_bytes(Encoding.Raw, PublicFormat.Raw)
+            .hex()
+            + "\n",
+            encoding="ascii",
+        )
+        os.chmod(public_source, 0o600)
+        if HELPER_AUTHORITY.exists() or HELPER_AUTHORITY.is_symlink():
+            raise LifecycleError("synthetic helper authority target already exists")
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/install",
+                "-D",
+                "-m",
+                "0644",
+                public_source,
+                HELPER_AUTHORITY,
+            ],
+            cwd=self.temporary_root,
+        )
+        self.synthetic_paths.append(HELPER_AUTHORITY)
+
     def _installer_environment(self, *, baseline: bool) -> dict[str, str]:
         assert self.temporary_root is not None
         release_root = (
@@ -862,7 +1073,7 @@ class SparkLifecycle:
             if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
                 raise LifecycleError("signed release input is unsafe")
         base = f"{release_root}/acceptance-baseline" if baseline else release_root
-        return {
+        environment = {
             "HOME": os.environ.get("HOME", "/tmp"),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
@@ -873,6 +1084,8 @@ class SparkLifecycle:
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(local_release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(signature),
         }
+        environment.update(getattr(self, "firewall_environment", {}))
+        return environment
 
     def _bootstrap_url(self, *, baseline: bool) -> str:
         release = (
@@ -923,8 +1136,7 @@ class SparkLifecycle:
                 "publication_graph": self.graph,
             }
 
-        canary = self._run_synthetic_canary(node_id)
-        renewal = self._observe_renewal(node_id, str(baseline["serial"]))
+        self._complete_synthetic_baseline_configuration()
         config_before = self._hash_path(SPARK_CONFIG)
         private_before = self._hash_path(AGENT_DATA / "machine-evidence")
         try:
@@ -944,6 +1156,8 @@ class SparkLifecycle:
         private_after = self._hash_path(AGENT_DATA / "machine-evidence")
         if candidate["node_id"] != node_id:
             raise LifecycleError("candidate upgrade changed node identity")
+        canary = self._run_synthetic_canary(node_id)
+        renewal = self._observe_renewal(node_id, str(baseline["serial"]))
         return {
             "canary": canary,
             "config_sha256_after_upgrade": config_after,
@@ -972,6 +1186,42 @@ class SparkLifecycle:
                 "synthetic": True,
             },
         }
+
+    def _complete_synthetic_baseline_configuration(self) -> None:
+        assert self.temporary_root is not None
+        node_fabric_ip = self.firewall_environment.get("VONK_NODE_FABRIC_IP")
+        if node_fabric_ip is None:
+            raise LifecycleError("synthetic baseline fabric address is unavailable")
+        try:
+            current = SPARK_CONFIG.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise LifecycleError("synthetic baseline configuration is unavailable") from error
+        if "fabric_address" in current or "fabric_bandwidth_mbps" in current:
+            raise LifecycleError("synthetic baseline configuration is unexpected")
+        source = self.temporary_root / "baseline-agent.toml"
+        source.write_text(
+            current
+            + f'fabric_address = "{node_fabric_ip}"\n'
+            + "fabric_bandwidth_mbps = 200000\n",
+            encoding="utf-8",
+        )
+        os.chmod(source, 0o600)
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/install",
+                "-o",
+                "root",
+                "-g",
+                "root",
+                "-m",
+                "0644",
+                source,
+                SPARK_CONFIG,
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
         assert self.control is not None

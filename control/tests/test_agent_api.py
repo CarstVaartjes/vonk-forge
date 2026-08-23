@@ -1915,6 +1915,37 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert "PRIVATE KEY" not in response.text
 
 
+def test_setup_schema_two_adds_only_the_host_helper_public_authority(agent_system) -> None:
+    client, services, _, _ = agent_system
+
+    class PublicAuthority:
+        def __init__(self) -> None:
+            self.public_key_document = {"public_key": "11" * 32}
+
+    object.__setattr__(services, "host_runtime_authority", PublicAuthority())
+
+    legacy = client.get("/agent/v1/bootstrap")
+    setup = client.get("/agent/v1/bootstrap?setup_schema=2")
+
+    assert legacy.status_code == setup.status_code == 200
+    assert "host_helper_authority_public_key" not in legacy.json()
+    assert setup.json() == {
+        **legacy.json(),
+        "host_helper_authority_public_key": "11" * 32,
+    }
+    assert setup.content == canonical_message(setup.json())
+    assert "PRIVATE KEY" not in setup.text
+
+
+def test_setup_schema_two_fails_closed_without_a_host_helper_authority(agent_system) -> None:
+    client, _, _, _ = agent_system
+
+    response = client.get("/agent/v1/bootstrap?setup_schema=2")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "host runtime authority is unavailable"}
+
+
 def test_obsolete_enrollment_decision_routes_are_not_exposed(agent_system) -> None:
     client, _, codec, _ = agent_system
     headers = admin_headers(codec)

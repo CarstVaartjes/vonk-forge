@@ -26,11 +26,18 @@ const MAX_RELEASE_BYTES: usize = 1024 * 1024;
 const MAX_RELEASE_SIGNATURE_BYTES: usize = 16 * 1024;
 const CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
 const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
+const FIREWALL_CONFIG_PATH: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
+const HELPER_AUTHORITY_PATH: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const HOSTS_PATH: &str = "/etc/hosts";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
 const HELPER_SOCKET: &str = "vonk-forge-package-helper.socket";
+const FIREWALL_SERVICE: &str = "vonk-forge-docker-firewall.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
+const DEFAULT_ENDPOINT_HOST_PORTS: &str = "8000,8101";
+const DEFAULT_HOST_ENDPOINT_PORTS: &str = "8888";
+const DEFAULT_RENDEZVOUS_PORT: &str = "29500";
+const DEFAULT_FABRIC_BANDWIDTH_MBPS: &str = "200000";
 const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
 const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
 const INSTALLER_RELEASE_PUBLIC_KEY: &[u8] =
@@ -107,6 +114,42 @@ pub struct SetupRequest {
     setup_signature: PathBuf,
     executable: PathBuf,
     controller_address: Option<Ipv4Addr>,
+    firewall_inputs: FirewallInputs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FirewallInputs {
+    nas_management_ip: Option<String>,
+    node_management_ip: Option<String>,
+    node_fabric_ip: Option<String>,
+    peer_fabric_ip: Option<String>,
+    endpoint_host_ports: Option<String>,
+    host_endpoint_ports: Option<String>,
+    rendezvous_port: Option<String>,
+    fabric_bandwidth_mbps: Option<String>,
+}
+
+impl FirewallInputs {
+    pub fn from_environment() -> Result<Self, SetupError> {
+        fn optional(name: &'static str) -> Result<Option<String>, SetupError> {
+            match std::env::var(name) {
+                Ok(value) => Ok(Some(value)),
+                Err(std::env::VarError::NotPresent) => Ok(None),
+                Err(std::env::VarError::NotUnicode(_)) => Err(SetupError::UnsafeInput(name)),
+            }
+        }
+
+        Ok(Self {
+            nas_management_ip: optional("VONK_NAS_MANAGEMENT_IP")?,
+            node_management_ip: optional("VONK_NODE_MANAGEMENT_IP")?,
+            node_fabric_ip: optional("VONK_NODE_FABRIC_IP")?,
+            peer_fabric_ip: optional("VONK_PEER_FABRIC_IP")?,
+            endpoint_host_ports: optional("VONK_ENDPOINT_HOST_PORTS")?,
+            host_endpoint_ports: optional("VONK_HOST_ENDPOINT_PORTS")?,
+            rendezvous_port: optional("VONK_RENDEZVOUS_PORT")?,
+            fabric_bandwidth_mbps: optional("VONK_FABRIC_BANDWIDTH_MBPS")?,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -276,13 +319,15 @@ impl CallerIdentity {
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum ApplyOperation {
     Fresh {
-        enrollment_url: Url,
-        controller_url: Url,
+        enrollment_url: Box<Url>,
+        controller_url: Box<Url>,
         ca_sha256: String,
         ca_pem: Vec<u8>,
         node_id: String,
         pairing_token: String,
         host_mapping: Option<HostMapping>,
+        firewall: FirewallConfig,
+        helper_authority: Vec<u8>,
     },
     Pair {
         enrollment_url: Url,
@@ -297,6 +342,27 @@ enum ApplyOperation {
 struct HostMapping {
     address: String,
     hostnames: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EnrollmentDiscovery {
+    controller_url: Url,
+    ca_pem: Vec<u8>,
+    host_mapping: Option<HostMapping>,
+    helper_authority: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FirewallConfig {
+    nas_management_ip: Ipv4Addr,
+    node_management_ip: Ipv4Addr,
+    node_fabric_ip: Ipv4Addr,
+    peer_fabric_ip: Ipv4Addr,
+    endpoint_host_ports: Vec<u16>,
+    host_endpoint_ports: Vec<u16>,
+    rendezvous_port: u16,
+    fabric_bandwidth_mbps: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,6 +453,7 @@ impl SetupRequest {
             setup_signature,
             executable,
             controller_address: None,
+            firewall_inputs: FirewallInputs::default(),
         })
     }
 
@@ -400,6 +467,192 @@ impl SetupRequest {
             .transpose()?;
         Ok(self)
     }
+
+    pub fn with_firewall_inputs(mut self, inputs: FirewallInputs) -> Self {
+        self.firewall_inputs = inputs;
+        self
+    }
+}
+
+impl FirewallConfig {
+    fn collect(
+        inputs: &FirewallInputs,
+        controller_address: Option<Ipv4Addr>,
+        prompt: &mut dyn Prompt,
+    ) -> Result<Self, SetupError> {
+        fn supplied_or_prompted(
+            supplied: Option<&String>,
+            prompt: &mut dyn Prompt,
+            label: &'static str,
+        ) -> Result<String, SetupError> {
+            supplied
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(|| prompt.value(label).map_err(|_| SetupError::Prompt))
+        }
+
+        fn ipv4(value: String, field: &'static str) -> Result<Ipv4Addr, SetupError> {
+            let address = value
+                .parse::<Ipv4Addr>()
+                .map_err(|_| SetupError::UnsafeInput(field))?;
+            if !valid_site_ipv4(address) {
+                return Err(SetupError::UnsafeInput(field));
+            }
+            Ok(address)
+        }
+
+        fn port(value: &str, field: &'static str) -> Result<u16, SetupError> {
+            let parsed = value
+                .parse::<u16>()
+                .map_err(|_| SetupError::UnsafeInput(field))?;
+            if parsed < 1024 || parsed.to_string() != value {
+                return Err(SetupError::UnsafeInput(field));
+            }
+            Ok(parsed)
+        }
+
+        fn ports(value: &str, field: &'static str, required: bool) -> Result<Vec<u16>, SetupError> {
+            if value.is_empty() {
+                return if required {
+                    Err(SetupError::UnsafeInput(field))
+                } else {
+                    Ok(Vec::new())
+                };
+            }
+            let parsed = value
+                .split(',')
+                .map(|value| port(value, field))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut unique = parsed.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            if unique.len() != parsed.len() {
+                return Err(SetupError::UnsafeInput(field));
+            }
+            Ok(parsed)
+        }
+
+        let nas_management_ip = inputs
+            .nas_management_ip
+            .clone()
+            .or_else(|| controller_address.map(|value| value.to_string()))
+            .map(Ok)
+            .unwrap_or_else(|| {
+                prompt
+                    .value("NAS management IPv4 address")
+                    .map_err(|_| SetupError::Prompt)
+            })?;
+        let endpoint_host_ports = inputs
+            .endpoint_host_ports
+            .as_deref()
+            .unwrap_or(DEFAULT_ENDPOINT_HOST_PORTS);
+        let host_endpoint_ports = inputs
+            .host_endpoint_ports
+            .as_deref()
+            .unwrap_or(DEFAULT_HOST_ENDPOINT_PORTS);
+        let rendezvous_port = inputs
+            .rendezvous_port
+            .as_deref()
+            .unwrap_or(DEFAULT_RENDEZVOUS_PORT);
+        let fabric_bandwidth_mbps = inputs
+            .fabric_bandwidth_mbps
+            .as_deref()
+            .unwrap_or(DEFAULT_FABRIC_BANDWIDTH_MBPS)
+            .parse::<u64>()
+            .map_err(|_| SetupError::UnsafeInput("fabric bandwidth"))?;
+        let config = Self {
+            nas_management_ip: ipv4(nas_management_ip, "NAS management address")?,
+            node_management_ip: ipv4(
+                supplied_or_prompted(
+                    inputs.node_management_ip.as_ref(),
+                    prompt,
+                    "Spark management IPv4 address",
+                )?,
+                "Spark management address",
+            )?,
+            node_fabric_ip: ipv4(
+                supplied_or_prompted(
+                    inputs.node_fabric_ip.as_ref(),
+                    prompt,
+                    "Spark fabric IPv4 address",
+                )?,
+                "Spark fabric address",
+            )?,
+            peer_fabric_ip: ipv4(
+                supplied_or_prompted(
+                    inputs.peer_fabric_ip.as_ref(),
+                    prompt,
+                    "Peer Spark fabric IPv4 address",
+                )?,
+                "peer Spark fabric address",
+            )?,
+            endpoint_host_ports: ports(endpoint_host_ports, "endpoint host ports", true)?,
+            host_endpoint_ports: ports(host_endpoint_ports, "host endpoint ports", false)?,
+            rendezvous_port: port(rendezvous_port, "rendezvous port")?,
+            fabric_bandwidth_mbps,
+        };
+        if !config.valid() {
+            return Err(SetupError::UnsafeInput("Spark network topology"));
+        }
+        Ok(config)
+    }
+
+    fn valid(&self) -> bool {
+        let addresses = [
+            self.nas_management_ip,
+            self.node_management_ip,
+            self.node_fabric_ip,
+            self.peer_fabric_ip,
+        ];
+        addresses.iter().all(|address| valid_site_ipv4(*address))
+            && addresses
+                .iter()
+                .enumerate()
+                .all(|(index, address)| !addresses[index + 1..].contains(address))
+            && !self.endpoint_host_ports.is_empty()
+            && valid_unique_ports(&self.endpoint_host_ports)
+            && valid_unique_ports(&self.host_endpoint_ports)
+            && !self.endpoint_host_ports.contains(&self.rendezvous_port)
+            && !self.host_endpoint_ports.contains(&self.rendezvous_port)
+            && self.rendezvous_port >= 1024
+            && (1..=1_000_000).contains(&self.fabric_bandwidth_mbps)
+    }
+
+    fn render(&self) -> String {
+        let ports = |values: &[u16]| {
+            values
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        format!(
+            "VONK_NAS_MANAGEMENT_IP={}\nVONK_NODE_MANAGEMENT_IP={}\nVONK_NODE_FABRIC_IP={}\nVONK_PEER_FABRIC_IP={}\nVONK_ENDPOINT_HOST_PORTS={}\nVONK_HOST_ENDPOINT_PORTS={}\nVONK_RENDEZVOUS_PORT={}\n",
+            self.nas_management_ip,
+            self.node_management_ip,
+            self.node_fabric_ip,
+            self.peer_fabric_ip,
+            ports(&self.endpoint_host_ports),
+            ports(&self.host_endpoint_ports),
+            self.rendezvous_port,
+        )
+    }
+}
+
+fn valid_site_ipv4(value: Ipv4Addr) -> bool {
+    !value.is_unspecified()
+        && !value.is_loopback()
+        && !value.is_link_local()
+        && !value.is_multicast()
+        && !value.is_broadcast()
+}
+
+fn valid_unique_ports(values: &[u16]) -> bool {
+    values.iter().all(|value| *value >= 1024)
+        && values
+            .iter()
+            .enumerate()
+            .all(|(index, value)| !values[index + 1..].contains(value))
 }
 
 pub fn handoff_to_root(
@@ -479,6 +732,8 @@ public_key=$root/installer-release-public.pem
 pub struct InstallPaths {
     pub config: PathBuf,
     pub ca: PathBuf,
+    pub firewall_config: PathBuf,
+    pub helper_authority: PathBuf,
     pub hosts: PathBuf,
     pub agent: PathBuf,
     pub staging_root: PathBuf,
@@ -492,6 +747,8 @@ impl InstallPaths {
         Self {
             config: PathBuf::from(CONFIG_PATH),
             ca: PathBuf::from(CA_PATH),
+            firewall_config: PathBuf::from(FIREWALL_CONFIG_PATH),
+            helper_authority: PathBuf::from(HELPER_AUTHORITY_PATH),
             hosts: PathBuf::from(HOSTS_PATH),
             agent: PathBuf::from(AGENT_PATH),
             staging_root: PathBuf::from("/var/tmp"),
@@ -645,20 +902,27 @@ pub fn prepare_setup_with_authority(
             if !valid_token(&pairing_token) {
                 return Err(SetupError::UnsafeInput("pairing token"));
             }
-            let (controller_url, ca_pem, host_mapping) = discover_enrollment(
+            let discovery = discover_enrollment(
                 &enrollment_url,
                 &ca_sha256,
                 request.controller_address,
                 runner,
             )?;
+            let firewall = FirewallConfig::collect(
+                &request.firewall_inputs,
+                request.controller_address,
+                prompt,
+            )?;
             ApplyOperation::Fresh {
-                enrollment_url,
-                controller_url,
+                enrollment_url: Box::new(enrollment_url),
+                controller_url: Box::new(discovery.controller_url),
                 ca_sha256,
-                ca_pem,
+                ca_pem: discovery.ca_pem,
                 node_id: format!("spk_{}", Uuid::new_v4().simple()),
                 pairing_token,
-                host_mapping,
+                host_mapping: discovery.host_mapping,
+                firewall,
+                helper_authority: discovery.helper_authority,
             }
         }
         InstallState::ConfiguredUnpaired => {
@@ -960,16 +1224,20 @@ pub fn apply_setup_from_with_authority(
             node_id,
             pairing_token,
             host_mapping,
+            firewall,
+            helper_authority,
         } => {
             install_package(runner, &staged)?;
             let config = GeneratedConfig {
-                enrollment_url,
-                controller_url,
+                enrollment_url: *enrollment_url,
+                controller_url: *controller_url,
                 ca_path: paths.ca.clone(),
                 ca_sha256,
                 node_id,
+                fabric_address: firewall.node_fabric_ip,
+                fabric_bandwidth_mbps: firewall.fabric_bandwidth_mbps,
             };
-            install_configuration(paths, &config, &ca_pem, owner)?;
+            install_configuration(paths, &config, &firewall, &helper_authority, &ca_pem, owner)?;
             if let Some(mapping) = host_mapping {
                 install_host_mapping(paths, &mapping, owner)?;
             }
@@ -1061,6 +1329,8 @@ fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
             node_id,
             pairing_token,
             host_mapping,
+            firewall,
+            helper_authority,
         } => {
             if !valid_origin(enrollment_url)
                 || !valid_origin(controller_url)
@@ -1068,6 +1338,8 @@ fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
                 || !valid_node_id(node_id)
                 || !valid_token(pairing_token)
                 || !valid_host_mapping(host_mapping.as_ref())
+                || !firewall.valid()
+                || !valid_helper_authority(helper_authority)
             {
                 return Err(SetupError::PrivilegedInput);
             }
@@ -1093,6 +1365,8 @@ fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
 fn install_configuration(
     paths: &InstallPaths,
     config: &GeneratedConfig,
+    firewall: &FirewallConfig,
+    helper_authority: &[u8],
     ca: &[u8],
     owner: u32,
 ) -> Result<(), SetupError> {
@@ -1102,8 +1376,23 @@ fn install_configuration(
     if !valid_written_config(&parsed, paths) {
         return Err(SetupError::PrivilegedInput);
     }
+    if !valid_helper_authority(helper_authority) {
+        return Err(SetupError::PrivilegedInput);
+    }
     atomic_root_write(&paths.ca, ca, owner, 0o644)?;
-    atomic_root_write(&paths.config, rendered.as_bytes(), owner, 0o644)
+    atomic_root_write(&paths.config, rendered.as_bytes(), owner, 0o644)?;
+    atomic_root_write(
+        &paths.firewall_config,
+        firewall.render().as_bytes(),
+        owner,
+        0o600,
+    )?;
+    atomic_root_write(
+        &paths.helper_authority,
+        format!("{}\n", hex::encode(helper_authority)).as_bytes(),
+        owner,
+        0o644,
+    )
 }
 
 const HOSTS_BEGIN: &str = "# BEGIN VONK FORGE MANAGED HOSTS";
@@ -1225,7 +1514,13 @@ fn enable_runtime_units(
         runner,
         Command::new(
             "/usr/bin/systemctl",
-            ["enable", "--now", HELPER_SOCKET, &paths.service],
+            [
+                "enable",
+                "--now",
+                FIREWALL_SERVICE,
+                HELPER_SOCKET,
+                &paths.service,
+            ],
         ),
     )
     .map(|_| ())
@@ -1377,13 +1672,17 @@ fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
     safe_existing_parent(&paths.agent, paths.required_owner)?;
     let config = safe_existing_file(&paths.config, paths.required_owner)?;
     let ca = safe_existing_file(&paths.ca, paths.required_owner)?;
+    let firewall = safe_existing_file(&paths.firewall_config, paths.required_owner)?;
+    let helper_authority = safe_existing_file(&paths.helper_authority, paths.required_owner)?;
     let agent = safe_existing_file(&paths.agent, paths.required_owner)?;
     let state_path = setup_state_path(paths);
     let state = safe_existing_file(&state_path, paths.required_owner)?;
-    match (config, ca, agent, state) {
-        (false, false, false, false) => Ok(InstallState::Fresh),
-        (true, true, true, true) => {
+    match (config, ca, firewall, helper_authority, agent, state) {
+        (false, false, false, false, false, false) => Ok(InstallState::Fresh),
+        (true, true, true, true, true, true) => {
             paired_configuration(&paths.config, paths)?;
+            installed_firewall_configuration(paths)?;
+            installed_helper_authority(paths)?;
             let raw = fs::read(&state_path).map_err(|_| SetupError::ExistingInstall)?;
             match raw.as_slice() {
                 b"unpaired-v1\n" => Ok(InstallState::ConfiguredUnpaired),
@@ -1393,6 +1692,104 @@ fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
         }
         _ => Err(SetupError::ExistingInstall),
     }
+}
+
+fn installed_helper_authority(paths: &InstallPaths) -> Result<Vec<u8>, SetupError> {
+    let raw = fs::read(&paths.helper_authority).map_err(|_| SetupError::ExistingInstall)?;
+    if raw.len() != 65 || raw.last() != Some(&b'\n') {
+        return Err(SetupError::ExistingInstall);
+    }
+    let decoded = hex::decode(&raw[..64]).map_err(|_| SetupError::ExistingInstall)?;
+    if !valid_helper_authority(&decoded) || hex::encode(&decoded).as_bytes() != &raw[..64] {
+        return Err(SetupError::ExistingInstall);
+    }
+    Ok(decoded)
+}
+
+fn valid_helper_authority(value: &[u8]) -> bool {
+    value.len() == 32 && value.iter().any(|byte| *byte != 0)
+}
+
+fn installed_firewall_configuration(paths: &InstallPaths) -> Result<FirewallConfig, SetupError> {
+    let raw =
+        fs::read_to_string(&paths.firewall_config).map_err(|_| SetupError::ExistingInstall)?;
+    if raw.len() > 16 * 1024 {
+        return Err(SetupError::ExistingInstall);
+    }
+    let mut values = BTreeMap::new();
+    for line in raw.lines() {
+        let (name, value) = line.split_once('=').ok_or(SetupError::ExistingInstall)?;
+        if value.is_empty() && name != "VONK_HOST_ENDPOINT_PORTS" {
+            return Err(SetupError::ExistingInstall);
+        }
+        if values.insert(name, value).is_some() {
+            return Err(SetupError::ExistingInstall);
+        }
+    }
+    let mut parse_ip = |name| {
+        values
+            .remove(name)
+            .ok_or(SetupError::ExistingInstall)?
+            .parse::<Ipv4Addr>()
+            .map_err(|_| SetupError::ExistingInstall)
+    };
+    let parse_ports = |value: &str, required: bool| {
+        if value.is_empty() {
+            return if required {
+                Err(SetupError::ExistingInstall)
+            } else {
+                Ok(Vec::new())
+            };
+        }
+        value
+            .split(',')
+            .map(|value| {
+                value
+                    .parse::<u16>()
+                    .map_err(|_| SetupError::ExistingInstall)
+                    .and_then(|port| {
+                        if port.to_string() == value {
+                            Ok(port)
+                        } else {
+                            Err(SetupError::ExistingInstall)
+                        }
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let agent_config = paired_configuration(&paths.config, paths)?;
+    let config = FirewallConfig {
+        nas_management_ip: parse_ip("VONK_NAS_MANAGEMENT_IP")?,
+        node_management_ip: parse_ip("VONK_NODE_MANAGEMENT_IP")?,
+        node_fabric_ip: parse_ip("VONK_NODE_FABRIC_IP")?,
+        peer_fabric_ip: parse_ip("VONK_PEER_FABRIC_IP")?,
+        endpoint_host_ports: parse_ports(
+            values
+                .remove("VONK_ENDPOINT_HOST_PORTS")
+                .ok_or(SetupError::ExistingInstall)?,
+            true,
+        )?,
+        host_endpoint_ports: parse_ports(
+            values
+                .remove("VONK_HOST_ENDPOINT_PORTS")
+                .ok_or(SetupError::ExistingInstall)?,
+            false,
+        )?,
+        rendezvous_port: values
+            .remove("VONK_RENDEZVOUS_PORT")
+            .ok_or(SetupError::ExistingInstall)?
+            .parse::<u16>()
+            .map_err(|_| SetupError::ExistingInstall)?,
+        fabric_bandwidth_mbps: agent_config.fabric_bandwidth_mbps,
+    };
+    if !values.is_empty()
+        || !config.valid()
+        || config.node_fabric_ip != agent_config.fabric_address
+        || config.render() != raw
+    {
+        return Err(SetupError::ExistingInstall);
+    }
+    Ok(config)
 }
 
 fn safe_existing_parent(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
@@ -1726,6 +2123,7 @@ struct EnrollmentBootstrap {
     controller_address: Option<String>,
     #[serde(default)]
     service_hostnames: Vec<String>,
+    host_helper_authority_public_key: String,
 }
 
 fn discover_enrollment(
@@ -1733,9 +2131,10 @@ fn discover_enrollment(
     expected_ca_sha256: &str,
     expected_controller_address: Option<Ipv4Addr>,
     runner: &mut dyn CommandRunner,
-) -> Result<(Url, Vec<u8>, Option<HostMapping>), SetupError> {
+) -> Result<EnrollmentDiscovery, SetupError> {
     let mut bootstrap_url = expected_enrollment.clone();
     bootstrap_url.set_path("/agent/v1/bootstrap");
+    bootstrap_url.set_query(Some("setup_schema=2"));
     let output = run_checked(
         runner,
         bootstrap_curl(&bootstrap_url, expected_controller_address, None),
@@ -1746,7 +2145,7 @@ fn discover_enrollment(
     }
     let bootstrap: EnrollmentBootstrap =
         serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
-    let (controller, ca, mapping) = validate_enrollment_bootstrap(
+    let discovered = validate_enrollment_bootstrap(
         bootstrap,
         expected_enrollment,
         expected_ca_sha256,
@@ -1754,12 +2153,12 @@ fn discover_enrollment(
     )?;
     let directory = secure_tempdir("vonk-enrollment-ca.")?;
     let ca_path = directory.path().join("controller-ca.pem");
-    fs::write(&ca_path, &ca).map_err(SetupError::PrivilegedWrite)?;
+    fs::write(&ca_path, &discovered.ca_pem).map_err(SetupError::PrivilegedWrite)?;
     let authenticated = run_checked(
         runner,
         bootstrap_curl(
             &bootstrap_url,
-            mapping.as_ref().map(|value| {
+            discovered.host_mapping.as_ref().map(|value| {
                 value
                     .address
                     .parse::<Ipv4Addr>()
@@ -1778,11 +2177,12 @@ fn discover_enrollment(
         authenticated,
         expected_enrollment,
         expected_ca_sha256,
-        mapping
+        discovered
+            .host_mapping
             .as_ref()
             .map(|value| value.address.parse().expect("validated controller address")),
     )?;
-    if verified.0 != controller || verified.1 != ca || verified.2 != mapping {
+    if verified != discovered {
         return Err(SetupError::EnrollmentBootstrap);
     }
     Ok(verified)
@@ -1827,7 +2227,7 @@ fn validate_enrollment_bootstrap(
     expected_enrollment: &Url,
     expected_ca_sha256: &str,
     expected_controller_address: Option<Ipv4Addr>,
-) -> Result<(Url, Vec<u8>, Option<HostMapping>), SetupError> {
+) -> Result<EnrollmentDiscovery, SetupError> {
     let enrollment =
         Url::parse(&bootstrap.enrollment_endpoint).map_err(|_| SetupError::EnrollmentBootstrap)?;
     let controller =
@@ -1842,6 +2242,19 @@ fn validate_enrollment_bootstrap(
     }
     let ca = bootstrap.ca_pem.into_bytes();
     verify_ca(&ca, expected_ca_sha256).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    if bootstrap.host_helper_authority_public_key.len() != 64
+        || !bootstrap
+            .host_helper_authority_public_key
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
+    let helper_authority = hex::decode(bootstrap.host_helper_authority_public_key)
+        .map_err(|_| SetupError::EnrollmentBootstrap)?;
+    if !valid_helper_authority(&helper_authority) {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
     let mapping = match bootstrap.controller_address {
         Some(address) => {
             let address = address
@@ -1873,7 +2286,12 @@ fn validate_enrollment_bootstrap(
         }
         None => return Err(SetupError::EnrollmentBootstrap),
     };
-    Ok((controller, ca, mapping))
+    Ok(EnrollmentDiscovery {
+        controller_url: controller,
+        ca_pem: ca,
+        host_mapping: mapping,
+        helper_authority,
+    })
 }
 
 fn required_sha256(prompt: &mut dyn Prompt, label: &str) -> Result<String, SetupError> {
@@ -1978,17 +2396,21 @@ struct GeneratedConfig {
     ca_path: PathBuf,
     ca_sha256: String,
     node_id: String,
+    fabric_address: Ipv4Addr,
+    fabric_bandwidth_mbps: u64,
 }
 
 impl GeneratedConfig {
     fn to_toml(&self) -> String {
         format!(
-            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"{}\"\nfabric_bandwidth_mbps = {}\n",
             self.enrollment_url,
             self.controller_url,
             self.ca_path.display(),
             self.ca_sha256,
             self.node_id,
+            self.fabric_address,
+            self.fabric_bandwidth_mbps,
         )
     }
 }
@@ -2004,6 +2426,8 @@ struct WrittenConfig {
     node_id: String,
     poll_min_seconds: u64,
     poll_max_seconds: u64,
+    fabric_address: Ipv4Addr,
+    fabric_bandwidth_mbps: u64,
 }
 
 fn valid_written_config(config: &WrittenConfig, paths: &InstallPaths) -> bool {
@@ -2015,6 +2439,8 @@ fn valid_written_config(config: &WrittenConfig, paths: &InstallPaths) -> bool {
         && valid_node_id(&config.node_id)
         && config.poll_min_seconds == 2
         && config.poll_max_seconds == 60
+        && valid_site_ipv4(config.fabric_address)
+        && (1..=1_000_000).contains(&config.fabric_bandwidth_mbps)
 }
 
 fn valid_node_id(value: &str) -> bool {
@@ -2171,6 +2597,19 @@ impl Prompt for TtyPrompt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+
+    struct Values(VecDeque<String>);
+
+    impl Prompt for Values {
+        fn value(&mut self, _label: &str) -> Result<String, String> {
+            self.0.pop_front().ok_or_else(|| "missing value".to_owned())
+        }
+
+        fn secret(&mut self, _label: &str) -> Result<String, String> {
+            Err("unexpected secret prompt".to_owned())
+        }
+    }
 
     #[test]
     fn host_validation_rejects_non_debian_and_missing_systemd_before_setup() {
@@ -2208,5 +2647,53 @@ mod tests {
                 "b".repeat(64)
             )
         );
+    }
+
+    #[test]
+    fn firewall_configuration_defaults_are_canonical_and_controller_bound() {
+        let mut prompt = Values(
+            ["192.168.1.211", "192.168.100.10", "192.168.100.11"]
+                .map(str::to_owned)
+                .into(),
+        );
+        let config = FirewallConfig::collect(
+            &FirewallInputs::default(),
+            Some("192.168.1.231".parse().unwrap()),
+            &mut prompt,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.render(),
+            "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n"
+        );
+        assert_eq!(config.fabric_bandwidth_mbps, 200_000);
+        assert!(prompt.0.is_empty());
+    }
+
+    #[test]
+    fn firewall_configuration_rejects_ambiguous_topology_and_ports() {
+        let base = FirewallInputs {
+            nas_management_ip: Some("192.168.1.231".to_owned()),
+            node_management_ip: Some("192.168.1.211".to_owned()),
+            node_fabric_ip: Some("192.168.100.10".to_owned()),
+            peer_fabric_ip: Some("192.168.100.10".to_owned()),
+            ..FirewallInputs::default()
+        };
+        let mut prompt = Values(VecDeque::new());
+        assert!(matches!(
+            FirewallConfig::collect(&base, None, &mut prompt),
+            Err(SetupError::UnsafeInput("Spark network topology"))
+        ));
+
+        let invalid_ports = FirewallInputs {
+            peer_fabric_ip: Some("192.168.100.11".to_owned()),
+            endpoint_host_ports: Some("08000".to_owned()),
+            ..base
+        };
+        assert!(matches!(
+            FirewallConfig::collect(&invalid_ports, None, &mut prompt),
+            Err(SetupError::UnsafeInput("endpoint host ports"))
+        ));
     }
 }
