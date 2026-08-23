@@ -10,6 +10,8 @@ import re
 import threading
 import time
 from dataclasses import dataclass, replace
+from datetime import date
+from itertools import pairwise
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -47,6 +49,12 @@ _MAX_RECIPES = 256
 _MAX_CATALOG_ENTITIES = 512
 _MAX_SOURCE_CONTEXTS = 128
 _MAX_SOURCE_FILES = 4096
+_MAX_RELEASES = 32
+_MAX_RELEASE_CHANGES = 16
+_SEMVER = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 _INDEX_PATH = "catalog-index.json"
 _ENTITY_DIRECTORY = {
@@ -89,6 +97,23 @@ class RecipeLibrarySourceContext:
 
 
 @dataclass(frozen=True, slots=True)
+class RecipeLibraryChange:
+    kind: str
+    summary: str
+    details: str | None = None
+    references: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeLibraryRelease:
+    version: str
+    released_at: str
+    content_sha256: str
+    upgrade_effect: str
+    changes: tuple[RecipeLibraryChange, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RecipeLibraryItem:
     library_commit: str
     source_path: str
@@ -100,6 +125,7 @@ class RecipeLibraryItem:
     content_sha256: str
     uri: str
     document: dict[str, object]
+    release_history: tuple[RecipeLibraryRelease, ...] = ()
     dependencies: tuple[dict[str, object], ...] = ()
     source_context: RecipeLibrarySourceContext | None = None
     source_bundle: bytes | None = None
@@ -110,6 +136,35 @@ class RecipeLibrarySnapshot:
     commit: str
     items: tuple[RecipeLibraryItem, ...]
     repository: str = _REPOSITORY
+
+
+def recipe_release_is_older(older: str, newer: str) -> bool:
+    def parts(value: str) -> tuple[tuple[int, int, int], tuple[str, ...]]:
+        core, separator, prerelease = value.partition("-")
+        return (
+            tuple(int(item) for item in core.split(".")),  # type: ignore[return-value]
+            tuple(prerelease.split(".")) if separator else (),
+        )
+
+    older_core, older_prerelease = parts(older)
+    newer_core, newer_prerelease = parts(newer)
+    if older_core != newer_core:
+        return older_core < newer_core
+    if not older_prerelease:
+        return False
+    if not newer_prerelease:
+        return True
+    for older_item, newer_item in zip(older_prerelease, newer_prerelease, strict=False):
+        if older_item == newer_item:
+            continue
+        older_numeric = older_item.isdigit()
+        newer_numeric = newer_item.isdigit()
+        if older_numeric and newer_numeric:
+            return int(older_item) < int(newer_item)
+        if older_numeric != newer_numeric:
+            return older_numeric
+        return older_item < newer_item
+    return len(older_prerelease) < len(newer_prerelease)
 
 
 class RecipeLibraryClient:
@@ -221,9 +276,7 @@ class RecipeLibraryClient:
             if isinstance(entry, dict)
             and entry.get("type") == "blob"
             and isinstance(entry.get("path"), str)
-            and re.fullmatch(
-                r"recipes/[a-z0-9][a-z0-9-]{1,62}\.json", entry["path"]
-            )
+            and re.fullmatch(r"recipes/[a-z0-9][a-z0-9-]{1,62}\.json", entry["path"])
         )
         return tuple(self._item(commit, path) for path in paths)
 
@@ -270,10 +323,12 @@ class RecipeLibraryClient:
                     "recipe library index entry is incomplete",
                 )
             item = self._item_from_document(commit, source_path, recipe_document)
+            release_history = self._release_history(entry, item.content_sha256)
             dependencies = self._dependency_closure(item.document, entities)
             source_context = self._recipe_source_context(item.document, contexts)
             item = replace(
                 item,
+                release_history=release_history,
                 dependencies=dependencies,
                 source_context=source_context,
             )
@@ -291,6 +346,188 @@ class RecipeLibraryClient:
                 "recipe library index is not sorted",
             )
         return tuple(items)
+
+    @staticmethod
+    def _release_history(
+        entry: dict[str, object], current_digest: str
+    ) -> tuple[RecipeLibraryRelease, ...]:
+        raw_release = entry.get("release")
+        if raw_release is None:
+            return ()
+        if not isinstance(raw_release, dict) or set(raw_release) != {
+            "version",
+            "released_at",
+            "history",
+        }:
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                "recipe library release metadata is invalid",
+            )
+        current_version = raw_release["version"]
+        current_released_at = raw_release["released_at"]
+        raw_releases = raw_release["history"]
+        if (
+            not isinstance(current_version, str)
+            or _SEMVER.fullmatch(current_version) is None
+            or not isinstance(current_released_at, str)
+            or not isinstance(raw_releases, list)
+            or not raw_releases
+            or len(raw_releases) > _MAX_RELEASES
+        ):
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                "recipe library release history is invalid",
+            )
+        categories = {
+            "initial",
+            "model",
+            "runtime",
+            "performance",
+            "fix",
+            "security",
+            "compatibility",
+            "metadata",
+            "breaking",
+        }
+        effects = {"metadata-only", "restart", "reinstall", "rebuild"}
+        releases: list[RecipeLibraryRelease] = []
+        versions: set[str] = set()
+        digests: set[str] = set()
+        for raw_release in raw_releases:
+            if not isinstance(raw_release, dict) or set(raw_release) != {
+                "version",
+                "released_at",
+                "recipe_content_sha256",
+                "upgrade_effect",
+                "changes",
+            }:
+                raise RecipeLibraryError(
+                    "recipe_library.response_invalid",
+                    "recipe library release entry is invalid",
+                )
+            version = raw_release["version"]
+            released_at = raw_release["released_at"]
+            digest = raw_release["recipe_content_sha256"]
+            effect = raw_release["upgrade_effect"]
+            raw_changes = raw_release["changes"]
+            if (
+                not isinstance(version, str)
+                or _SEMVER.fullmatch(version) is None
+                or version in versions
+                or not isinstance(released_at, str)
+                or len(released_at) != 10
+                or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or digest in digests
+                or effect not in effects
+                or not isinstance(raw_changes, list)
+                or not raw_changes
+                or len(raw_changes) > _MAX_RELEASE_CHANGES
+            ):
+                raise RecipeLibraryError(
+                    "recipe_library.response_invalid",
+                    "recipe library release entry is invalid",
+                )
+            try:
+                parsed_date = date.fromisoformat(released_at)
+            except ValueError as error:
+                raise RecipeLibraryError(
+                    "recipe_library.response_invalid",
+                    "recipe library release date is invalid",
+                ) from error
+            if parsed_date.isoformat() != released_at:
+                raise RecipeLibraryError(
+                    "recipe_library.response_invalid",
+                    "recipe library release date is invalid",
+                )
+            changes: list[RecipeLibraryChange] = []
+            for raw_change in raw_changes:
+                if (
+                    not isinstance(raw_change, dict)
+                    or not {"kind", "summary"}.issubset(raw_change)
+                    or not set(raw_change).issubset(
+                        {"kind", "summary", "details", "references"}
+                    )
+                ):
+                    raise RecipeLibraryError(
+                        "recipe_library.response_invalid",
+                        "recipe library release change is invalid",
+                    )
+                kind = raw_change["kind"]
+                summary = raw_change["summary"]
+                details = raw_change.get("details")
+                references = raw_change.get("references", [])
+                if (
+                    kind not in categories
+                    or not isinstance(summary, str)
+                    or not summary.strip()
+                    or summary != summary.strip()
+                    or len(summary) > 160
+                    or (
+                        details is not None
+                        and (
+                            not isinstance(details, str)
+                            or not details.strip()
+                            or details != details.strip()
+                            or len(details) > 1000
+                        )
+                    )
+                    or not isinstance(references, list)
+                    or ("references" in raw_change and not references)
+                    or len(references) > 8
+                    or any(
+                        not isinstance(reference, str)
+                        or not reference.startswith("https://")
+                        or len(reference) > 500
+                        for reference in references
+                    )
+                    or len(references) != len(set(references))
+                ):
+                    raise RecipeLibraryError(
+                        "recipe_library.response_invalid",
+                        "recipe library release change is invalid",
+                    )
+                changes.append(
+                    RecipeLibraryChange(
+                        kind=str(kind),
+                        summary=summary,
+                        details=details if isinstance(details, str) else None,
+                        references=tuple(str(reference) for reference in references),
+                    )
+                )
+            digests.add(digest)
+            versions.add(version)
+            releases.append(
+                RecipeLibraryRelease(
+                    version=version,
+                    released_at=released_at,
+                    content_sha256=digest,
+                    upgrade_effect=str(effect),
+                    changes=tuple(changes),
+                )
+            )
+        if releases[0].content_sha256 != current_digest:
+            raise RecipeLibraryError(
+                "recipe_library.digest_mismatch",
+                "current recipe release does not match its document",
+            )
+        if (
+            current_version != releases[0].version
+            or current_released_at != releases[0].released_at
+        ):
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                "current recipe release metadata is inconsistent",
+            )
+        if any(
+            not recipe_release_is_older(older.version, newer.version)
+            for newer, older in pairwise(releases)
+        ):
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                "recipe library release versions are not newest-first",
+            )
+        return tuple(releases)
 
     def _indexed_entities(
         self, index: dict[str, object]
@@ -337,7 +574,12 @@ class RecipeLibraryClient:
                     str(identity["slug"]),
                     catalog_content_sha256(document),
                 )
-            except (CatalogContractError, KeyError, ValueError, AssertionError) as error:
+            except (
+                CatalogContractError,
+                KeyError,
+                ValueError,
+                AssertionError,
+            ) as error:
                 raise RecipeLibraryError(
                     "recipe_library.schema_incompatible",
                     "recipe library catalog entity is incompatible",
@@ -431,7 +673,9 @@ class RecipeLibraryClient:
                     "recipe_library.response_invalid",
                     "recipe library source files are not sorted",
                 )
-            context = RecipeLibrarySourceContext(path, digest, expected_bytes, tuple(files))
+            context = RecipeLibrarySourceContext(
+                path, digest, expected_bytes, tuple(files)
+            )
             if digest in contexts and contexts[digest] != context:
                 raise RecipeLibraryError(
                     "recipe_library.digest_mismatch",
@@ -443,8 +687,10 @@ class RecipeLibraryClient:
     @staticmethod
     def _safe_relative_path(value: str) -> bool:
         path = PurePosixPath(value)
-        return bool(path.parts) and not path.is_absolute() and all(
-            part not in {"", ".", ".."} for part in path.parts
+        return (
+            bool(path.parts)
+            and not path.is_absolute()
+            and all(part not in {"", ".", ".."} for part in path.parts)
         )
 
     def _dependency_closure(
@@ -476,7 +722,10 @@ class RecipeLibraryClient:
             elif reference.kind is CatalogKind.MODEL_VERSION:
                 field, expected_kind = "model", CatalogKind.MODEL
             elif reference.kind is CatalogKind.RUNTIME_DISTRIBUTION:
-                field, expected_kind = "implements_harness", CatalogKind.EXECUTION_HARNESS
+                field, expected_kind = (
+                    "implements_harness",
+                    CatalogKind.EXECUTION_HARNESS,
+                )
             elif reference.kind is CatalogKind.PATCH_BUNDLE:
                 field, expected_kind = "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
             if field is not None:
@@ -487,7 +736,9 @@ class RecipeLibraryClient:
                         "recipe library dependency reference is invalid",
                     )
                 try:
-                    pending.append(parse_catalog_reference(value, expected_kind=expected_kind))
+                    pending.append(
+                        parse_catalog_reference(value, expected_kind=expected_kind)
+                    )
                 except CatalogContractError as error:
                     raise RecipeLibraryError(
                         "recipe_library.response_invalid",
@@ -514,7 +765,9 @@ class RecipeLibraryClient:
         context = build.get("context") if isinstance(build, dict) else None
         path = context.get("path") if isinstance(context, dict) else None
         digest = context.get("sha256") if isinstance(context, dict) else None
-        expected_bytes = context.get("expected_bytes") if isinstance(context, dict) else None
+        expected_bytes = (
+            context.get("expected_bytes") if isinstance(context, dict) else None
+        )
         selected = contexts.get(digest) if isinstance(digest, str) else None
         if (
             selected is None
@@ -584,7 +837,10 @@ class RecipeLibraryClient:
                     f"blob {len(content)}\0".encode() + content,
                     usedforsecurity=False,
                 ).hexdigest()
-                if len(content) != source_file.size or git_identity != source_file.blob_sha:
+                if (
+                    len(content) != source_file.size
+                    or git_identity != source_file.blob_sha
+                ):
                     raise RecipeLibraryError(
                         "recipe_library.digest_mismatch",
                         "recipe library source blob digest does not match",
@@ -655,9 +911,7 @@ class RecipeLibraryClient:
                 f"{label} content is invalid",
             )
         try:
-            return base64.b64decode(
-                "".join(encoded["content"].split()), validate=True
-            )
+            return base64.b64decode("".join(encoded["content"].split()), validate=True)
         except binascii.Error as error:
             raise RecipeLibraryError(
                 "recipe_library.response_invalid",

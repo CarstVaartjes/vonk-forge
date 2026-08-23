@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import Any, BinaryIO
 
@@ -58,6 +58,10 @@ from .schema_resources import read_runtime_schema
 from .source_bundles import SourceBundleError, SourceBundleStore
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+_RELEASE_VERSION = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _MUTABLE_REVISIONS = frozenset(
     {"main", "master", "latest", "head", "main-latest", "master-latest"}
 )
@@ -107,6 +111,7 @@ class RemoteRecipeImportPreview:
     report_digest: str
     source_sha256: str
 
+
 @dataclass(frozen=True, slots=True)
 class RecipeSummary:
     recipe_id: str
@@ -126,6 +131,17 @@ class RecipeSummary:
     node_count: int
     maximum_installed_bytes_per_node: int
     maximum_runtime_memory_bytes_per_node: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeCatalogLocalRevision:
+    recipe_id: str
+    source_kind: str
+    publisher: str
+    slug: str
+    revision_number: int
+    content_sha256: str | None
+    release_version: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +300,84 @@ class CatalogService:
             if revision is None:
                 raise KeyError(recipe_id)
             return _view(recipe, revision)
+
+    def recipe_catalog_local_revisions(
+        self, slugs: Sequence[str]
+    ) -> dict[str, RecipeCatalogLocalRevision]:
+        """Return one bounded latest local revision per requested catalog slug."""
+
+        requested = sorted(set(slugs))
+        if len(requested) > 256 or any(not _SLUG.fullmatch(slug) for slug in requested):
+            raise CatalogValidationError(
+                "catalog.identities", "catalog recipe identities are invalid"
+            )
+        if not requested:
+            return {}
+        latest_numbers = (
+            select(
+                LocalRecipeRevision.recipe_id,
+                func.max(LocalRecipeRevision.revision_number).label("revision_number"),
+            )
+            .group_by(LocalRecipeRevision.recipe_id)
+            .subquery()
+        )
+        with self._sessions() as session:
+            rows = session.execute(
+                select(LocalRecipe, LocalRecipeRevision)
+                .join(latest_numbers, latest_numbers.c.recipe_id == LocalRecipe.id)
+                .join(
+                    LocalRecipeRevision,
+                    and_(
+                        LocalRecipeRevision.recipe_id == LocalRecipe.id,
+                        LocalRecipeRevision.revision_number
+                        == latest_numbers.c.revision_number,
+                    ),
+                )
+                .where(LocalRecipe.slug.in_(requested))
+            ).all()
+            recipe_ids = [recipe.id for recipe, _revision in rows]
+            receipts = (
+                session.scalars(
+                    select(RecipeImport).where(
+                        RecipeImport.recipe_id.in_(recipe_ids),
+                        RecipeImport.source_kind == "recipe_library",
+                    )
+                ).all()
+                if recipe_ids
+                else []
+            )
+        receipt_versions: dict[tuple[str, str], str] = {}
+        for receipt in receipts:
+            raw_version = receipt.redacted_source.get("release_version")
+            if (
+                isinstance(raw_version, str)
+                and _RELEASE_VERSION.fullmatch(raw_version) is not None
+            ):
+                receipt_versions[(receipt.recipe_id, receipt.source_sha256)] = (
+                    raw_version
+                )
+        result: dict[str, RecipeCatalogLocalRevision] = {}
+        for recipe, revision in rows:
+            identity = revision.document.get("identity")
+            publisher = (
+                str(identity.get("publisher", ""))
+                if isinstance(identity, Mapping)
+                else ""
+            )
+            result[recipe.slug] = RecipeCatalogLocalRevision(
+                recipe_id=recipe.id,
+                source_kind=recipe.source_kind,
+                publisher=publisher,
+                slug=recipe.slug,
+                revision_number=revision.revision_number,
+                content_sha256=revision.content_sha256,
+                release_version=(
+                    receipt_versions.get((recipe.id, revision.content_sha256))
+                    if revision.content_sha256 is not None
+                    else None
+                ),
+            )
+        return result
 
     def create_recipe(self, actor: str, draft: RecipeDraftInput) -> RecipeRevisionView:
         document = self._validated_document(draft.document, slug=draft.slug)
@@ -493,8 +587,8 @@ class CatalogService:
             if applies_to != distribution_ref:
                 raise CatalogConflict(
                     "catalog.patch_distribution_mismatch",
-                "patch bundle does not declare the recipe's exact distribution",
-            )
+                    "patch bundle does not declare the recipe's exact distribution",
+                )
         for dependency_ref in recipe_model_dependencies(document):
             dependency = entity_service.lookup_exact(*dependency_ref.portable_identity)
             model_ref = _catalog_reference(
@@ -672,6 +766,8 @@ class CatalogService:
         document: Mapping[str, object],
         expected_content_sha256: str,
         dependency_documents: Sequence[Mapping[str, object]] = (),
+        release_version: str | None = None,
+        release_released_at: str | None = None,
     ) -> RecipeRevisionView:
         """Import one exact recipe from the public Git recipe library."""
 
@@ -742,6 +838,19 @@ class CatalogService:
                     "recipe_library.slug_conflict",
                     "a non-library recipe already uses this slug",
                 )
+            else:
+                previous = self._repository.latest_revision(session, recipe.id)
+                previous_identity = (
+                    previous.document.get("identity") if previous is not None else None
+                )
+                if (
+                    not isinstance(previous_identity, Mapping)
+                    or previous_identity.get("publisher") != publisher
+                ):
+                    raise CatalogConflict(
+                        "recipe_library.identity_conflict",
+                        "the local recipe publisher does not match the library recipe",
+                    )
 
             revision = session.scalar(
                 select(LocalRecipeRevision).where(
@@ -771,19 +880,43 @@ class CatalogService:
                 session.add(revision)
                 session.flush()
 
+            redacted_source: dict[str, object] = {
+                "repository": "CarstVaartjes/vonk-forge-recipes",
+                "commit": library_commit,
+                "path": source_path,
+                "publisher": publisher,
+                "slug": slug,
+            }
+            if (release_version is None) != (release_released_at is None):
+                raise CatalogValidationError(
+                    "recipe_library.release_invalid",
+                    "recipe library release metadata is invalid",
+                )
+            if release_version is not None and release_released_at is not None:
+                try:
+                    parsed_release_date = date.fromisoformat(release_released_at)
+                except ValueError as error:
+                    raise CatalogValidationError(
+                        "recipe_library.release_invalid",
+                        "recipe library release metadata is invalid",
+                    ) from error
+                if (
+                    _RELEASE_VERSION.fullmatch(release_version) is None
+                    or parsed_release_date.isoformat() != release_released_at
+                ):
+                    raise CatalogValidationError(
+                        "recipe_library.release_invalid",
+                        "recipe library release metadata is invalid",
+                    )
+                redacted_source["release_version"] = release_version
+                redacted_source["release_released_at"] = release_released_at
             session.add(
                 RecipeImport(
                     recipe_id=recipe.id,
                     source_kind="recipe_library",
                     source_reference=source_reference,
                     source_sha256=actual,
-                    redacted_source={
-                        "repository": "CarstVaartjes/vonk-forge-recipes",
-                        "commit": library_commit,
-                        "path": source_path,
-                        "publisher": publisher,
-                        "slug": slug,
-                    },
+                    redacted_source=redacted_source,
                     created_by=actor,
                     created_at=now,
                 )
@@ -1016,13 +1149,21 @@ class CatalogService:
     ) -> RemoteRecipeImportPreview:
         """Validate an exact remote revision and return its persistence report."""
         raw_identity = _mapping(remote.document.get("identity"))
-        clean = self._validated_document(remote.document, slug=str(raw_identity.get("slug", "")))
+        clean = self._validated_document(
+            remote.document, slug=str(raw_identity.get("slug", ""))
+        )
         actual = recipe_content_sha256(clean)
         if actual != remote.content_sha256:
-            raise CatalogValidationError("recipe_library.hash_mismatch", "recipe content does not match remote digest")
+            raise CatalogValidationError(
+                "recipe_library.hash_mismatch",
+                "recipe content does not match remote digest",
+            )
         identity = _mapping(clean["identity"])
         if identity != {"publisher": remote.publisher, "slug": remote.slug}:
-            raise CatalogValidationError("recipe_library.identity_mismatch", "remote recipe identity is inconsistent")
+            raise CatalogValidationError(
+                "recipe_library.identity_mismatch",
+                "remote recipe identity is inconsistent",
+            )
         item = ImportReportItem(
             source_path=f"recipes/{remote.slug}.json",
             disposition=ImportDisposition.IMPORTED,
@@ -1031,14 +1172,35 @@ class CatalogService:
             detail="remote recipe revision will be copied into PostgreSQL",
             blocking=False,
         )
-        encoded = json.dumps({"source_sha256": actual, "items": [asdict(item)]}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-        return RemoteRecipeImportPreview(remote, (item,), hashlib.sha256(encoded).hexdigest(), actual)
+        encoded = json.dumps(
+            {"source_sha256": actual, "items": [asdict(item)]},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+        return RemoteRecipeImportPreview(
+            remote, (item,), hashlib.sha256(encoded).hexdigest(), actual
+        )
 
-    def import_recipe_library_preview(self, actor: str, preview: RemoteRecipeImportPreview) -> RecipeRevisionView:
+    def import_recipe_library_preview(
+        self, actor: str, preview: RemoteRecipeImportPreview
+    ) -> RecipeRevisionView:
         checked = self.preview_recipe_library(preview.remote)
-        if (checked.source_sha256, checked.report_digest) != (preview.source_sha256, preview.report_digest):
-            raise CatalogConflict("recipe_library.preview_changed", "remote recipe changed since preview")
-        return self.import_recipe_library(actor, library_commit=preview.remote.revision_id.replace("-", "")[:40], source_path=f"recipes/{preview.remote.slug}.json", document=preview.remote.document, expected_content_sha256=preview.source_sha256)
+        if (checked.source_sha256, checked.report_digest) != (
+            preview.source_sha256,
+            preview.report_digest,
+        ):
+            raise CatalogConflict(
+                "recipe_library.preview_changed", "remote recipe changed since preview"
+            )
+        return self.import_recipe_library(
+            actor,
+            library_commit=preview.remote.revision_id.replace("-", "")[:40],
+            source_path=f"recipes/{preview.remote.slug}.json",
+            document=preview.remote.document,
+            expected_content_sha256=preview.source_sha256,
+        )
+
     def publication_export(
         self, recipe_id: str, target_publisher: str
     ) -> dict[str, object]:

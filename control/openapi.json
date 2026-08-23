@@ -4067,6 +4067,60 @@
         "title": "PublicImportRequest",
         "type": "object"
       },
+      "PublicRecipeChange": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "kind": {
+            "enum": [
+              "initial",
+              "model",
+              "runtime",
+              "performance",
+              "fix",
+              "security",
+              "compatibility",
+              "breaking",
+              "metadata"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "References",
+            "type": "array"
+          },
+          "summary": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "summary",
+          "references"
+        ],
+        "title": "PublicRecipeChange",
+        "type": "object"
+      },
       "PublicRecipeListItem": {
         "additionalProperties": false,
         "properties": {
@@ -4114,6 +4168,9 @@
             "minimum": 1.0,
             "title": "Expected Download Bytes",
             "type": "integer"
+          },
+          "local": {
+            "$ref": "#/components/schemas/PublicRecipeLocalState"
           },
           "maximum_installed_bytes_per_node": {
             "minimum": 1.0,
@@ -4171,6 +4228,32 @@
             ],
             "title": "Qualification",
             "type": "string"
+          },
+          "release_released_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Released At"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Version"
           },
           "runtime_distribution": {
             "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
@@ -4268,7 +4351,8 @@
           "node_count",
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
-          "maximum_runtime_memory_bytes_per_node"
+          "maximum_runtime_memory_bytes_per_node",
+          "local"
         ],
         "title": "PublicRecipeListItem",
         "type": "object"
@@ -4285,7 +4369,7 @@
             "items": {
               "$ref": "#/components/schemas/PublicRecipeListItem"
             },
-            "maxItems": 100,
+            "maxItems": 256,
             "title": "Recipes",
             "type": "array"
           },
@@ -4302,6 +4386,77 @@
           "recipes"
         ],
         "title": "PublicRecipeListResponse",
+        "type": "object"
+      },
+      "PublicRecipeLocalState": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "recipe_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Id"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Version"
+          },
+          "revision_number": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Number"
+          },
+          "status": {
+            "enum": [
+              "not-imported",
+              "current",
+              "update-available",
+              "local-ahead",
+              "different-revision",
+              "conflict"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PublicRecipeLocalState",
         "type": "object"
       },
       "PublicRecipePreviewResponse": {
@@ -4331,6 +4486,14 @@
             "title": "Capabilities",
             "type": "array"
           },
+          "changes_since_local": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeRelease"
+            },
+            "maxItems": 32,
+            "title": "Changes Since Local",
+            "type": "array"
+          },
           "content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Content Sha256",
@@ -4351,6 +4514,9 @@
             "minimum": 1.0,
             "title": "Expected Download Bytes",
             "type": "integer"
+          },
+          "local": {
+            "$ref": "#/components/schemas/PublicRecipeLocalState"
           },
           "maximum_installed_bytes_per_node": {
             "minimum": 1.0,
@@ -4408,6 +4574,32 @@
             ],
             "title": "Qualification",
             "type": "string"
+          },
+          "release_released_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Released At"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Version"
           },
           "runtime_distribution": {
             "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
@@ -4514,9 +4706,61 @@
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
-          "source"
+          "local",
+          "source",
+          "changes_since_local"
         ],
         "title": "PublicRecipePreviewResponse",
+        "type": "object"
+      },
+      "PublicRecipeRelease": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeChange"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Changes",
+            "type": "array"
+          },
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "released_at": {
+            "maxLength": 10,
+            "minLength": 10,
+            "title": "Released At",
+            "type": "string"
+          },
+          "upgrade_effect": {
+            "enum": [
+              "metadata-only",
+              "restart",
+              "reinstall",
+              "rebuild"
+            ],
+            "title": "Upgrade Effect",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 64,
+            "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "released_at",
+          "content_sha256",
+          "upgrade_effect",
+          "changes"
+        ],
+        "title": "PublicRecipeRelease",
         "type": "object"
       },
       "PublicationExportRequest": {

@@ -94,6 +94,91 @@ def test_recipe_library_uses_one_digest_bound_index_and_caches_it() -> None:
     ]
 
 
+def test_recipe_library_parses_bounded_release_history_without_changing_recipe_digest() -> (
+    None
+):
+    current = "a" * 64
+    previous = "b" * 64
+    entry = {
+        "release": {
+            "version": "2.0.0",
+            "released_at": "2026-08-23",
+            "history": [
+                {
+                    "version": "2.0.0",
+                    "released_at": "2026-08-23",
+                    "recipe_content_sha256": current,
+                    "upgrade_effect": "rebuild",
+                    "changes": [
+                        {
+                            "kind": "performance",
+                            "summary": "Adopt current validated graph defaults.",
+                            "details": "The executable recipe remains digest-bound.",
+                            "references": ["https://github.com/MiaAI-Lab/example"],
+                        }
+                    ],
+                },
+                {
+                    "version": "1.0.0",
+                    "released_at": "2026-08-14",
+                    "recipe_content_sha256": previous,
+                    "upgrade_effect": "reinstall",
+                    "changes": [{"kind": "initial", "summary": "Legacy baseline."}],
+                },
+            ],
+        }
+    }
+
+    releases = RecipeLibraryClient._release_history(entry, current)
+
+    assert [release.version for release in releases] == ["2.0.0", "1.0.0"]
+    assert releases[0].content_sha256 == current
+    assert releases[0].changes[0].references == (
+        "https://github.com/MiaAI-Lab/example",
+    )
+    assert RecipeLibraryClient._release_history({}, current) == ()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value["release"].update(version="3.0.0"),
+        lambda value: value["release"]["history"].reverse(),
+        lambda value: value["release"]["history"][0].update(
+            recipe_content_sha256="c" * 64
+        ),
+    ],
+)
+def test_recipe_library_rejects_inconsistent_release_history(mutate) -> None:
+    current = "a" * 64
+    entry = {
+        "release": {
+            "version": "2.0.0",
+            "released_at": "2026-08-23",
+            "history": [
+                {
+                    "version": "2.0.0",
+                    "released_at": "2026-08-23",
+                    "recipe_content_sha256": current,
+                    "upgrade_effect": "rebuild",
+                    "changes": [{"kind": "fix", "summary": "Current release."}],
+                },
+                {
+                    "version": "1.0.0",
+                    "released_at": "2026-08-14",
+                    "recipe_content_sha256": "b" * 64,
+                    "upgrade_effect": "reinstall",
+                    "changes": [{"kind": "initial", "summary": "Baseline."}],
+                },
+            ],
+        }
+    }
+    mutate(entry)
+
+    with pytest.raises(RecipeLibraryError):
+        RecipeLibraryClient._release_history(entry, current)
+
+
 def test_recipe_library_rejects_an_index_with_a_changed_digest() -> None:
     document = json.loads(FIXTURE.read_text(encoding="utf-8"))
     commit = "d" * 40
@@ -119,7 +204,9 @@ def test_recipe_library_rejects_an_index_with_a_changed_digest() -> None:
         RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
 
 
-def test_recipe_library_v2_index_resolves_dependencies_and_exact_source_bundle() -> None:
+def test_recipe_library_v2_index_resolves_dependencies_and_exact_source_bundle() -> (
+    None
+):
     document = copy.deepcopy(
         json.loads((DEVELOPMENT_FIXTURE / "recipe.json").read_text(encoding="utf-8"))
     )
@@ -239,7 +326,11 @@ def test_recipe_library_rejects_a_changed_document_digest() -> None:
         if request.url.path.endswith(f"/git/trees/{commit}"):
             return httpx.Response(
                 200,
-                json={"tree": [{"path": "recipes/synthetic-tiny-openai.json", "type": "blob"}]},
+                json={
+                    "tree": [
+                        {"path": "recipes/synthetic-tiny-openai.json", "type": "blob"}
+                    ]
+                },
             )
         if request.url.path.endswith("/contents/catalog-index.json"):
             return httpx.Response(404)

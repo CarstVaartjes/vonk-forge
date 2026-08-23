@@ -488,6 +488,35 @@
   box-shadow: inset 3px 0 var(--mint);
 }
 
+.library-import-card-release {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.library-import-local-status {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  font-weight: 750;
+  padding: 0.22rem 0.42rem;
+}
+
+.library-import-local-status.status-update-available {
+  background: #68e5b31a;
+  border-color: #68e5b366;
+  color: var(--mint-strong);
+}
+
+.library-import-local-status.status-conflict,
+.library-import-local-status.status-different-revision,
+.library-import-local-status.status-local-ahead {
+  border-color: #e9b36c66;
+  color: #ffd099;
+}
+
 .library-import-card h5 {
   font-size: 0.96rem;
   line-height: 1.25;
@@ -642,6 +671,84 @@
 
 .library-import-facts dd {
   margin: 0.2rem 0 0;
+}
+
+.library-import-upgrade-note,
+.library-import-upgrade-warning {
+  border-left: 3px solid var(--mint);
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.library-import-upgrade-warning {
+  background: #3a281866;
+  border-left-color: #e9b36c;
+  color: #ffd8a6;
+}
+
+.library-import-changelog {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.library-import-changelog h5 {
+  margin: 0.2rem 0 0;
+}
+
+.library-import-changelog article {
+  background: #07110e99;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+}
+
+.library-import-changelog article header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+}
+
+.library-import-changelog article header span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.library-import-changelog ul {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+}
+
+.library-import-changelog li {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.library-import-changelog li > span {
+  color: var(--mint-strong);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.library-import-changelog li p {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.library-import-changelog li div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.library-import-changelog a {
+  color: var(--mint);
+  font-size: 0.75rem;
 }
 
 .library-import-digest {

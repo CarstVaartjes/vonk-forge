@@ -4,8 +4,8 @@
   "identity": {"publisher": "miaai-lab", "slug": "mia-deepseek-v4-flash-0731"},
   "metadata": {
     "title": "Mia DeepSeek V4 Flash 0731 build patches",
-    "description": "Exact ordered Mia compatibility and correctness patch set, applied and verified while constructing the runtime image.",
-    "tags": ["deepseek", "dspark", "mia", "patches", "vllm"]
+    "description": "Current fail-closed Mia compatibility, correctness, scheduler, and GB10 performance patch set, applied and verified while constructing the runtime image.",
+    "tags": ["candidate", "deepseek", "dspark", "mia", "patches", "vllm"]
   },
   "applies_to": {
     "kind": "runtime-distribution",
@@ -15,8 +15,8 @@
   },
   "source": {
     "repository": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark",
-    "revision": "f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
-    "archive_sha256": "1b5abd647bbead78b1863632424ac332b9e0044e521743813058ac07f3606e04"
+    "revision": "f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
+    "archive_sha256": "57e72d1ee30aac77aa239c24d0caaba929a981edaf7ffc36dbd98ad315d33355"
   },
   "base_source": {
     "repository": "https://github.com/vllm-project/vllm",
@@ -26,146 +26,149 @@
     {
       "order": 1,
       "path": "patches/apply-reasoning-default.py",
-      "sha256": "f42787340f6c115ead869cdf5076efc45c4e3f54a4c1c04cbcd2de8828aa1947",
+      "sha256": "505d3345ba2a5369481896e83f94003d3e8182253f783a9852c6f45413ebaed0",
       "purpose": "Normalize unknown reasoning effort to low while preserving explicit high and max.",
-      "upstream_reference": "Mia docker-compose.dspark.yml inline reasoning normalization at f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
+      "upstream_reference": "Mia docker-compose.dspark.yml inline reasoning normalization at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 2,
       "path": "patches/hotfix-encoding-dsv4-issue21.py",
-      "sha256": "1a74f6c4ec6a2b7cd2ff01f19b52fbf4ced980a22f08b9d75a6aae1bff0d0548",
+      "sha256": "c75d160245cb563d6e9a6adaee9bf7a4cd55ed5268b5ca89856977d293df9816",
       "purpose": "Accept already-decoded tool-call argument objects in the official DeepSeek V4 encoding.",
       "upstream_reference": "Mia issue 21",
       "license": "MIT"
     },
     {
       "order": 3,
-      "path": "patches/hotfix-dsv4-issue31-v2-thinking-budget-gpu.py",
-      "sha256": "7e6ee3e6852dc4003a5d9e7f1c62e316010858722ff3644467e1f4db57d2d909",
-      "purpose": "Implement V2 thinking-budget state on the GPU sampler path.",
-      "upstream_reference": "Mia issue 31",
+      "path": "patches/hotfix-dsv4-issue55-tool-truncation.py",
+      "sha256": "0dbb8a18d41325d518c221b3cfbd148c3a092e37c1816ba565b62e28172dd773",
+      "purpose": "Preserve complete tool calls and correct finish reasons when completion output is truncated.",
+      "upstream_reference": "Mia issue 55 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 4,
-      "path": "patches/hotfix-dsv4-issue55-tool-truncation.py",
-      "sha256": "53f26da9039eb6d99baa6c141c6ed916b292d406da292a5e762012c5ef423dec",
-      "purpose": "Preserve complete tool calls when completion output is truncated.",
-      "upstream_reference": "Mia issue 55",
+      "path": "patches/hotfix-nvfp4-ds-mla-issue22.sh",
+      "sha256": "52de6d0cd06f571cfdbbb856bfea4a098a5118ce769de739a18b51044300772a",
+      "purpose": "Route NVFP4 DS MLA long-context decode to the supported fast kernel path.",
+      "upstream_reference": "Mia issue 22 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 5,
-      "path": "patches/hotfix-nvfp4-ds-mla-issue22.sh",
-      "sha256": "4999ed58c4c2ca0903bc21fcdb6db50d481396ded62066e4132ea609096b13bf",
-      "purpose": "Route NVFP4 DS MLA long-context decode to the supported fast kernel path.",
-      "upstream_reference": "Mia issue 22",
+      "path": "patches/hotfix-gb10-spin-wait.sh",
+      "sha256": "b7deed123348d78c8e7ae3f99d9107b59a798d0b3c7840b7cccaadfd8418de71",
+      "purpose": "Reduce GB10 shared-memory IPC spin time before sleeping to lower idle CPU load and SoC heat.",
+      "upstream_reference": "Mia issue 79 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 6,
       "path": "patches/hotfix-dsv4-mtp-buffer-50312.sh",
-      "sha256": "18dee7b92db1c6c55983c7a9df4d6c27c5a09d9be2225cd54207837fe94ecfe0",
+      "sha256": "8ad604b767e09390a958cd6ffd907dd9260bb92d680b8d4d5e702ff61fb787f4",
       "purpose": "Backport the conditional MTP hidden-state buffer allocation.",
       "upstream_reference": "vLLM pull request 50312",
       "license": "Apache-2.0"
     },
     {
       "order": 7,
-      "path": "patches/hotfix-dsv4-adaptive-topk-50004.sh",
-      "sha256": "561a6ebd295964e3a37df07c96259a1a2eb0d7e6aaef5ac5ca73ecb0cebf7493",
-      "purpose": "Backport adaptive C128A top-k width.",
-      "upstream_reference": "vLLM pull request 50004",
+      "path": "patches/hotfix-dsv4-skip-topk-49486.sh",
+      "sha256": "431eff0d51c107afacc8ddb76e34c5a57d146341bf5a0d982569e8f89fc474ed",
+      "purpose": "Backport the short-context indexer top-k skip with the graph-capture safety guard.",
+      "upstream_reference": "vLLM pull requests 49486 and 52492",
       "license": "Apache-2.0"
     },
     {
       "order": 8,
-      "path": "patches/hotfix-dsv4-skip-topk-49486.sh",
-      "sha256": "636fd162fefc2a156750027b731a9eb136e7993f2552389adf7e3647c5b4dc7b",
-      "purpose": "Backport the short-context indexer top-k skip.",
-      "upstream_reference": "vLLM pull request 49486",
-      "license": "Apache-2.0"
-    },
-    {
-      "order": 9,
       "path": "patches/hotfix-dsv4-dense-prefill-indexer-48407.sh",
-      "sha256": "c2fa444ea40af9225f3063b3be3a5827f4cada9b0ddf84e156176a23e99a2e6b",
+      "sha256": "6d731f1b03b6c17275c8f0af82ee5dfa3ff9d778d25468b4edc96fbd356ffa23",
       "purpose": "Backport the dormant dense-prefill indexer scoring skip.",
       "upstream_reference": "vLLM pull request 48407",
       "license": "Apache-2.0"
     },
     {
-      "order": 10,
+      "order": 9,
       "path": "patches/hotfix-dsv4-skip-empty-c128-48957.sh",
-      "sha256": "dabafb64f9273c37659027706920d175d5ed0a6b0cdd53fb5be784f408d7990e",
+      "sha256": "bcae8526f474f885f0af681aaa596e613fa94f8bf95847f1e71c5ea4970ccd27",
       "purpose": "Backport empty C128 compressor launch avoidance.",
       "upstream_reference": "vLLM pull request 48957",
       "license": "Apache-2.0"
     },
     {
-      "order": 11,
+      "order": 10,
       "path": "patches/hotfix-dsv4-flashmla-workspace-50298.sh",
-      "sha256": "a7f557b264d247fbc65bfe49cc6d05e0780e4c6bebcdaf3633ace55338fa4268",
+      "sha256": "213fd93fb6c4dd70f38eefbd331f0ce08b64331feb2ff03643394857acd96078",
       "purpose": "Backport FlashMLA combined-top-k workspace reuse.",
       "upstream_reference": "vLLM pull request 50298",
       "license": "Apache-2.0"
     },
     {
-      "order": 12,
+      "order": 11,
       "path": "patches/hotfix-dsv4-grammar-advance.sh",
-      "sha256": "99f5e0d3737a8a074c4c85b7348882a91a4d96a12bcf0d65de4d1c751a4d8abd",
+      "sha256": "6318c0959816156ba0015fba9d3d56e4e128acdfb778aee373d9bf227c6faaa5",
       "purpose": "Advance structured-output grammar across the reasoning boundary.",
       "upstream_reference": "vLLM pull request 44993 and Mia issue 24",
       "license": "Apache-2.0"
     },
     {
+      "order": 12,
+      "path": "patches/hotfix-vllm-empty-encoder-output.py",
+      "sha256": "e417bcdcb6d62f4790885fe5c64bef3a3015a17cea00e3901eb3e2f4b7cf35a6",
+      "purpose": "Prevent encoder-only execution steps from emitting phantom token zero.",
+      "upstream_reference": "Mia issue 109 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
+      "license": "MIT"
+    },
+    {
       "order": 13,
       "path": "patches/hotfix-dsv4-issue27-partial-prefill-concurrency.py",
-      "sha256": "e87e14a6dc45ccbbdea2940d9594f239f6d8dbda7b82d7a094f45bcaa2dfb450",
-      "purpose": "Correct scheduler accounting for partial-prefill concurrency.",
-      "upstream_reference": "Mia issue 27",
+      "sha256": "31e7b14213dc6983c07716cf625c4245a42f9d884733e5f7e21a79ab459a8f8b",
+      "purpose": "Correct scheduler accounting for bounded partial-prefill concurrency.",
+      "upstream_reference": "Mia issue 27 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 14,
       "path": "patches/hotfix-dsv4-issue43-decode-fairness-and-diag.py",
-      "sha256": "f362f6289fabefd17d41007637e99a503f5b282dbb13b21cd203a3c30b844de6",
-      "purpose": "Add decode fairness and scheduler diagnostics.",
-      "upstream_reference": "Mia issue 43",
+      "sha256": "0059144ce08e825354718c8b0aa3799dcf434045f40241f75a4211fe4f199dc4",
+      "purpose": "Add bounded decode service during mixed prefills plus opt-in scheduler diagnostics.",
+      "upstream_reference": "Mia issue 43 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 15,
       "path": "patches/hotfix-dsv4-issue26-hybrid-swa-min.py",
-      "sha256": "acdf9aa2705de248333b3ba6ddeb20aea67b5582f408552e407c7a670b20ee82",
+      "sha256": "8c76a65207d5f30b898cf5f60e39b8a59e4febb3217c34fe57f6a7fb225a3c3f",
       "purpose": "Keep hybrid SWA common-hit calculation from shrinking valid cache hits.",
-      "upstream_reference": "Mia issue 26",
+      "upstream_reference": "Mia issues 26 and 36 at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     },
     {
       "order": 16,
       "path": "patches/hotfix-dsv4-suppress-stops-in-reasoning.py",
-      "sha256": "89df901d5d5853e79d71d48e1f2f1a4302ac688b5e2d3788c8551a7fe8477f21",
+      "sha256": "618a66c58fc422ae65d0f08018fac69370657e4ead1285c8104a56f507f6279f",
       "purpose": "Keep client stop strings dormant while the model is inside reasoning output.",
-      "upstream_reference": "Mia suppress-stops reasoning hotfix at f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
+      "upstream_reference": "Mia suppress-stops hotfix at f104c39a8c6fa68d4ea0b342ad6eed172bc0e635",
       "license": "MIT"
     }
   ],
   "pre_patch_tree_sha256": "c95903b2148fee727e4e88ffa9b0e65d86239f36bcbec33e352c9a5b92580a03",
-  "post_patch_tree_sha256": "d8995ee56a347544e794269479595768a4aac24b6fac447bf599dc04b73b3325",
+  "post_patch_tree_sha256": "25e036c025a68c01de1408450f3ba6d2d368cfab016ea3ba7cc4d4ca63b9a3ba",
   "compatible_model_versions": [
     {
       "kind": "model-version",
       "publisher": "deepseek-ai",
       "slug": "deepseek-v4-flash-0731-official",
-      "content_sha256": "d46fb40bf9d117ae39fe68fae3d5a3a7532325a5421637cad68f373a7b5ddd10"
+      "content_sha256": "28420ead252663dd5825d7556fc78fe53e55a1c33a4de4d43e15a3bf2fabd6b4"
     }
   ],
   "capability_changes": [
     "deepseek-v4-dspark",
     "distributed-vllm-tp2",
-    "reasoning-budget",
+    "empty-encoder-output",
+    "fail-closed-patching",
+    "gb10-spin-wait",
+    "scheduler-fairness",
     "tool-call-correctness"
   ],
   "removal_condition": "Remove each patch only after the exact base vLLM revision incorporates the same behavior and two-Spark qualification is repeated.",
@@ -174,9 +177,9 @@
     "attribution": ["MiaAI-Lab", "vLLM contributors"]
   },
   "source_bundle": {
-    "sha256": "1db8274206e65ccf2f58b5e744c5b4e7f96c14f916bce2b4a0429630eda6256f",
-    "expected_bytes": 235520,
+    "sha256": "00d8799893c26fa7ace5bf656f4379524ad56029b6c7fae9b72ae3a0845474c5",
+    "expected_bytes": 245760,
     "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
   },
-  "sha256": "3f239f783ee872ce90ef9ae345027ddd66ae36a8943f2095b352438b050287f2"
+  "sha256": "e6ca405ace5989910f92c982bdecd3e147d5056f5124381e9339897a86f39b6d"
 }

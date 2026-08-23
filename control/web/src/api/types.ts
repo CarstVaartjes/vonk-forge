@@ -57,6 +57,9 @@ export type GlobalRecipeRevision = {
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
 export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d";
+export type PublicRecipeChange = {kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata"; summary: string; details: string | null; references: string[]};
+export type PublicRecipeRelease = {version: string; released_at: string; content_sha256: string; upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild"; changes: PublicRecipeChange[]};
+export type PublicRecipeLocalState = {status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict"; recipe_id: string | null; revision_number: number | null; content_sha256: string | null; release_version: string | null};
 export type PublicRecipe = {
   publisher: string; slug: string; title: string; description: string; tags: string[];
   uri: string; content_sha256: string;
@@ -66,9 +69,10 @@ export type PublicRecipe = {
   execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
   topology_name: string; topology_mode: string; node_count: number;
   expected_download_bytes: number; maximum_installed_bytes_per_node: number; maximum_runtime_memory_bytes_per_node: number;
+  release_version: string | null; release_released_at: string | null; local: PublicRecipeLocalState;
 };
 export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
-export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"};
+export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"; changes_since_local: PublicRecipeRelease[]};
 export interface CatalogApi {
   catalogRecipes(cursor?: string): Promise<CatalogRecipeList>;
   catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision>;

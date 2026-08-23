@@ -12,37 +12,29 @@ from pathlib import Path
 ROOT = Path("/usr/local/lib/python3.12/dist-packages/vllm")
 SOURCE = Path("/opt/vonk-build")
 PATCHES = SOURCE / "patches"
-CANONICAL_NO_NEWLINE = {
-    "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
-    "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
-    "hotfix-dsv4-issue55-tool-truncation.py",
-}
 EXPECTED = {
-    "apply-reasoning-default.py": "f42787340f6c115ead869cdf5076efc45c4e3f54a4c1c04cbcd2de8828aa1947",
-    "hotfix-encoding-dsv4-issue21.py": "1a74f6c4ec6a2b7cd2ff01f19b52fbf4ced980a22f08b9d75a6aae1bff0d0548",
-    "hotfix-dsv4-issue31-v2-thinking-budget-gpu.py": "7e6ee3e6852dc4003a5d9e7f1c62e316010858722ff3644467e1f4db57d2d909",
-    "hotfix-dsv4-issue55-tool-truncation.py": "53f26da9039eb6d99baa6c141c6ed916b292d406da292a5e762012c5ef423dec",
-    "hotfix-nvfp4-ds-mla-issue22.sh": "4999ed58c4c2ca0903bc21fcdb6db50d481396ded62066e4132ea609096b13bf",
-    "hotfix-dsv4-mtp-buffer-50312.sh": "18dee7b92db1c6c55983c7a9df4d6c27c5a09d9be2225cd54207837fe94ecfe0",
-    "hotfix-dsv4-adaptive-topk-50004.sh": "561a6ebd295964e3a37df07c96259a1a2eb0d7e6aaef5ac5ca73ecb0cebf7493",
-    "hotfix-dsv4-skip-topk-49486.sh": "636fd162fefc2a156750027b731a9eb136e7993f2552389adf7e3647c5b4dc7b",
-    "hotfix-dsv4-dense-prefill-indexer-48407.sh": "c2fa444ea40af9225f3063b3be3a5827f4cada9b0ddf84e156176a23e99a2e6b",
-    "hotfix-dsv4-skip-empty-c128-48957.sh": "dabafb64f9273c37659027706920d175d5ed0a6b0cdd53fb5be784f408d7990e",
-    "hotfix-dsv4-flashmla-workspace-50298.sh": "a7f557b264d247fbc65bfe49cc6d05e0780e4c6bebcdaf3633ace55338fa4268",
-    "hotfix-dsv4-grammar-advance.sh": "99f5e0d3737a8a074c4c85b7348882a91a4d96a12bcf0d65de4d1c751a4d8abd",
-    "hotfix-dsv4-issue27-partial-prefill-concurrency.py": "e87e14a6dc45ccbbdea2940d9594f239f6d8dbda7b82d7a094f45bcaa2dfb450",
-    "hotfix-dsv4-issue43-decode-fairness-and-diag.py": "f362f6289fabefd17d41007637e99a503f5b282dbb13b21cd203a3c30b844de6",
-    "hotfix-dsv4-issue26-hybrid-swa-min.py": "acdf9aa2705de248333b3ba6ddeb20aea67b5582f408552e407c7a670b20ee82",
-    "hotfix-dsv4-suppress-stops-in-reasoning.py": "89df901d5d5853e79d71d48e1f2f1a4302ac688b5e2d3788c8551a7fe8477f21",
+    "apply-reasoning-default.py": "505d3345ba2a5369481896e83f94003d3e8182253f783a9852c6f45413ebaed0",
+    "hotfix-encoding-dsv4-issue21.py": "c75d160245cb563d6e9a6adaee9bf7a4cd55ed5268b5ca89856977d293df9816",
+    "hotfix-dsv4-issue55-tool-truncation.py": "0dbb8a18d41325d518c221b3cfbd148c3a092e37c1816ba565b62e28172dd773",
+    "hotfix-nvfp4-ds-mla-issue22.sh": "52de6d0cd06f571cfdbbb856bfea4a098a5118ce769de739a18b51044300772a",
+    "hotfix-gb10-spin-wait.sh": "b7deed123348d78c8e7ae3f99d9107b59a798d0b3c7840b7cccaadfd8418de71",
+    "hotfix-dsv4-mtp-buffer-50312.sh": "8ad604b767e09390a958cd6ffd907dd9260bb92d680b8d4d5e702ff61fb787f4",
+    "hotfix-dsv4-skip-topk-49486.sh": "431eff0d51c107afacc8ddb76e34c5a57d146341bf5a0d982569e8f89fc474ed",
+    "hotfix-dsv4-dense-prefill-indexer-48407.sh": "6d731f1b03b6c17275c8f0af82ee5dfa3ff9d778d25468b4edc96fbd356ffa23",
+    "hotfix-dsv4-skip-empty-c128-48957.sh": "bcae8526f474f885f0af681aaa596e613fa94f8bf95847f1e71c5ea4970ccd27",
+    "hotfix-dsv4-flashmla-workspace-50298.sh": "213fd93fb6c4dd70f38eefbd331f0ce08b64331feb2ff03643394857acd96078",
+    "hotfix-dsv4-grammar-advance.sh": "6318c0959816156ba0015fba9d3d56e4e128acdfb778aee373d9bf227c6faaa5",
+    "hotfix-vllm-empty-encoder-output.py": "e417bcdcb6d62f4790885fe5c64bef3a3015a17cea00e3901eb3e2f4b7cf35a6",
+    "hotfix-dsv4-issue27-partial-prefill-concurrency.py": "31e7b14213dc6983c07716cf625c4245a42f9d884733e5f7e21a79ab459a8f8b",
+    "hotfix-dsv4-issue43-decode-fairness-and-diag.py": "0059144ce08e825354718c8b0aa3799dcf434045f40241f75a4211fe4f199dc4",
+    "hotfix-dsv4-issue26-hybrid-swa-min.py": "8c76a65207d5f30b898cf5f60e39b8a59e4febb3217c34fe57f6a7fb225a3c3f",
+    "hotfix-dsv4-suppress-stops-in-reasoning.py": "618a66c58fc422ae65d0f08018fac69370657e4ead1285c8104a56f507f6279f",
 }
 
 
 def checked_patch(name: str) -> Path:
     path = PATCHES / name
     payload = path.read_bytes()
-    if name in CANONICAL_NO_NEWLINE and payload.endswith(b"\n"):
-        payload = payload[:-1]
-        path.write_bytes(payload)
     if hashlib.sha256(payload).hexdigest() != EXPECTED[name]:
         raise SystemExit(f"patch hash mismatch: {name}")
     return path
@@ -58,7 +50,7 @@ if not ROOT.is_dir():
     raise SystemExit(f"vLLM tree is missing: {ROOT}")
 encoding = SOURCE / "encoding/encoding_dsv4.py"
 if hashlib.sha256(encoding.read_bytes()).hexdigest() != (
-    "bdbd57c132a1b3725042323d02b98b9d1df28e5f388f134399555d041f5055e0"
+    "abc0d26120250dda0ae077dc64aa28836026e61e970854aaeb792445e6a0dde6"
 ):
     raise SystemExit("official encoding hash mismatch")
 destination = ROOT / "tokenizers/deepseek_v4_encoding.py"
@@ -66,14 +58,13 @@ shutil.copyfile(encoding, destination)
 
 run("apply-reasoning-default.py")
 run("hotfix-encoding-dsv4-issue21.py", str(destination))
-run("hotfix-dsv4-issue31-v2-thinking-budget-gpu.py", str(ROOT))
 run("hotfix-dsv4-issue55-tool-truncation.py", str(ROOT))
-run("hotfix-nvfp4-ds-mla-issue22.sh")
 
 shell_environment = {**os.environ, "VLLM_ROOT": str(ROOT)}
+run("hotfix-nvfp4-ds-mla-issue22.sh", environment=shell_environment)
+run("hotfix-gb10-spin-wait.sh", environment=shell_environment)
 for patch in (
     "hotfix-dsv4-mtp-buffer-50312.sh",
-    "hotfix-dsv4-adaptive-topk-50004.sh",
     "hotfix-dsv4-skip-topk-49486.sh",
     "hotfix-dsv4-dense-prefill-indexer-48407.sh",
     "hotfix-dsv4-skip-empty-c128-48957.sh",
@@ -82,6 +73,7 @@ for patch in (
 ):
     run(patch, environment=shell_environment)
 
+run("hotfix-vllm-empty-encoder-output.py")
 run("hotfix-dsv4-issue27-partial-prefill-concurrency.py")
 run("hotfix-dsv4-issue43-decode-fairness-and-diag.py")
 run("hotfix-dsv4-issue26-hybrid-swa-min.py")
