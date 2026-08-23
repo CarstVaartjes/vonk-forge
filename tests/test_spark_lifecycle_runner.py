@@ -140,17 +140,39 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
         lifecycle._synthetic_device_fixture("linux-riscv64")
 
 
-def test_synthetic_firewall_is_not_materialized_before_baseline_install(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
+    tmp_path: Path,
 ) -> None:
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.bundle = tmp_path
     run.temporary_root = tmp_path
-    monkeypatch.setattr(lifecycle, "_agent_package_installed", lambda: False)
+    run.project = "vonk-spark-42-arm64"
+    run.synthetic_interfaces = []
+    observed: list[list[str]] = []
 
-    with pytest.raises(lifecycle.LifecycleError, match="must follow baseline"):
-        run._materialize_synthetic_firewall()
+    def command(argv, *, cwd, timeout=300):
+        assert cwd == tmp_path
+        observed.append(argv)
+        if argv[:3] == ["docker", "network", "inspect"]:
+            stdout = "172.28.0.1\n"
+        elif argv[-3:] == ["ps", "--quiet", "litellm"]:
+            stdout = "a" * 64 + "\n"
+        elif argv[:2] == ["docker", "inspect"]:
+            stdout = "172.28.0.9\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout)
+
+    run._run_command = command
+
+    run._prepare_synthetic_firewall_environment()
+
+    assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.28.0.9"
+    assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.28.0.1"
+    assert run.firewall_environment["VONK_FABRIC_BANDWIDTH_MBPS"] == "200000"
+    assert len(run.synthetic_interfaces) == 1
+    assert all("/usr/bin/install" not in argv for argv in observed)
 
 
 def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
