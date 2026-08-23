@@ -565,7 +565,7 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
     node_id = "spk_" + "1" * 32
     serial_before = str(int("1234567890abcdef", 16))
     serial_after = str(int("abcdef1234567890", 16))
-    run.graph = {"baseline_version": "1.2.3~acceptance.1+g" + "a" * 12}
+    run.graph = {"candidate_version": "1.2.3"}
     run._psql = lambda _query: [[serial_after, "revoked", "1"]]
     run._wait_for_agent_identity = lambda **_kwargs: {
         "node_id": node_id,
