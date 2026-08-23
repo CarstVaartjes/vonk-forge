@@ -319,8 +319,8 @@ impl CallerIdentity {
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum ApplyOperation {
     Fresh {
-        enrollment_url: Url,
-        controller_url: Url,
+        enrollment_url: Box<Url>,
+        controller_url: Box<Url>,
         ca_sha256: String,
         ca_pem: Vec<u8>,
         node_id: String,
@@ -342,6 +342,14 @@ enum ApplyOperation {
 struct HostMapping {
     address: String,
     hostnames: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EnrollmentDiscovery {
+    controller_url: Url,
+    ca_pem: Vec<u8>,
+    host_mapping: Option<HostMapping>,
+    helper_authority: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -894,7 +902,7 @@ pub fn prepare_setup_with_authority(
             if !valid_token(&pairing_token) {
                 return Err(SetupError::UnsafeInput("pairing token"));
             }
-            let (controller_url, ca_pem, host_mapping, helper_authority) = discover_enrollment(
+            let discovery = discover_enrollment(
                 &enrollment_url,
                 &ca_sha256,
                 request.controller_address,
@@ -906,15 +914,15 @@ pub fn prepare_setup_with_authority(
                 prompt,
             )?;
             ApplyOperation::Fresh {
-                enrollment_url,
-                controller_url,
+                enrollment_url: Box::new(enrollment_url),
+                controller_url: Box::new(discovery.controller_url),
                 ca_sha256,
-                ca_pem,
+                ca_pem: discovery.ca_pem,
                 node_id: format!("spk_{}", Uuid::new_v4().simple()),
                 pairing_token,
-                host_mapping,
+                host_mapping: discovery.host_mapping,
                 firewall,
-                helper_authority,
+                helper_authority: discovery.helper_authority,
             }
         }
         InstallState::ConfiguredUnpaired => {
@@ -1221,8 +1229,8 @@ pub fn apply_setup_from_with_authority(
         } => {
             install_package(runner, &staged)?;
             let config = GeneratedConfig {
-                enrollment_url,
-                controller_url,
+                enrollment_url: *enrollment_url,
+                controller_url: *controller_url,
                 ca_path: paths.ca.clone(),
                 ca_sha256,
                 node_id,
@@ -2123,7 +2131,7 @@ fn discover_enrollment(
     expected_ca_sha256: &str,
     expected_controller_address: Option<Ipv4Addr>,
     runner: &mut dyn CommandRunner,
-) -> Result<(Url, Vec<u8>, Option<HostMapping>, Vec<u8>), SetupError> {
+) -> Result<EnrollmentDiscovery, SetupError> {
     let mut bootstrap_url = expected_enrollment.clone();
     bootstrap_url.set_path("/agent/v1/bootstrap");
     bootstrap_url.set_query(Some("setup_schema=2"));
@@ -2137,7 +2145,7 @@ fn discover_enrollment(
     }
     let bootstrap: EnrollmentBootstrap =
         serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
-    let (controller, ca, mapping, helper_authority) = validate_enrollment_bootstrap(
+    let discovered = validate_enrollment_bootstrap(
         bootstrap,
         expected_enrollment,
         expected_ca_sha256,
@@ -2145,12 +2153,12 @@ fn discover_enrollment(
     )?;
     let directory = secure_tempdir("vonk-enrollment-ca.")?;
     let ca_path = directory.path().join("controller-ca.pem");
-    fs::write(&ca_path, &ca).map_err(SetupError::PrivilegedWrite)?;
+    fs::write(&ca_path, &discovered.ca_pem).map_err(SetupError::PrivilegedWrite)?;
     let authenticated = run_checked(
         runner,
         bootstrap_curl(
             &bootstrap_url,
-            mapping.as_ref().map(|value| {
+            discovered.host_mapping.as_ref().map(|value| {
                 value
                     .address
                     .parse::<Ipv4Addr>()
@@ -2169,15 +2177,12 @@ fn discover_enrollment(
         authenticated,
         expected_enrollment,
         expected_ca_sha256,
-        mapping
+        discovered
+            .host_mapping
             .as_ref()
             .map(|value| value.address.parse().expect("validated controller address")),
     )?;
-    if verified.0 != controller
-        || verified.1 != ca
-        || verified.2 != mapping
-        || verified.3 != helper_authority
-    {
+    if verified != discovered {
         return Err(SetupError::EnrollmentBootstrap);
     }
     Ok(verified)
@@ -2222,7 +2227,7 @@ fn validate_enrollment_bootstrap(
     expected_enrollment: &Url,
     expected_ca_sha256: &str,
     expected_controller_address: Option<Ipv4Addr>,
-) -> Result<(Url, Vec<u8>, Option<HostMapping>, Vec<u8>), SetupError> {
+) -> Result<EnrollmentDiscovery, SetupError> {
     let enrollment =
         Url::parse(&bootstrap.enrollment_endpoint).map_err(|_| SetupError::EnrollmentBootstrap)?;
     let controller =
@@ -2281,7 +2286,12 @@ fn validate_enrollment_bootstrap(
         }
         None => return Err(SetupError::EnrollmentBootstrap),
     };
-    Ok((controller, ca, mapping, helper_authority))
+    Ok(EnrollmentDiscovery {
+        controller_url: controller,
+        ca_pem: ca,
+        host_mapping: mapping,
+        helper_authority,
+    })
 }
 
 fn required_sha256(prompt: &mut dyn Prompt, label: &str) -> Result<String, SetupError> {
