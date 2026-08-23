@@ -900,7 +900,7 @@ jobs:
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
           [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
           scripts/install-release-publication promote \
-            --bundle "$RUNNER_TEMP/installer-publication" \
+            --bundle "$RUNNER_TEMP/installer-publication/installer-publication" \
             --accepted-evidence "$RUNNER_TEMP/acceptance/receipt.json" \
             --accepted-evidence-signature "$RUNNER_TEMP/acceptance/receipt.sig" \
             --acceptance-public-key "$RUNNER_TEMP/acceptance/installer-acceptance-public.pem" \
@@ -916,7 +916,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/installer-publication/publication-plan.json
+            ${{ runner.temp }}/installer-publication/installer-publication/publication-plan.json
             ${{ runner.temp }}/promotion-receipt.jsonl
 
   refresh:
