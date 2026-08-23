@@ -180,24 +180,47 @@ def test_development_images_build_supported_linux_architectures(
         'printf "%s\\n" "$*" >> "$DOCKER_LOG"',
     )
 
-    result = subprocess.run(
-        ["bash", "-c", development_step_run("Build exact OCI archives")],
-        cwd=ROOT,
-        env={
-            **os.environ,
-            "DOCKER_LOG": str(docker_log),
-            "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
-            "GITHUB_SERVER_URL": "https://github.com",
-            "GITHUB_SHA": "a" * 40,
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            "RUNNER_TEMP": str(tmp_path),
-        },
-        capture_output=True,
-        check=False,
-        text=True,
+    matrix = (
+        ("api", "vonk-forge-api.oci.tar", ".", "control/Dockerfile", "api"),
+        (
+            "worker",
+            "vonk-forge-worker.oci.tar",
+            ".",
+            "control/Dockerfile",
+            "worker",
+        ),
+        (
+            "hermes",
+            "vonk-forge-hermes.oci.tar",
+            "deploy/compose/hermes-agent",
+            "deploy/compose/hermes-agent/Dockerfile",
+            "managed",
+        ),
     )
+    for role, archive, context, dockerfile, target in matrix:
+        result = subprocess.run(
+            ["bash", "-c", development_step_run("Build exact OCI archive")],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "ARCHIVE": archive,
+                "CONTEXT": context,
+                "DOCKERFILE": dockerfile,
+                "DOCKER_LOG": str(docker_log),
+                "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
+                "GITHUB_SERVER_URL": "https://github.com",
+                "GITHUB_SHA": "a" * 40,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "ROLE": role,
+                "RUNNER_TEMP": str(tmp_path),
+                "TARGET": target,
+            },
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
-    assert result.returncode == 0, result.stderr
     builds = docker_log.read_text().splitlines()
     assert len(builds) == 3
     assert all(line.startswith("buildx build ") for line in builds)
@@ -214,14 +237,29 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
 
     assert setup in text
     assert text.index(setup) < text.index("docker/setup-buildx-action@")
-    assert text.index(setup) < text.index("- name: Build exact OCI archives")
-    qemu = text[text.index(setup) : text.index("- name: Build exact OCI archives")]
+    assert text.index(setup) < text.index("- name: Build exact OCI archive")
+    qemu = text[text.index(setup) : text.index("- name: Build exact OCI archive")]
     assert (
         "image: docker.io/tonistiigi/binfmt@sha256:"
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
         in qemu
     )
     assert "platforms: arm64" in qemu
+    matrix = text[text.index("  build-oci-archives:") : text.index("  build-and-accept:")]
+    assert "max-parallel: 3" in matrix
+    assert matrix.count("          - role:") == 3
+
+
+def test_development_image_validation_waits_for_all_parallel_archives() -> None:
+    text = DEV_WORKFLOW.read_text()
+    validation = text[text.index("  build-and-accept:") : text.index("  publish-development-images:")]
+
+    assert "needs: [build-oci-archives]" in validation
+    assert "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}" in validation
+    assert "merge-multiple: true" in validation
+    assert validation.index("Download exact OCI archives") < validation.index(
+        "Load tested images without pulling"
+    )
 
 
 def test_development_image_publication_requires_both_platforms() -> None:
