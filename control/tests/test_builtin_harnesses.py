@@ -435,6 +435,18 @@ def test_vllm_accepts_qwen3_reasoning_parser() -> None:
     assert "qwen3" in projection.command
 
 
+def test_vllm_accepts_glm_reasoning_parser() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "glm45"}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--reasoning-parser" in projection.command
+    assert "glm45" in projection.command
+
+
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [

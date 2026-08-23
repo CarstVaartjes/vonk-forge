@@ -35,6 +35,26 @@ from .recipe_library import (
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
 _MAX_DOCUMENT_BYTES = 256 * 1024
+_PUBLIC_CAPABILITIES = (
+    "chat",
+    "reasoning",
+    "vision",
+    "image-generation",
+    "image-editing",
+    "video",
+    "audio",
+    "3d",
+)
+PublicRecipeCapability = Literal[
+    "chat",
+    "reasoning",
+    "vision",
+    "image-generation",
+    "image-editing",
+    "video",
+    "audio",
+    "3d",
+]
 
 CATALOG_OPERATION_IDS = {
     ("get", "/api/v1/catalog/entities"): "listCatalogEntities",
@@ -180,6 +200,22 @@ class PublicRecipeListItem(StrictModel):
     tags: list[str] = Field(max_length=32)
     uri: str = Field(min_length=100, max_length=256)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_publisher: str = Field(pattern=_SLUG)
+    model_slug: str = Field(pattern=_SLUG)
+    model_title: str = Field(min_length=1, max_length=120)
+    capabilities: list[PublicRecipeCapability] = Field(max_length=8)
+    qualification: Literal["candidate", "cataloged"]
+    precision: str | None = Field(default=None, min_length=2, max_length=24)
+    execution_harness: str = Field(pattern=_SLUG)
+    runtime_distribution: str = Field(pattern=_SLUG)
+    source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifact_count: int = Field(ge=0, le=32)
+    topology_name: str = Field(min_length=1, max_length=64)
+    topology_mode: str = Field(min_length=1, max_length=32)
+    node_count: int = Field(ge=1)
+    expected_download_bytes: int = Field(ge=1)
+    maximum_installed_bytes_per_node: int = Field(ge=1)
+    maximum_runtime_memory_bytes_per_node: int = Field(ge=1)
 
 
 class PublicRecipeListResponse(StrictModel):
@@ -188,14 +224,7 @@ class PublicRecipeListResponse(StrictModel):
     recipes: list[PublicRecipeListItem] = Field(max_length=100)
 
 
-class PublicRecipePreviewResponse(StrictModel):
-    publisher: str = Field(pattern=_SLUG)
-    slug: str = Field(pattern=_SLUG)
-    title: str = Field(min_length=1, max_length=120)
-    description: str = Field(min_length=1, max_length=4000)
-    tags: list[str] = Field(max_length=32)
-    uri: str = Field(min_length=100, max_length=256)
-    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+class PublicRecipePreviewResponse(PublicRecipeListItem):
     source: Literal["global", "recipe_library"]
 
 
@@ -354,6 +383,109 @@ def _entity_revision(value: CatalogEntityRevision) -> dict[str, object]:
     }
 
 
+def _public_recipe_metadata(
+    document: Mapping[str, object],
+    dependencies: tuple[dict[str, object], ...] = (),
+) -> dict[str, object]:
+    model_version = document.get("model")
+    model_version = model_version if isinstance(model_version, Mapping) else {}
+    model_publisher = str(model_version.get("publisher", "unknown"))
+    model_slug = str(model_version.get("slug", "unknown"))
+    model_title = model_slug
+    model_reference: Mapping[str, object] | None = None
+    model_version_title = ""
+    for dependency in dependencies:
+        identity = dependency.get("identity")
+        if (
+            dependency.get("kind") == "model-version"
+            and isinstance(identity, Mapping)
+            and identity.get("publisher") == model_publisher
+            and identity.get("slug") == model_slug
+        ):
+            value = dependency.get("model")
+            model_reference = value if isinstance(value, Mapping) else None
+            metadata = dependency.get("metadata")
+            if isinstance(metadata, Mapping):
+                model_version_title = str(metadata.get("title", ""))
+            break
+    if model_reference is not None:
+        referenced_publisher = model_reference.get("publisher")
+        referenced_slug = model_reference.get("slug")
+        if isinstance(referenced_publisher, str) and isinstance(referenced_slug, str):
+            model_publisher = referenced_publisher
+            model_slug = referenced_slug
+            model_title = model_slug
+            for dependency in dependencies:
+                identity = dependency.get("identity")
+                if (
+                    dependency.get("kind") == "model"
+                    and isinstance(identity, Mapping)
+                    and identity.get("publisher") == model_publisher
+                    and identity.get("slug") == model_slug
+                ):
+                    metadata = dependency.get("metadata")
+                    if isinstance(metadata, Mapping):
+                        model_title = str(metadata.get("title", model_slug))
+                    break
+
+    metadata = document.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    raw_tags = metadata.get("tags", [])
+    raw_tags = raw_tags if isinstance(raw_tags, list) else []
+    tags = {value.lower() for value in raw_tags if isinstance(value, str)}
+    raw_interfaces = document.get("interfaces", [])
+    raw_interfaces = raw_interfaces if isinstance(raw_interfaces, list) else []
+    adapters = {
+        str(interface.get("adapter", ""))
+        for interface in raw_interfaces
+        if isinstance(interface, Mapping)
+    }
+    capabilities: set[str] = set()
+    if "openai" in adapters:
+        capabilities.add("chat")
+    if "reasoning" in tags:
+        capabilities.add("reasoning")
+    if tags.intersection({"vision", "multimodal", "omni"}):
+        capabilities.add("vision")
+    editing = bool(tags.intersection({"editing", "image-to-image", "layered"}))
+    if editing:
+        capabilities.add("image-editing")
+    if ("image-job" in adapters and not editing) or tags.intersection(
+        {"generation", "text-to-image"}
+    ):
+        capabilities.add("image-generation")
+    if "video-job" in adapters or "video" in tags:
+        capabilities.add("video")
+    if "audio-job" in adapters or "audio" in tags:
+        capabilities.add("audio")
+    if "mesh-job" in adapters or tags.intersection({"three-d", "3d", "mesh"}):
+        capabilities.add("3d")
+
+    title = str(metadata.get("title", ""))
+    precision_text = " ".join((*tags, title.lower(), model_version_title.lower()))
+    precision = next(
+        (
+            value.upper()
+            for value in ("nvfp4", "bf16", "fp8", "fp4", "int8", "int4")
+            if value in precision_text
+        ),
+        None,
+    )
+    return {
+        "model_publisher": model_publisher,
+        "model_slug": model_slug,
+        "model_title": model_title,
+        "capabilities": [
+            capability
+            for capability in _PUBLIC_CAPABILITIES
+            if capability in capabilities
+        ],
+        "qualification": "candidate" if "candidate" in tags else "cataloged",
+        "precision": precision,
+        **_document_summary(document),
+    }
+
+
 def _bounded(
     document: Mapping[str, object], *, subject: str = "recipe document"
 ) -> None:
@@ -432,6 +564,7 @@ def install_catalog_routes(
                 "uri": value.uri,
                 "content_sha256": value.content_sha256,
                 "source": source,
+                **_public_recipe_metadata(value.document, value.dependencies),
             }
         assert isinstance(value, GlobalRecipeRevision)
         metadata = value.document.get("metadata")
@@ -446,6 +579,7 @@ def install_catalog_routes(
             "uri": value.uri,
             "content_sha256": value.content_sha256,
             "source": source,
+            **_public_recipe_metadata(value.document),
         }
 
     @app.get(
@@ -1006,6 +1140,7 @@ def install_catalog_routes(
                     "tags": list(item.tags),
                     "uri": item.uri,
                     "content_sha256": item.content_sha256,
+                    **_public_recipe_metadata(item.document, item.dependencies),
                 }
                 for item in snapshot.items
             ],

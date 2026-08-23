@@ -4070,6 +4070,30 @@
       "PublicRecipeListItem": {
         "additionalProperties": false,
         "properties": {
+          "artifact_count": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Artifact Count",
+            "type": "integer"
+          },
+          "capabilities": {
+            "items": {
+              "enum": [
+                "chat",
+                "reasoning",
+                "vision",
+                "image-generation",
+                "image-editing",
+                "video",
+                "audio",
+                "3d"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Capabilities",
+            "type": "array"
+          },
           "content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Content Sha256",
@@ -4081,14 +4105,86 @@
             "title": "Description",
             "type": "string"
           },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
+          },
+          "expected_download_bytes": {
+            "minimum": 1.0,
+            "title": "Expected Download Bytes",
+            "type": "integer"
+          },
+          "maximum_installed_bytes_per_node": {
+            "minimum": 1.0,
+            "title": "Maximum Installed Bytes Per Node",
+            "type": "integer"
+          },
+          "maximum_runtime_memory_bytes_per_node": {
+            "minimum": 1.0,
+            "title": "Maximum Runtime Memory Bytes Per Node",
+            "type": "integer"
+          },
+          "model_publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Publisher",
+            "type": "string"
+          },
+          "model_slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Slug",
+            "type": "string"
+          },
+          "model_title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model Title",
+            "type": "string"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
           "publisher": {
             "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
             "title": "Publisher",
             "type": "string"
           },
+          "qualification": {
+            "enum": [
+              "candidate",
+              "cataloged"
+            ],
+            "title": "Qualification",
+            "type": "string"
+          },
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
+            "type": "string"
+          },
           "slug": {
             "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
             "title": "Slug",
+            "type": "string"
+          },
+          "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Bundle Sha256",
             "type": "string"
           },
           "tags": {
@@ -4105,6 +4201,18 @@
             "title": "Title",
             "type": "string"
           },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          },
           "uri": {
             "maxLength": 256,
             "minLength": 100,
@@ -4119,7 +4227,22 @@
           "description",
           "tags",
           "uri",
-          "content_sha256"
+          "content_sha256",
+          "model_publisher",
+          "model_slug",
+          "model_title",
+          "capabilities",
+          "qualification",
+          "execution_harness",
+          "runtime_distribution",
+          "source_bundle_sha256",
+          "artifact_count",
+          "topology_name",
+          "topology_mode",
+          "node_count",
+          "expected_download_bytes",
+          "maximum_installed_bytes_per_node",
+          "maximum_runtime_memory_bytes_per_node"
         ],
         "title": "PublicRecipeListItem",
         "type": "object"
@@ -4158,6 +4281,30 @@
       "PublicRecipePreviewResponse": {
         "additionalProperties": false,
         "properties": {
+          "artifact_count": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Artifact Count",
+            "type": "integer"
+          },
+          "capabilities": {
+            "items": {
+              "enum": [
+                "chat",
+                "reasoning",
+                "vision",
+                "image-generation",
+                "image-editing",
+                "video",
+                "audio",
+                "3d"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Capabilities",
+            "type": "array"
+          },
           "content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Content Sha256",
@@ -4169,9 +4316,76 @@
             "title": "Description",
             "type": "string"
           },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
+          },
+          "expected_download_bytes": {
+            "minimum": 1.0,
+            "title": "Expected Download Bytes",
+            "type": "integer"
+          },
+          "maximum_installed_bytes_per_node": {
+            "minimum": 1.0,
+            "title": "Maximum Installed Bytes Per Node",
+            "type": "integer"
+          },
+          "maximum_runtime_memory_bytes_per_node": {
+            "minimum": 1.0,
+            "title": "Maximum Runtime Memory Bytes Per Node",
+            "type": "integer"
+          },
+          "model_publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Publisher",
+            "type": "string"
+          },
+          "model_slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Slug",
+            "type": "string"
+          },
+          "model_title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model Title",
+            "type": "string"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
           "publisher": {
             "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
             "title": "Publisher",
+            "type": "string"
+          },
+          "qualification": {
+            "enum": [
+              "candidate",
+              "cataloged"
+            ],
+            "title": "Qualification",
+            "type": "string"
+          },
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
             "type": "string"
           },
           "slug": {
@@ -4187,6 +4401,11 @@
             "title": "Source",
             "type": "string"
           },
+          "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Bundle Sha256",
+            "type": "string"
+          },
           "tags": {
             "items": {
               "type": "string"
@@ -4199,6 +4418,18 @@
             "maxLength": 120,
             "minLength": 1,
             "title": "Title",
+            "type": "string"
+          },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
             "type": "string"
           },
           "uri": {
@@ -4216,6 +4447,21 @@
           "tags",
           "uri",
           "content_sha256",
+          "model_publisher",
+          "model_slug",
+          "model_title",
+          "capabilities",
+          "qualification",
+          "execution_harness",
+          "runtime_distribution",
+          "source_bundle_sha256",
+          "artifact_count",
+          "topology_name",
+          "topology_mode",
+          "node_count",
+          "expected_download_bytes",
+          "maximum_installed_bytes_per_node",
+          "maximum_runtime_memory_bytes_per_node",
           "source"
         ],
         "title": "PublicRecipePreviewResponse",

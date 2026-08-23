@@ -2387,18 +2387,53 @@ export interface components {
         };
         /** PublicRecipeListItem */
         PublicRecipeListItem: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Capabilities */
+            capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
             /** Content Sha256 */
             content_sha256: string;
             /** Description */
             description: string;
+            /** Execution Harness */
+            execution_harness: string;
+            /** Expected Download Bytes */
+            expected_download_bytes: number;
+            /** Maximum Installed Bytes Per Node */
+            maximum_installed_bytes_per_node: number;
+            /** Maximum Runtime Memory Bytes Per Node */
+            maximum_runtime_memory_bytes_per_node: number;
+            /** Model Publisher */
+            model_publisher: string;
+            /** Model Slug */
+            model_slug: string;
+            /** Model Title */
+            model_title: string;
+            /** Node Count */
+            node_count: number;
+            /** Precision */
+            precision?: string | null;
             /** Publisher */
             publisher: string;
+            /**
+             * Qualification
+             * @enum {string}
+             */
+            qualification: "candidate" | "cataloged";
+            /** Runtime Distribution */
+            runtime_distribution: string;
             /** Slug */
             slug: string;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256: string;
             /** Tags */
             tags: string[];
             /** Title */
             title: string;
+            /** Topology Mode */
+            topology_mode: string;
+            /** Topology Name */
+            topology_name: string;
             /** Uri */
             uri: string;
         };
@@ -2413,12 +2448,41 @@ export interface components {
         };
         /** PublicRecipePreviewResponse */
         PublicRecipePreviewResponse: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Capabilities */
+            capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
             /** Content Sha256 */
             content_sha256: string;
             /** Description */
             description: string;
+            /** Execution Harness */
+            execution_harness: string;
+            /** Expected Download Bytes */
+            expected_download_bytes: number;
+            /** Maximum Installed Bytes Per Node */
+            maximum_installed_bytes_per_node: number;
+            /** Maximum Runtime Memory Bytes Per Node */
+            maximum_runtime_memory_bytes_per_node: number;
+            /** Model Publisher */
+            model_publisher: string;
+            /** Model Slug */
+            model_slug: string;
+            /** Model Title */
+            model_title: string;
+            /** Node Count */
+            node_count: number;
+            /** Precision */
+            precision?: string | null;
             /** Publisher */
             publisher: string;
+            /**
+             * Qualification
+             * @enum {string}
+             */
+            qualification: "candidate" | "cataloged";
+            /** Runtime Distribution */
+            runtime_distribution: string;
             /** Slug */
             slug: string;
             /**
@@ -2426,10 +2490,16 @@ export interface components {
              * @enum {string}
              */
             source: "global" | "recipe_library";
+            /** Source Bundle Sha256 */
+            source_bundle_sha256: string;
             /** Tags */
             tags: string[];
             /** Title */
             title: string;
+            /** Topology Mode */
+            topology_mode: string;
+            /** Topology Name */
+            topology_name: string;
             /** Uri */
             uri: string;
         };

@@ -122,8 +122,12 @@ from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
 from .public_import_request import PublicImportRequest
 from .public_recipe_list_item import PublicRecipeListItem
+from .public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
+from .public_recipe_list_item_qualification import PublicRecipeListItemQualification
 from .public_recipe_list_response import PublicRecipeListResponse
 from .public_recipe_preview_response import PublicRecipePreviewResponse
+from .public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
+from .public_recipe_preview_response_qualification import PublicRecipePreviewResponseQualification
 from .public_recipe_preview_response_source import PublicRecipePreviewResponseSource
 from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
@@ -343,8 +347,12 @@ __all__ = (
     "PublicationExportRequest",
     "PublicImportRequest",
     "PublicRecipeListItem",
+    "PublicRecipeListItemCapabilitiesItem",
+    "PublicRecipeListItemQualification",
     "PublicRecipeListResponse",
     "PublicRecipePreviewResponse",
+    "PublicRecipePreviewResponseCapabilitiesItem",
+    "PublicRecipePreviewResponseQualification",
     "PublicRecipePreviewResponseSource",
     "RecipeDiskRequirements",
     "RecipeFabric",
