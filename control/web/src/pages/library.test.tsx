@@ -555,6 +555,15 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.getByText("@cccccccc")).toBeVisible();
   expect(screen.getAllByRole("link", {name: /QwenLM/})[0]).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
 
+  const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});
+  expect(within(qualification).getByRole("option", {name: "Accepted"})).toHaveValue("cataloged");
+  expect(within(qualification).queryByRole("option", {name: "Cataloged"})).not.toBeInTheDocument();
+  await user.selectOptions(qualification, "cataloged");
+  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.getByText("Accepted · v1.0.0")).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+
   const localStatus = screen.getByRole("combobox", {name: "Filter by local status"});
   expect(within(localStatus).getByRole("option", {name: "All (4)"})).toBeVisible();
   expect(within(localStatus).getByRole("option", {name: "Not installed (1)"})).toBeVisible();
