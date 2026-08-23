@@ -502,8 +502,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
             metadata.join("runtime.json").display()
         ),
-        "--gpus".to_owned(),
-        "all".to_owned(),
+        "--device".to_owned(),
+        "nvidia.com/gpu=all".to_owned(),
         image_reference.clone(),
         "python".to_owned(),
         "/app/server.py".to_owned(),
@@ -545,6 +545,35 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
                 .is_err()
         );
     }
+    for forbidden_device in ["vendor.example/gpu=all", "/dev/null:/dev/null"] {
+        let mut forbidden = request.clone();
+        let device = forbidden
+            .arguments
+            .iter_mut()
+            .find(|value| value.as_str() == "nvidia.com/gpu=all")
+            .unwrap();
+        *device = forbidden_device.to_owned();
+        let forbidden_digest = write_runtime_request(&roots, &forbidden);
+        assert!(
+            executor
+                .execute(&runtime_operation(&forbidden, forbidden_digest))
+                .is_err()
+        );
+    }
+    let mut legacy_gpu_flag = request.clone();
+    let device_index = legacy_gpu_flag
+        .arguments
+        .iter()
+        .position(|value| value == "nvidia.com/gpu=all")
+        .unwrap();
+    legacy_gpu_flag.arguments[device_index - 1] = "--gpus".to_owned();
+    legacy_gpu_flag.arguments[device_index] = "all".to_owned();
+    let forbidden_digest = write_runtime_request(&roots, &legacy_gpu_flag);
+    assert!(
+        executor
+            .execute(&runtime_operation(&legacy_gpu_flag, forbidden_digest))
+            .is_err()
+    );
 
     {
         let calls = runner.calls.lock().unwrap();
@@ -585,8 +614,14 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             value.contains("docker.sock")
                 || value == "--privileged"
                 || value == "host"
-                || value.starts_with("--device")
+                || value == "/dev/infiniband:/dev/infiniband"
         }));
+        assert!(
+            docker_run
+                .1
+                .windows(2)
+                .any(|values| values == ["--device", "nvidia.com/gpu=all"])
+        );
     }
     let inspect = runtime_request(HostRuntimeAction::RunInspect, request.arguments.clone());
     let inspect_digest = write_runtime_request(&roots, &inspect);
@@ -755,8 +790,8 @@ fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
             "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
             metadata.join("runtime.json").display()
         ),
-        "--gpus".to_owned(),
-        "all".to_owned(),
+        "--device".to_owned(),
+        "nvidia.com/gpu=all".to_owned(),
         image_reference,
         "/opt/vonk/mia-deepseek-v4-flash".to_owned(),
     ];

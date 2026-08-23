@@ -151,7 +151,7 @@ instead, the controller signs an expiring grant bound to one canonical runtime
 request, and a root helper compiles only the allow-listed Docker operation.
 The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
 user, runtime-interface label, resource limits, mounts, ports, and optional
-`--gpus all` request. Bridge mode remains the default. A connected multi-node
+`--device nvidia.com/gpu=all` request. Bridge mode remains the default. A connected multi-node
 recipe may select one compiled direct-fabric shape with host networking, host
 IPC, `/dev/infiniband`, and fixed memlock/stack limits; the helper requires the
 complete shape plus the host-firewall preflight. It rejects every partial or

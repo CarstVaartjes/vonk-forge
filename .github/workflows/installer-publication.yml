@@ -622,14 +622,12 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    needs: [authority, candidate, nas-acceptance]
+    needs: [authority, candidate]
     if: >-
       needs.authority.result == 'success' &&
-      needs.candidate.result == 'success' &&
-      needs['nas-acceptance'].result == 'success'
+      needs.candidate.result == 'success'
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - platform: linux-amd64

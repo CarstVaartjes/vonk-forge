@@ -359,7 +359,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .iter()
             .any(|device| device == "nvidia.com/gpu=all")
         {
-            arguments.extend(["--gpus".to_owned(), "all".to_owned()]);
+            arguments.extend(["--device".to_owned(), "nvidia.com/gpu=all".to_owned()]);
         }
         for environment in &spec.runtime.environment {
             let Some(value) = &environment.value else {
