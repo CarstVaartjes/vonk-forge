@@ -297,6 +297,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "VONK_RUNTIME_SPEC=/run/vonk/runtime.json".to_owned(),
             "--env".to_owned(),
             "VONK_MODEL_ROOT=/models".to_owned(),
+            "--env".to_owned(),
             "VONK_LISTEN_HOST=0.0.0.0".to_owned(),
             "--env".to_owned(),
             format!("VONK_LISTEN_PORT={}", spec.endpoint.port),
