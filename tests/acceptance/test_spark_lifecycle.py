@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import http.client
 import importlib.machinery
 import importlib.util
+import ipaddress
 import json
 import os
 import platform
@@ -83,6 +85,37 @@ COMPOSE_IMAGE_ROLES = {
     "hermes": "hermes-agent",
 }
 
+ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
+ED25519_PKCS8_V2_PUBLIC_PREFIX = bytes.fromhex("812100")
+ED25519_PKCS8_V1_PREFIX = bytes.fromhex("302e020100")
+
+
+def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
+    """Convert strict RFC 5958 Ed25519 material to RFC 5208 for OpenSSL 3.0."""
+    lines = raw.strip().splitlines()
+    if (
+        len(lines) < 3
+        or lines[0] != b"-----BEGIN PRIVATE KEY-----"
+        or lines[-1] != b"-----END PRIVATE KEY-----"
+    ):
+        raise LifecycleError("retired agent private key is invalid")
+    try:
+        der = base64.b64decode(b"".join(lines[1:-1]), validate=True)
+    except (ValueError, base64.binascii.Error) as error:
+        raise LifecycleError("retired agent private key is invalid") from error
+    if (
+        len(der) != 83
+        or not der.startswith(ED25519_PKCS8_V2_PREFIX)
+        or der[48:51] != ED25519_PKCS8_V2_PUBLIC_PREFIX
+    ):
+        raise LifecycleError("retired agent private key is invalid")
+    compatible = ED25519_PKCS8_V1_PREFIX + der[5:48]
+    encoded = base64.b64encode(compatible)
+    body = b"\n".join(
+        encoded[index : index + 64] for index in range(0, len(encoded), 64)
+    )
+    return b"-----BEGIN PRIVATE KEY-----\n" + body + b"\n-----END PRIVATE KEY-----\n"
+
 
 class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
@@ -138,9 +171,20 @@ def _run_spark_bootstrap(
     )
 
 
-def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> None:
+def _configure_acceptance_renewal(
+    bundle: Path, *, lifetime_seconds: int, agent_source_address: str
+) -> None:
+    try:
+        parsed_agent_source = ipaddress.ip_address(agent_source_address)
+    except ValueError as error:
+        raise LifecycleError("acceptance agent source address is invalid") from error
     if lifetime_seconds != CERTIFICATE_LIFETIME_SECONDS:
         raise LifecycleError("acceptance certificate lifetime is invalid")
+    if (
+        not isinstance(parsed_agent_source, ipaddress.IPv4Address)
+        or parsed_agent_source not in ipaddress.ip_network("172.16.0.0/12")
+    ):
+        raise LifecycleError("acceptance agent source address is invalid")
     ca_path = bundle / "secrets/step-ca/ca.json"
     ca = _read_document(ca_path, "Step CA configuration")
     try:
@@ -179,13 +223,50 @@ def _configure_acceptance_renewal(bundle: Path, *, lifetime_seconds: int) -> Non
         raise LifecycleError("Compose controller environment is invalid")
     environment["VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS"] = str(lifetime_seconds)
     try:
-        caddy_ports = compose["services"]["caddy"]["ports"]
+        caddy_service = compose["services"]["caddy"]
+        caddy_ports = caddy_service["ports"]
+        caddy_mounts = caddy_service["configs"]
+        caddy_source = next(
+            value["source"]
+            for value in caddy_mounts
+            if value.get("target") == "/etc/caddy/Caddyfile"
+        )
+        caddy_definition = compose["configs"][caddy_source]
     except (KeyError, TypeError) as error:
         raise LifecycleError("Compose browser boundary is invalid") from error
+    except StopIteration as error:
+        raise LifecycleError("Caddy acceptance boundary is invalid") from error
+    if (
+        re.fullmatch(r"vonk_runtime_[0-9a-f]{16}", caddy_source) is None
+        or caddy_definition
+        != {"file": f"./secrets/runtime-configs/{caddy_source}"}
+    ):
+        raise LifecycleError("Caddy acceptance boundary is invalid")
+    caddy_path = bundle / "secrets/runtime-configs" / caddy_source
+    try:
+        caddy_metadata = caddy_path.lstat()
+        caddy = caddy_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise LifecycleError("Caddy acceptance boundary is invalid") from error
+    source_directive = "header_up X-Vonk-Agent-Source {http.request.remote.host}"
+    if (
+        caddy_path.is_symlink()
+        or not stat.S_ISREG(caddy_metadata.st_mode)
+        or caddy.count(source_directive) != 1
+    ):
+        raise LifecycleError("Caddy acceptance boundary is invalid")
+    caddy_path.write_text(
+        caddy.replace(
+            source_directive,
+            f"header_up X-Vonk-Agent-Source {agent_source_address}",
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(caddy_path, 0o644)
     if not isinstance(caddy_ports, list) or "127.0.0.1::8080" in caddy_ports:
         raise LifecycleError("Compose browser boundary is invalid")
     caddy_ports.append("127.0.0.1::8080")
-    caddy_networks = compose["services"]["caddy"].get("networks")
+    caddy_networks = caddy_service.get("networks")
     if (
         not isinstance(caddy_networks, list)
         or "cluster-egress" in caddy_networks
@@ -218,6 +299,37 @@ def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
         separators=(",", ":"),
     ).encode("ascii")
     return raw, hashlib.sha256(raw).hexdigest()
+
+
+def _load_development_runner() -> object:
+    runner_path = REPOSITORY_ROOT / "scripts/run-development-slices"
+    scripts_path = os.fspath(runner_path.parent)
+    loader = importlib.machinery.SourceFileLoader(
+        "spark_lifecycle_development_runner", os.fspath(runner_path)
+    )
+    specification = importlib.util.spec_from_loader(loader.name, loader)
+    if specification is None or specification.loader is None:
+        raise LifecycleError("synthetic canary runner is unavailable")
+    module = importlib.util.module_from_spec(specification)
+    shared_client = sys.modules.get("scripts.development_slice_client")
+    if shared_client is None:
+        raise LifecycleError("synthetic canary client is unavailable")
+    previous_client = sys.modules.get("development_slice_client")
+    sys.modules["development_slice_client"] = shared_client
+    sys.path.insert(0, scripts_path)
+    try:
+        specification.loader.exec_module(module)
+    except (ImportError, OSError) as error:
+        raise LifecycleError("synthetic canary runner is unavailable") from error
+    finally:
+        sys.path.remove(scripts_path)
+        if previous_client is None:
+            sys.modules.pop("development_slice_client", None)
+        else:
+            sys.modules["development_slice_client"] = previous_client
+    if module.SliceError is not SliceError:
+        raise LifecycleError("synthetic canary client identity is inconsistent")
+    return module
 
 
 def _agent_package_installed() -> bool:
@@ -366,6 +478,26 @@ class LocalBrowserController:
             transport=transport,
         )
 
+    def bearer(self, token: str, *, timeout: float) -> Client:
+        def transport(
+            method: str,
+            path: str,
+            payload: bytes | None,
+            request_headers: dict[str, str],
+            request_timeout: float,
+        ) -> tuple[int, bytes]:
+            status, _response_headers, content = self.raw_request(
+                method, path, payload, request_headers, request_timeout
+            )
+            return status, content
+
+        return Client(
+            f"https://{self.hostname}",
+            token,
+            timeout=timeout,
+            transport=transport,
+        )
+
 
 class SparkLifecycle:
     def __init__(self, arguments: argparse.Namespace, graph: dict[str, object]) -> None:
@@ -379,6 +511,7 @@ class SparkLifecycle:
         self.temporary_root: Path | None = None
         self.bundle: Path | None = None
         self.control: Client | None = None
+        self.browser: LocalBrowserController | None = None
         self.synthetic_paths: list[Path] = []
         self.synthetic_interfaces: list[str] = []
         self.synthetic_fabric_octet = os.getpid() % 200 + 20
@@ -599,7 +732,7 @@ class SparkLifecycle:
         for path in reversed(getattr(self, "synthetic_paths", [])):
             try:
                 self._run_command(
-                    ["sudo", "/usr/bin/rm", "--", os.fspath(path)],
+                    ["sudo", "/usr/bin/rm", "-f", "--", os.fspath(path)],
                     cwd=Path("/"),
                     timeout=30,
                 )
@@ -621,6 +754,9 @@ class SparkLifecycle:
         except BaseException as error:  # noqa: BLE001 - continue cleanup.
             failures.append(error)
         for interface in reversed(getattr(self, "synthetic_interfaces", [])):
+            interface_path = Path("/sys/class/net") / interface
+            if not interface_path.exists():
+                continue
             try:
                 self._run_command(
                     ["sudo", "/usr/sbin/ip", "link", "delete", interface],
@@ -628,7 +764,8 @@ class SparkLifecycle:
                     timeout=30,
                 )
             except BaseException as error:  # noqa: BLE001 - continue cleanup.
-                failures.append(error)
+                if interface_path.exists():
+                    failures.append(error)
         bundle = getattr(self, "bundle", None)
         if bundle is not None:
             try:
@@ -723,7 +860,9 @@ class SparkLifecycle:
             **self.tailnet_services,
         )
         _configure_acceptance_renewal(
-            self.bundle, lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS
+            self.bundle,
+            lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
+            agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
         )
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
@@ -770,6 +909,7 @@ class SparkLifecycle:
             hostname=self.control_hostname,
             port=self._local_browser_port(),
         )
+        self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
@@ -916,53 +1056,129 @@ class SparkLifecycle:
 
     def _prepare_synthetic_firewall_environment(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
-        network = f"{self.project}_cluster-egress"
-        node_management_ip = self._run_command(
-            [
-                "docker",
-                "network",
-                "inspect",
-                "--format",
-                "{{(index .IPAM.Config 0).Gateway}}",
-                network,
-            ],
-            cwd=self.bundle,
-        ).stdout.strip()
+        suffix = self.synthetic_fabric_octet
+        management_interface = f"vmgt{os.getpid() % 100000}"
+        management_peer = f"vnas{os.getpid() % 100000}"
+        fabric_interface = f"vfab{os.getpid() % 100000}"
+        node_management_ip = f"172.31.{suffix}.1"
+        nas_management_ip = f"172.31.{suffix}.2"
+        node_fabric_ip = f"198.19.{suffix}.1"
+        peer_fabric_ip = f"198.19.{suffix}.2"
+        if any(
+            len(interface) > 15
+            for interface in (
+                management_interface,
+                management_peer,
+                fabric_interface,
+            )
+        ):
+            raise LifecycleError("synthetic firewall interface identity is invalid")
         litellm_container = self._run_command(
             self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
         ).stdout.strip()
         if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
             raise LifecycleError("synthetic firewall source container is invalid")
-        nas_management_ip = self._run_command(
+        litellm_pid = self._run_command(
             [
                 "docker",
                 "inspect",
                 "--format",
-                (
-                    f"{{{{with index .NetworkSettings.Networks {json.dumps(network)}}}}}"
-                    "{{.IPAddress}}{{end}}"
-                ),
+                "{{.State.Pid}}",
                 litellm_container,
             ],
             cwd=self.bundle,
         ).stdout.strip()
+        if re.fullmatch(r"[1-9][0-9]{1,9}", litellm_pid) is None:
+            raise LifecycleError("synthetic firewall source namespace is invalid")
         if any(
             re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None
             for value in (node_management_ip, nas_management_ip)
         ):
             raise LifecycleError("synthetic firewall management topology is invalid")
 
-        suffix = self.synthetic_fabric_octet
-        interface = f"vfab{os.getpid() % 100000}"
-        node_fabric_ip = f"198.19.{suffix}.1"
-        peer_fabric_ip = f"198.19.{suffix}.2"
-        if len(interface) > 15:
-            raise LifecycleError("synthetic firewall interface identity is invalid")
         self._run_command(
-            ["sudo", "/usr/sbin/ip", "link", "add", interface, "type", "dummy"],
+            [
+                "sudo",
+                "/usr/sbin/ip",
+                "link",
+                "add",
+                management_interface,
+                "type",
+                "veth",
+                "peer",
+                "name",
+                management_peer,
+            ],
             cwd=self.temporary_root,
         )
-        self.synthetic_interfaces.append(interface)
+        self.synthetic_interfaces.append(management_interface)
+        self._run_command(
+            [
+                "sudo",
+                "/usr/sbin/ip",
+                "link",
+                "set",
+                management_peer,
+                "netns",
+                litellm_pid,
+            ],
+            cwd=self.temporary_root,
+        )
+        self._run_command(
+            [
+                "sudo",
+                "/usr/sbin/ip",
+                "address",
+                "add",
+                f"{node_management_ip}/30",
+                "dev",
+                management_interface,
+            ],
+            cwd=self.temporary_root,
+        )
+        self._run_command(
+            ["sudo", "/usr/sbin/ip", "link", "set", management_interface, "up"],
+            cwd=self.temporary_root,
+        )
+        for command in (
+            [
+                "/usr/bin/nsenter",
+                "--target",
+                litellm_pid,
+                "--net",
+                "/usr/sbin/ip",
+                "address",
+                "add",
+                f"{nas_management_ip}/30",
+                "dev",
+                management_peer,
+            ],
+            [
+                "/usr/bin/nsenter",
+                "--target",
+                litellm_pid,
+                "--net",
+                "/usr/sbin/ip",
+                "link",
+                "set",
+                management_peer,
+                "up",
+            ],
+        ):
+            self._run_command(["sudo", *command], cwd=self.temporary_root)
+        self._run_command(
+            [
+                "sudo",
+                "/usr/sbin/ip",
+                "link",
+                "add",
+                fabric_interface,
+                "type",
+                "dummy",
+            ],
+            cwd=self.temporary_root,
+        )
+        self.synthetic_interfaces.append(fabric_interface)
         self._run_command(
             [
                 "sudo",
@@ -971,12 +1187,12 @@ class SparkLifecycle:
                 "add",
                 f"{node_fabric_ip}/24",
                 "dev",
-                interface,
+                fabric_interface,
             ],
             cwd=self.temporary_root,
         )
         self._run_command(
-            ["sudo", "/usr/sbin/ip", "link", "set", interface, "up"],
+            ["sudo", "/usr/sbin/ip", "link", "set", fabric_interface, "up"],
             cwd=self.temporary_root,
         )
         self.firewall_environment = {
@@ -1197,25 +1413,14 @@ class SparkLifecycle:
         }
 
     def _run_synthetic_canary(self, node_id: str) -> dict[str, object]:
-        assert self.control is not None and self.temporary_root is not None
+        assert (
+            self.control is not None
+            and self.browser is not None
+            and self.temporary_root is not None
+        )
         if NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("synthetic canary node identity is invalid")
-        runner_path = REPOSITORY_ROOT / "scripts/run-development-slices"
-        scripts_path = os.fspath(runner_path.parent)
-        loader = importlib.machinery.SourceFileLoader(
-            "spark_lifecycle_development_runner", os.fspath(runner_path)
-        )
-        specification = importlib.util.spec_from_loader(loader.name, loader)
-        if specification is None or specification.loader is None:
-            raise LifecycleError("synthetic canary runner is unavailable")
-        module = importlib.util.module_from_spec(specification)
-        sys.path.insert(0, scripts_path)
-        try:
-            specification.loader.exec_module(module)
-        except (ImportError, OSError) as error:
-            raise LifecycleError("synthetic canary runner is unavailable") from error
-        finally:
-            sys.path.remove(scripts_path)
+        module = _load_development_runner()
         evidence = self.temporary_root / "synthetic-canary.json"
         arguments = argparse.Namespace(
             phase="synthetic",
@@ -1237,10 +1442,13 @@ class SparkLifecycle:
             stop_after=None,
         )
         try:
+            inference_key = self._read_secret("litellm-master-key")
+            inference = self.browser.bearer(inference_key, timeout=30)
+            del inference_key
             runner = module.Runner(
                 arguments,
                 control_client=self.control,
-                inference_client=self.control,
+                inference_client=inference,
             )
             runner.run()
         except module.SliceError as error:
@@ -1267,60 +1475,79 @@ class SparkLifecycle:
             raise LifecycleError("certificate serial proof is invalid")
         return encoded
 
-    def _old_certificate_rejected(self) -> bool:
+    def _old_certificate_rejected(self, serial_before: str) -> bool:
         assert self.temporary_root is not None
+        if SERIAL.fullmatch(serial_before) is None:
+            raise LifecycleError("retired agent certificate serial is invalid")
         credential_root = AGENT_DATA / "credentials"
-        leaf = self.temporary_root / "retired-agent-certificate.pem"
-        chain = self.temporary_root / "retired-agent-chain.pem"
-        combined = self.temporary_root / "retired-agent-bundle.pem"
-        for source, target in (
-            (credential_root / "certificate.pem", leaf),
-            (credential_root / "chain.pem", chain),
-        ):
-            self._run_command(
-                [
-                    "sudo",
-                    "/usr/bin/install",
-                    "-o",
-                    str(os.getuid()),
-                    "-m",
-                    "0600",
-                    os.fspath(source),
-                    os.fspath(target),
-                ],
-                cwd=self.temporary_root,
-                timeout=30,
+        probe = self.temporary_root / "retired-agent-probe"
+        probe.mkdir(mode=0o700)
+        leaf = probe / "certificate.pem"
+        chain = probe / "chain.pem"
+        key_v2 = probe / "private-key-v2.pem"
+        identity = probe / "identity.json"
+        bundle = probe / "bundle.pem"
+        key_v1 = probe / "private-key.pem"
+        try:
+            for source, target in (
+                (credential_root / "certificate.pem", leaf),
+                (credential_root / "chain.pem", chain),
+                (credential_root / "private-key.pem", key_v2),
+                (credential_root / "identity.json", identity),
+            ):
+                self._run_command(
+                    [
+                        "sudo",
+                        "/usr/bin/install",
+                        "-o",
+                        str(os.getuid()),
+                        "-m",
+                        "0600",
+                        os.fspath(source),
+                        os.fspath(target),
+                    ],
+                    cwd=self.temporary_root,
+                    timeout=30,
+                )
+            try:
+                metadata = json.loads(identity.read_bytes())
+            except (OSError, json.JSONDecodeError) as error:
+                raise LifecycleError("retired agent identity is invalid") from error
+            if not isinstance(metadata, dict) or metadata.get("serial") != serial_before:
+                raise LifecycleError("retired agent identity serial changed")
+            bundle.write_bytes(leaf.read_bytes() + chain.read_bytes())
+            key_v1.write_bytes(
+                _openssl_compatible_ed25519_private_key(key_v2.read_bytes())
             )
-        combined.write_bytes(leaf.read_bytes() + chain.read_bytes())
-        os.chmod(combined, 0o600)
-        leaf.unlink()
-        chain.unlink()
-        result = self._run_command(
-            [
-                "sudo",
-                "/usr/bin/curl",
-                "--config",
-                "/dev/null",
-                "--silent",
-                "--show-error",
-                "--output",
-                "/dev/null",
-                "--write-out",
-                "%{http_code}",
-                "--max-time",
-                "30",
-                "--cacert",
-                "/etc/vonk-forge-agent/controller-ca.pem",
-                "--cert",
-                os.fspath(combined),
-                "--key",
-                os.fspath(credential_root / "private-key.pem"),
-                f"https://{AGENT_HOST}:8443/agent/v1/source-bundles/{'0' * 64}",
-            ],
-            cwd=Path("/"),
-            timeout=40,
-        )
-        return result.stdout == "401"
+            os.chmod(bundle, 0o600)
+            os.chmod(key_v1, 0o600)
+            result = self._run_command(
+                [
+                    "/usr/bin/curl",
+                    "--config",
+                    "/dev/null",
+                    "--silent",
+                    "--show-error",
+                    "--output",
+                    "/dev/null",
+                    "--write-out",
+                    "%{http_code}",
+                    "--max-time",
+                    "30",
+                    "--cacert",
+                    "/etc/vonk-forge-agent/controller-ca.pem",
+                    "--cert",
+                    os.fspath(bundle),
+                    "--key",
+                    os.fspath(key_v1),
+                    f"https://{AGENT_HOST}:8443/agent/v1/source-bundles/{'0' * 64}",
+                ],
+                cwd=Path("/"),
+                timeout=40,
+            )
+            return result.stdout == "401"
+        finally:
+            shutil.rmtree(probe)
 
     def _observe_renewal(self, node_id: str, serial_before: str) -> dict[str, object]:
         if (
@@ -1352,7 +1579,7 @@ class SparkLifecycle:
                     or identity.get("serial") != serial_after
                 ):
                     raise LifecycleError("renewed agent identity is inconsistent")
-                if not self._old_certificate_rejected():
+                if not self._old_certificate_rejected(serial_before):
                     raise LifecycleError("retired agent certificate was not rejected")
                 before_proof = self._serial_proof(serial_before)
                 return {

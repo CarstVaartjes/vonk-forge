@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import subprocess
@@ -73,6 +74,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     lifecycle = _module()
     bundle = tmp_path / "bundle"
     (bundle / "secrets/step-ca").mkdir(parents=True)
+    (bundle / "secrets/runtime-configs").mkdir()
     (bundle / "secrets/step-ca/ca.json").write_text(
         json.dumps(
             {
@@ -99,10 +101,26 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         + "\n    environment:\n      VONK_DEPLOYMENT_MODE: production\n"
         + "  caddy:\n    image: caddy:acceptance\n    networks: [ingress]\n    ports:\n"
         + "      - target: 8443\n        published: 8443\n"
+        + "    configs:\n      - source: vonk_runtime_0123456789abcdef\n"
+        + "        target: /etc/caddy/Caddyfile\n"
         + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
+        + "configs:\n  vonk_runtime_0123456789abcdef:\n"
+        + "    file: ./secrets/runtime-configs/vonk_runtime_0123456789abcdef\n"
+    )
+    caddy_path = (
+        bundle / "secrets/runtime-configs/vonk_runtime_0123456789abcdef"
+    )
+    caddy_path.write_text(
+        "reverse_proxy control-api:8443 {\n"
+        "\theader_up X-Vonk-Agent-Source {http.request.remote.host}\n"
+        "}\n"
     )
 
-    lifecycle._configure_acceptance_renewal(bundle, lifetime_seconds=300)
+    lifecycle._configure_acceptance_renewal(
+        bundle,
+        lifetime_seconds=300,
+        agent_source_address="172.31.42.1",
+    )
 
     ca = json.loads((bundle / "secrets/step-ca/ca.json").read_text())
     claims = ca["authority"]["provisioners"][0]["claims"]
@@ -117,6 +135,11 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '300'" in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
+    assert (
+        "header_up X-Vonk-Agent-Source 172.31.42.1"
+        in caddy_path.read_text()
+    )
+    assert "{http.request.remote.host}" not in caddy_path.read_text()
 
 
 def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
@@ -138,6 +161,14 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
     assert amd64_digest == arm64_digest
     with pytest.raises(lifecycle.LifecycleError, match="platform"):
         lifecycle._synthetic_device_fixture("linux-riscv64")
+
+
+def test_embedded_development_runner_reuses_the_shared_client_exception() -> None:
+    lifecycle = _module()
+
+    runner = lifecycle._load_development_runner()
+
+    assert runner.SliceError is lifecycle.SliceError
 
 
 def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
@@ -166,12 +197,10 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     def command(argv, *, cwd, timeout=300):
         assert cwd == tmp_path
         observed.append(argv)
-        if argv[:3] == ["docker", "network", "inspect"]:
-            stdout = "172.28.0.1\n"
-        elif argv[-3:] == ["ps", "--quiet", "litellm"]:
+        if argv[-3:] == ["ps", "--quiet", "litellm"]:
             stdout = "a" * 64 + "\n"
         elif argv[:2] == ["docker", "inspect"]:
-            stdout = "172.28.0.9\n"
+            stdout = "4242\n"
         else:
             stdout = ""
         return subprocess.CompletedProcess(argv, 0, stdout=stdout)
@@ -180,12 +209,21 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
 
     run._prepare_synthetic_firewall_environment()
 
-    assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.28.0.9"
-    assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.28.0.1"
+    assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.31.42.2"
+    assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.31.42.1"
     assert run.firewall_environment["VONK_FABRIC_BANDWIDTH_MBPS"] == "200000"
     assert run.firewall_environment["VONK_NODE_FABRIC_IP"] == "198.19.42.1"
     assert run.firewall_environment["VONK_PEER_FABRIC_IP"] == "198.19.42.2"
-    assert len(run.synthetic_interfaces) == 1
+    assert len(run.synthetic_interfaces) == 2
+    assert run.synthetic_interfaces[0].startswith("vmgt")
+    assert run.synthetic_interfaces[1].startswith("vfab")
+    assert any("172.31.42.1/30" in argv for argv in observed)
+    assert any("172.31.42.2/30" in argv for argv in observed)
+    assert any("/usr/bin/nsenter" in argv for argv in observed)
+    assert all(
+        not ("172.31.42.1/30" in argv and "198.19.42.1/24" in argv)
+        for argv in observed
+    )
     assert all("/usr/bin/install" not in argv for argv in observed)
 
 
@@ -201,7 +239,8 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     run.bundle = bundle
     run.project = "vonk-spark-42-arm64"
     run.temporary_root = root
-    run.synthetic_paths = []
+    run.synthetic_paths = [Path("/etc/cdi/vonk-spark-acceptance.json")]
+    run.synthetic_interfaces = ["vmgt99999"]
     run._run_command = lambda command, *, cwd, timeout=300: observed.append(
         (command, cwd, timeout)
     )
@@ -209,6 +248,17 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     run._cleanup()
 
     assert observed == [
+        (
+            [
+                "sudo",
+                "/usr/bin/rm",
+                "-f",
+                "--",
+                "/etc/cdi/vonk-spark-acceptance.json",
+            ],
+            Path("/"),
+            30,
+        ),
         (
             [
                 "sudo",
@@ -291,6 +341,17 @@ def test_local_browser_controller_uses_only_the_loopback_publication(monkeypatch
         "headers": {"Host": "vonk-forge.acceptance.example.test"},
         "limit": lifecycle.MAXIMUM_RESPONSE_BYTES + 1,
         "closed": True,
+    }
+
+    observed.clear()
+    assert boundary.bearer("opaque-inference-key", timeout=5).request(
+        "GET", "/healthz"
+    ) == (200, {})
+    assert observed["headers"] == {
+        "Accept": "application/json",
+        "Authorization": "Bearer opaque-inference-key",
+        "Content-Type": "application/json",
+        "Host": "vonk-forge.acceptance.example.test",
     }
 
 
@@ -585,7 +646,10 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
         "node_id": node_id,
         "serial": serial_after,
     }
-    run._old_certificate_rejected = lambda: True
+    rejected_serials: list[str] = []
+    run._old_certificate_rejected = (
+        lambda serial: rejected_serials.append(serial) is None
+    )
 
     observed = run._observe_renewal(node_id, serial_before)
 
@@ -601,3 +665,30 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
             },
         },
     }
+    assert rejected_serials == [serial_before]
+
+
+def test_openssl_ed25519_probe_key_conversion_is_strict() -> None:
+    lifecycle = _module()
+    seed = bytes(range(32))
+    public = bytes(range(32, 64))
+    source_der = (
+        lifecycle.ED25519_PKCS8_V2_PREFIX
+        + seed
+        + lifecycle.ED25519_PKCS8_V2_PUBLIC_PREFIX
+        + public
+    )
+    source = (
+        b"-----BEGIN PRIVATE KEY-----\n"
+        + base64.b64encode(source_der)
+        + b"\n-----END PRIVATE KEY-----\n"
+    )
+
+    converted = lifecycle._openssl_compatible_ed25519_private_key(source)
+    converted_der = base64.b64decode(b"".join(converted.splitlines()[1:-1]))
+
+    assert converted_der == lifecycle.ED25519_PKCS8_V1_PREFIX + source_der[5:48]
+    with pytest.raises(lifecycle.LifecycleError, match="private key"):
+        lifecycle._openssl_compatible_ed25519_private_key(
+            source.replace(b"PRIVATE KEY", b"RSA PRIVATE KEY")
+        )
