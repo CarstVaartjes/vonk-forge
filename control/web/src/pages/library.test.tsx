@@ -18,6 +18,8 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   model_publisher: "qwen",
   model_slug: "qwen-3-5",
   model_title: "Qwen 3.5",
+  source_owner: "QwenLM",
+  source_repository: "https://github.com/QwenLM/Qwen3",
   capabilities: ["chat"],
   qualification: "candidate",
   precision: "BF16",
@@ -467,7 +469,7 @@ test("offers custom recipe authoring with validation and save", async () => {
   expect(await screen.findByRole("status", {name: "Recipe authoring"})).toHaveTextContent("Recipe saved");
 });
 
-test("previews a public recipe import with exact identity and persists only after confirmation", async () => {
+test("previews a public recipe import with exact identity and provenance before confirmation", async () => {
   history.replaceState(null, "", "/library");
   const previewPublicRecipe = vi.fn(async () => publicRecipePreview({publisher: "vonk", slug: "service", title: "Service", description: "", tags: [], uri: "vonk://catalog/vonk/service@sha256:" + "a".repeat(64), content_sha256: "a".repeat(64), source: "global"}));
   const importPublicRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
@@ -480,6 +482,8 @@ test("previews a public recipe import with exact identity and persists only afte
   await user.click(screen.getByRole("button", {name: "Review URI"}));
   const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
   expect(within(preview).getAllByText("vonk/service")).toHaveLength(2);
+  expect(within(preview).getByText("QwenLM")).toBeVisible();
+  expect(within(preview).getByRole("link", {name: /View source/})).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
   await user.click(within(preview).getByRole("button", {name: "Import recipe"}));
   expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
@@ -510,6 +514,8 @@ test("loads the current default catalog recipes when public import opens", async
         model_publisher: "wan-ai",
         model_slug: "wan-2-2",
         model_title: "Wan 2.2",
+        source_owner: "MiaAI-Lab",
+        source_repository: "https://github.com/MiaAI-Lab/wan-spark",
         capabilities: ["video"],
         runtime_distribution: "diffusers-0-40",
         precision: "FP8",
@@ -540,6 +546,14 @@ test("loads the current default catalog recipes when public import opens", async
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
   expect(await screen.findByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
   expect(screen.getByText("@cccccccc")).toBeVisible();
+  expect(screen.getAllByRole("link", {name: /QwenLM/})[0]).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
+
+  const creator = screen.getByRole("combobox", {name: "Filter by creator or source"});
+  expect(within(creator).getByRole("option", {name: "MiaAI-Lab"})).toBeVisible();
+  await user.selectOptions(creator, "MiaAI-Lab");
+  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
 
   const sparks = screen.getByRole("combobox", {name: "Filter by required Sparks"});
   expect(within(sparks).getByRole("option", {name: "1 Spark"})).toBeVisible();

@@ -512,6 +512,25 @@
   margin-top: 0.25rem;
 }
 
+.library-import-source-owner {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.72rem;
+  margin-top: 0.18rem;
+}
+
+.library-import-source-owner a,
+.library-import-facts a {
+  color: var(--mint);
+  text-decoration-color: color-mix(in srgb, var(--mint), transparent 45%);
+  text-underline-offset: 0.16em;
+}
+
+.library-import-source-owner a:hover,
+.library-import-facts a:hover {
+  text-decoration-color: currentColor;
+}
+
 .library-import-card-facts {
   display: grid;
   gap: 0.4rem;

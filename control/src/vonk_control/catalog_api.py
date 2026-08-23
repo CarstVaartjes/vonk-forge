@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import tempfile
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +37,7 @@ from .recipe_library import (
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
 _MAX_DOCUMENT_BYTES = 256 * 1024
+_SOURCE_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 _PUBLIC_CAPABILITIES = (
     "chat",
     "reasoning",
@@ -203,6 +206,8 @@ class PublicRecipeListItem(StrictModel):
     model_publisher: str = Field(pattern=_SLUG)
     model_slug: str = Field(pattern=_SLUG)
     model_title: str = Field(min_length=1, max_length=120)
+    source_owner: str | None = Field(default=None, min_length=1, max_length=120)
+    source_repository: str | None = Field(default=None, min_length=1, max_length=512)
     capabilities: list[PublicRecipeCapability] = Field(max_length=8)
     qualification: Literal["candidate", "cataloged"]
     precision: str | None = Field(default=None, min_length=2, max_length=24)
@@ -471,10 +476,13 @@ def _public_recipe_metadata(
         ),
         None,
     )
+    source_owner, source_repository = _public_recipe_source(document)
     return {
         "model_publisher": model_publisher,
         "model_slug": model_slug,
         "model_title": model_title,
+        "source_owner": source_owner,
+        "source_repository": source_repository,
         "capabilities": [
             capability
             for capability in _PUBLIC_CAPABILITIES
@@ -484,6 +492,82 @@ def _public_recipe_metadata(
         "precision": precision,
         **_document_summary(document),
     }
+
+
+def _public_recipe_source(
+    document: Mapping[str, object],
+) -> tuple[str | None, str | None]:
+    provenance = document.get("provenance")
+    provenance = provenance if isinstance(provenance, Mapping) else {}
+    source_reference = provenance.get("source_reference")
+    if not isinstance(source_reference, str):
+        return None, None
+
+    canonical = _canonical_source_repository(source_reference)
+    if canonical is None:
+        return None, None
+    return canonical
+
+
+def _canonical_source_repository(
+    source_reference: str,
+) -> tuple[str, str] | None:
+    try:
+        parsed = urlsplit(source_reference.strip())
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or parsed.query
+    ):
+        return None
+
+    hostname = (parsed.hostname or "").lower()
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if not segments or any(
+        value in {".", ".."} or not _SOURCE_PATH_SEGMENT.fullmatch(value)
+        for value in segments
+    ):
+        return None
+
+    repository_segments: list[str]
+    canonical_segments: list[str]
+    if hostname in {"github.com", "www.github.com", "raw.githubusercontent.com"}:
+        repository_segments = segments[:2]
+        canonical_segments = repository_segments
+        hostname = "github.com"
+    elif hostname in {"gitlab.com", "www.gitlab.com"}:
+        if "-" not in segments and len(segments) != 2:
+            return None
+        separator = segments.index("-") if "-" in segments else 2
+        repository_segments = segments[:separator]
+        canonical_segments = repository_segments
+        hostname = "gitlab.com"
+    elif hostname in {"huggingface.co", "www.huggingface.co"}:
+        offset = 1 if segments[0] in {"datasets", "spaces"} else 0
+        repository_segments = segments[offset : offset + 2]
+        canonical_segments = [*segments[:offset], *repository_segments]
+        hostname = "huggingface.co"
+    else:
+        return None
+
+    if len(repository_segments) < 2:
+        return None
+    repository_segments[-1] = repository_segments[-1].removesuffix(".git")
+    canonical_segments[-1] = repository_segments[-1]
+    if not repository_segments[-1]:
+        return None
+    owner = repository_segments[0]
+    repository = urlunsplit(
+        ("https", hostname, f"/{'/'.join(canonical_segments)}", "", "")
+    )
+    if len(owner) > 120 or len(repository) > 512:
+        return None
+    return owner, repository
 
 
 def _bounded(

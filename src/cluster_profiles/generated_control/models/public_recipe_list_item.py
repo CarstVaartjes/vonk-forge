@@ -51,6 +51,8 @@ class PublicRecipeListItem:
             topology_name (str):
             uri (str):
             precision (Union[None, Unset, str]):
+            source_owner (Union[None, Unset, str]):
+            source_repository (Union[None, Unset, str]):
      """
 
     artifact_count: int
@@ -76,6 +78,8 @@ class PublicRecipeListItem:
     topology_name: str
     uri: str
     precision: Union[None, Unset, str] = UNSET
+    source_owner: Union[None, Unset, str] = UNSET
+    source_repository: Union[None, Unset, str] = UNSET
 
 
 
@@ -139,6 +143,18 @@ class PublicRecipeListItem:
         else:
             precision = self.precision
 
+        source_owner: Union[None, Unset, str]
+        if isinstance(self.source_owner, Unset):
+            source_owner = UNSET
+        else:
+            source_owner = self.source_owner
+
+        source_repository: Union[None, Unset, str]
+        if isinstance(self.source_repository, Unset):
+            source_repository = UNSET
+        else:
+            source_repository = self.source_repository
+
 
         field_dict: dict[str, Any] = {}
 
@@ -168,6 +184,10 @@ class PublicRecipeListItem:
         })
         if precision is not UNSET:
             field_dict["precision"] = precision
+        if source_owner is not UNSET:
+            field_dict["source_owner"] = source_owner
+        if source_repository is not UNSET:
+            field_dict["source_repository"] = source_repository
 
         return field_dict
 
@@ -242,6 +262,26 @@ class PublicRecipeListItem:
         precision = _parse_precision(d.pop("precision", UNSET))
 
 
+        def _parse_source_owner(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        source_owner = _parse_source_owner(d.pop("source_owner", UNSET))
+
+
+        def _parse_source_repository(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        source_repository = _parse_source_repository(d.pop("source_repository", UNSET))
+
+
         public_recipe_list_item = cls(
             artifact_count=artifact_count,
             capabilities=capabilities,
@@ -266,6 +306,8 @@ class PublicRecipeListItem:
             topology_name=topology_name,
             uri=uri,
             precision=precision,
+            source_owner=source_owner,
+            source_repository=source_repository,
         )
 
         return public_recipe_list_item
