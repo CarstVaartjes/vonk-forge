@@ -235,6 +235,7 @@ def configure_tailnet_service_names(
     if TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None:
         raise AcceptanceError("acceptance Tailscale gateway hostname is invalid")
     settings = services | {
+        "VONK_TAILSCALE_EPHEMERAL": "true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME": gateway_hostname,
     }
     environment = bundle / ".env"

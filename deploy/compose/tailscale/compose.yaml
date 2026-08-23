@@ -19,6 +19,9 @@ services:
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
+      # Production gateways must survive extended offline periods. Acceptance
+      # overrides this to true so disposable CI nodes leave no tailnet state.
+      VONK_TAILSCALE_EPHEMERAL: ${VONK_TAILSCALE_EPHEMERAL:-false}
     command:
       - /bin/sh
       - -eu
@@ -28,15 +31,23 @@ services:
           printf '%s\n' 'Tailscale OAuth client secret input is invalid' >&2
           exit 1
         fi
+        case "$${VONK_TAILSCALE_EPHEMERAL}" in
+          true|false) ;;
+          *)
+            printf '%s\n' 'VONK_TAILSCALE_EPHEMERAL must be true or false' >&2
+            exit 1
+            ;;
+        esac
         umask 077
         tr -d '\r\n' < /run/secrets/tailscale-oauth-client-secret \
-          > /tmp/tailscale-oauth-client-secret-non-ephemeral
-        test -s /tmp/tailscale-oauth-client-secret-non-ephemeral
-        printf '%s' '?ephemeral=false&preauthorized=true' \
-          >> /tmp/tailscale-oauth-client-secret-non-ephemeral
-        chmod 0400 /tmp/tailscale-oauth-client-secret-non-ephemeral
+          > /tmp/tailscale-oauth-client-secret
+        test -s /tmp/tailscale-oauth-client-secret
+        printf '?ephemeral=%s&preauthorized=true' \
+          "$${VONK_TAILSCALE_EPHEMERAL}" \
+          >> /tmp/tailscale-oauth-client-secret
+        chmod 0400 /tmp/tailscale-oauth-client-secret
         exec env \
-          TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret-non-ephemeral \
+          TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret \
           /usr/local/bin/containerboot
     secrets:
       - tailscale-oauth-client-id

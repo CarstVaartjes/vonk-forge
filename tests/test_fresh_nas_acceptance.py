@@ -199,6 +199,7 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
         "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge-acceptance",
         "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api-acceptance",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard-acceptance",
+        "VONK_TAILSCALE_EPHEMERAL=true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
     ]
     assert (

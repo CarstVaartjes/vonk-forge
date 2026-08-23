@@ -30,5 +30,11 @@ unattended gateway enrollment; it is not the operator's GitHub credential. Keep
 the captured client secret raw: Compose adds the non-ephemeral enrollment
 parameter only inside the gateway tmpfs.
 
+The repository's disposable acceptance harness sets
+`VONK_TAILSCALE_EPHEMERAL=true`, while generated operator bundles retain the
+default permanent identity. This keeps restart recovery representative without
+leaking offline CI machines into the tailnet after the acceptance volumes are
+removed.
+
 See [the gateway runbook](../../../docs/runbooks/tailscale.md) for setup,
 verification, backup, and recovery.
