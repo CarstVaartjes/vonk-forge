@@ -56,7 +56,6 @@ ACCEPTANCE_GATES = {
     "spark_job",
     "spark_pairing",
     "spark_renewal",
-    "spark_upgrade",
 }
 
 

@@ -93,7 +93,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "Run literal clean NAS and Tailscale configuration acceptance"
     ]["env"]
     spark_environment = _steps(jobs["spark-acceptance"])[
-        "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
+        "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
     ]["env"]
     for name, service in expected_services.items():
         assert nas_environment[name] == service
@@ -278,11 +278,11 @@ def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> N
         ),
         "path": "${{ runner.temp }}/spark-publication",
     }
-    run = steps["Run packaged Spark pairing, job, renewal, and upgrade acceptance"][
+    run = steps["Run packaged Spark fresh-install, pairing, job, and renewal acceptance"][
         "run"
     ]
     environment = steps[
-        "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
+        "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
     ]["env"]
 
     immutable_root = '"$RUNNER_TEMP/spark-publication/installer-publication/objects"'

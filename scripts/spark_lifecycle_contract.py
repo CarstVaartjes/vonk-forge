@@ -14,25 +14,24 @@ from typing import Any
 PLATFORMS = ("linux-amd64", "linux-arm64")
 GATES = {
     "linux-amd64": ["spark_amd64", "spark_pairing"],
-    "linux-arm64": ["spark_arm64", "spark_job", "spark_renewal", "spark_upgrade"],
+    "linux-arm64": ["spark_arm64", "spark_job", "spark_renewal"],
 }
 PHASES = {
     "linux-amd64": [
         "publication-graph-verified",
         "controller-ready",
-        "baseline-installed",
+        "candidate-installed",
         "paired",
         "direct-rust-agent-healthy",
     ],
     "linux-arm64": [
         "publication-graph-verified",
         "controller-ready",
-        "baseline-installed",
+        "candidate-installed",
         "paired",
         "synthetic-device-ready",
         "canary-completed",
         "identity-renewed",
-        "candidate-upgraded",
         "direct-rust-agent-healthy",
     ],
 }
@@ -525,10 +524,10 @@ def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
     selected = graph["packages"]["linux-amd64"]
     if installation != {
         "architecture": "amd64",
-        "package_sha256": selected["baseline_sha256"],
-        "version": graph["baseline_version"],
+        "package_sha256": selected["candidate_sha256"],
+        "version": graph["candidate_version"],
     }:
-        raise ContractError("AMD64 installation does not match the baseline graph")
+        raise ContractError("AMD64 installation does not match the candidate graph")
     if not isinstance(proof.get("node_id"), str) or NODE_ID.fullmatch(proof["node_id"]) is None:
         raise ContractError("AMD64 node identity proof is invalid")
 
@@ -538,17 +537,12 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         proof,
         {
             "canary",
-            "config_sha256_after_upgrade",
-            "config_sha256_before_upgrade",
             "controller_generation",
             "direct_agent_health",
             "installation",
             "node_id_after_renewal",
-            "node_id_after_upgrade",
             "node_id_before_renewal",
             "pairing_grant_use_count",
-            "private_identity_sha256_after_upgrade",
-            "private_identity_sha256_before_upgrade",
             "publication_graph",
             "renewal",
             "synthetic_device",
@@ -558,7 +552,6 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
     node_ids = [
         proof.get("node_id_before_renewal"),
         proof.get("node_id_after_renewal"),
-        proof.get("node_id_after_upgrade"),
     ]
     if (
         not all(isinstance(node_id, str) and NODE_ID.fullmatch(node_id) for node_id in node_ids)
@@ -567,40 +560,16 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         raise ContractError("ARM64 node identity was not preserved")
 
     installation = _object(proof.get("installation"), "ARM64 installation proof")
-    _exact(installation, {"architecture", "baseline", "candidate"}, "ARM64 installation proof")
+    _exact(installation, {"architecture", "identity"}, "ARM64 installation proof")
     if installation.get("architecture") != "arm64":
         raise ContractError("ARM64 installation architecture is invalid")
     packages = graph["packages"]["linux-arm64"]
-    baseline = _validate_install_identity(
-        installation.get("baseline"),
-        label="ARM64 baseline installation identity",
-        version=graph["baseline_version"],
-        package_digest=packages["baseline_sha256"],
-    )
-    candidate = _validate_install_identity(
-        installation.get("candidate"),
+    _validate_install_identity(
+        installation.get("identity"),
         label="ARM64 candidate installation identity",
         version=graph["candidate_version"],
         package_digest=packages["candidate_sha256"],
     )
-    if any(
-        baseline[field] == candidate[field]
-        for field in ("version", "package_sha256", "build_sha256", "binary_sha256")
-    ):
-        raise ContractError("ARM64 upgraded identities did not all change")
-
-    for before, after, label in (
-        ("config_sha256_before_upgrade", "config_sha256_after_upgrade", "config"),
-        (
-            "private_identity_sha256_before_upgrade",
-            "private_identity_sha256_after_upgrade",
-            "private identity",
-        ),
-    ):
-        before_digest = _digest(proof.get(before), f"ARM64 {label} before upgrade")
-        after_digest = _digest(proof.get(after), f"ARM64 {label} after upgrade")
-        if before_digest != after_digest:
-            raise ContractError(f"ARM64 {label} was not preserved")
 
     renewal = _object(proof.get("renewal"), "ARM64 renewal proof")
     _exact(

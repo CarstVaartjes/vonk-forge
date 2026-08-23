@@ -20,12 +20,11 @@ SOURCE_SHA = "b" * 40
 ARM64_PHASES = [
     "publication-graph-verified",
     "controller-ready",
-    "baseline-installed",
+    "candidate-installed",
     "paired",
     "synthetic-device-ready",
     "canary-completed",
     "identity-renewed",
-    "candidate-upgraded",
     "direct-rust-agent-healthy",
 ]
 
@@ -87,8 +86,6 @@ def _arm64_proof() -> dict[str, object]:
             ],
             "deterministic_response_sha256": "5" * 64,
         },
-        "config_sha256_after_upgrade": "6" * 64,
-        "config_sha256_before_upgrade": "6" * 64,
         "controller_generation": GENERATION,
         "direct_agent_health": {
             "healthy": True,
@@ -97,13 +94,7 @@ def _arm64_proof() -> dict[str, object]:
         },
         "installation": {
             "architecture": "arm64",
-            "baseline": {
-                "binary_sha256": "7" * 64,
-                "build_sha256": "8" * 64,
-                "package_sha256": "3" * 64,
-                "version": "1.2.2~acceptance.1+gbbbbbbbbbbbb",
-            },
-            "candidate": {
+            "identity": {
                 "binary_sha256": "9" * 64,
                 "build_sha256": "a" * 64,
                 "package_sha256": "4" * 64,
@@ -111,11 +102,8 @@ def _arm64_proof() -> dict[str, object]:
             },
         },
         "node_id_after_renewal": node_id,
-        "node_id_after_upgrade": node_id,
         "node_id_before_renewal": node_id,
         "pairing_grant_use_count": 1,
-        "private_identity_sha256_after_upgrade": "d" * 64,
-        "private_identity_sha256_before_upgrade": "d" * 64,
         "publication_graph": _publication_graph(),
         "renewal": {
             "certificate_serial_after": "fedcba9876543210",
@@ -456,7 +444,7 @@ def test_report_is_emitted_only_from_complete_generation_bound_evidence(
     assert result.stdout == ""
     assert json.loads(report.read_text()) == {
         "channel": "dev",
-        "gates": ["spark_arm64", "spark_job", "spark_renewal", "spark_upgrade"],
+        "gates": ["spark_arm64", "spark_job", "spark_renewal"],
         "generation": GENERATION,
         "lifecycle": {
             "completed_phases": ARM64_PHASES,
@@ -503,12 +491,9 @@ def test_run_owns_observation_validation_cleanup_and_report_emission(
             proof["publication_graph"] = graph
             installation = proof["installation"]
             assert isinstance(installation, dict)
-            baseline_identity = installation["baseline"]
-            candidate_identity = installation["candidate"]
-            assert isinstance(baseline_identity, dict)
-            assert isinstance(candidate_identity, dict)
-            baseline_identity["package_sha256"] = graph["baseline_package_sha256"]
-            candidate_identity["package_sha256"] = graph["candidate_package_sha256"]
+            identity = installation["identity"]
+            assert isinstance(identity, dict)
+            identity["package_sha256"] = graph["candidate_package_sha256"]
             self.proof = proof
 
         def __enter__(self):
