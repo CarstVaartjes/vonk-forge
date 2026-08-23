@@ -373,8 +373,6 @@ fn container_arguments_are_typed_and_hardened() {
         "bridge",
         "--memory-swap",
         "--shm-size",
-        "--gpus",
-        "all",
         "VONK_RANK=1",
         "VONK_WORLD_SIZE=2",
         "VONK_MASTER_ADDR=192.168.100.10",
@@ -409,9 +407,14 @@ fn container_arguments_are_typed_and_hardened() {
         );
     }
     assert!(
-        !arguments.iter().any(|value| value == "--privileged"
-            || value == "--network=host"
-            || value == "--device")
+        !arguments
+            .iter()
+            .any(|value| value == "--privileged" || value == "--network=host")
+    );
+    assert!(
+        arguments
+            .windows(2)
+            .any(|values| values == ["--device", "nvidia.com/gpu=all"])
     );
     assert!(
         arguments

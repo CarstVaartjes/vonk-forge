@@ -91,7 +91,7 @@ arguments rather than accepting argv. In particular it enforces:
   `/var/lib/vonk-forge-agent`;
 - no Docker/container socket, arbitrary host path, secret directory, or
   controller credential mount;
-- logical `nvidia.com/gpu=all` mapped to Docker `--gpus all`; no raw NVIDIA
+- logical `nvidia.com/gpu=all` mapped to Docker CDI `--device nvidia.com/gpu=all`; no raw NVIDIA
   device list is accepted from a recipe;
 - no raw RDMA device exposure in the first runtime version; distributed
   profiles use the validated TCP fabric path until a separately qualified

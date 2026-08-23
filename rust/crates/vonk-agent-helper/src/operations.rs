@@ -1150,14 +1150,15 @@ fn validate_docker_run(
                 }
                 ipc_host = true;
             }
-            "--device" if !infiniband => {
+            "--device" if !infiniband || !gpu => {
                 index += 1;
-                if arguments.get(index).map(String::as_str)
-                    != Some("/dev/infiniband:/dev/infiniband")
-                {
-                    return Err(OperationError::InvalidOperation);
+                match arguments.get(index).map(String::as_str) {
+                    Some("/dev/infiniband:/dev/infiniband") if !infiniband => {
+                        infiniband = true;
+                    }
+                    Some("nvidia.com/gpu=all") if !gpu => gpu = true,
+                    _ => return Err(OperationError::InvalidOperation),
                 }
-                infiniband = true;
             }
             "--ulimit" if !memlock || !stack => {
                 index += 1;
@@ -1265,13 +1266,6 @@ fn validate_docker_run(
                 } else {
                     return Err(OperationError::InvalidOperation);
                 }
-            }
-            "--gpus" if !gpu => {
-                index += 1;
-                if arguments.get(index).map(String::as_str) != Some("all") {
-                    return Err(OperationError::InvalidOperation);
-                }
-                gpu = true;
             }
             _ => return Err(OperationError::InvalidOperation),
         }
