@@ -23,7 +23,12 @@ from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256
-from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_library import (
+    RecipeLibraryChange,
+    RecipeLibraryItem,
+    RecipeLibraryRelease,
+    RecipeLibrarySnapshot,
+)
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .test_catalog_entities import model_group
@@ -41,7 +46,9 @@ class Jobs:
         return [], None, 0
 
 
-def _catalog_app(codec, audits, service, global_catalog=None, recipe_library=None) -> FastAPI:
+def _catalog_app(
+    codec, audits, service, global_catalog=None, recipe_library=None
+) -> FastAPI:
     app = FastAPI()
 
     @app.middleware("http")
@@ -713,7 +720,9 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
         recipe_library=Library(),
     )
     catalog_client = TestClient(app)
-    token = TokenCodec(b"b" * 32).issue(Actor("administrator", "administrator"), ttl_seconds=100, now=0)
+    token = TokenCodec(b"b" * 32).issue(
+        Actor("administrator", "administrator"), ttl_seconds=100, now=0
+    )
     auth = {"Authorization": f"Bearer {token}"}
 
     listed = catalog_client.get("/api/v1/catalog/public-recipes", headers=auth)
@@ -732,11 +741,101 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
     assert listed.json()["recipes"][0]["title"] == "Synthetic Tiny OpenAI"
     assert listed.json()["recipes"][0]["source_owner"] is None
     assert listed.json()["recipes"][0]["source_repository"] is None
+    assert listed.json()["recipes"][0]["release_version"] is None
+    assert listed.json()["recipes"][0]["local"]["status"] == "not-imported"
     assert preview.status_code == 200
     assert preview.json()["uri"] == remote.uri
     assert imported.status_code == 201, imported.text
     assert imported.json()["origin"] == "recipe_library"
     assert any(event.action == "catalog.public.import" for event in audits.list())
+
+
+def test_public_recipe_preview_explains_known_update_since_local_digest(
+    bridge_api,
+) -> None:
+    _client, _headers, audits, service, remote = bridge_api
+    service.import_recipe_library(
+        "admin",
+        library_commit="a" * 40,
+        source_path="recipes/synthetic-tiny-openai.json",
+        document=remote.document,
+        expected_content_sha256=remote.content_sha256,
+        release_version="1.0.0",
+        release_released_at="2026-08-14",
+    )
+    changed = copy.deepcopy(remote.document)
+    changed["metadata"]["description"] = "Updated public recipe."
+    changed_digest = recipe_content_sha256(changed)
+    releases = (
+        RecipeLibraryRelease(
+            version="2.0.0",
+            released_at="2026-08-23",
+            content_sha256=changed_digest,
+            upgrade_effect="rebuild",
+            changes=(
+                RecipeLibraryChange(
+                    kind="fix",
+                    summary="Removed a reverted upstream hotfix.",
+                ),
+            ),
+        ),
+        RecipeLibraryRelease(
+            version="1.0.0",
+            released_at="2026-08-14",
+            content_sha256=remote.content_sha256,
+            upgrade_effect="reinstall",
+            changes=(RecipeLibraryChange(kind="initial", summary="Legacy baseline."),),
+        ),
+    )
+    item = RecipeLibraryItem(
+        library_commit="b" * 40,
+        source_path="recipes/synthetic-tiny-openai.json",
+        publisher=remote.publisher,
+        slug=remote.slug,
+        title="Synthetic Tiny OpenAI",
+        description="Updated public recipe.",
+        tags=("synthetic",),
+        content_sha256=changed_digest,
+        uri=f"vonk://catalog/{remote.publisher}/{remote.slug}@sha256:{changed_digest}",
+        document=changed,
+        release_history=releases,
+    )
+
+    class Library:
+        def list(self):
+            return RecipeLibrarySnapshot(commit="b" * 40, items=(item,))
+
+        def fetch(self, uri: str):
+            assert uri == item.uri
+            return item
+
+    app = _catalog_app(TokenCodec(b"u" * 32), audits, service, recipe_library=Library())
+    client = TestClient(app)
+    token = TokenCodec(b"u" * 32).issue(
+        Actor("administrator", "administrator"), ttl_seconds=100, now=0
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+
+    listed = client.get("/api/v1/catalog/public-recipes", headers=auth)
+    preview = client.post(
+        "/api/v1/catalog/imports/public/preview",
+        headers=auth,
+        json={"uri": item.uri},
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["recipes"][0]["local"] == {
+        "status": "update-available",
+        "recipe_id": service.list_recipes()[0][0].recipe_id,
+        "revision_number": 1,
+        "content_sha256": remote.content_sha256,
+        "release_version": "1.0.0",
+    }
+    assert preview.status_code == 200, preview.text
+    assert [
+        release["version"] for release in preview.json()["changes_since_local"]
+    ] == ["2.0.0"]
+    assert preview.json()["changes_since_local"][0]["changes"][0]["kind"] == "fix"
 
 
 def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
@@ -798,9 +897,7 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     audits = MemoryAuditStore()
     app = _catalog_app(codec, audits, service, recipe_library=Library())
     client = TestClient(app)
-    token = codec.issue(
-        Actor("administrator", "administrator"), ttl_seconds=100, now=0
-    )
+    token = codec.issue(Actor("administrator", "administrator"), ttl_seconds=100, now=0)
     auth = {"Authorization": f"Bearer {token}"}
 
     listed = client.get("/api/v1/catalog/public-recipes", headers=auth)

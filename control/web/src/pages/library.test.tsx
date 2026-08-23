@@ -33,12 +33,16 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   expected_download_bytes: 80 * 1024 ** 3,
   maximum_installed_bytes_per_node: 100 * 1024 ** 3,
   maximum_runtime_memory_bytes_per_node: 72 * 1024 ** 3,
+  release_version: "1.0.0",
+  release_released_at: "2026-08-23",
+  local: {status: "not-imported", recipe_id: null, revision_number: null, content_sha256: null, release_version: null},
   ...overrides,
 });
 
 const publicRecipePreview = (overrides: Partial<PublicRecipePreview> = {}): PublicRecipePreview => ({
   ...publicRecipe(),
   source: "recipe_library",
+  changes_since_local: [],
   ...overrides,
 });
 
@@ -505,6 +509,7 @@ test("loads the current default catalog recipes when public import opens", async
         capabilities: ["chat", "vision"],
         node_count: 2,
         topology_mode: "tensor-parallel",
+        local: {status: "update-available", recipe_id: "00000000-0000-4000-8000-000000000001", revision_number: 1, content_sha256: "1".repeat(64), release_version: "0.9.0"},
       }),
       publicRecipe({
         slug: "wan-video-four",
@@ -521,6 +526,7 @@ test("loads the current default catalog recipes when public import opens", async
         precision: "FP8",
         node_count: 4,
         topology_mode: "distributed",
+        local: {status: "current", recipe_id: "00000000-0000-4000-8000-000000000002", revision_number: 2, content_sha256: "e".repeat(64), release_version: "1.0.0"},
       }),
       publicRecipe({
         slug: "audio-five",
@@ -535,6 +541,7 @@ test("loads the current default catalog recipes when public import opens", async
         node_count: 5,
         topology_mode: "distributed",
         qualification: "cataloged",
+        local: {status: "different-revision", recipe_id: "00000000-0000-4000-8000-000000000003", revision_number: 1, content_sha256: "2".repeat(64), release_version: null},
       }),
     ],
   }));
@@ -547,6 +554,24 @@ test("loads the current default catalog recipes when public import opens", async
   expect(await screen.findByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
   expect(screen.getByText("@cccccccc")).toBeVisible();
   expect(screen.getAllByRole("link", {name: /QwenLM/})[0]).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
+
+  const localStatus = screen.getByRole("combobox", {name: "Filter by local status"});
+  expect(within(localStatus).getByRole("option", {name: "All (4)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Not installed (1)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Update available (1)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Installed current (1)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Needs review (1)"})).toBeVisible();
+  await user.selectOptions(localStatus, "update-available");
+  expect(screen.getByRole("heading", {name: /Qwen Vision/, level: 5})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  await user.selectOptions(localStatus, "current");
+  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  await user.selectOptions(localStatus, "needs-review");
+  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  await user.selectOptions(localStatus, "not-imported");
+  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  expect(localStatus).toHaveValue("");
 
   const creator = screen.getByRole("combobox", {name: "Filter by creator or source"});
   expect(within(creator).getByRole("option", {name: "MiaAI-Lab"})).toBeVisible();
@@ -602,6 +627,44 @@ test("loads the current default catalog recipes when public import opens", async
   await user.click(screen.getByRole("button", {name: "Clear filters"}));
   await user.type(screen.getByRole("searchbox", {name: "Search public recipes"}), "nonexistent model");
   expect(screen.getByText("No matching recipes")).toBeVisible();
+});
+
+test("shows a digest-proven update and its changelog before importing", async () => {
+  history.replaceState(null, "", "/library");
+  const localDigest = "a".repeat(64);
+  const remoteDigest = "b".repeat(64);
+  const update = publicRecipe({
+    content_sha256: remoteDigest,
+    uri: `vonk://catalog/vonk-forge/qwen@sha256:${remoteDigest}`,
+    release_version: "2.0.0",
+    local: {status: "update-available", recipe_id: "00000000-0000-4000-8000-000000000001", revision_number: 1, content_sha256: localDigest, release_version: "1.0.0"},
+  });
+  const listPublicRecipes = vi.fn(async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "c".repeat(40), recipes: [update]}));
+  const previewPublicRecipe = vi.fn(async () => publicRecipePreview({
+    ...update,
+    changes_since_local: [{
+      version: "2.0.0",
+      released_at: "2026-08-23",
+      content_sha256: remoteDigest,
+      upgrade_effect: "rebuild",
+      changes: [{kind: "fix", summary: "Removed a reverted upstream hotfix.", details: "Prevents intermittent output corruption.", references: ["https://github.com/MiaAI-Lab/example"]}],
+    }],
+  }));
+  const importPublicRecipe = vi.fn();
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes, previewPublicRecipe, importPublicRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
+  expect(await screen.findByText("Update from v1.0.0")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Review update"}));
+
+  const changelog = await screen.findByRole("region", {name: "Changes since local recipe"});
+  expect(within(changelog).getByRole("heading", {name: "Changes since local v1.0.0"})).toBeVisible();
+  expect(within(changelog).getByText("Removed a reverted upstream hotfix.")).toBeVisible();
+  expect(within(changelog).getByText("Rebuild required", {exact: false})).toBeVisible();
+  expect(screen.getByText(/Existing installations and running services remain pinned/)).toBeVisible();
+  expect(screen.getByRole("button", {name: "Import v2.0.0"})).toBeEnabled();
 });
 
 test("keeps the API client binding and leaves loading state on a synchronous catalog failure", async () => {

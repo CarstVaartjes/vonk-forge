@@ -32,30 +32,30 @@ KIND_ROOT = {
     "runtime-distribution": "runtime-distributions",
     "patch-bundle": "patch-bundles",
 }
-MIA_COMMIT = "f752cd04ab30f2cf42077dd8811a5e1e682d63e7"
-MODEL_REVISION = "62af8fffb2f7030cac4de2f0169f5b8d1101b646"
+MIA_COMMIT = "f104c39a8c6fa68d4ea0b342ad6eed172bc0e635"
+MODEL_REVISION = "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
 ANEMLL_COMMIT = "47503f8e38dadd4dededca798150db2619594fce"
 IMAGE = (
     "ghcr.io/anemll/dspark-vllm-gx10"
     "@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8"
 )
 PATCH_SHA256 = {
-    "apply-reasoning-default.py": "f42787340f6c115ead869cdf5076efc45c4e3f54a4c1c04cbcd2de8828aa1947",
-    "hotfix-encoding-dsv4-issue21.py": "1a74f6c4ec6a2b7cd2ff01f19b52fbf4ced980a22f08b9d75a6aae1bff0d0548",
-    "hotfix-dsv4-issue31-v2-thinking-budget-gpu.py": "7e6ee3e6852dc4003a5d9e7f1c62e316010858722ff3644467e1f4db57d2d909",
-    "hotfix-dsv4-issue55-tool-truncation.py": "53f26da9039eb6d99baa6c141c6ed916b292d406da292a5e762012c5ef423dec",
-    "hotfix-nvfp4-ds-mla-issue22.sh": "4999ed58c4c2ca0903bc21fcdb6db50d481396ded62066e4132ea609096b13bf",
-    "hotfix-dsv4-mtp-buffer-50312.sh": "18dee7b92db1c6c55983c7a9df4d6c27c5a09d9be2225cd54207837fe94ecfe0",
-    "hotfix-dsv4-adaptive-topk-50004.sh": "561a6ebd295964e3a37df07c96259a1a2eb0d7e6aaef5ac5ca73ecb0cebf7493",
-    "hotfix-dsv4-skip-topk-49486.sh": "636fd162fefc2a156750027b731a9eb136e7993f2552389adf7e3647c5b4dc7b",
-    "hotfix-dsv4-dense-prefill-indexer-48407.sh": "c2fa444ea40af9225f3063b3be3a5827f4cada9b0ddf84e156176a23e99a2e6b",
-    "hotfix-dsv4-skip-empty-c128-48957.sh": "dabafb64f9273c37659027706920d175d5ed0a6b0cdd53fb5be784f408d7990e",
-    "hotfix-dsv4-flashmla-workspace-50298.sh": "a7f557b264d247fbc65bfe49cc6d05e0780e4c6bebcdaf3633ace55338fa4268",
-    "hotfix-dsv4-grammar-advance.sh": "99f5e0d3737a8a074c4c85b7348882a91a4d96a12bcf0d65de4d1c751a4d8abd",
-    "hotfix-dsv4-issue27-partial-prefill-concurrency.py": "e87e14a6dc45ccbbdea2940d9594f239f6d8dbda7b82d7a094f45bcaa2dfb450",
-    "hotfix-dsv4-issue43-decode-fairness-and-diag.py": "f362f6289fabefd17d41007637e99a503f5b282dbb13b21cd203a3c30b844de6",
-    "hotfix-dsv4-issue26-hybrid-swa-min.py": "acdf9aa2705de248333b3ba6ddeb20aea67b5582f408552e407c7a670b20ee82",
-    "hotfix-dsv4-suppress-stops-in-reasoning.py": "89df901d5d5853e79d71d48e1f2f1a4302ac688b5e2d3788c8551a7fe8477f21",
+    "apply-reasoning-default.py": "505d3345ba2a5369481896e83f94003d3e8182253f783a9852c6f45413ebaed0",
+    "hotfix-encoding-dsv4-issue21.py": "c75d160245cb563d6e9a6adaee9bf7a4cd55ed5268b5ca89856977d293df9816",
+    "hotfix-dsv4-issue55-tool-truncation.py": "0dbb8a18d41325d518c221b3cfbd148c3a092e37c1816ba565b62e28172dd773",
+    "hotfix-nvfp4-ds-mla-issue22.sh": "52de6d0cd06f571cfdbbb856bfea4a098a5118ce769de739a18b51044300772a",
+    "hotfix-gb10-spin-wait.sh": "b7deed123348d78c8e7ae3f99d9107b59a798d0b3c7840b7cccaadfd8418de71",
+    "hotfix-dsv4-mtp-buffer-50312.sh": "8ad604b767e09390a958cd6ffd907dd9260bb92d680b8d4d5e702ff61fb787f4",
+    "hotfix-dsv4-skip-topk-49486.sh": "431eff0d51c107afacc8ddb76e34c5a57d146341bf5a0d982569e8f89fc474ed",
+    "hotfix-dsv4-dense-prefill-indexer-48407.sh": "6d731f1b03b6c17275c8f0af82ee5dfa3ff9d778d25468b4edc96fbd356ffa23",
+    "hotfix-dsv4-skip-empty-c128-48957.sh": "bcae8526f474f885f0af681aaa596e613fa94f8bf95847f1e71c5ea4970ccd27",
+    "hotfix-dsv4-flashmla-workspace-50298.sh": "213fd93fb6c4dd70f38eefbd331f0ce08b64331feb2ff03643394857acd96078",
+    "hotfix-dsv4-grammar-advance.sh": "6318c0959816156ba0015fba9d3d56e4e128acdfb778aee373d9bf227c6faaa5",
+    "hotfix-vllm-empty-encoder-output.py": "e417bcdcb6d62f4790885fe5c64bef3a3015a17cea00e3901eb3e2f4b7cf35a6",
+    "hotfix-dsv4-issue27-partial-prefill-concurrency.py": "31e7b14213dc6983c07716cf625c4245a42f9d884733e5f7e21a79ab459a8f8b",
+    "hotfix-dsv4-issue43-decode-fairness-and-diag.py": "0059144ce08e825354718c8b0aa3799dcf434045f40241f75a4211fe4f199dc4",
+    "hotfix-dsv4-issue26-hybrid-swa-min.py": "8c76a65207d5f30b898cf5f60e39b8a59e4febb3217c34fe57f6a7fb225a3c3f",
+    "hotfix-dsv4-suppress-stops-in-reasoning.py": "618a66c58fc422ae65d0f08018fac69370657e4ead1285c8104a56f507f6279f",
 }
 
 
@@ -102,7 +102,7 @@ def test_official_model_version_has_complete_exact_74_file_inventory() -> None:
     artifacts = version["artifacts"]
 
     assert version["source"] == {
-        "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
+        "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
         "revision": MODEL_REVISION,
     }
     assert version["format"] == {
@@ -112,10 +112,10 @@ def test_official_model_version_has_complete_exact_74_file_inventory() -> None:
     }
     assert len(artifacts) == 74
     assert len({artifact["path"] for artifact in artifacts}) == 74
-    assert sum(artifact["download_bytes"] for artifact in artifacts) == 166_898_666_055
+    assert sum(artifact["download_bytes"] for artifact in artifacts) == 166_898_660_330
     assert version["sizes"] == {
-        "download_bytes": 166_898_666_055,
-        "installed_bytes": 166_898_666_055,
+        "download_bytes": 166_898_660_330,
+        "installed_bytes": 166_898_660_330,
     }
     assert all(artifact["revision"] == MODEL_REVISION for artifact in artifacts)
     assert version["access"] == {
@@ -228,12 +228,6 @@ def test_mia_patch_bundle_is_ordered_hashed_and_build_time_only() -> None:
     for filename, digest in PATCH_SHA256.items():
         assert filename in patcher
         payload = (context / "patches" / filename).read_bytes()
-        if filename in {
-            "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
-            "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
-            "hotfix-dsv4-issue55-tool-truncation.py",
-        }:
-            payload = payload.removesuffix(b"\n")
         assert __import__("hashlib").sha256(payload).hexdigest() == digest
 
     bundle = generate_source_bundle(
@@ -251,7 +245,10 @@ def test_mia_topology_declares_rank_lifecycle_readiness_and_failure() -> None:
     recipe = _recipe()
     topology = recipe["topology"]
 
-    assert [(role["name"], role["count"], role["endpoint_owner"]) for role in topology["roles"]] == [
+    assert [
+        (role["name"], role["count"], role["endpoint_owner"])
+        for role in topology["roles"]
+    ] == [
         ("entrypoint", 1, True),
         ("worker", 1, False),
     ]
@@ -299,9 +296,19 @@ def test_only_verified_distribution_owned_vllm_tp2_compiles() -> None:
     for rank, projection in ((1, worker), (0, entrypoint)):
         assert projection.command[0] == "/opt/vonk/bin/vllm"
         assert projection.command[projection.command.index("--nnodes") + 1] == "2"
-        assert projection.command[projection.command.index("--node-rank") + 1] == str(rank)
-        assert projection.command[projection.command.index("--tensor-parallel-size") + 1] == "2"
-        assert projection.command[projection.command.index("--distributed-executor-backend") + 1] == "mp"
+        assert projection.command[projection.command.index("--node-rank") + 1] == str(
+            rank
+        )
+        assert (
+            projection.command[projection.command.index("--tensor-parallel-size") + 1]
+            == "2"
+        )
+        assert (
+            projection.command[
+                projection.command.index("--distributed-executor-backend") + 1
+            ]
+            == "mp"
+        )
         assert "sh" not in projection.command
         assert "-c" not in projection.command
 
@@ -321,7 +328,9 @@ def test_only_verified_distribution_owned_vllm_tp2_compiles() -> None:
 
     wrong_fabric = copy.deepcopy(distribution)
     wrong_fabric["capabilities"]["distributed_vllm"]["fabric"] = "tcp"
-    with pytest.raises(HarnessCompileError, match="verified distributed vLLM distribution"):
+    with pytest.raises(
+        HarnessCompileError, match="verified distributed vLLM distribution"
+    ):
         VllmHarnessCompiler().compile(
             recipe,
             wrong_fabric,
@@ -425,7 +434,9 @@ def test_mia_wrapper_consumes_complete_placement_and_fabric_contract(
     }
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"])
+    monkeypatch.setattr(
+        sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"]
+    )
 
     def capture(executable: str, arguments: tuple[str, ...]) -> None:
         observed.append((executable, arguments))
@@ -479,7 +490,9 @@ def test_mia_wrapper_refuses_incomplete_distributed_launch(
     ):
         monkeypatch.setenv(name, "3" if name == "NCCL_IB_GID_INDEX" else "test")
     monkeypatch.delenv(missing)
-    monkeypatch.setattr(sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"])
+    monkeypatch.setattr(
+        sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"]
+    )
     module = importlib.util.module_from_spec(module_spec)
 
     with pytest.raises(SystemExit, match="distributed vLLM requires"):

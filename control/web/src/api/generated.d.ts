@@ -2385,6 +2385,20 @@ export interface components {
             /** Uri */
             uri: string;
         };
+        /** PublicRecipeChange */
+        PublicRecipeChange: {
+            /** Details */
+            details?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata";
+            /** References */
+            references: string[];
+            /** Summary */
+            summary: string;
+        };
         /** PublicRecipeListItem */
         PublicRecipeListItem: {
             /** Artifact Count */
@@ -2399,6 +2413,7 @@ export interface components {
             execution_harness: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
+            local: components["schemas"]["PublicRecipeLocalState"];
             /** Maximum Installed Bytes Per Node */
             maximum_installed_bytes_per_node: number;
             /** Maximum Runtime Memory Bytes Per Node */
@@ -2420,6 +2435,10 @@ export interface components {
              * @enum {string}
              */
             qualification: "candidate" | "cataloged";
+            /** Release Released At */
+            release_released_at?: string | null;
+            /** Release Version */
+            release_version?: string | null;
             /** Runtime Distribution */
             runtime_distribution: string;
             /** Slug */
@@ -2450,12 +2469,30 @@ export interface components {
             /** Repository */
             repository: string;
         };
+        /** PublicRecipeLocalState */
+        PublicRecipeLocalState: {
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Recipe Id */
+            recipe_id?: string | null;
+            /** Release Version */
+            release_version?: string | null;
+            /** Revision Number */
+            revision_number?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict";
+        };
         /** PublicRecipePreviewResponse */
         PublicRecipePreviewResponse: {
             /** Artifact Count */
             artifact_count: number;
             /** Capabilities */
             capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
+            /** Changes Since Local */
+            changes_since_local: components["schemas"]["PublicRecipeRelease"][];
             /** Content Sha256 */
             content_sha256: string;
             /** Description */
@@ -2464,6 +2501,7 @@ export interface components {
             execution_harness: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
+            local: components["schemas"]["PublicRecipeLocalState"];
             /** Maximum Installed Bytes Per Node */
             maximum_installed_bytes_per_node: number;
             /** Maximum Runtime Memory Bytes Per Node */
@@ -2485,6 +2523,10 @@ export interface components {
              * @enum {string}
              */
             qualification: "candidate" | "cataloged";
+            /** Release Released At */
+            release_released_at?: string | null;
+            /** Release Version */
+            release_version?: string | null;
             /** Runtime Distribution */
             runtime_distribution: string;
             /** Slug */
@@ -2510,6 +2552,22 @@ export interface components {
             topology_name: string;
             /** Uri */
             uri: string;
+        };
+        /** PublicRecipeRelease */
+        PublicRecipeRelease: {
+            /** Changes */
+            changes: components["schemas"]["PublicRecipeChange"][];
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Released At */
+            released_at: string;
+            /**
+             * Upgrade Effect
+             * @enum {string}
+             */
+            upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild";
+            /** Version */
+            version: string;
         };
         /** PublicationExportRequest */
         PublicationExportRequest: {

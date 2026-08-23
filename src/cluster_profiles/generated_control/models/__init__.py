@@ -121,14 +121,20 @@ from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
 from .public_import_request import PublicImportRequest
+from .public_recipe_change import PublicRecipeChange
+from .public_recipe_change_kind import PublicRecipeChangeKind
 from .public_recipe_list_item import PublicRecipeListItem
 from .public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
 from .public_recipe_list_item_qualification import PublicRecipeListItemQualification
 from .public_recipe_list_response import PublicRecipeListResponse
+from .public_recipe_local_state import PublicRecipeLocalState
+from .public_recipe_local_state_status import PublicRecipeLocalStateStatus
 from .public_recipe_preview_response import PublicRecipePreviewResponse
 from .public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
 from .public_recipe_preview_response_qualification import PublicRecipePreviewResponseQualification
 from .public_recipe_preview_response_source import PublicRecipePreviewResponseSource
+from .public_recipe_release import PublicRecipeRelease
+from .public_recipe_release_upgrade_effect import PublicRecipeReleaseUpgradeEffect
 from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
@@ -346,14 +352,20 @@ __all__ = (
     "ProposalRequest",
     "PublicationExportRequest",
     "PublicImportRequest",
+    "PublicRecipeChange",
+    "PublicRecipeChangeKind",
     "PublicRecipeListItem",
     "PublicRecipeListItemCapabilitiesItem",
     "PublicRecipeListItemQualification",
     "PublicRecipeListResponse",
+    "PublicRecipeLocalState",
+    "PublicRecipeLocalStateStatus",
     "PublicRecipePreviewResponse",
     "PublicRecipePreviewResponseCapabilitiesItem",
     "PublicRecipePreviewResponseQualification",
     "PublicRecipePreviewResponseSource",
+    "PublicRecipeRelease",
+    "PublicRecipeReleaseUpgradeEffect",
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",

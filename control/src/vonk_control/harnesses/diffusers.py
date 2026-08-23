@@ -45,6 +45,7 @@ _ARGUMENTS = {
     ),
     "guidance-scale": ArgumentSpec("--guidance-scale", validate=decimal(0.0, 100.0)),
     "true-cfg-scale": ArgumentSpec("--true-cfg-scale", validate=decimal(0.0, 100.0)),
+    "cfg-normalize": ArgumentSpec("--cfg-normalize", validate=one_of("true", "false")),
     "width": ArgumentSpec("--width", validate=integer(64, 8192)),
     "height": ArgumentSpec("--height", validate=integer(64, 8192)),
     "layers": ArgumentSpec("--layers", validate=integer(1, 8)),
