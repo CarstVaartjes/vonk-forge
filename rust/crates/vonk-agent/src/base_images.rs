@@ -495,16 +495,9 @@ fn oras_arguments(command: &[&str], source: &RegistrySource, reference: &str) ->
         .iter()
         .map(|value| (*value).to_owned())
         .chain(
-            [
-                "--output",
-                "-",
-                "--no-tty",
-                "--registry-config",
-                ORAS_AUTH,
-                "--resolve",
-            ]
-            .into_iter()
-            .map(str::to_owned),
+            ["--output", "-", "--registry-config", ORAS_AUTH, "--resolve"]
+                .into_iter()
+                .map(str::to_owned),
         )
         .chain([source.resolve.clone(), reference.to_owned()])
         .collect()

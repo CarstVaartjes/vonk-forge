@@ -13,6 +13,7 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
     main = _source("rust/crates/vonk-agent/src/main.rs")
     for capability in (
         "agent.runtime.rust.v1",
+        "runtime.vonk.v1",
         "recipe.install",
         "recipe.start",
         "recipe.stop",
@@ -22,13 +23,13 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
     assert '"package.prepare"' not in main
 
     package_builder = _source("scripts/build-agent-deb")
-    assert 'BINARIES = ("vonk-agent", "vonk-agent-helper")' in package_builder
+    assert 'BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")' in package_builder
     assert "vonk_agent" not in package_builder
 
 
 def test_debian_package_is_the_only_agent_installer_authority() -> None:
     package_builder = _source("scripts/build-agent-deb")
-    for binary in ("vonk-agent", "vonk-agent-helper"):
+    for binary in ("vonk-agent", "vonk-agent-helper", "oras"):
         assert binary in package_builder
     for unit in (
         "vonk-forge-agent.service",
@@ -37,6 +38,9 @@ def test_debian_package_is_the_only_agent_installer_authority() -> None:
         "vonk-forge-package-helper.socket",
     ):
         assert (ROOT / "packaging/systemd" / unit).is_file()
+
+    process = _source("rust/crates/vonk-agent/src/process.rs")
+    assert 'Self::Oras => "/usr/lib/vonk-forge/oras"' in process
 
 
 def test_release_workflow_runs_every_agent_owner_before_publication() -> None:

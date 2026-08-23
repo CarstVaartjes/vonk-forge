@@ -100,12 +100,20 @@ def test_native_recipe_builds_declare_the_exact_offline_base_image_supply() -> N
 def test_synthetic_development_recipe_compiles_through_the_native_runtime_path() -> None:
     fixture = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
     recipe = _load(fixture / "recipe.json")
+    base_images = dockerfile_base_images((fixture / "context/Dockerfile").read_bytes())
+    expected_base_image = (
+        "docker.io/library/python:3.12.11-slim-bookworm@"
+        "sha256:9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3"
+    )
+    assert tuple(image["reference"] for image in base_images) == (expected_base_image,)
+    assert recipe["build"]["resources"]["download_bytes"] == 256 * 1024 * 1024
     entities = {
         document["kind"]: document
         for path in sorted((fixture / "entities").glob("*.json"))
         if (document := _load(path))["kind"]
         in {"model-version", "execution-harness", "runtime-distribution"}
     }
+    assert entities["runtime-distribution"]["image"] == expected_base_image
     resolved = {
         "model_version": SimpleNamespace(
             content_sha256=recipe["model"]["content_sha256"]

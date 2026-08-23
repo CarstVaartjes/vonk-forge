@@ -18,7 +18,7 @@ PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
-PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper")
+PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
 BUILD_DIGEST = "sha256:" + "b" * 64
 
 
@@ -61,6 +61,7 @@ def _build(
     architecture: str = "linux-arm64",
     acceptance_baseline: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    (binaries / "oras.LICENSE").write_text("ORAS test license\n")
     command = [
             BUILD,
             "--version",
@@ -352,6 +353,24 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     agent = payload / "usr/lib/vonk-forge/vonk-agent"
     assert agent.is_file()
     assert stat.S_IMODE(agent.stat().st_mode) == 0o555
+    oras = payload / "usr/lib/vonk-forge/oras"
+    assert oras.is_file()
+    assert stat.S_IMODE(oras.stat().st_mode) == 0o555
+    oras_license = payload / "usr/share/doc/vonk-forge-agent/oras-LICENSE"
+    assert oras_license.read_text() == "ORAS test license\n"
+    assert stat.S_IMODE(oras_license.stat().st_mode) == 0o644
+    cyclone = json.loads(
+        (payload / "usr/share/doc/vonk-forge-agent/sbom.cdx.json").read_text()
+    )
+    oras_component = next(
+        component
+        for component in cyclone["components"]
+        if component.get("name") == "oras"
+    )
+    assert oras_component["version"] == "1.3.2"
+    assert oras_component["hashes"] == [
+        {"alg": "SHA-256", "content": hashlib.sha256(oras.read_bytes()).hexdigest()}
+    ]
     assert not (payload / "usr/lib/vonk-forge/release/vonk-agent").exists()
     assert not (payload / "usr/lib/vonk-forge/vonk-agent-supervisor").exists()
     assert not (
@@ -482,8 +501,9 @@ def test_builder_and_verifier_make_each_architecture_a_real_package_output(
     )
     payload = tmp_path / f"payload-{architecture}"
     subprocess.run(["/usr/bin/dpkg-deb", "--extract", package, payload], check=True)
-    raw = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
-    assert struct.unpack_from("<H", raw, 18)[0] == machine
+    for name in PACKAGE_BINARIES:
+        raw = (payload / f"usr/lib/vonk-forge/{name}").read_bytes()
+        assert struct.unpack_from("<H", raw, 18)[0] == machine
 
 
 def test_builder_enforces_cargo_and_package_semantic_version_consistency(

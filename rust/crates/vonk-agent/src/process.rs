@@ -30,7 +30,7 @@ impl Program {
             Self::Docker => "/usr/bin/docker",
             Self::NvidiaCtk => "/usr/bin/nvidia-ctk",
             Self::NvidiaSmi => "/usr/bin/nvidia-smi",
-            Self::Oras => "/usr/bin/oras",
+            Self::Oras => "/usr/lib/vonk-forge/oras",
             Self::Podman => "/usr/bin/podman",
         }
     }

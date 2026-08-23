@@ -48,6 +48,7 @@ BASE_COMMIT = "a" * 64
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
 AGENT_CAPABILITIES = (
     "agent.runtime.rust.v1",
+    "runtime.vonk.v1",
     "node.probe",
     "release.install",
     "workload.health",
