@@ -755,7 +755,6 @@ class SparkLifecycle:
                 "candidate controller services are not healthy"
             ) from error
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
-        self._materialize_synthetic_firewall()
         verify_tailscale_services(
             self.bundle,
             hermes=False,
@@ -916,6 +915,10 @@ class SparkLifecycle:
 
     def _materialize_synthetic_firewall(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
+        if not _agent_package_installed():
+            raise LifecycleError(
+                "synthetic firewall must follow baseline Spark installation"
+            )
         network = f"{self.project}_cluster-egress"
         node_management_ip = self._run_command(
             [
@@ -1136,6 +1139,7 @@ class SparkLifecycle:
                 "publication_graph": self.graph,
             }
 
+        self._materialize_synthetic_firewall()
         self._complete_synthetic_baseline_configuration()
         config_before = self._hash_path(SPARK_CONFIG)
         private_before = self._hash_path(AGENT_DATA / "machine-evidence")

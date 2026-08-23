@@ -140,6 +140,19 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
         lifecycle._synthetic_device_fixture("linux-riscv64")
 
 
+def test_synthetic_firewall_is_not_materialized_before_baseline_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.temporary_root = tmp_path
+    monkeypatch.setattr(lifecycle, "_agent_package_installed", lambda: False)
+
+    with pytest.raises(lifecycle.LifecycleError, match="must follow baseline"):
+        run._materialize_synthetic_firewall()
+
+
 def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     tmp_path: Path,
 ) -> None:
