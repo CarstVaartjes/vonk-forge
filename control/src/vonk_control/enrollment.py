@@ -28,6 +28,7 @@ from .models import (
     AgentEnrollmentGrant,
     AgentIssuedCertificateRevocation,
     AgentNode,
+    AgentNodeProfile,
 )
 from .pki import CertificateAuthority, IssuedCertificate
 
@@ -898,6 +899,15 @@ def _persist_issued_enrollment(
     # There is no ORM relationship between these operational rows. Flush
     # the FK parent explicitly for PostgreSQL.
     session.flush([node])
+    session.add(
+        AgentNodeProfile(
+            node_id=enrollment.node_id,
+            display_name=enrollment.node_id,
+            hostname="",
+            lifecycle="ready",
+            labels={},
+        )
+    )
     generation = 1
     session.add(
         AgentCertificate(
