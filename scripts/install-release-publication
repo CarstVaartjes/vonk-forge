@@ -908,7 +908,7 @@ def accept(arguments: argparse.Namespace) -> None:
         "version": arguments.version,
     }
     receipt_raw = _canonical(receipt)
-    signature_raw = _sign(arguments.signing_key, receipt_raw).encode("ascii")
+    signature_raw = (_sign(arguments.signing_key, receipt_raw) + "\n").encode("ascii")
     for path in (arguments.output, arguments.signature_output):
         if path.exists() or path.is_symlink() or not path.parent.is_dir():
             raise PublicationError("acceptance output is unsafe")
