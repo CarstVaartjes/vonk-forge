@@ -74,6 +74,7 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/step-ca/ca.json",
         "deploy/compose/trust/litellm-cosign.pub",
         "scripts/build-agent-deb",
+        "scripts/materialize-agent-tools",
         "scripts/build-agent-package-evidence",
         "scripts/container-release-metadata",
         "scripts/agent-package-metadata",
