@@ -659,6 +659,28 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/spark-publication
 
+      - name: Enable Docker CDI for the synthetic Spark device
+        shell: bash
+        run: |
+          set -euo pipefail
+          daemon_config=/etc/docker/daemon.json
+          updated_config=$(mktemp)
+          trap 'rm -f -- "$updated_config"' EXIT
+          if sudo test -e "$daemon_config"; then
+            sudo jq \
+              'if (.features // {}) | type != "object" then error("invalid Docker features") else .features = ((.features // {}) + {"cdi": true}) end' \
+              "$daemon_config" > "$updated_config"
+          else
+            jq -n '{"features":{"cdi":true}}' > "$updated_config"
+          fi
+          sudo dockerd --validate --config-file "$updated_config"
+          sudo install -D -o root -g root -m 0644 \
+            "$updated_config" "$daemon_config"
+          sudo systemctl restart docker.service
+          docker info --format '{{json .CDISpecDirs}}' | \
+            jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
+              >/dev/null
+
       - name: Run packaged Spark fresh-install, pairing, job, and renewal acceptance
         shell: bash
         env:

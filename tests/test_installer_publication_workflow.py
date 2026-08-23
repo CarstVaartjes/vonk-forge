@@ -251,6 +251,22 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     assert report["with"]["if-no-files-found"] == "error"
 
 
+def test_spark_acceptance_enables_and_verifies_native_docker_cdi() -> None:
+    spark = _workflow()["jobs"]["spark-acceptance"]
+    steps = _steps(spark)
+    cdi = steps["Enable Docker CDI for the synthetic Spark device"]["run"]
+    names = list(steps)
+
+    assert names.index("Enable Docker CDI for the synthetic Spark device") < names.index(
+        "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
+    )
+    assert '.features = ((.features // {}) + {"cdi": true})' in cdi
+    assert 'dockerd --validate --config-file "$updated_config"' in cdi
+    assert "systemctl restart docker.service" in cdi
+    assert "docker info --format '{{json .CDISpecDirs}}'" in cdi
+    assert 'index("/etc/cdi") != null' in cdi
+
+
 def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() -> None:
     jobs = _workflow()["jobs"]
     for name in ("nas-acceptance", "spark-acceptance"):
