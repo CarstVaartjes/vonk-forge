@@ -140,6 +140,17 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
         lifecycle._synthetic_device_fixture("linux-riscv64")
 
 
+def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.synthetic_fabric_octet = 42
+
+    replacements = run._controller_response_replacements()
+
+    assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
+    assert replacements["Direct GPU fabric CIDRs []: "] == "198.19.42.0/24"
+
+
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     tmp_path: Path,
 ) -> None:
@@ -149,6 +160,7 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     run.temporary_root = tmp_path
     run.project = "vonk-spark-42-arm64"
     run.synthetic_interfaces = []
+    run.synthetic_fabric_octet = 42
     observed: list[list[str]] = []
 
     def command(argv, *, cwd, timeout=300):
@@ -171,6 +183,8 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.28.0.9"
     assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.28.0.1"
     assert run.firewall_environment["VONK_FABRIC_BANDWIDTH_MBPS"] == "200000"
+    assert run.firewall_environment["VONK_NODE_FABRIC_IP"] == "198.19.42.1"
+    assert run.firewall_environment["VONK_PEER_FABRIC_IP"] == "198.19.42.2"
     assert len(run.synthetic_interfaces) == 1
     assert all("/usr/bin/install" not in argv for argv in observed)
 
