@@ -29,6 +29,7 @@ const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
 const HOSTS_PATH: &str = "/etc/hosts";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
+const HELPER_SOCKET: &str = "vonk-forge-package-helper.socket";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
 const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
@@ -1212,11 +1213,22 @@ fn start_and_verify(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    enable_runtime_units(paths, runner)?;
+    verify_sustained_readiness(paths, runner)
+}
+
+fn enable_runtime_units(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+) -> Result<(), SetupError> {
     run_checked(
         runner,
-        Command::new("/usr/bin/systemctl", ["enable", "--now", &paths.service]),
-    )?;
-    verify_sustained_readiness(paths, runner)
+        Command::new(
+            "/usr/bin/systemctl",
+            ["enable", "--now", HELPER_SOCKET, &paths.service],
+        ),
+    )
+    .map(|_| ())
 }
 
 fn install_package(
@@ -1251,6 +1263,7 @@ fn upgrade_existing(
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
     install_package(runner, staged)?;
+    enable_runtime_units(paths, runner)?;
     run_checked(
         runner,
         Command::new("/usr/bin/systemctl", ["restart", &paths.service]),
