@@ -28,6 +28,7 @@ from vonk_control.models import (
     AgentEnrollmentGrant,
     AgentIssuedCertificateRevocation,
     AgentNode,
+    AgentNodeProfile,
     Base,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
@@ -287,6 +288,7 @@ def test_grant_is_single_use_and_immediately_issues_authorized_certificate(
         stored = session.scalar(select(AgentEnrollment))
         certificate = session.get(AgentCertificate, issued.serial)
         node = session.get(AgentNode, NODE_ID)
+        profile = session.get(AgentNodeProfile, NODE_ID)
         assert (
             stored_grant is not None
             and stored_grant.token_digest
@@ -300,6 +302,11 @@ def test_grant_is_single_use_and_immediately_issues_authorized_certificate(
         assert stored.csr_public_key_fingerprint == public_key_fingerprint(request)
         assert certificate is not None and certificate.node_id == NODE_ID
         assert node is not None and node.state == "active"
+        assert profile is not None
+        assert profile.display_name == NODE_ID
+        assert profile.hostname == ""
+        assert profile.lifecycle == "ready"
+        assert profile.labels == {}
 
 
 def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:

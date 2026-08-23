@@ -934,7 +934,9 @@ class SparkLifecycle:
                 environment=self._installer_environment(baseline=False),
             )
         except AcceptanceError as error:
-            raise self._installation_failure("candidate Spark upgrade", error) from error
+            raise self._installation_failure(
+                "candidate Spark upgrade", error
+            ) from error
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
         )
@@ -1117,7 +1119,7 @@ class SparkLifecycle:
             )
             runner.run()
         except module.SliceError as error:
-            raise LifecycleError("synthetic canary failed") from error
+            raise LifecycleError(f"synthetic canary failed: {error}") from error
         completed = runner.evidence.get("completed_states")
         response_digest = runner.outputs.get("inference_response_sha256")
         if (
