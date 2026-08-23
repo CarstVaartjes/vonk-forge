@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_ROOT = ROOT / "config" / "model-targets"
 RECIPE_ROOT = ROOT / "config" / "recipes"
@@ -19,7 +18,9 @@ def _targets() -> list[dict[str, object]]:
     return targets
 
 
-def test_target_ledger_covers_every_v1_modality_and_is_explicit_about_readiness() -> None:
+def test_target_ledger_covers_every_v1_modality_and_is_explicit_about_readiness() -> (
+    None
+):
     targets = _targets()
     assert {target["modality"] for target in targets} == {
         "language",
@@ -49,10 +50,19 @@ def test_target_ledger_covers_every_v1_modality_and_is_explicit_about_readiness(
             assert not target["recipe_slugs"]
 
 
-def test_only_the_physically_recreated_deepseek_targets_are_accepted() -> None:
+def test_only_currently_qualified_deepseek_targets_are_accepted() -> None:
     targets = _targets()
-    accepted = {(target["group"], target["version"]) for target in targets if target["status"] == "accepted"}
-    assert accepted == {
-        ("DeepSeek Flash", "V4 Flash 0731 DS4 IQ2/Q2 mixed"),
-        ("DeepSeek Flash", "V4 Flash 0731 official DSpark FP4/FP8"),
+    accepted = {
+        (target["group"], target["version"])
+        for target in targets
+        if target["status"] == "accepted"
     }
+    assert accepted == {("DeepSeek Flash", "V4 Flash 0731 DS4 IQ2/Q2 mixed")}
+
+    mia = next(
+        target
+        for target in targets
+        if target["version"] == "V4 Flash 0731 official DSpark FP4/FP8"
+    )
+    assert mia["status"] == "candidate"
+    assert "physical canary" in str(mia["notes"])
