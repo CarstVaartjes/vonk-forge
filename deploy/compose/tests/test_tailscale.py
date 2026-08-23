@@ -320,7 +320,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered() -> dict[str, object]:
+def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, object]:
     result = subprocess.run(
         [
             "docker",
@@ -334,7 +334,7 @@ def _rendered() -> dict[str, object]:
         check=True,
         capture_output=True,
         text=True,
-        env=_environment(),
+        env=environment or _environment(),
     )
     return json.loads(result.stdout)
 
@@ -364,14 +364,13 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
         "TS_STATE_DIR": "/var/lib/tailscale",
         "TS_USERSPACE": "true",
+        "VONK_TAILSCALE_EPHEMERAL": "false",
     }
     assert gateway["command"][:3] == ["/bin/sh", "-eu", "-c"]
     bootstrap = gateway["command"][3]
-    assert "?ephemeral=false&preauthorized=true" in bootstrap
-    assert (
-        "TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret-non-ephemeral"
-        in bootstrap
-    )
+    assert "printf '?ephemeral=%s&preauthorized=true'" in bootstrap
+    assert '"$${VONK_TAILSCALE_EPHEMERAL}"' in bootstrap
+    assert "TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret" in bootstrap
     assert "exec env" in bootstrap
     assert "tr -d '\\r\\n'" in bootstrap
     assert "echo" not in bootstrap
@@ -382,6 +381,19 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
         "/run/secrets/tailscale-oauth-client-id",
         "/run/secrets/tailscale-oauth-client-secret",
     }
+
+
+def test_gateway_can_be_ephemeral_for_acceptance() -> None:
+    environment = _environment()
+    environment["VONK_TAILSCALE_EPHEMERAL"] = "true"
+    rendered = _rendered(environment=environment)
+
+    assert (
+        rendered["services"]["tailscale-gateway"]["environment"][
+            "VONK_TAILSCALE_EPHEMERAL"
+        ]
+        == "true"
+    )
 
 
 def test_gateway_hostname_can_be_isolated_for_acceptance() -> None:
