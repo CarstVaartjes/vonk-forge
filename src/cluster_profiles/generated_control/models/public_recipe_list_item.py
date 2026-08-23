@@ -15,6 +15,8 @@ from typing import cast
 from typing import cast, Union
 from typing import Union
 
+if TYPE_CHECKING:
+  from ..models.public_recipe_local_state import PublicRecipeLocalState
 
 
 
@@ -34,6 +36,7 @@ class PublicRecipeListItem:
             description (str):
             execution_harness (str):
             expected_download_bytes (int):
+            local (PublicRecipeLocalState):
             maximum_installed_bytes_per_node (int):
             maximum_runtime_memory_bytes_per_node (int):
             model_publisher (str):
@@ -51,6 +54,8 @@ class PublicRecipeListItem:
             topology_name (str):
             uri (str):
             precision (Union[None, Unset, str]):
+            release_released_at (Union[None, Unset, str]):
+            release_version (Union[None, Unset, str]):
             source_owner (Union[None, Unset, str]):
             source_repository (Union[None, Unset, str]):
      """
@@ -61,6 +66,7 @@ class PublicRecipeListItem:
     description: str
     execution_harness: str
     expected_download_bytes: int
+    local: 'PublicRecipeLocalState'
     maximum_installed_bytes_per_node: int
     maximum_runtime_memory_bytes_per_node: int
     model_publisher: str
@@ -78,6 +84,8 @@ class PublicRecipeListItem:
     topology_name: str
     uri: str
     precision: Union[None, Unset, str] = UNSET
+    release_released_at: Union[None, Unset, str] = UNSET
+    release_version: Union[None, Unset, str] = UNSET
     source_owner: Union[None, Unset, str] = UNSET
     source_repository: Union[None, Unset, str] = UNSET
 
@@ -86,6 +94,7 @@ class PublicRecipeListItem:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_recipe_local_state import PublicRecipeLocalState
         artifact_count = self.artifact_count
 
         capabilities = []
@@ -102,6 +111,8 @@ class PublicRecipeListItem:
         execution_harness = self.execution_harness
 
         expected_download_bytes = self.expected_download_bytes
+
+        local = self.local.to_dict()
 
         maximum_installed_bytes_per_node = self.maximum_installed_bytes_per_node
 
@@ -143,6 +154,18 @@ class PublicRecipeListItem:
         else:
             precision = self.precision
 
+        release_released_at: Union[None, Unset, str]
+        if isinstance(self.release_released_at, Unset):
+            release_released_at = UNSET
+        else:
+            release_released_at = self.release_released_at
+
+        release_version: Union[None, Unset, str]
+        if isinstance(self.release_version, Unset):
+            release_version = UNSET
+        else:
+            release_version = self.release_version
+
         source_owner: Union[None, Unset, str]
         if isinstance(self.source_owner, Unset):
             source_owner = UNSET
@@ -165,6 +188,7 @@ class PublicRecipeListItem:
             "description": description,
             "execution_harness": execution_harness,
             "expected_download_bytes": expected_download_bytes,
+            "local": local,
             "maximum_installed_bytes_per_node": maximum_installed_bytes_per_node,
             "maximum_runtime_memory_bytes_per_node": maximum_runtime_memory_bytes_per_node,
             "model_publisher": model_publisher,
@@ -184,6 +208,10 @@ class PublicRecipeListItem:
         })
         if precision is not UNSET:
             field_dict["precision"] = precision
+        if release_released_at is not UNSET:
+            field_dict["release_released_at"] = release_released_at
+        if release_version is not UNSET:
+            field_dict["release_version"] = release_version
         if source_owner is not UNSET:
             field_dict["source_owner"] = source_owner
         if source_repository is not UNSET:
@@ -195,6 +223,7 @@ class PublicRecipeListItem:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_recipe_local_state import PublicRecipeLocalState
         d = dict(src_dict)
         artifact_count = d.pop("artifact_count")
 
@@ -215,6 +244,11 @@ class PublicRecipeListItem:
         execution_harness = d.pop("execution_harness")
 
         expected_download_bytes = d.pop("expected_download_bytes")
+
+        local = PublicRecipeLocalState.from_dict(d.pop("local"))
+
+
+
 
         maximum_installed_bytes_per_node = d.pop("maximum_installed_bytes_per_node")
 
@@ -262,6 +296,26 @@ class PublicRecipeListItem:
         precision = _parse_precision(d.pop("precision", UNSET))
 
 
+        def _parse_release_released_at(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        release_released_at = _parse_release_released_at(d.pop("release_released_at", UNSET))
+
+
+        def _parse_release_version(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        release_version = _parse_release_version(d.pop("release_version", UNSET))
+
+
         def _parse_source_owner(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -289,6 +343,7 @@ class PublicRecipeListItem:
             description=description,
             execution_harness=execution_harness,
             expected_download_bytes=expected_download_bytes,
+            local=local,
             maximum_installed_bytes_per_node=maximum_installed_bytes_per_node,
             maximum_runtime_memory_bytes_per_node=maximum_runtime_memory_bytes_per_node,
             model_publisher=model_publisher,
@@ -306,6 +361,8 @@ class PublicRecipeListItem:
             topology_name=topology_name,
             uri=uri,
             precision=precision,
+            release_released_at=release_released_at,
+            release_version=release_version,
             source_owner=source_owner,
             source_repository=source_repository,
         )

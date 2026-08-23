@@ -21,6 +21,7 @@ from .catalog_service import (
     CatalogError,
     CatalogService,
     CatalogValidationError,
+    RecipeCatalogLocalRevision,
     RecipeDraftInput,
     RecipeRevisionView,
     RecipeSummary,
@@ -31,11 +32,17 @@ from .models import CatalogEntityRevision
 from .recipe_library import (
     RecipeLibraryError,
     RecipeLibraryItem,
+    RecipeLibraryRelease,
     RecipeLibrarySnapshot,
+    recipe_release_is_older,
 )
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
+_SEMVER = (
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _MAX_DOCUMENT_BYTES = 256 * 1024
 _SOURCE_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 _PUBLIC_CAPABILITIES = (
@@ -195,6 +202,49 @@ class GlobalRevisionResponse(StrictModel):
     document: dict[str, object]
 
 
+class PublicRecipeChange(StrictModel):
+    kind: Literal[
+        "initial",
+        "model",
+        "runtime",
+        "performance",
+        "fix",
+        "security",
+        "compatibility",
+        "breaking",
+        "metadata",
+    ]
+    summary: str = Field(min_length=1, max_length=160)
+    details: str | None = Field(default=None, min_length=1, max_length=1000)
+    references: list[str] = Field(max_length=8)
+
+
+class PublicRecipeRelease(StrictModel):
+    version: str = Field(
+        pattern=_SEMVER,
+        max_length=64,
+    )
+    released_at: str = Field(min_length=10, max_length=10)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    upgrade_effect: Literal["metadata-only", "restart", "reinstall", "rebuild"]
+    changes: list[PublicRecipeChange] = Field(min_length=1, max_length=16)
+
+
+class PublicRecipeLocalState(StrictModel):
+    status: Literal[
+        "not-imported",
+        "current",
+        "update-available",
+        "local-ahead",
+        "different-revision",
+        "conflict",
+    ]
+    recipe_id: str | None = Field(default=None, pattern=_UUID)
+    revision_number: int | None = Field(default=None, ge=1)
+    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
+
+
 class PublicRecipeListItem(StrictModel):
     publisher: str = Field(pattern=_SLUG)
     slug: str = Field(pattern=_SLUG)
@@ -221,16 +271,20 @@ class PublicRecipeListItem(StrictModel):
     expected_download_bytes: int = Field(ge=1)
     maximum_installed_bytes_per_node: int = Field(ge=1)
     maximum_runtime_memory_bytes_per_node: int = Field(ge=1)
+    release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
+    release_released_at: str | None = Field(default=None, min_length=10, max_length=10)
+    local: PublicRecipeLocalState
 
 
 class PublicRecipeListResponse(StrictModel):
     repository: str = Field(min_length=1, max_length=200)
     commit: str = Field(pattern=r"^[0-9a-f]{40}$")
-    recipes: list[PublicRecipeListItem] = Field(max_length=100)
+    recipes: list[PublicRecipeListItem] = Field(max_length=256)
 
 
 class PublicRecipePreviewResponse(PublicRecipeListItem):
     source: Literal["global", "recipe_library"]
+    changes_since_local: list[PublicRecipeRelease] = Field(max_length=32)
 
 
 class RecipeSummaryResponse(StrictModel):
@@ -509,6 +563,90 @@ def _public_recipe_source(
     return canonical
 
 
+def _public_release(release: RecipeLibraryRelease) -> dict[str, object]:
+    return {
+        "version": release.version,
+        "released_at": release.released_at,
+        "content_sha256": release.content_sha256,
+        "upgrade_effect": release.upgrade_effect,
+        "changes": [
+            {
+                "kind": change.kind,
+                "summary": change.summary,
+                "details": change.details,
+                "references": list(change.references),
+            }
+            for change in release.changes
+        ],
+    }
+
+
+def _public_recipe_release_state(
+    *,
+    source_kind: Literal["global", "recipe_library"],
+    publisher: str,
+    content_sha256: str,
+    releases: tuple[RecipeLibraryRelease, ...],
+    local: RecipeCatalogLocalRevision | None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    current = releases[0] if releases else None
+    release_version = current.version if current is not None else None
+    release_released_at = current.released_at if current is not None else None
+    if local is None:
+        state: dict[str, object] = {
+            "status": "not-imported",
+            "recipe_id": None,
+            "revision_number": None,
+            "content_sha256": None,
+            "release_version": None,
+        }
+        changes = list(reversed(releases))
+    else:
+        status = "different-revision"
+        matched_version = local.release_version
+        matched_index: int | None = None
+        if local.source_kind != source_kind or local.publisher != publisher:
+            status = "conflict"
+        elif local.content_sha256 == content_sha256:
+            status = "current"
+            matched_version = release_version or matched_version
+            matched_index = 0
+        else:
+            for index, release in enumerate(releases):
+                if release.content_sha256 == local.content_sha256:
+                    matched_version = release.version
+                    matched_index = index
+                    status = "update-available" if index > 0 else "current"
+                    break
+            if (
+                matched_index is None
+                and current is not None
+                and local.release_version is not None
+                and recipe_release_is_older(current.version, local.release_version)
+            ):
+                status = "local-ahead"
+        state = {
+            "status": status,
+            "recipe_id": local.recipe_id,
+            "revision_number": local.revision_number,
+            "content_sha256": local.content_sha256,
+            "release_version": matched_version,
+        }
+        changes = (
+            list(reversed(releases[:matched_index]))
+            if status == "update-available" and matched_index is not None
+            else ([] if status == "current" else list(releases[:1]))
+        )
+    return (
+        {
+            "release_version": release_version,
+            "release_released_at": release_released_at,
+            "local": state,
+        },
+        [_public_release(release) for release in changes],
+    )
+
+
 def _canonical_source_repository(
     source_reference: str,
 ) -> tuple[str, str] | None:
@@ -639,6 +777,15 @@ def install_catalog_routes(
     ) -> dict[str, object]:
         if source == "recipe_library":
             assert isinstance(value, RecipeLibraryItem)
+            release_state, changes = _public_recipe_release_state(
+                source_kind="recipe_library",
+                publisher=value.publisher,
+                content_sha256=value.content_sha256,
+                releases=value.release_history,
+                local=catalog()
+                .recipe_catalog_local_revisions([value.slug])
+                .get(value.slug),
+            )
             return {
                 "publisher": value.publisher,
                 "slug": value.slug,
@@ -649,11 +796,22 @@ def install_catalog_routes(
                 "content_sha256": value.content_sha256,
                 "source": source,
                 **_public_recipe_metadata(value.document, value.dependencies),
+                **release_state,
+                "changes_since_local": changes,
             }
         assert isinstance(value, GlobalRecipeRevision)
         metadata = value.document.get("metadata")
         metadata = metadata if isinstance(metadata, dict) else {}
         tags = metadata.get("tags", [])
+        release_state, changes = _public_recipe_release_state(
+            source_kind="global",
+            publisher=value.publisher,
+            content_sha256=value.content_sha256,
+            releases=(),
+            local=catalog()
+            .recipe_catalog_local_revisions([value.slug])
+            .get(value.slug),
+        )
         return {
             "publisher": value.publisher,
             "slug": value.slug,
@@ -664,6 +822,8 @@ def install_catalog_routes(
             "content_sha256": value.content_sha256,
             "source": source,
             **_public_recipe_metadata(value.document),
+            **release_state,
+            "changes_since_local": changes,
         }
 
     @app.get(
@@ -962,7 +1122,8 @@ def install_catalog_routes(
             else 409
             if error.code == "recipe_library.digest_mismatch"
             else 422
-            if error.code in {"recipe_library.uri_invalid", "recipe_library.schema_incompatible"}
+            if error.code
+            in {"recipe_library.uri_invalid", "recipe_library.schema_incompatible"}
             else 503
         )
         return JSONResponse(
@@ -1196,9 +1357,7 @@ def install_catalog_routes(
         response_model=PublicRecipeListResponse,
         operation_id="listPublicRecipes",
     )
-    def list_public_recipes(
-        request: Request, _actor: Actor = authenticated
-    ):
+    def list_public_recipes(request: Request, _actor: Actor = authenticated):
         administrator(_actor)
         if recipe_library is None:
             return recipe_library_problem(
@@ -1210,8 +1369,13 @@ def install_catalog_routes(
             )
         try:
             snapshot = recipe_library.list()
+            local_revisions = catalog().recipe_catalog_local_revisions(
+                [item.slug for item in snapshot.items]
+            )
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
+        except CatalogError as error:
+            return _problem(request, error)
         return {
             "repository": snapshot.repository,
             "commit": snapshot.commit,
@@ -1225,6 +1389,13 @@ def install_catalog_routes(
                     "uri": item.uri,
                     "content_sha256": item.content_sha256,
                     **_public_recipe_metadata(item.document, item.dependencies),
+                    **_public_recipe_release_state(
+                        source_kind="recipe_library",
+                        publisher=item.publisher,
+                        content_sha256=item.content_sha256,
+                        releases=item.release_history,
+                        local=local_revisions.get(item.slug),
+                    )[0],
                 }
                 for item in snapshot.items
             ],
@@ -1297,16 +1468,29 @@ def install_catalog_routes(
                     document=value.document,
                     expected_content_sha256=value.content_sha256,
                     dependency_documents=value.dependencies,
+                    release_version=(
+                        value.release_history[0].version
+                        if value.release_history
+                        else None
+                    ),
+                    release_released_at=(
+                        value.release_history[0].released_at
+                        if value.release_history
+                        else None
+                    ),
                 )
                 action = "catalog.public.import"
             else:
                 assert isinstance(value, GlobalRecipeRevision)
                 build = value.document.get("build")
                 context = build.get("context") if isinstance(build, dict) else None
-                source_sha256 = context.get("sha256") if isinstance(context, dict) else None
+                source_sha256 = (
+                    context.get("sha256") if isinstance(context, dict) else None
+                )
                 if not isinstance(source_sha256, str):
                     raise CatalogValidationError(
-                        "global.source_invalid", "global recipe source identity is invalid"
+                        "global.source_invalid",
+                        "global recipe source identity is invalid",
                     )
                 source_bundle = (
                     global_catalog.fetch_source_bundle(source_sha256)

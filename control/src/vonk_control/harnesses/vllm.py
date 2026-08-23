@@ -58,6 +58,7 @@ _ARGUMENTS = {
         "--enable-auto-tool-choice", takes_value=False
     ),
     "enable-prefix-caching": ArgumentSpec("--enable-prefix-caching", takes_value=False),
+    "language-model-only": ArgumentSpec("--language-model-only", takes_value=False),
     "enable-prompt-tokens-details": ArgumentSpec(
         "--enable-prompt-tokens-details", takes_value=False
     ),
@@ -80,9 +81,7 @@ _ARGUMENTS = {
     "moe-backend": ArgumentSpec("--moe-backend", validate=one_of("flashinfer_b12x")),
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
-        validate=one_of(
-            "deepseek_v4", "glm45", "nemotron_v3", "poolside_v1", "qwen3"
-        ),
+        validate=one_of("deepseek_v4", "glm45", "nemotron_v3", "poolside_v1", "qwen3"),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
@@ -143,8 +142,7 @@ class VllmHarnessCompiler:
                 != parallelism.get("tensor")
                 or implementation.get("pipeline_parallel_size")
                 != parallelism.get("pipeline")
-                or implementation.get("data_parallel_size")
-                != parallelism.get("data")
+                or implementation.get("data_parallel_size") != parallelism.get("data")
                 or implementation.get("endpoint_role") != "entrypoint"
                 or implementation.get("worker_role") != "worker"
                 or implementation.get("rank_loss_withdraws_endpoint") is not True
@@ -199,7 +197,10 @@ class VllmHarnessCompiler:
                 or profile.get("role") != role
                 or not isinstance(fabric_environment, Mapping)
                 or set(fabric_environment) != expected_environment
-                or any(type(value) is not str or not value for value in fabric_environment.values())
+                or any(
+                    type(value) is not str or not value
+                    for value in fabric_environment.values()
+                )
             ):
                 raise HarnessCompileError(
                     "vLLM distributed topology requires a complete launch contract"
@@ -232,8 +233,10 @@ class VllmHarnessCompiler:
                     "CUTE_DSL_ARCH",
                     "DG_JIT_NVCC_COMPILER",
                     "DG_JIT_USE_NVRTC",
+                    "DSPARK_MAX_INFLIGHT_PREFILLS",
                     "FLASHINFER_CUDA_ARCH_LIST",
                     "FLASHINFER_DISABLE_VERSION_CHECK",
+                    "FLASHINFER_WORKSPACE_BASE",
                     "HF_HUB_DISABLE_XET",
                     "HF_HUB_OFFLINE",
                     "NCCL_CROSS_NIC",
@@ -246,10 +249,15 @@ class VllmHarnessCompiler:
                     "NCCL_NET",
                     "NCCL_NVLS_ENABLE",
                     "PYTORCH_CUDA_ALLOC_CONF",
+                    "TILELANG_CACHE_DIR",
                     "TILELANG_CLEANUP_TEMP_FILES",
                     "TORCH_CUDA_ARCH_LIST",
                     "TRANSFORMERS_OFFLINE",
+                    "TRITON_CACHE_DIR",
                     "VLLM_ALLOW_LONG_MAX_MODEL_LEN",
+                    "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM",
+                    "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M",
+                    "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS",
                     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS",
                     "VLLM_NO_USAGE_STATS",
                     "VLLM_NVFP4_GEMM_BACKEND",
@@ -258,6 +266,7 @@ class VllmHarnessCompiler:
                     "VLLM_USE_B12X_MOE",
                     "VLLM_USE_FLASHINFER_SAMPLER",
                     "VLLM_USE_FLASHINFER_MOE_FP4",
+                    "VLLM_USE_BREAKABLE_CUDAGRAPH",
                 }
             ),
         )

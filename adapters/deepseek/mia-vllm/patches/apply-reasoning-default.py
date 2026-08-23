@@ -24,4 +24,3 @@ if NEW not in source:
     if OLD not in source:
         raise SystemExit("reasoning-effort normalization anchor is missing")
     TARGET.write_text(source.replace(OLD, NEW, 1), encoding="utf-8")
-

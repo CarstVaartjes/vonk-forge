@@ -411,6 +411,17 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
+def test_vllm_accepts_text_only_multimodal_mode() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "language-model-only", "value": True}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--language-model-only" in projection.command
+
+
 def test_vllm_accepts_poolside_reasoning_parser() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append(
@@ -460,6 +471,27 @@ def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     assert ("VLLM_NO_USAGE_STATS", "1") in projection.environment
     assert ("VLLM_NVFP4_GEMM_BACKEND", "marlin") in projection.environment
     assert ("VLLM_USE_FLASHINFER_MOE_FP4", "0") in projection.environment
+
+
+def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None:
+    recipe = _recipe("vllm")
+    expected = {
+        "DSPARK_MAX_INFLIGHT_PREFILLS": "2",
+        "FLASHINFER_WORKSPACE_BASE": "/cache/flashinfer",
+        "TILELANG_CACHE_DIR": "/cache/tilelang",
+        "TRITON_CACHE_DIR": "/cache/triton",
+        "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "1",
+        "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M": "32",
+        "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "120",
+        "VLLM_USE_BREAKABLE_CUDAGRAPH": "0",
+    }
+    recipe["runtime"]["environment"] = [
+        {"name": name, "value": value} for name, value in expected.items()
+    ]
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert set(projection.environment) == set(expected.items())
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
@@ -742,6 +774,7 @@ def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
     recipe["runtime"]["arguments"].extend(
         [
             {"name": "true-cfg-scale", "value": "4"},
+            {"name": "cfg-normalize", "value": "true"},
             {"name": "layers", "value": 4},
             {"name": "resolution", "value": 640},
         ]
@@ -761,7 +794,7 @@ def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
     projection = _compile("diffusers", recipe=recipe)
 
     assert "image-to-layers" in projection.command
-
+    assert "--cfg-normalize" in projection.command
 
 
 def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
@@ -775,7 +808,6 @@ def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
 
     with pytest.raises(HarnessCompileError, match="input mount"):
         _compile("diffusers", recipe=recipe)
-
 
 
 def test_comfyui_requires_an_immutable_workflow_from_the_recipe_bundle() -> None:

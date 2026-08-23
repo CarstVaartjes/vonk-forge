@@ -7,13 +7,14 @@
   },
   "metadata": {
     "title": "DeepSeek V4 Flash 0731 official DSpark",
-    "description": "Complete exact 74-file public official FP4/FP8 DSpark checkpoint inventory.",
+    "description": "Complete exact official FP4/FP8 checkpoint with the DSpark speculative module, pinned to the 0731 release revision.",
     "tags": [
       "deepseek",
       "dspark",
       "fp4",
       "fp8",
-      "official"
+      "official",
+      "candidate"
     ]
   },
   "model": {
@@ -22,10 +23,10 @@
     "slug": "deepseek-v4-flash-0731",
     "content_sha256": "379c5650925fcf84631a262f3112d1c1f1aa603c3885056192cebb25c614f145"
   },
-  "version": "0731-dspark-62af8ff",
+  "version": "0731-9e165c30",
   "source": {
-    "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-    "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646"
+    "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+    "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
   },
   "lineage": {
     "publisher": "deepseek-ai",
@@ -36,7 +37,7 @@
       "slug": "deepseek-v4-flash-0731",
       "content_sha256": "379c5650925fcf84631a262f3112d1c1f1aa603c3885056192cebb25c614f145"
     },
-    "derivation": "Official DeepSeek checkpoint with the DSpark speculative module; MoE expert parameters use FP4 and remaining checkpoint tensors use FP8."
+    "derivation": "Official DeepSeek 0731 checkpoint with the DSpark speculative module; MoE expert parameters use FP4 and remaining checkpoint tensors use FP8."
   },
   "format": {
     "container": "safetensors",
@@ -51,12 +52,12 @@
     "context_tokens": 1048576
   },
   "sizes": {
-    "download_bytes": 166898666055,
-    "installed_bytes": 166898666055
+    "download_bytes": 166898660330,
+    "installed_bytes": 166898660330
   },
   "license": {
     "spdx": "MIT",
-    "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark/blob/62af8fffb2f7030cac4de2f0169f5b8d1101b646/LICENSE",
+    "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/blob/9e165c30e2704aec5d9d593cce3eebd58bbef1cb/LICENSE",
     "attribution": [
       "DeepSeek AI"
     ],
@@ -69,11 +70,11 @@
   },
   "artifacts": [
     {
-      "id": "file-0",
+      "id": "metadata-11ad7efa2497",
       "path": ".gitattributes",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
       "download_bytes": 1519,
       "installed_bytes": 1519,
@@ -82,11 +83,11 @@
       ]
     },
     {
-      "id": "file-1",
+      "id": "license-f2c6c6028156",
       "path": "LICENSE",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "f2c6c602815669d292889e5be8c802f2ed950653b77999b1584e8e6aed25d040",
       "download_bytes": 1084,
       "installed_bytes": 1084,
@@ -95,24 +96,24 @@
       ]
     },
     {
-      "id": "file-2",
+      "id": "readme-3e66a85d3521",
       "path": "README.md",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "3a9459303c2a1eed8f1cf6315c86400f1ae96a42cda9144fecb8750a25ca1068",
-      "download_bytes": 14362,
-      "installed_bytes": 14362,
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "3e66a85d35215e658011f0d8ad4fe7d725c4beacb095892ef5aa96f369f2fa20",
+      "download_bytes": 6494,
+      "installed_bytes": 6494,
       "roles": [
         "metadata"
       ]
     },
     {
-      "id": "file-3",
+      "id": "config-6c8f3d2d3b48",
       "path": "config.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "6c8f3d2d3b48707541b88f32f22ef3f0f8a6b57d8523281e2b8d3cdb0ae9a023",
       "download_bytes": 1888,
       "installed_bytes": 1888,
@@ -121,154 +122,154 @@
       ]
     },
     {
-      "id": "file-4",
+      "id": "readme-294ed6493ebf",
       "path": "encoding/README.md",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "605363e9e43ee91beba88ea96c7806ce6ecdb2924e481459c9d16e1526470c10",
-      "download_bytes": 8118,
-      "installed_bytes": 8118,
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "294ed6493ebfe5a487f172154d60c494899997fed8806fdd3352dd8e3c33f9de",
+      "download_bytes": 9168,
+      "installed_bytes": 9168,
       "roles": [
-        "tokenizer"
+        "metadata"
       ]
     },
     {
-      "id": "file-5",
+      "id": "encoding-dsv4-abc0d2612025",
       "path": "encoding/encoding_dsv4.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "bdbd57c132a1b3725042323d02b98b9d1df28e5f388f134399555d041f5055e0",
-      "download_bytes": 27908,
-      "installed_bytes": 27908,
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "abc0d26120250dda0ae077dc64aa28836026e61e970854aaeb792445e6a0dde6",
+      "download_bytes": 29001,
+      "installed_bytes": 29001,
       "roles": [
-        "tokenizer"
+        "runtime"
       ]
     },
     {
-      "id": "file-6",
+      "id": "test-encoding-dsv4-c2bc54c4c934",
       "path": "encoding/test_encoding_dsv4.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "c2bc54c4c934f5c64096bd9c555efa7d1ddf179c1eff58f01ceb2dcd60adcf28",
       "download_bytes": 3741,
       "installed_bytes": 3741,
       "roles": [
-        "tokenizer"
+        "runtime"
       ]
     },
     {
-      "id": "file-7",
+      "id": "test-input-1-10e0c074c977",
       "path": "encoding/tests/test_input_1.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "10e0c074c977c3a80daab758af28219c6b1c2bd7f3f5cf2890c84b361cc32897",
       "download_bytes": 2748,
       "installed_bytes": 2748,
       "roles": [
-        "tokenizer"
+        "configuration"
       ]
     },
     {
-      "id": "file-8",
+      "id": "test-input-2-c44ae0db20fa",
       "path": "encoding/tests/test_input_2.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "c44ae0db20fafff38a6021e8068d7ed6e28605d76cafd20be80b03398509f447",
       "download_bytes": 526,
       "installed_bytes": 526,
       "roles": [
-        "tokenizer"
+        "configuration"
       ]
     },
     {
-      "id": "file-9",
+      "id": "test-input-3-37bf8ef95e04",
       "path": "encoding/tests/test_input_3.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "37bf8ef95e0411ea5f411be0b02fbafec7363438b6ccefddca0c52ec9aeaf69a",
       "download_bytes": 4546,
       "installed_bytes": 4546,
       "roles": [
-        "tokenizer"
+        "configuration"
       ]
     },
     {
-      "id": "file-10",
+      "id": "test-input-4-c45bbd0a1b7a",
       "path": "encoding/tests/test_input_4.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "c45bbd0a1b7a2f75033d8db4ba74ee5b7653bd01114045a52f79d3b387663465",
       "download_bytes": 2730,
       "installed_bytes": 2730,
       "roles": [
-        "tokenizer"
+        "configuration"
       ]
     },
     {
-      "id": "file-11",
+      "id": "test-output-1-9b366d9d2eac",
       "path": "encoding/tests/test_output_1.txt",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "9b366d9d2eac842a6e890594aac0b58648e5623717202b33497afadf03e26540",
       "download_bytes": 2390,
       "installed_bytes": 2390,
       "roles": [
-        "tokenizer"
+        "metadata"
       ]
     },
     {
-      "id": "file-12",
+      "id": "test-output-2-ca66b01a1ac3",
       "path": "encoding/tests/test_output_2.txt",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "ca66b01a1ac3a204bb032c928fb607d4877171e998a50f7f89f39fa821b75665",
       "download_bytes": 342,
       "installed_bytes": 342,
       "roles": [
-        "tokenizer"
+        "metadata"
       ]
     },
     {
-      "id": "file-13",
+      "id": "test-output-3-b3b1cd8748b7",
       "path": "encoding/tests/test_output_3.txt",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "b3b1cd8748b7b90d3c6be6da3f786f12e4d70be073bd445ea162dfad4dc01a64",
       "download_bytes": 3313,
       "installed_bytes": 3313,
       "roles": [
-        "tokenizer"
+        "metadata"
       ]
     },
     {
-      "id": "file-14",
+      "id": "test-output-4-60e1643840ba",
       "path": "encoding/tests/test_output_4.txt",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "60e1643840ba9e4aeede450feb7b0498fa66ee24e4a939d48855ce04ec6fc375",
       "download_bytes": 2552,
       "installed_bytes": 2552,
       "roles": [
-        "tokenizer"
+        "metadata"
       ]
     },
     {
-      "id": "file-15",
+      "id": "generation-config-5fccff80f55a",
       "path": "generation_config.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "5fccff80f55a4d455bbe516bdd552edf3e9623df95e99fbf2a3c3389fdf91af0",
       "download_bytes": 170,
       "installed_bytes": 170,
@@ -277,11 +278,11 @@
       ]
     },
     {
-      "id": "file-16",
+      "id": "readme-b9fe8027f91f",
       "path": "inference/README.md",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "b9fe8027f91f2160b46582b61eaaf7b9873b3da36ee9f98bc76a900e7c1fed94",
       "download_bytes": 951,
       "installed_bytes": 951,
@@ -290,76 +291,76 @@
       ]
     },
     {
-      "id": "file-17",
+      "id": "config-c90861f3d10a",
       "path": "inference/config.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "c90861f3d10a9e4ef5954f8f1a34c529d480da1c5799f84660028f4e38e14e71",
       "download_bytes": 1162,
       "installed_bytes": 1162,
       "roles": [
-        "metadata"
+        "configuration"
       ]
     },
     {
-      "id": "file-18",
+      "id": "convert-6efe65ebc66b",
       "path": "inference/convert.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "6efe65ebc66b18c9f2656816608f941cacfe20da79c2dee19040ecbee8b42bfe",
       "download_bytes": 6639,
       "installed_bytes": 6639,
       "roles": [
-        "metadata"
+        "runtime"
       ]
     },
     {
-      "id": "file-19",
+      "id": "generate-775fcfee2344",
       "path": "inference/generate.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "775fcfee2344e21a7b02c73161c517763e4348b84cf2eb266353e0857b9c8812",
       "download_bytes": 5804,
       "installed_bytes": 5804,
       "roles": [
-        "metadata"
+        "runtime"
       ]
     },
     {
-      "id": "file-20",
+      "id": "kernel-59b325083d71",
       "path": "inference/kernel.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "59b325083d7103975cba025bd0d60ea343bb82d8fff53088afb7c04bd380c0c2",
       "download_bytes": 22198,
       "installed_bytes": 22198,
       "roles": [
-        "metadata"
+        "runtime"
       ]
     },
     {
-      "id": "file-21",
+      "id": "model-c0c19e6c9fa4",
       "path": "inference/model.py",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "c0c19e6c9fa439bac7fbb1c5bc1868232dfd5aa2f439a548d0e33dcc2a9edd3f",
       "download_bytes": 45118,
       "installed_bytes": 45118,
       "roles": [
-        "metadata"
+        "runtime"
       ]
     },
     {
-      "id": "file-22",
+      "id": "requirements-857e0b8b58e4",
       "path": "inference/requirements.txt",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "857e0b8b58e41cabe16e55bf4ab7ff791677c53b25f0f3e104ef85227cd11eab",
       "download_bytes": 92,
       "installed_bytes": 92,
@@ -368,12 +369,12 @@
       ]
     },
     {
-      "id": "file-23",
+      "id": "model-00001-of-00048-f3668ba4cccf",
       "path": "model-00001-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "5176586613905d4beaadbaea1cfecd1693e17f9da4a0ea09d99aab7d3f2f5b7c",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "f3668ba4cccf1ca6a7eb84e888fb92c1cdc7204d472ba9db771e6fd3abf6b874",
       "download_bytes": 1059061856,
       "installed_bytes": 1059061856,
       "roles": [
@@ -381,12 +382,12 @@
       ]
     },
     {
-      "id": "file-24",
+      "id": "model-00002-of-00048-77b26c939a0e",
       "path": "model-00002-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "0821952bc12c7e72a49a1b6d3e36d79d4776a37e6f3f5168ad57a2ae17f073df",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "77b26c939a0e25b3113c8d6bb04e1901a748bd4a7d2589e3bfdaabdf1e9bba14",
       "download_bytes": 3566321192,
       "installed_bytes": 3566321192,
       "roles": [
@@ -394,12 +395,12 @@
       ]
     },
     {
-      "id": "file-25",
+      "id": "model-00003-of-00048-412abf4c906f",
       "path": "model-00003-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "2bd2b020f81f26575917acb87113fa0788f9e6f70dce0a9ec5fb4af53a31c868",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "412abf4c906faadc221ef0cb50f90fe20bde8454a08ad4dc2364b6b79e7fda5c",
       "download_bytes": 3566321192,
       "installed_bytes": 3566321192,
       "roles": [
@@ -407,12 +408,12 @@
       ]
     },
     {
-      "id": "file-26",
+      "id": "model-00004-of-00048-9610f56bc587",
       "path": "model-00004-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "e6286ec182a2e3ee6019bd969075506356e3606694e00d5fbb74f735441c91c1",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "9610f56bc587fb0ff9a8b68a60299482ee8c433fe5b5587e4257aca98add4a2e",
       "download_bytes": 3596229272,
       "installed_bytes": 3596229272,
       "roles": [
@@ -420,12 +421,12 @@
       ]
     },
     {
-      "id": "file-27",
+      "id": "model-00005-of-00048-f87a5ac7b8be",
       "path": "model-00005-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "021dd40791d0c77fafe29bf05c204b9563620c5a2e629bfbece8ed8b99119ced",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "f87a5ac7b8becc31f9c3169afd3a6f33fb82b4af9e21022e3755a10bc28f0180",
       "download_bytes": 3568768976,
       "installed_bytes": 3568768976,
       "roles": [
@@ -433,12 +434,12 @@
       ]
     },
     {
-      "id": "file-28",
+      "id": "model-00006-of-00048-4a4f3764e3fc",
       "path": "model-00006-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "3d96bfc9686d7c91f1c8d920c121bab7eff6b231a899e4d7311cb83cae58aa42",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "4a4f3764e3fc772b9fba67f0a44ef68e18f178b6f00faa80b75db549e51894cd",
       "download_bytes": 3590024776,
       "installed_bytes": 3590024776,
       "roles": [
@@ -446,12 +447,12 @@
       ]
     },
     {
-      "id": "file-29",
+      "id": "model-00007-of-00048-df81bb80e27a",
       "path": "model-00007-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "4481b0c86e9f507689ce5036c2bfbdf073654145d66ed7d78edfa76e41a22cf1",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "df81bb80e27a689e01fa579eebd6499f86e0b6105f7fea18961aa5eebbbee9bc",
       "download_bytes": 3568768976,
       "installed_bytes": 3568768976,
       "roles": [
@@ -459,12 +460,12 @@
       ]
     },
     {
-      "id": "file-30",
+      "id": "model-00008-of-00048-224968d2b27f",
       "path": "model-00008-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "e19559e75d35316d6b5a9049b42e8bb19a4eb98e2ad2748245b94f646ccbff30",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "224968d2b27f8669365ec08657a768dfec40da0585f85f302a31495931f6a526",
       "download_bytes": 3590024776,
       "installed_bytes": 3590024776,
       "roles": [
@@ -472,12 +473,12 @@
       ]
     },
     {
-      "id": "file-31",
+      "id": "model-00009-of-00048-04d69ef1071f",
       "path": "model-00009-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "ab44718d102e8cfd89a7f032cabe041589cec6a2fc72a1689fd718ec523a5692",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "04d69ef1071fff8721c62968c200a5583122b59b015e9ef9b2978bfed271b2b7",
       "download_bytes": 3568768976,
       "installed_bytes": 3568768976,
       "roles": [
@@ -485,12 +486,12 @@
       ]
     },
     {
-      "id": "file-32",
+      "id": "model-00010-of-00048-627145f4ebeb",
       "path": "model-00010-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "743c16a35f1ca3e01fbfa117f67f876f4cd62138f7dfb51badea10ac25010e5a",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "627145f4ebeb1cc3f5bdd03416b8cb7370b3c96974853cbeb8e5516ad5713e49",
       "download_bytes": 3590024776,
       "installed_bytes": 3590024776,
       "roles": [
@@ -498,12 +499,12 @@
       ]
     },
     {
-      "id": "file-33",
+      "id": "model-00011-of-00048-e4b8e601dcbe",
       "path": "model-00011-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "4fc2c700363b0edb34750c3325c4704cdbef0bf188119e27b1c7970c34d8dd69",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "e4b8e601dcbebe902e0102e7b098b670a121cb8b9564dd719fc41d782c8416e0",
       "download_bytes": 3568768976,
       "installed_bytes": 3568768976,
       "roles": [
@@ -511,12 +512,12 @@
       ]
     },
     {
-      "id": "file-34",
+      "id": "model-00012-of-00048-64ed4e5f6126",
       "path": "model-00012-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "5214de3c6ca89c98186dd4e05ba6c2affe2bbd2ae4e579bd245db7842e9185a1",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "64ed4e5f6126ba029c462c9d5fca0fc907c5f855b4ba01194d79560f6db16e42",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -524,12 +525,12 @@
       ]
     },
     {
-      "id": "file-35",
+      "id": "model-00013-of-00048-8dfe199d07c0",
       "path": "model-00013-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "d953f118488b2ec6fce75b2faf33c9badefeb49d353bb66852d8026295c89c62",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "8dfe199d07c07ddd141c2c0136a2237f1161250a1a03ebe8deaabac93440da1d",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -537,12 +538,12 @@
       ]
     },
     {
-      "id": "file-36",
+      "id": "model-00014-of-00048-45db2f540f82",
       "path": "model-00014-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "40c97b77151b0f40599006fc7d3e0809a770a25cf4ce7adb70ad6f72bafbe006",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "45db2f540f825f92453c50335e49aede58cca56bc578d1787c12a0fbca6593e5",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -550,12 +551,12 @@
       ]
     },
     {
-      "id": "file-37",
+      "id": "model-00015-of-00048-5810381a0f05",
       "path": "model-00015-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "136cfaa14f36a04fb321bed2cff84bd8476a3cd079ff80763746b729e07eecbd",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "5810381a0f05b7381c002d299ed6ac19e42eba8070dd17e2703546944d84f292",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -563,12 +564,12 @@
       ]
     },
     {
-      "id": "file-38",
+      "id": "model-00016-of-00048-e0530b702477",
       "path": "model-00016-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "6881f71ac5daf0a115bd16e6b992c80703dec4a0f1515d4baab2ee7cd4cdd71a",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "e0530b7024771b0ce2df9b40bcc2232578f3300178487ec216863b0b2835617b",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -576,12 +577,12 @@
       ]
     },
     {
-      "id": "file-39",
+      "id": "model-00017-of-00048-ed1113024711",
       "path": "model-00017-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "a1949b35de69d59a2291341cc848a2a68783918afd91c442e20ea684bf44e084",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "ed11130247118b185ade893c0109bad896dd394cb1e066ce4fce044176261d94",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -589,12 +590,12 @@
       ]
     },
     {
-      "id": "file-40",
+      "id": "model-00018-of-00048-e393fea96da2",
       "path": "model-00018-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "8288d44620157b703a5f6e186e245768b0ca21ea9e3381ce1eb806a725331489",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "e393fea96da2a3414ef089354fc32e1c8891954de40958c84d2c2ecf80365b25",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -602,12 +603,12 @@
       ]
     },
     {
-      "id": "file-41",
+      "id": "model-00019-of-00048-a74ca4d3e8e8",
       "path": "model-00019-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "25a4d2a2a4a02ac4231a7fc4d3aa769c2228bf7497f22c7885dbb8a6f8b2dd11",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "a74ca4d3e8e82ce20c458bb8b1900110b753793ad4c58d08f38995f719c616f7",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -615,12 +616,12 @@
       ]
     },
     {
-      "id": "file-42",
+      "id": "model-00020-of-00048-9f556769926e",
       "path": "model-00020-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "0016a46d9f8565dc3aee0eacc70e9871d78fca0b987155ec2cbe90a5f555ebb0",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "9f556769926e60309e8defe45ab59fc8b26ae460d30c190cd746a3d78c11e2c2",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -628,12 +629,12 @@
       ]
     },
     {
-      "id": "file-43",
+      "id": "model-00021-of-00048-1671cce7f90d",
       "path": "model-00021-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "3f342f4120b90ffb73b77e4c5297fb46091d337b843a264aadb81ec17bb856cc",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "1671cce7f90d781f796b5ca6bf32dd1aeb740abcb2735e41ffd28f62485ce005",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -641,12 +642,12 @@
       ]
     },
     {
-      "id": "file-44",
+      "id": "model-00022-of-00048-decd67a4bd97",
       "path": "model-00022-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "0bf9870e1d44a987bee8a76f63d11444d091ced403392670da42e0648e622ac9",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "decd67a4bd97a75fa36861d2ad3067afeefa6a04a20da997fe6c19f171e70132",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -654,12 +655,12 @@
       ]
     },
     {
-      "id": "file-45",
+      "id": "model-00023-of-00048-c61a3e179cdb",
       "path": "model-00023-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "215f51b475b8671e832698bc44146d6aef563aa8fb27f7621e1126dff828f72d",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "c61a3e179cdbee19bfb8cbc4e111928ce2f1e1f0f4729d7c0cd5634354a4689d",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -667,12 +668,12 @@
       ]
     },
     {
-      "id": "file-46",
+      "id": "model-00024-of-00048-fc27aeb42335",
       "path": "model-00024-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "a11f085685e7f06eebcd9ca3daba4135a3bc31620a70f1c7344555db954d3184",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "fc27aeb4233534f6f7781dcfe57127a3908ae10fc025c5d86dc0682057f8b2fe",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -680,12 +681,12 @@
       ]
     },
     {
-      "id": "file-47",
+      "id": "model-00025-of-00048-a66b6b8d5821",
       "path": "model-00025-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "1d2a9ec82956e0c36d3d73c9e1e12763a4e100d30864dff82e7c685572bfa206",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "a66b6b8d5821b68f5b511e4f91e12025cd07d0fa6d0b71e722d825a2d6d878ca",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -693,12 +694,12 @@
       ]
     },
     {
-      "id": "file-48",
+      "id": "model-00026-of-00048-657b89314fba",
       "path": "model-00026-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "aaec7eb32b16f627007b998002a54a9954116f7308d5029b20e2e91f012775ad",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "657b89314fbaf6eee4acce24b3baf7e5fd2c5986a96ad85b08d90539cde869fe",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -706,12 +707,12 @@
       ]
     },
     {
-      "id": "file-49",
+      "id": "model-00027-of-00048-fb01f21a0da0",
       "path": "model-00027-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "63069bb430af6c8293535526076b7a493526ed33ade31fa3823831b804297374",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "fb01f21a0da0446b0bdf25a127ab19a6b06006acd8735f06a9ebfe34423fd7f5",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -719,12 +720,12 @@
       ]
     },
     {
-      "id": "file-50",
+      "id": "model-00028-of-00048-b2fd5cbbb639",
       "path": "model-00028-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "2a804253c04f7a0457d3a8389a4f3a32abc3c5c4fb0ebce97fadeb1e7b7986e8",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "b2fd5cbbb639f16e673bc484e5cca16b52a58bf2ab4bd62592e0c5408712ad7c",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -732,12 +733,12 @@
       ]
     },
     {
-      "id": "file-51",
+      "id": "model-00029-of-00048-9ec2fdf90027",
       "path": "model-00029-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "68dfa669a272cc8fbdc6c2a5798a974747777882f593adea057d40debf327351",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "9ec2fdf900275daeac0980490c5c731cc7868b151ce1de5698f48418de4fa5f0",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -745,12 +746,12 @@
       ]
     },
     {
-      "id": "file-52",
+      "id": "model-00030-of-00048-9ed3c317bf96",
       "path": "model-00030-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "dd8433e27dff56a2ff284bfdcb7fe9e14089c6f375cddd9db50e108d41a843b1",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "9ed3c317bf967d32133ad3a068ee4c56aae9784bc8b7da694482437f37dc1782",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -758,12 +759,12 @@
       ]
     },
     {
-      "id": "file-53",
+      "id": "model-00031-of-00048-d5078c3fca3e",
       "path": "model-00031-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "6e7796ad3b0532261bfc37e08ddcda9b3d5046388c8cfd63b80fe48ddd1cdfa4",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "d5078c3fca3e6370043606ead7856e0b8fe67a9aab52c415769f29934c4d7f5d",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -771,12 +772,12 @@
       ]
     },
     {
-      "id": "file-54",
+      "id": "model-00032-of-00048-163653848f00",
       "path": "model-00032-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "86d3f021bec54fe93fb3ee755031409df8e2b60d425be2c2c8201a308f3df100",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "163653848f002718d3deaa6ce48885483fc1f2e12e50e44a47477c73ccd91393",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -784,12 +785,12 @@
       ]
     },
     {
-      "id": "file-55",
+      "id": "model-00033-of-00048-f2cffd43f2a5",
       "path": "model-00033-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "35a92fa5a3ccb26704cb7e5b79e1ad10ecf85ff2048bcb0d8b349ce710850f57",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "f2cffd43f2a5f491f4691f8694e6bc08239158e143ae7063dc04f0eb0259214a",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -797,12 +798,12 @@
       ]
     },
     {
-      "id": "file-56",
+      "id": "model-00034-of-00048-0f9494512147",
       "path": "model-00034-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "368896471e8e2f864d0822af0b1bc30fd0a41fa0341015aa85a0854ab40173c0",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "0f94945121474cfdb6a9ab175914d3811ffbf08e6cc54082e14e473c755d18d8",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -810,12 +811,12 @@
       ]
     },
     {
-      "id": "file-57",
+      "id": "model-00035-of-00048-9cb6a316989f",
       "path": "model-00035-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "85c9a9af1ec58d018a5cf01f2ac30f7acadb66b9b840007795315899a3006a0c",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "9cb6a316989f7c7385e3ec2bd42ffe766ee126c70ef3466742849982ee1b0f0f",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -823,12 +824,12 @@
       ]
     },
     {
-      "id": "file-58",
+      "id": "model-00036-of-00048-7e6761421fe9",
       "path": "model-00036-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "0e22e7f4133180ddd85c155e325ff7c52a3e2955fa5fe81c362b705175c87f4a",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "7e6761421fe944c2143eb897b983085891b421c148c6c17fb5cd8eaa9bdaa497",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -836,12 +837,12 @@
       ]
     },
     {
-      "id": "file-59",
+      "id": "model-00037-of-00048-a59d662f1143",
       "path": "model-00037-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "47f41e12ce985d5dac4e78e23d60f7628ea5e58c8ab7b407805403379d67f4d2",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "a59d662f1143596d56c452a1230b717ce43edf678207398c573a2503b0f72c91",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -849,12 +850,12 @@
       ]
     },
     {
-      "id": "file-60",
+      "id": "model-00038-of-00048-137fa617a74b",
       "path": "model-00038-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "cdbb8c36da34d9ee8fef60560ed0673bcf7598576627ae8fa2db797537289b94",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "137fa617a74ba8e73fd76bb1010c7a85d791aaa150006cb66faa04a83e9e730f",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -862,12 +863,12 @@
       ]
     },
     {
-      "id": "file-61",
+      "id": "model-00039-of-00048-a29af1aa519d",
       "path": "model-00039-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "03f3cc8ab1a7b270c895b95e066bb222aad2f44e0f5c01834293d620eaf6d0bb",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "a29af1aa519d7ce726235ea2c2b38146d756290cda7a82d90c4d4438155b53e4",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -875,12 +876,12 @@
       ]
     },
     {
-      "id": "file-62",
+      "id": "model-00040-of-00048-8bc93d8a7d19",
       "path": "model-00040-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "3124105d383434df89f2148eb1d85f4068825ff0678bd13b2996709fd9fb7ee6",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "8bc93d8a7d1987dc86b14e22b1d8f42ec31da92c56edd9f312daf43f33a6a206",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -888,12 +889,12 @@
       ]
     },
     {
-      "id": "file-63",
+      "id": "model-00041-of-00048-fd312e7fdd6c",
       "path": "model-00041-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "4eda737587c449353cfc4cf3f3c89f0f5889cd2c12b6c510c98609bf59a5b487",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "fd312e7fdd6cb5796df356a7f0314f124851dc149991e9fb02c5bed45cc4ba05",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -901,12 +902,12 @@
       ]
     },
     {
-      "id": "file-64",
+      "id": "model-00042-of-00048-4d19bf368083",
       "path": "model-00042-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "9ac23e2e32c41edab36cf54bd029f99f429d4d5ef2ef506cb37b1e0db3197f34",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "4d19bf368083c9a183cb0849f316ec17b62f859ca824c0586e779657efb6e6a6",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -914,12 +915,12 @@
       ]
     },
     {
-      "id": "file-65",
+      "id": "model-00043-of-00048-b7103842ceb7",
       "path": "model-00043-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "8c629a864a9bf1ac9f17257d3bf870c88ba97e1284f332a905076249e1d7a1d5",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "b7103842ceb70848f9804f55c193d6a57f43174a587cba42b61b5c1bc4e1303d",
       "download_bytes": 3568770544,
       "installed_bytes": 3568770544,
       "roles": [
@@ -927,12 +928,12 @@
       ]
     },
     {
-      "id": "file-66",
+      "id": "model-00044-of-00048-422d3889fa20",
       "path": "model-00044-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "745476d81cb15bc8ee0aee5bdc81ef71a698f7ea83dbd033992262577ef7c85b",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "422d3889fa20c238b7f97464c14df0bcf3328f189c294f41a3a334421dc560c7",
       "download_bytes": 3590026352,
       "installed_bytes": 3590026352,
       "roles": [
@@ -940,12 +941,12 @@
       ]
     },
     {
-      "id": "file-67",
+      "id": "model-00045-of-00048-a5be6aed7b84",
       "path": "model-00045-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "9a0fd242134e9ebe4e6993a7631692944838e4fdf20067b3219caa48eab68045",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "a5be6aed7b84fc87ec42b5d24ba0b0d67f253a3906fcd99c13f4f7be5958fc00",
       "download_bytes": 1059332516,
       "installed_bytes": 1059332516,
       "roles": [
@@ -953,12 +954,12 @@
       ]
     },
     {
-      "id": "file-68",
+      "id": "model-00046-of-00048-5db924ca907e",
       "path": "model-00046-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "14810f274692bb771c3970e8cba45846c4aa2213dcfb0025ffebe788d229e18d",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "5db924ca907e0d93acd975bd5079c3662717f9ac709f23d079bd8f816d29d9dd",
       "download_bytes": 3610455184,
       "installed_bytes": 3610455184,
       "roles": [
@@ -966,12 +967,12 @@
       ]
     },
     {
-      "id": "file-69",
+      "id": "model-00047-of-00048-62816173f9f6",
       "path": "model-00047-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "7a44164698d90648a35c030c5eb369256d2c469306bfbf2b1ae27f35b6e57889",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "62816173f9f6e136b20b48e3b6f16613ac9ea02b5603f636928b253244a548bd",
       "download_bytes": 3560111960,
       "installed_bytes": 3560111960,
       "roles": [
@@ -979,12 +980,12 @@
       ]
     },
     {
-      "id": "file-70",
+      "id": "model-00048-of-00048-cc43742bd24a",
       "path": "model-00048-of-00048.safetensors",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
-      "sha256": "a0bbb24f36d2ef6107250088e0f020f93aec0677cd24be3e9e69589547a7656f",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "sha256": "cc43742bd24ae6bcdea343a91442f6f66aed2cfebcc6b235470204851ce2f8a9",
       "download_bytes": 3692775244,
       "installed_bytes": 3692775244,
       "roles": [
@@ -992,11 +993,11 @@
       ]
     },
     {
-      "id": "file-71",
+      "id": "model-safetensors-index-98efab455cf0",
       "path": "model.safetensors.index.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "98efab455cf08dfbbbaaba6f570e1bf10bf927d2b4c3c453a59c2f6f0e3be92b",
       "download_bytes": 5602871,
       "installed_bytes": 5602871,
@@ -1005,11 +1006,11 @@
       ]
     },
     {
-      "id": "file-72",
+      "id": "tokenizer-8f9f37ca37fd",
       "path": "tokenizer.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "8f9f37ca37fdc4f5fd36d5cf4d3b0e8392edb4e894fd10cc0d70b4957c8633cf",
       "download_bytes": 6367146,
       "installed_bytes": 6367146,
@@ -1018,11 +1019,11 @@
       ]
     },
     {
-      "id": "file-73",
+      "id": "tokenizer-config-6ac8c8dc065e",
       "path": "tokenizer_config.json",
       "kind": "huggingface.file",
-      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
-      "revision": "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+      "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
       "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
       "download_bytes": 801,
       "installed_bytes": 801,
