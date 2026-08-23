@@ -625,8 +625,11 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
     document = json.loads(receipt.read_text())
     assert set(document["gates"]) == ACCEPTANCE_GATES
     assert all(document["gates"].values())
+    signature_raw = signature.read_bytes()
+    assert signature_raw.endswith(b"\n")
+    assert signature_raw.count(b"\n") == 1
     (tmp_path / "acceptance/raw.sig").write_bytes(
-        base64.b64decode(signature.read_bytes(), validate=True)
+        base64.b64decode(signature_raw.strip(), validate=True)
     )
     verified = subprocess.run(
         [
@@ -643,6 +646,18 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         check=False,
     )
     assert verified.returncode == 0, verified.stderr
+
+    destination = tmp_path / "promoted"
+    candidate = _publish_candidate(publication, destination)
+    assert candidate.returncode == 0, candidate.stderr
+    promoted = _promote(
+        publication,
+        destination,
+        receipt,
+        signature,
+        tmp_path / "acceptance/keys/installer-signing-public.pem",
+    )
+    assert promoted.returncode == 0, promoted.stderr
 
 
 def test_acceptance_authority_rejects_internally_consistent_invented_graph(
