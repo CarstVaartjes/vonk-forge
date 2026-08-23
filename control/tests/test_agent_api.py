@@ -76,6 +76,7 @@ CAPABILITIES = [
     "agent.runtime.rust.v1",
     "node.probe",
     "release.install",
+    "runtime.vonk.v1",
     "workload.health",
     "workload.prepare",
     "workload.start",

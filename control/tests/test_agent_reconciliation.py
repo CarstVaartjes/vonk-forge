@@ -45,6 +45,7 @@ NODE_B = "spk_" + "b" * 32
 BASE_COMMIT = "a" * 64
 AGENT_CAPABILITIES = (
     "agent.runtime.rust.v1",
+    "runtime.vonk.v1",
     "node.probe",
     "release.install",
     "workload.health",

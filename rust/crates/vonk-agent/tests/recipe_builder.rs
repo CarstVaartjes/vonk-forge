@@ -854,6 +854,7 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
     assert!(oras[0].1.iter().any(|value| value == &exact_remote));
     assert!(oras.iter().all(|(_, arguments)| {
         arguments.iter().any(|value| value == "--resolve")
+            && arguments.iter().all(|value| value != "--no-tty")
             && arguments.iter().all(|value| !value.contains("ignored-tag"))
     }));
     let load = calls

@@ -179,7 +179,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper"):
+    for name in ("vonk-agent", "vonk-agent-helper", "oras"):
         raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
@@ -189,6 +189,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
         (binaries / name).write_bytes(raw)
         (binaries / name).chmod(0o555)
+    (binaries / "oras.LICENSE").write_text("ORAS test license\n")
     private_key = tmp_path / "release.pem"
     generate_private_key(private_key, "ED25519")
     output = tmp_path / "dist"
@@ -394,6 +395,11 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in text
     assert "cargo test --workspace --locked" in text
     assert "scripts/verify-agent-systemd" in text
+    assert "scripts/materialize-agent-tools --output-root target" in text
+    materializer = (ROOT / "scripts/materialize-agent-tools").read_text()
+    assert 'ORAS_VERSION = "1.3.2"' in materializer
+    assert materializer.count('"archive_sha256":') == 2
+    assert materializer.count('"binary_sha256":') == 2
     assert "scripts/test-agent-package-native-lifecycle" in text
     for architecture in ("linux-arm64", "linux-amd64"):
         assert f"--architecture {architecture}" in text

@@ -113,6 +113,7 @@ def rust_package_inputs(root: Path) -> tuple[str, ...]:
         "Cargo.toml",
         "Cargo.lock",
         "scripts/build-agent-deb",
+        "scripts/materialize-agent-tools",
         "scripts/build-agent-package-evidence",
         "scripts/verify-agent-deb",
         "scripts/verify-agent-systemd",

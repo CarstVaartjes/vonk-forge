@@ -30,7 +30,7 @@
   },
   "build": {
     "context": {
-      "sha256": "61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94",
+      "sha256": "a7b9ac9c971d0746a91420546fd44cee9ac4bf90d8066bd3f1bb15cc52267af8",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
@@ -42,7 +42,7 @@
       "hosts": []
     },
     "resources": {
-      "download_bytes": 0,
+      "download_bytes": 268435456,
       "temporary_bytes": 536870912,
       "memory_bytes": 134217728,
       "timeout_seconds": 300
@@ -71,7 +71,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "development-vllm-shim-arm64",
-      "content_sha256": "40a2e2be4069930f3e903afff0fb1efcb23fae75aedf4a57380cedbb3b96c68b"
+      "content_sha256": "bff1f54f5bb1e148782d88914493ab4645231394ac1cbe3e0a319a7f62dd68c8"
     },
     "entrypoint": [
       "/opt/vonk/bin/vllm",

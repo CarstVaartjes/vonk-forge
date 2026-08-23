@@ -90,10 +90,11 @@ _REQUIRED_CAPABILITIES = frozenset(
         AgentOperation.WORKLOAD_VERIFY.value,
     }
 )
+_RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
 _NEXT_CAPABILITIES = (
-    _REQUIRED_CAPABILITIES | frozenset({"agent.runtime.rust.v1"}) | _RECIPE_CAPABILITIES
+    _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 )
-_CONTROL_OPERATIONS = _NEXT_CAPABILITIES - frozenset({"agent.runtime.rust.v1"})
+_CONTROL_OPERATIONS = _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
 
 
 class StaleAgentAttempt(RuntimeError):

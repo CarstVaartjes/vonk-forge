@@ -205,6 +205,12 @@ runs:
             ;;
         esac
 
+    - name: Materialize pinned package tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        scripts/materialize-agent-tools --output-root target
+
     - name: Materialize and verify protected agent key
       shell: bash
       env:

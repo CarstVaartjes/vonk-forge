@@ -59,7 +59,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "90396dc5d736ad8083ddfa23f90b2ecef5c05ea1c3129da5375455ddd684413a"
+RECIPE_DIGEST = "2b631974b1c835dfe6be2b9bc1c22c83e7df7198115e1fe023788d78b983485d"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -73,7 +73,7 @@ class SliceServer(ThreadingHTTPServer):
         self.recipe_digest = RECIPE_DIGEST
         self.recipe_revision = 1
         self.source_digest = (
-            "61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94"
+            "a7b9ac9c971d0746a91420546fd44cee9ac4bf90d8066bd3f1bb15cc52267af8"
         )
         self.slug = "dev-http-smoke"
         self.route_published = False

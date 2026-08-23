@@ -79,6 +79,7 @@ _REQUIRED_AGENT_CAPABILITIES = frozenset(
 _NEXT_AGENT_CAPABILITIES = _REQUIRED_AGENT_CAPABILITIES | frozenset(
     {
         "agent.runtime.rust.v1",
+        "runtime.vonk.v1",
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",
