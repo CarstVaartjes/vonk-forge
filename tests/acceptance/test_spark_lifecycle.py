@@ -1069,53 +1069,36 @@ class SparkLifecycle:
         if not image or "\x00" in image or "\n" in image or "\r" in image:
             raise LifecycleError("synthetic CDI probe image is unavailable")
         name = f"vonk-cdi-probe-{self.project}"
-        created = False
         try:
             self._run_command(
                 [
                     "docker",
-                    "create",
+                    "run",
+                    "--rm",
                     "--name",
                     name,
+                    "--network",
+                    "none",
+                    "--read-only",
+                    "--cap-drop",
+                    "ALL",
+                    "--security-opt",
+                    "no-new-privileges",
                     "--device",
                     "nvidia.com/gpu=all",
+                    "--entrypoint",
+                    "/bin/sh",
                     image,
+                    "-eu",
+                    "-c",
+                    'test "${VONK_SYNTHETIC_CDI:-}" = 1',
                 ],
                 cwd=self.bundle,
             )
-            created = True
-            configured = self._run_command(
-                [
-                    "docker",
-                    "inspect",
-                    "--format",
-                    "{{json .Config.Env}}",
-                    name,
-                ],
-                cwd=self.bundle,
-            ).stdout
-            try:
-                environment = json.loads(configured)
-            except json.JSONDecodeError as error:
-                raise LifecycleError(
-                    "synthetic Docker CDI fixture is invalid"
-                ) from error
-            if (
-                not isinstance(environment, list)
-                or "VONK_SYNTHETIC_CDI=1" not in environment
-            ):
-                raise LifecycleError("synthetic Docker CDI fixture is invalid")
         except LifecycleError as error:
             raise LifecycleError(
                 "native Docker CDI support is unavailable"
             ) from error
-        finally:
-            if created:
-                self._run_command(
-                    ["docker", "rm", "--force", name],
-                    cwd=self.bundle,
-                    timeout=30,
-                )
 
     def _prepare_synthetic_firewall_environment(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
