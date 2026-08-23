@@ -734,6 +734,86 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
     assert any(event.action == "catalog.public.import" for event in audits.list())
 
 
+def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
+    tmp_path: Path,
+) -> None:
+    fixture = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
+    document = json.loads((fixture / "recipe.json").read_text(encoding="utf-8"))
+    dependencies = tuple(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((fixture / "entities").glob("*.json"))
+    )
+    bundle = generate_source_bundle(
+        {
+            path.name: path.read_bytes()
+            for path in sorted((fixture / "context").iterdir())
+        }
+    )
+    digest = recipe_content_sha256(document)
+    item = RecipeLibraryItem(
+        library_commit="f" * 40,
+        source_path="recipes/dev-http-smoke.json",
+        publisher="vonk",
+        slug="dev-http-smoke",
+        title="Development HTTP smoke fixture",
+        description="Deterministic development recipe.",
+        tags=("dev", "smoke"),
+        content_sha256=digest,
+        uri=f"vonk://catalog/vonk/dev-http-smoke@sha256:{digest}",
+        document=document,
+        dependencies=dependencies,
+        source_bundle=bundle.archive,
+    )
+
+    class Library:
+        def list(self):
+            return RecipeLibrarySnapshot(commit="f" * 40, items=(item,))
+
+        def fetch(self, uri: str):
+            assert uri == item.uri
+            return item
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'fresh-library.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    codec = TokenCodec(b"l" * 32)
+    service = CatalogService(
+        sessions,
+        clock=lambda: datetime(2026, 8, 22, 12, 0, tzinfo=UTC),
+        cursors=codec.cursor_codec(),
+        source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
+    )
+    audits = MemoryAuditStore()
+    app = _catalog_app(codec, audits, service, recipe_library=Library())
+    client = TestClient(app)
+    token = codec.issue(
+        Actor("administrator", "administrator"), ttl_seconds=100, now=0
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+
+    listed = client.get("/api/v1/catalog/public-recipes", headers=auth)
+    preview = client.post(
+        "/api/v1/catalog/imports/public/preview",
+        headers=auth,
+        json={"uri": item.uri},
+    )
+    imported = client.post(
+        "/api/v1/catalog/imports/public",
+        headers=auth,
+        json={"uri": item.uri, "expected_content_sha256": digest},
+    )
+
+    assert listed.status_code == 200
+    assert preview.status_code == 200
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["origin"] == "recipe_library"
+    assert len(service.entities.list_entities(limit=100)[0]) == 5
+    assert service.read_source_bundle(bundle.sha256) == bundle.archive
+
+
 def test_publication_report_and_export_are_local_json_only(
     bridge_api, recipe_document
 ) -> None:

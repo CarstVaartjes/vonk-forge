@@ -6,13 +6,12 @@ import copy
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any, BinaryIO
 
-from .import_report import ImportDisposition, ImportReportItem
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +22,7 @@ from .catalog_contract import (
     CatalogContractError,
     CatalogKind,
     CatalogReference,
+    catalog_content_sha256,
     parse_catalog_reference,
 )
 from .catalog_entities import (
@@ -33,7 +33,10 @@ from .catalog_entities import (
 )
 from .catalog_repository import CatalogRepository, sensitive_document_path
 from .global_catalog import GlobalRecipeRevision
+from .import_report import ImportDisposition, ImportReportItem
 from .models import (
+    CatalogEntity,
+    CatalogEntityRevision,
     LocalRecipe,
     LocalRecipeRevision,
     RecipeGlobalLink,
@@ -54,7 +57,6 @@ from .recipe_contract import (
 from .schema_resources import read_runtime_schema
 from .source_bundles import SourceBundleError, SourceBundleStore
 
-
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _MUTABLE_REVISIONS = frozenset(
     {"main", "master", "latest", "head", "main-latest", "master-latest"}
@@ -62,6 +64,14 @@ _MUTABLE_REVISIONS = frozenset(
 _REQUIRED_TEST_CHECKS = frozenset(
     {"container.started", "endpoint.healthy", "inference.completed"}
 )
+_LIBRARY_ENTITY_ORDER = {
+    CatalogKind.EXECUTION_HARNESS: 0,
+    CatalogKind.MODEL_GROUP: 1,
+    CatalogKind.MODEL: 2,
+    CatalogKind.MODEL_VERSION: 3,
+    CatalogKind.RUNTIME_DISTRIBUTION: 4,
+    CatalogKind.PATCH_BUNDLE: 5,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -661,6 +671,7 @@ class CatalogService:
         source_path: str,
         document: Mapping[str, object],
         expected_content_sha256: str,
+        dependency_documents: Sequence[Mapping[str, object]] = (),
     ) -> RecipeRevisionView:
         """Import one exact recipe from the public Git recipe library."""
 
@@ -704,6 +715,12 @@ class CatalogService:
                         "recipe library import history is inconsistent",
                     )
                 return _view(recipe, revision)
+
+            self._materialize_recipe_library_entities(
+                session,
+                dependency_documents,
+                actor=actor,
+            )
 
             recipe = self._repository.recipe_by_slug(session, slug)
             now = self._clock()
@@ -773,6 +790,103 @@ class CatalogService:
             )
             session.flush()
             return _view(recipe, revision)
+
+    def _materialize_recipe_library_entities(
+        self,
+        session: Session,
+        documents: Sequence[Mapping[str, object]],
+        *,
+        actor: str,
+    ) -> None:
+        """Resolve the exact dependency closure shipped with a library recipe."""
+
+        ordered: list[tuple[CatalogKind, Mapping[str, object]]] = []
+        for document in documents:
+            try:
+                kind = CatalogKind(document.get("kind"))
+            except (TypeError, ValueError) as error:
+                raise CatalogValidationError(
+                    "recipe_library.entity_kind",
+                    "recipe library dependency kind is invalid",
+                ) from error
+            if kind not in _LIBRARY_ENTITY_ORDER:
+                raise CatalogValidationError(
+                    "recipe_library.entity_kind",
+                    "recipe library dependency kind is invalid",
+                )
+            ordered.append((kind, document))
+        ordered.sort(
+            key=lambda item: (
+                _LIBRARY_ENTITY_ORDER[item[0]],
+                str(_mapping(item[1].get("identity")).get("publisher", "")),
+                str(_mapping(item[1].get("identity")).get("slug", "")),
+            )
+        )
+        entities = CatalogEntityService(
+            session,
+            clock=self._clock,
+            cursors=self._cursors,
+        )
+        for kind, document in ordered:
+            identity = _mapping(document.get("identity"))
+            publisher = str(identity.get("publisher", ""))
+            slug = str(identity.get("slug", ""))
+            try:
+                digest = catalog_content_sha256(document)
+            except CatalogContractError as error:
+                raise CatalogValidationError(
+                    error.code,
+                    f"{error.path}: {error.detail}",
+                ) from error
+            try:
+                entities.lookup_exact(kind, publisher, slug, digest)
+                continue
+            except CatalogConflict:
+                pass
+            entity = session.scalar(
+                select(CatalogEntity).where(
+                    CatalogEntity.kind == kind.value,
+                    CatalogEntity.publisher == publisher,
+                    CatalogEntity.slug == slug,
+                )
+            )
+            with session.begin_nested():
+                if entity is None:
+                    draft = entities.create_draft(document, actor=actor)
+                else:
+                    latest = session.scalar(
+                        select(CatalogEntityRevision)
+                        .where(CatalogEntityRevision.entity_id == entity.id)
+                        .order_by(CatalogEntityRevision.revision_number.desc())
+                        .limit(1)
+                    )
+                    if latest is None:
+                        raise CatalogConflict(
+                            "recipe_library.entity_history_inconsistent",
+                            "recipe library dependency history is inconsistent",
+                        )
+                    if (
+                        latest.lifecycle == "draft"
+                        and catalog_content_sha256(latest.document) == digest
+                    ):
+                        draft = latest
+                    else:
+                        draft = entities.revise(
+                            entity.id,
+                            document,
+                            actor=actor,
+                            expected_revision=latest.revision_number,
+                        )
+                resolved = entities.resolve(
+                    draft.id,
+                    actor=actor,
+                    expected_revision=draft.revision_number,
+                )
+                if resolved.content_sha256 != digest:
+                    raise CatalogConflict(
+                        "recipe_library.entity_digest_mismatch",
+                        "recipe library dependency resolved to a different digest",
+                    )
 
     def attach_test_report(
         self, recipe_id: str, report: Mapping[str, object], actor: str

@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {CatalogApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
@@ -222,6 +222,10 @@ export function LibraryPage({api, path, onNavigate}: {
   const [publicRecipes, setPublicRecipes] = useState<PublicRecipe[]>([]);
   const [publicRecipesLoading, setPublicRecipesLoading] = useState(false);
   const [publicRecipesError, setPublicRecipesError] = useState("");
+  const [publicRecipesCommit, setPublicRecipesCommit] = useState("");
+  const [publicRecipeQuery, setPublicRecipeQuery] = useState("");
+  const [importPreviewLoading, setImportPreviewLoading] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -229,6 +233,11 @@ export function LibraryPage({api, path, onNavigate}: {
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
   const route = libraryRoute(path);
+  const filteredPublicRecipes = useMemo(() => {
+    const normalized = publicRecipeQuery.trim().toLowerCase();
+    if (!normalized) return publicRecipes;
+    return publicRecipes.filter(recipe => [recipe.title, recipe.slug, recipe.description, ...recipe.tags].some(value => value.toLowerCase().includes(normalized)));
+  }, [publicRecipeQuery, publicRecipes]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -343,6 +352,63 @@ export function LibraryPage({api, path, onNavigate}: {
     }
   }
 
+  async function refreshPublicRecipes() {
+    if (!catalog.listPublicRecipes) {
+      setPublicRecipesError("The public recipe catalog is not available in this control-plane build.");
+      setPublicRecipesLoading(false);
+      return;
+    }
+    setPublicRecipesLoading(true);
+    setPublicRecipesError("");
+    try {
+      const result = await catalog.listPublicRecipes();
+      setPublicRecipes(result.recipes);
+      setPublicRecipesCommit(result.commit);
+    } catch (value) {
+      setPublicRecipesError(value instanceof Error ? value.message : "Unable to load the current recipe catalog");
+    } finally {
+      setPublicRecipesLoading(false);
+    }
+  }
+
+  function openPublicImport() {
+    setAuthoring("import");
+    setAuthoringStatus("");
+    setImportError("");
+    setImportPreview(undefined);
+    setPublicRecipeQuery("");
+    void refreshPublicRecipes();
+  }
+
+  async function previewPublicImport(uri = importUri) {
+    if (!catalog.previewPublicRecipe || !uri) return;
+    setImportUri(uri);
+    setImportError("");
+    setImportPreview(undefined);
+    setImportPreviewLoading(true);
+    try {
+      setImportPreview(await catalog.previewPublicRecipe(uri));
+    } catch (value) {
+      setImportError(value instanceof Error ? value.message : "Unable to preview import");
+    } finally {
+      setImportPreviewLoading(false);
+    }
+  }
+
+  async function savePublicImport() {
+    if (!catalog.importPublicRecipe || !importPreview) return;
+    setImportError("");
+    setImportSaving(true);
+    try {
+      await catalog.importPublicRecipe(importPreview.uri, importPreview.content_sha256);
+      setAuthoringStatus("Recipe imported");
+    } catch (value) {
+      setImportError(value instanceof Error ? value.message : "Unable to import recipe");
+    } finally {
+      setImportSaving(false);
+    }
+  }
+
   return <div className="library-page">
     <header className="fleet-hero">
       <div>
@@ -350,7 +416,7 @@ export function LibraryPage({api, path, onNavigate}: {
         <h2 ref={heading} tabIndex={-1}>Library</h2>
       <div className="library-toolbar-actions">
         <button type="button" className="button secondary" onClick={() => { const next = defaultDocument(); setCustomDocument(next); setDocumentText(JSON.stringify(next, null, 2)); setSlug(next.identity.slug); setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
-        <button type="button" className="button secondary" onClick={() => { setAuthoring("import"); setImportError(""); setImportPreview(undefined); setPublicRecipesError(""); const listPublicRecipes = catalog.listPublicRecipes; if (!listPublicRecipes) { setPublicRecipesLoading(false); return; } setPublicRecipesLoading(true); void listPublicRecipes().then(result => { setPublicRecipes(result.recipes); setPublicRecipesLoading(false); }).catch((error: unknown) => { setPublicRecipesError(error instanceof Error ? error.message : "Unable to load the current recipe catalog"); setPublicRecipesLoading(false); }); }}>Import public recipe</button>
+        <button type="button" className="button secondary" onClick={openPublicImport}>Import public recipe</button>
       </div>
       {authoring === "create" && <section className="library-section library-authoring-panel" aria-label="Recipe authoring">
         <div className="library-panel-heading"><div><p className="fleet-kicker">Local recipe builder</p><h3>Create custom recipe</h3><p>Describe every part of the runtime in a guided form. Use advanced JSON only when you need a field-level escape hatch.</p></div><span className="library-panel-badge">Draft</span></div>
@@ -363,18 +429,25 @@ export function LibraryPage({api, path, onNavigate}: {
       {authoring === "import" && <section className="library-section library-import-panel" aria-label="Public recipe import">
         <div className="library-panel-heading"><div><p className="fleet-kicker">Public recipe catalog</p><h3>Import public recipe</h3><p>Choose a reviewed recipe from the live catalog, or paste an immutable public URI. Every option is previewed before it is saved locally.</p></div><span className="library-panel-badge">Digest-bound</span></div>
         <div className="library-import-source">
-          <div className="library-import-source-heading"><div><span className="library-import-eyebrow">Recommended</span><h4>Live default catalog</h4></div><span className="library-import-count">{publicRecipesLoading ? "Refreshing…" : `${publicRecipes.length} recipes available`}</span></div>
-          <label>Default catalog recipe<select aria-label="Default catalog recipe" value={importUri} onChange={event => { setImportUri(event.target.value); setImportPreview(undefined); setImportError(""); }}>
-          <option value="">Choose a recipe from vonk-forge-recipes…</option>
-          {publicRecipes.map(recipe => <option key={recipe.uri} value={recipe.uri}>{recipe.title} · {recipe.slug}</option>)}
-          </select></label>
-          <p className="library-import-helper" role={publicRecipesLoading ? "status" : undefined}>{publicRecipesLoading ? "Looking up the latest recipes now…" : "The list refreshes every time you open this panel."}</p>
+          <div className="library-import-source-heading"><div><span className="library-import-eyebrow">Recommended</span><h4>Reviewed recipe library</h4></div><div className="library-import-catalog-meta"><span className="library-import-count">{publicRecipesLoading ? "Refreshing…" : `${publicRecipes.length} recipes`}</span>{publicRecipesCommit && <code title={publicRecipesCommit}>@{publicRecipesCommit.slice(0, 8)}</code>}</div></div>
+          {publicRecipesLoading && publicRecipes.length === 0 && <div className="library-import-loading" role="status"><span aria-hidden="true" /><div><strong>Loading the reviewed catalog</strong><small>Resolving one immutable library snapshot…</small></div></div>}
+          {publicRecipesError && <div className="library-import-error" role="alert"><div><strong>Catalog unavailable</strong><p>{publicRecipesError}</p></div><button type="button" className="button secondary" onClick={() => void refreshPublicRecipes()}>Try again</button></div>}
+          {!publicRecipesLoading && publicRecipes.length > 0 && <>
+            <label className="library-import-search"><span>Find a recipe</span><input type="search" aria-label="Search public recipes" value={publicRecipeQuery} onChange={event => setPublicRecipeQuery(event.target.value)} placeholder="Search model, modality, runtime, or tag…" /></label>
+            <p className="library-import-helper">Showing {filteredPublicRecipes.length} of {publicRecipes.length} recipes from <code>{publicRecipesCommit.slice(0, 8)}</code>.</p>
+            <div className="library-import-grid" aria-label="Default catalog recipes">
+              {filteredPublicRecipes.map(recipe => <article className={`library-import-card${importUri === recipe.uri ? " selected" : ""}`} key={recipe.uri}>
+                <div><span className="library-import-eyebrow">{recipe.tags.includes("candidate") ? "Candidate" : "Reviewed"}</span><h5>{recipe.title}</h5><p>{recipe.description}</p></div>
+                <div className="library-import-tags" aria-label={`${recipe.title} tags`}>{recipe.tags.slice(0, 5).map(tag => <span className="library-import-tag" key={tag}>{tag}</span>)}</div>
+                <button type="button" className="button secondary" aria-pressed={importUri === recipe.uri} onClick={() => void previewPublicImport(recipe.uri)}>{importUri === recipe.uri && importPreviewLoading ? "Loading preview…" : "Review recipe"}</button>
+              </article>)}
+            </div>
+            {filteredPublicRecipes.length === 0 && <div className="library-import-empty"><strong>No matching recipes</strong><p>Try a model name, modality such as “video”, or runtime such as “vLLM”.</p></div>}
+          </>}
         </div>
-        {publicRecipesError && <p role="alert">{publicRecipesError}</p>}
-        <div className="library-import-manual"><div><span className="library-import-eyebrow">Any public contract</span><h4>Manual URI</h4></div><label>Public recipe URI<input aria-label="Public recipe URI" value={importUri} onChange={event => { setImportUri(event.target.value); setImportPreview(undefined); }} placeholder="vonk://catalog/publisher/slug@sha256:…" /></label><p className="library-import-helper">Use this for a catalog recipe from another publisher or a URI you already have.</p></div>
-        <div className="library-import-actions"><button type="button" className="button" disabled={!catalog.previewPublicRecipe || !importUri} onClick={() => { setImportError(""); void catalog.previewPublicRecipe?.(importUri).then(setImportPreview).catch((error: unknown) => setImportError(error instanceof Error ? error.message : "Unable to preview import")); }}>Preview public import</button><span>Nothing is saved until you confirm the preview.</span></div>
+        <details className="library-import-manual"><summary>Import a public recipe URI</summary><div className="library-import-manual-content"><div><span className="library-import-eyebrow">Advanced</span><h4>Manual URI</h4></div><label>Public recipe URI<input aria-label="Public recipe URI" value={importUri} onChange={event => { setImportUri(event.target.value); setImportPreview(undefined); setImportError(""); }} placeholder="vonk://catalog/publisher/slug@sha256:…" /></label><div className="library-import-actions"><button type="button" className="button secondary" disabled={!catalog.previewPublicRecipe || !importUri || importPreviewLoading} onClick={() => void previewPublicImport()}>{importPreviewLoading ? "Loading preview…" : "Review URI"}</button><span>Use this for another publisher or an immutable URI you already have.</span></div></div></details>
         {importError && <p role="alert">{importError}</p>}
-        {importPreview && <section className="library-import-preview" aria-label="Public recipe import preview"><div className="library-import-preview-heading"><div><span className="library-import-eyebrow">Ready for review</span><h4>{importPreview.title}</h4><p>{importPreview.publisher}/{importPreview.slug}</p></div><span className="library-import-status">Immutable</span></div><p className="library-import-description">{importPreview.description || "No description provided."}</p>{importPreview.tags.length > 0 && <div className="library-import-tags" aria-label="Recipe tags">{importPreview.tags.map(tag => <span className="library-import-tag" key={tag}>{tag}</span>)}</div>}<dl className="library-import-facts"><div><dt>Source</dt><dd>{importPreview.source === "recipe_library" ? "Live default catalog" : "Public catalog"}</dd></div><div><dt>Identity</dt><dd>{importPreview.publisher}/{importPreview.slug}</dd></div></dl><p className="library-import-digest"><span>Immutable content digest</span><code>sha256:{importPreview.content_sha256}</code></p><button type="button" className="button" disabled={!catalog.importPublicRecipe} onClick={() => { void catalog.importPublicRecipe?.(importPreview.uri, importPreview.content_sha256).then(() => setAuthoringStatus("Recipe imported")); }}>Import reviewed recipe</button></section>}
+        {importPreview && <section className="library-import-preview" aria-label="Public recipe import preview"><div className="library-import-preview-heading"><div><span className="library-import-eyebrow">Ready for review</span><h4>{importPreview.title}</h4><p>{importPreview.publisher}/{importPreview.slug}</p></div><span className="library-import-status">Immutable</span></div><p className="library-import-description">{importPreview.description || "No description provided."}</p>{importPreview.tags.length > 0 && <div className="library-import-tags" aria-label="Recipe tags">{importPreview.tags.map(tag => <span className="library-import-tag" key={tag}>{tag}</span>)}</div>}<dl className="library-import-facts"><div><dt>Source</dt><dd>{importPreview.source === "recipe_library" ? "Reviewed recipe library" : "Public catalog"}</dd></div><div><dt>Identity</dt><dd>{importPreview.publisher}/{importPreview.slug}</dd></div></dl><p className="library-import-digest"><span>Immutable content digest</span><code>sha256:{importPreview.content_sha256}</code></p><button type="button" className="button" disabled={!catalog.importPublicRecipe || importSaving} onClick={() => void savePublicImport()}>{importSaving ? "Importing…" : "Import reviewed recipe"}</button></section>}
         {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
         <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close import</button>
       </section>}
