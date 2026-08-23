@@ -239,6 +239,28 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     }
 
 
+def test_promotion_uses_the_candidate_artifact_directory_root() -> None:
+    promote = _workflow()["jobs"]["promote"]
+    steps = _steps(promote)
+    download = steps["Download immutable candidate publication bundle"]
+    assert download["with"]["path"] == "${{ runner.temp }}/installer-publication"
+
+    publish = steps["Publish acceptance evidence and advance pointer last"]["run"]
+    bundle = (
+        '"$RUNNER_TEMP/installer-publication/installer-publication"'
+    )
+    assert f"--bundle {bundle}" in publish
+
+    receipt = steps["Upload promotion receipt"]
+    assert set(receipt["with"]["path"].splitlines()) == {
+        (
+            "${{ runner.temp }}/installer-publication/installer-publication/"
+            "publication-plan.json"
+        ),
+        "${{ runner.temp }}/promotion-receipt.jsonl",
+    }
+
+
 def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
     spark = _workflow()["jobs"]["spark-acceptance"]
     assert spark["permissions"] == {"contents": "read"}
