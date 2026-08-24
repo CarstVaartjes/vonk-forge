@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy/compose/postgres/init-databases.sh"
 ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
 POSTGRES_IMAGE = (
-    "postgres:18.3@sha256:"
-    "7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"
+    "postgres:18.6@sha256:"
+    "06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941"
 )
 
 
