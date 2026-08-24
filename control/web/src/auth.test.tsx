@@ -33,7 +33,7 @@ function controlApi(overrides: Partial<TestApi> = {}): TestApi {
 
 async function openOperatorMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole("button", {name: /admin/i}));
-  expect(await screen.findByRole("dialog", {name: "Operator menu"})).toBeVisible();
+  expect(await screen.findByRole("menu", {name: "Operator menu"})).toBeVisible();
 }
 
 afterEach(() => {
@@ -148,10 +148,10 @@ it("waits for server logout before removing the authenticated shell", async () =
   render(<AuthProvider api={api}><App api={api}/></AuthProvider>);
   await screen.findByRole("heading", {name: "Fleet"});
   await openOperatorMenu(user);
-  await user.click(screen.getByRole("button", {name: "Logout"}));
+  await user.click(screen.getByRole("menuitem", {name: "Logout"}));
 
   expect(screen.getByRole("heading", {name: "Fleet"})).toBeVisible();
-  expect(screen.getByRole("button", {name: "Signing out…"})).toBeDisabled();
+  expect(screen.getByRole("menuitem", {name: "Signing out…"})).toBeDisabled();
   resolveLogout();
   expect(await screen.findByRole("heading", {name: "Sign in"})).toBeVisible();
 });
@@ -165,7 +165,7 @@ it("keeps the authenticated shell visible when logout fails", async () => {
   render(<AuthProvider api={api}><App api={api}/></AuthProvider>);
   await screen.findByRole("heading", {name: "Fleet"});
   await openOperatorMenu(user);
-  await user.click(screen.getByRole("button", {name: "Logout"}));
+  await user.click(screen.getByRole("menuitem", {name: "Logout"}));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Unable to sign out. Your session may still be active.");
   expect(screen.getByRole("heading", {name: "Fleet"})).toBeVisible();
