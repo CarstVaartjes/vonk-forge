@@ -99,7 +99,10 @@ test("the custom recipe builder guides a complete, responsive, accessible creati
   await page.getByRole("textbox", {name: "Exact harness digest"}).fill("b2".repeat(32));
   await page.getByRole("textbox", {name: "Exact runtime digest"}).fill("c3".repeat(32));
   await page.getByRole("textbox", {name: "Exact build context digest"}).fill("d4".repeat(32));
-  for (const heading of ["Artifacts", "Resources & topology", "Validation & provenance", "Review & create"]) {
+  await page.getByRole("button", {name: "Continue"}).click();
+  await expect(page.getByRole("heading", {name: "Artifacts"})).toBeVisible();
+  await page.getByRole("textbox", {name: "Immutable revision"}).fill("e5".repeat(20));
+  for (const heading of ["Resources & topology", "Validation & provenance", "Review & create"]) {
     await page.getByRole("button", {name: "Continue"}).click();
     await expect(page.getByRole("heading", {name: heading})).toBeVisible();
   }
