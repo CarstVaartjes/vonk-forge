@@ -1,14 +1,12 @@
 import {useEffect, useRef, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
-import type {AuditResponse} from "../api/types";
 import {AdminMenu} from "./admin-menu";
-import {CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
+import {ActivityIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
 
-export type AppRoute = "fleet" | "library";
+export type AppRoute = "fleet" | "library" | "activity";
 
 type Operator = {
   environment: string;
-  loadAudit(): Promise<AuditResponse>;
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;
@@ -19,11 +17,12 @@ type Operator = {
 type AppShellProps = {
   activeRoute?: AppRoute;
   children: ReactNode;
+  navigationLocked?: boolean;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): void;
   operator?: Operator;
 };
 
-export function AppShell({activeRoute, children, onNavigate, operator}: AppShellProps) {
+export function AppShell({activeRoute, children, navigationLocked = false, onNavigate, operator}: AppShellProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const mainContent = useRef<HTMLElement>(null);
   const previousRoute = useRef(activeRoute);
@@ -33,9 +32,14 @@ export function AppShell({activeRoute, children, onNavigate, operator}: AppShell
     mainContent.current?.focus();
   }, [activeRoute]);
   function navigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute) {
+    if (navigationLocked) {
+      event.preventDefault();
+      return;
+    }
     setNavigationOpen(false);
     onNavigate(event, route);
   }
+  const disabledLinkProps = navigationLocked ? {"aria-disabled": true as const, tabIndex: -1} : {};
   return <div className="shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className="app-sidebar">
@@ -49,11 +53,12 @@ export function AppShell({activeRoute, children, onNavigate, operator}: AppShell
       <div id="shell-navigation" className={`shell-navigation${navigationOpen ? " is-open" : ""}`}>
         <nav aria-label="Primary">
           <p className="nav-label">Workspace</p>
-          <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
-          <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
+          <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
+          <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
+          <a href="/activity" className="nav-link nav-link-primary" aria-current={activeRoute === "activity" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "activity")}><ActivityIcon/><span>Activity</span></a>
         </nav>
         <div className="sidebar-footer">
-          {operator && <AdminMenu {...operator}/>}
+          {operator && <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigateToActivity={event => navigate(event, "activity")}/>}
           <small className="authority-note">Local database authority</small>
         </div>
       </div>

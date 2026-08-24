@@ -186,6 +186,7 @@ class JobSummary(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=80)
     kind: str = Field(min_length=1, max_length=80)
+    created_at: datetime
 
 
 class JobsResponse(StrictModel):

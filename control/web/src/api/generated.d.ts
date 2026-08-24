@@ -1667,6 +1667,11 @@ export interface components {
         };
         /** JobSummary */
         JobSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Id */
             id: string;
             /** Kind */

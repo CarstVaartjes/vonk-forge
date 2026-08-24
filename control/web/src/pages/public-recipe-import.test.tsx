@@ -51,6 +51,7 @@ function deferred<T>() {
   return {promise, resolve, reject};
 }
 
+beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
 it("round-trips validated URL state with repeated multi-select capabilities", () => {
@@ -71,6 +72,54 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   await userEvent.click(screen.getByRole("checkbox", {name: /Vision/}));
   expect(screen.getByRole("heading", {name: "both", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "chat", level: 3})).not.toBeInTheDocument();
+});
+
+it("persists the compact catalog preference independently from URL state", async () => {
+  const alpha = recipe("Alpha");
+  const first = render(<Harness api={apiFor([alpha])}/>);
+  const compact = await screen.findByRole("button", {name: "Compact"});
+  await userEvent.click(compact);
+  expect(compact).toHaveAttribute("aria-pressed", "true");
+  expect(localStorage.getItem("vonk.public-recipe-catalog.view")).toBe("compact");
+  first.unmount();
+
+  render(<Harness api={apiFor([alpha])}/>);
+  expect(await screen.findByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", {name: "Cards"})).toHaveAttribute("aria-pressed", "false");
+});
+
+it("shows friendly topology and honest requirement graphics while keeping immutable IDs collapsed", async () => {
+  const distributed = recipe("Distributed", {node_count: 3, topology_mode: "tensor_parallel"});
+  render(<Harness api={apiFor([distributed])}/>);
+  await userEvent.click(await screen.findByRole("button", {name: `Review ${distributed.title}`}));
+
+  const topology = await screen.findByRole("region", {name: "3 Sparks · Tensor parallel"});
+  expect(within(topology).getByRole("img", {name: /One leader Spark serving the endpoint and 2 worker Sparks connected over shared fabric/})).toBeVisible();
+  expect(within(topology).getByText("Leader")).toBeVisible();
+  expect(within(topology).getAllByText("Worker")).toHaveLength(2);
+  const requirements = screen.getByRole("region", {name: "Largest per-Spark envelope"});
+  expect(within(requirements).getAllByRole("meter")).toHaveLength(3);
+  expect(within(requirements).getByText(/do not claim a fit against your current fleet/)).toBeVisible();
+
+  const digest = screen.getByText(`sha256:${distributed.content_sha256}`);
+  expect(digest).not.toBeVisible();
+  await userEvent.click(screen.getByText("Technical details"));
+  expect(digest).toBeVisible();
+});
+
+it("compares up to three recipes in an accessible human-readable table", async () => {
+  const alpha = recipe("Alpha");
+  const beta = recipe("Beta", {node_count: 2, precision: "FP8"});
+  render(<Harness api={apiFor([alpha, beta])}/>);
+  await userEvent.click(await screen.findByRole("checkbox", {name: /Compare.*Alpha/}));
+  await userEvent.click(screen.getByRole("checkbox", {name: /Compare.*Beta/}));
+  const compareButton = screen.getByRole("button", {name: "Compare 2 recipes"});
+  expect(compareButton).toBeEnabled();
+  await userEvent.click(compareButton);
+  const table = screen.getByRole("table", {name: "Selected public recipe comparison"});
+  expect(within(table).getByRole("columnheader", {name: "Alpha"})).toBeVisible();
+  expect(within(table).getByRole("columnheader", {name: "Beta"})).toBeVisible();
+  expect(within(table).getByRole("row", {name: /Sparks 1 Spark 2 Sparks/})).toBeVisible();
 });
 
 it("hydrates creator and original-repository filters with conditional zero counts", async () => {
@@ -104,7 +153,8 @@ it("aborts and ignores a stale preview when the user selects another recipe", as
   await waitFor(() => expect(previewPublicRecipe).toHaveBeenCalledTimes(2));
   expect(signals[0]?.aborted).toBe(true);
   betaResult.resolve(preview(beta));
-  expect(await screen.findByRole("heading", {name: beta.title, level: 2})).toHaveFocus();
+  const betaHeading = await screen.findByRole("heading", {name: beta.title, level: 2});
+  await waitFor(() => expect(betaHeading).toHaveFocus());
   alphaResult.resolve(preview(alpha));
   await waitFor(() => expect(screen.queryByRole("heading", {name: alpha.title, level: 2})).not.toBeInTheDocument());
 });

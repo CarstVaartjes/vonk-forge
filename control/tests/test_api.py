@@ -171,11 +171,15 @@ def test_admin_mutation_is_correlated_and_audited() -> None:
     request_id = response.headers["x-request-id"]
     assert jobs.calls[0][1:4] == ("administrator", "abc", ["node"])
     event = audits.for_request(request_id)
+    assert event.occurred_at is not None
     assert (event.actor, event.authority_revision, event.targets) == (
         "administrator",
         "abc",
         ("node",),
     )
+    audit_response = client.get("/api/v1/audit", headers=headers)
+    assert audit_response.status_code == 200
+    assert audit_response.json()["events"][0]["occurred_at"] == event.occurred_at.isoformat()
 
 
 def test_generic_job_endpoint_cannot_create_reconciliation_authority() -> None:

@@ -47,6 +47,7 @@ class EnqueuedJob:
     current_attempt: int = 1
     status_reason: str | None = None
     reconciliation_id: str | None = "22222222-2222-4222-8222-222222222222"
+    created_at: datetime = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
 
 
 class Jobs:
@@ -66,7 +67,7 @@ class Jobs:
 
     def list_page(self, *, limit=100, cursor=None, status=None, target=None):
         del limit, cursor, status, target
-        return [], None, 0
+        return [self.job], None, 1
 
 
 class Repository:
@@ -145,6 +146,22 @@ def test_openapi_exposes_only_current_document_contract() -> None:
     assert not any(path.startswith("/api/v1/reconciliations/") for path in paths)
     assert not any(path.startswith("/api/v1/updates") for path in paths)
     assert "/api/v1/documents" not in paths
+
+
+def test_job_activity_summaries_include_their_authoritative_creation_time() -> None:
+    client, operator, *_ = _client()
+
+    response = client.get("/api/v1/jobs", headers=operator)
+
+    assert response.status_code == 200
+    assert response.json()["jobs"] == [
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "state": "queued",
+            "kind": "reconcile",
+            "created_at": "2026-08-15T11:45:00Z",
+        }
+    ]
 
 
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:

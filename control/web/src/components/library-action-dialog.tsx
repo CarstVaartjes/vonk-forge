@@ -21,6 +21,7 @@ import type {LibraryActionPlan} from "./library-action-preview";
 import {actionName} from "./library-action-types";
 import type {LibraryActionName, LibraryActionTarget} from "./library-action-types";
 import type {LibraryPlacementGroup} from "./library-action-types";
+import {TechnicalDetails} from "./library-technical-details";
 
 function message(value: unknown): string {
   return (value instanceof Error ? value.message : "The control authority request failed.").slice(0, 256);
@@ -78,11 +79,12 @@ async function apply(api: LibraryApi, target: LibraryActionTarget, plan: Library
   return api.applyLibraryUninstall(target.installationId, {plan_digest: (plan as LibraryUninstallPlan).plan_digest, request_key: requestKey}, signal);
 }
 
-export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, onRefresh, policy, target}: {
+export function LibraryActionDialog({alias, api, evidence, onApplied, onBusyChange, onClose, onRefresh, policy, target}: {
   alias: string;
   api: LibraryApi;
   evidence?: LibraryPlacementGroup;
   onApplied(operation: LibraryOperation, name: LibraryActionName): void;
+  onBusyChange?(busy: boolean): void;
   onClose(): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
@@ -140,10 +142,23 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
     return () => { document.body.style.overflow = previousOverflow; };
   }, []);
 
+  useEffect(() => {
+    if (!applying) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [applying]);
+
+  useEffect(() => { onBusyChange?.(applying); }, [applying, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      if (!applying) onClose();
       return;
     }
     if (event.key !== "Tab") return;
@@ -183,20 +198,20 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
   }
 
   const digest = plan && "plan_digest" in plan ? plan.plan_digest : plan && "placement_digest" in plan ? plan.placement_digest : undefined;
-  return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+  return <div className="library-dialog-backdrop" onMouseDown={event => { if (!applying && event.target === event.currentTarget) onClose(); }}>
     <div className="library-action-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
-      <header><div><p className="fleet-kicker">Server authority preview</p><h3 id={titleId}>Review {name}</h3></div><button ref={close} type="button" className="icon-button" onClick={onClose} aria-label="Close review">×</button></header>
+      <header><div><p className="fleet-kicker">Server authority preview</p><h3 id={titleId}>Review {name}</h3></div><button ref={close} type="button" className="icon-button" disabled={applying} onClick={onClose} aria-label="Close review">×</button></header>
       <div className="library-action-dialog-body">
         {loading && <p role="status">Loading {name} preview…</p>}
         {previewError && <div className="fleet-error" role="alert"><p>{previewError}</p><button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry preview</button></div>}
         {plan && <>
           <Plan evidence={evidence} plan={plan} policy={policy} previewReceivedAt={previewReceivedAt} target={target}/>
-          {digest && <p className="library-digest-confirmation"><span>Exact authority digest</span><code>{digest}</code><small>Applying uses this reviewed digest; if authority changes, the action is rejected and must be previewed again.</small></p>}
+          {digest && <div className="library-digest-confirmation"><span>Authority is locked to this preview</span><small>Applying uses the reviewed digest; if authority changes, the action is rejected and must be previewed again.</small><TechnicalDetails items={[{label: "Authority digest", value: digest}]}/></div>}
         </>}
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p><p>The reviewed authority remains open. Review again if the underlying state changed.</p>{stale && <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh preview</button>}</div>}
       </div>
       <footer>
-        <button type="button" className="button secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="button secondary" disabled={applying} onClick={onClose}>Cancel</button>
         <button type="button" className="button" disabled={!plan || !allowed(plan) || applying || stale} onClick={() => void applyPlan()}>{applying ? "Applying…" : applyLabel(target)}</button>
       </footer>
     </div>

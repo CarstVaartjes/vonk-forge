@@ -1,6 +1,7 @@
 import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import type {ControlApi, TelemetryPoint, VisualFleetNode, VisualFleetSnapshot} from "../api/types";
-import {ENROLLMENT_GRANT_TTL_SECONDS, FleetPage} from "./fleet";
+import {App} from "../app";
+import {ENROLLMENT_GRANT_TTL_SECONDS, FLEET_VIEW_STORAGE_KEY, FleetPage} from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const GIB = 1024 ** 3;
@@ -68,9 +69,12 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  history.replaceState(null, "", "/fleet");
+  localStorage.clear();
 });
 
 afterEach(() => {
+  history.replaceState(null, "", "/");
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -129,6 +133,46 @@ test("labels partial and unknown unified capacity instead of implying a measured
   expect(within(summary).queryByText("0 B")).not.toBeInTheDocument();
 });
 
+test("switches between persisted compact and graphical topology views without exposing node IDs", async () => {
+  const identity = "spk_0123456789abcdef0123456789abcdef";
+  const alpha = node(identity, identity, "2026-08-15T11:59:58Z");
+  alpha.hostname = "mia-lab-west.internal";
+  alpha.loaded = [{run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "DeepSeek pair", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: [identity], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null}];
+  const api = control(async () => snapshot([alpha]));
+  const view = render(<FleetPage api={api}/>);
+  await flush();
+
+  expect(screen.getByRole("article", {name: "Mia Lab West — Live"})).toBeVisible();
+  expect(screen.queryByText(identity)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", {name: "Compact"}));
+  expect(screen.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
+  expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("compact");
+
+  fireEvent.click(screen.getByRole("button", {name: "Topology"}));
+  expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+  expect(screen.getByText("DeepSeek pair")).toBeVisible();
+  expect(screen.queryByText(identity)).not.toBeInTheDocument();
+  expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("topology");
+
+  view.unmount();
+  render(<FleetPage api={api}/>);
+  await flush();
+  expect(screen.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+});
+
+test("builds a short in-session GPU trend from live samples", async () => {
+  render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
+  await flush();
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/1 recent sample/);
+
+  act(() => FakeEventSource.instances[0].emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
+
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/2 recent samples/);
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/Latest 73.0%/);
+});
+
 test("keeps selected detail and focus while a keyed node card updates", async () => {
   render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
   await flush();
@@ -174,16 +218,135 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   await flush();
 
   expect(screen.getByRole("heading", {name: "No registered Fleet nodes"})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Add your first Spark"})).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });
+
+test("keeps Add Spark modal focus contained and restores the trigger on Escape", async () => {
+  const api = control(async () => snapshot([])) as ControlApi;
+  render(<FleetPage api={api}/>);
+  await flush();
+
+  const trigger = screen.getByRole("button", {name: "Add Spark"});
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole("dialog", {name: "Add Spark"});
+  const close = screen.getByRole("button", {name: "Close Add Spark"});
+  const create = screen.getByRole("button", {name: "Create one-time enrollment command"});
+  expect(close).toHaveFocus();
+  expect(document.body).toHaveStyle({overflow: "hidden"});
+
+  fireEvent.keyDown(close, {key: "Tab", shiftKey: true});
+  expect(create).toHaveFocus();
+  fireEvent.keyDown(create, {key: "Tab"});
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  await flush();
+
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  expect(document.body.style.overflow).toBe("");
+});
+
+test("protects an in-flight or revealed enrollment grant from accidental dismissal", async () => {
+  let releaseGrant!: (value: Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>) => void;
+  const pendingGrant = new Promise<Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>>(resolve => { releaseGrant = resolve; });
+  const api = control(async () => snapshot([])) as ControlApi;
+  api.createEnrollmentGrant = vi.fn(() => pendingGrant);
+  const onBusyChange = vi.fn();
+  render(<FleetPage api={api} onBusyChange={onBusyChange}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
+  const dialog = screen.getByRole("dialog", {name: "Add Spark"});
+  const create = screen.getByRole("button", {name: "Create one-time enrollment command"});
+  fireEvent.click(create);
+  fireEvent.click(create);
+
+  expect(api.createEnrollmentGrant).toHaveBeenCalledTimes(1);
+  expect(dialog).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("button", {name: "Close Add Spark"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Cancel"})).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("Keep this window open");
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  fireEvent.mouseDown(document.querySelector(".library-dialog-backdrop")!);
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+  const beforeUnload = new Event("beforeunload", {cancelable: true});
+  dispatchEvent(beforeUnload);
+  expect(beforeUnload.defaultPrevented).toBe(true);
+  expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+  await act(async () => releaseGrant({
+    id: "grant-locked", purpose: "new-node", token: "short-lived-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "b".repeat(64),
+    controller_address: "192.168.1.231",
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
+  }));
+
+  expect(dialog).not.toHaveAttribute("aria-busy");
+  fireEvent.click(screen.getByRole("button", {name: "Close Add Spark"}));
+  expect(screen.getByText("Discard this one-time grant?")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Keep grant open"})).toHaveFocus();
+  expect(screen.getByText("short-lived-secret")).toBeVisible();
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  expect(screen.queryByText("Discard this one-time grant?")).not.toBeInTheDocument();
+  fireEvent.mouseDown(document.querySelector(".library-dialog-backdrop")!);
+  expect(screen.getByText("Discard this one-time grant?")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Discard grant"}));
+
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+});
+
+test("blocks primary and browser-history navigation while enrollment credentials are unresolved", async () => {
+  let releaseGrant!: (value: Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>) => void;
+  const pendingGrant = new Promise<Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>>(resolve => { releaseGrant = resolve; });
+  const api = control(async () => snapshot([])) as ControlApi;
+  api.createEnrollmentGrant = vi.fn(() => pendingGrant);
+  api.librarySnapshot = vi.fn().mockResolvedValue({schema_version: 1, generated_at: NOW.toISOString(), freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null});
+  render(<App api={api}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
+  fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
+  const libraryLink = screen.getByRole("link", {name: "Library"});
+  expect(libraryLink).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(libraryLink);
+  expect(location.pathname).toBe("/fleet");
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+
+  act(() => {
+    history.replaceState(null, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(location.pathname).toBe("/fleet");
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+
+  await act(async () => releaseGrant({
+    id: "grant-nav", purpose: "new-node", token: "navigation-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "c".repeat(64),
+    controller_address: null,
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
+  }));
+  fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
+  expect(libraryLink).not.toHaveAttribute("aria-disabled");
+  fireEvent.click(libraryLink);
+  expect(location.pathname).toBe("/library");
+});
+
 test("renders the one-command Spark installer with enrollment inputs", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", {...navigator, clipboard: {writeText}});
   const visualFleet = vi.fn().mockResolvedValue(snapshot([]));
   const api = control(visualFleet) as ControlApi;
   api.agents = vi.fn().mockResolvedValue({agents: []});
   api.enrollments = vi.fn().mockResolvedValue({enrollments: []});
   api.createEnrollmentGrant = vi.fn().mockResolvedValue({
-    id: "grant-1", purpose: "new-node", token: "secret-token", expires_at: "2099-01-01T00:00:00Z",
+    id: "grant-1", purpose: "new-node", token: "secret-token", expires_at: "2026-08-15T12:15:00Z",
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "a".repeat(64),
@@ -194,17 +357,28 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   await flush();
   fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
   expect(screen.getByText(/generates its immutable/i)).toBeVisible();
+  expect(screen.getByText("Create grant").parentElement).toHaveTextContent("Generate a one-time authorization here.");
   fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
   await flush();
   expect(api.createEnrollmentGrant).toHaveBeenCalledWith(ENROLLMENT_GRANT_TTL_SECONDS);
+  expect(document.querySelector(".grant-success")).toHaveFocus();
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
   expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
   expect(command).not.toHaveTextContent("sudo");
   expect(command).not.toHaveTextContent("vonk-agent pair");
+  expect(screen.getByText("Expires in 15m 00s")).toBeVisible();
+  expect(screen.getByText(/Keep these setup values private/)).toBeVisible();
   expect(screen.getByText("https://controller.example.test:9443")).toBeVisible();
   expect(screen.getByText("https://enrollment.example.test:9444")).toBeVisible();
   expect(screen.getByText("secret-token")).toBeVisible();
   expect(screen.getByText("NAS LAN address")).toBeVisible();
   expect(screen.getByText("192.168.1.231")).toBeVisible();
+  expect(screen.getAllByRole("button", {name: /^Copy /})).toHaveLength(6);
+  fireEvent.click(screen.getByRole("button", {name: "Copy installer command"}));
+  await flush();
+  expect(writeText).toHaveBeenCalledWith("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
+  expect(screen.getAllByRole("status").some(status => status.textContent === "Copied")).toBe(true);
+  fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
 });

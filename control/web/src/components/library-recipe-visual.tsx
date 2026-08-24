@@ -1,28 +1,26 @@
 import type {LibraryRecipeDetail} from "../api/types";
+import {formatBytes} from "../lib/fleet";
+import {exactIdentity, friendlyModelName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
 type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
 
 function bytes(value: number): string {
-  return `${value.toLocaleString("en-US")} bytes`;
+  return formatBytes(value);
 }
 
 function values(items: readonly string[], empty: string): string {
   return items.length > 0 ? items.join(" · ") : empty;
 }
 
-function identity(value: {publisher: string; slug: string; content_sha256: string}): string {
-  return `${value.publisher}/${value.slug}@${value.content_sha256}`;
-}
-
 export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}) {
   return <>
     <section className="library-section recipe-identity" aria-label="Recipe identity">
-      <div className="section-heading"><div><p className="fleet-kicker">Exact runtime chain</p><h4>What will run</h4></div><span className="identity-note">Every identity is digest-bound</span></div>
+      <div className="section-heading"><div><p className="fleet-kicker">Runtime chain</p><h4>What will run</h4></div><span className="identity-note">Exact identities available on demand</span></div>
       <div className="recipe-identity-grid">
-        <div className="recipe-identity-card"><span className="identity-index">01</span><span>Model version</span><strong>{identity(document.model)}</strong><small>Immutable model artifact and format</small></div>
-        <div className="recipe-identity-card"><span className="identity-index">02</span><span>Execution harness</span><strong>{identity(document.execution.harness)}</strong><small>Lifecycle compiler and interface contract</small></div>
-        <div className="recipe-identity-card"><span className="identity-index">03</span><span>Runtime distribution</span><strong>{identity(document.runtime.distribution)}</strong><small>Signed image and dependency boundary</small></div>
-        <div className="recipe-identity-card recipe-identity-card-muted"><span className="identity-index">04</span><span>Patch bundle</span><strong>{document.execution.patch_bundle ? identity(document.execution.patch_bundle) : "None"}</strong><small>{document.execution.patch_bundle ? "Targeted immutable source changes" : "No recipe-local patch applied"}</small></div>
+        <div className="recipe-identity-card"><span className="identity-index">01</span><span>Model version</span><strong>{friendlyModelName(document.model)}</strong><small>Immutable model artifact and format</small><TechnicalDetails compact items={[{label: "Exact model identity", value: exactIdentity(document.model)}]}/></div>
+        <div className="recipe-identity-card"><span className="identity-index">02</span><span>Execution harness</span><strong>{humanizeIdentifier(document.execution.harness.slug)}</strong><small>Lifecycle compiler and interface contract</small><TechnicalDetails compact items={[{label: "Exact harness identity", value: exactIdentity(document.execution.harness)}]}/></div>
+        <div className="recipe-identity-card"><span className="identity-index">03</span><span>Runtime distribution</span><strong>{humanizeIdentifier(document.runtime.distribution.slug)}</strong><small>Signed image and dependency boundary</small><TechnicalDetails compact items={[{label: "Exact runtime identity", value: exactIdentity(document.runtime.distribution)}]}/></div>
+        <div className="recipe-identity-card recipe-identity-card-muted"><span className="identity-index">04</span><span>Patch bundle</span><strong>{document.execution.patch_bundle ? humanizeIdentifier(document.execution.patch_bundle.slug) : "None"}</strong><small>{document.execution.patch_bundle ? "Targeted immutable source changes" : "No recipe-local patch applied"}</small>{document.execution.patch_bundle && <TechnicalDetails compact items={[{label: "Exact patch identity", value: exactIdentity(document.execution.patch_bundle)}]}/>}</div>
       </div>
     </section>
 
@@ -41,19 +39,19 @@ export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}
         <div><dt>Build memory</dt><dd> {bytes(document.build.memory_bytes)}</dd></div>
         <div><dt>Timeout</dt><dd> {document.build.timeout_seconds.toLocaleString("en-US")} seconds</dd></div>
       </dl>
-      <p className="visual-digest"><span>Context digest</span><code>sha256:{document.build.context.sha256}</code></p>
+      <TechnicalDetails items={[{label: "Context digest", value: `sha256:${document.build.context.sha256}`}]}/>
       <div className="visual-artifacts">
         {document.artifacts.length === 0 && <p>No artifacts declared.</p>}
-        {document.artifacts.map((artifact, index) => <article key={`${artifact.id}:${index}`} aria-label={`Artifact ${artifact.id}`}>
-          <strong>{artifact.id}</strong>
+        {document.artifacts.map((artifact, index) => <article key={`${artifact.id}:${index}`} aria-label={`Artifact ${humanizeIdentifier(artifact.id)}`}>
+          <strong>{humanizeIdentifier(artifact.id)}</strong>
           <dl className="visual-field-grid">
             <div><dt>Kind</dt><dd> {artifact.kind}</dd></div>
             <div><dt>Repository</dt><dd> {artifact.repository}</dd></div>
-            <div><dt>Revision</dt><dd> {artifact.revision}</dd></div>
             <div><dt>Download</dt><dd> {bytes(artifact.download_bytes)}</dd></div>
             <div><dt>Installed</dt><dd> {bytes(artifact.installed_bytes)}</dd></div>
             <div><dt>Roles</dt><dd> {values(artifact.roles, "None")}</dd></div>
           </dl>
+          <TechnicalDetails compact items={[{label: "Artifact ID", value: artifact.id}, {label: "Artifact revision", value: artifact.revision}]}/>
         </article>)}
       </div>
     </section>

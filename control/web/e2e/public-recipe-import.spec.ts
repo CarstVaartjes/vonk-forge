@@ -67,12 +67,37 @@ test("desktop catalog is accessible, filterable and explains candidate qualifica
   await attachScreenshot(page, testInfo, "public-recipe-import-desktop.png");
 });
 
+test("compact preference, comparison and graphical requirements stay human-readable", async ({page}, testInfo) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library/import");
+  await expect(page.getByRole("button", {name: "Cards"})).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", {name: "Compact"}).click();
+  await expect(page.locator(".public-import-recipe-list")).toHaveClass(/is-compact/);
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("checkbox", {name: /Compare.*DeepSeek/}).check();
+  await page.getByRole("checkbox", {name: /Compare.*GLM 5.2 3/}).check();
+  await page.getByRole("button", {name: "Compare 2 recipes"}).click();
+  await expect(page.getByRole("table", {name: "Selected public recipe comparison"})).toContainText("Tensor parallel");
+  await expect(page.getByText("a".repeat(40))).toBeHidden();
+
+  await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();
+  await expect(page.getByRole("region", {name: "2 Sparks · Tensor parallel"})).toBeVisible();
+  await expect(page.getByRole("meter")).toHaveCount(3);
+  await expect(page.getByText(`sha256:${digest("DeepSeek V3.1 2×Spark")}`)).toBeHidden();
+  await page.getByText("Technical details").click();
+  await expect(page.getByText(`sha256:${digest("DeepSeek V3.1 2×Spark")}`)).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await attachScreenshot(page, testInfo, "public-recipe-import-compact-and-topology.png");
+});
+
 test("mobile uses Catalog → Review → Confirm and preserves usable targets", async ({page}, testInfo) => {
   await page.setViewportSize({width: 360, height: 800});
   await page.goto("/library/import");
   await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();
   await expect(page.getByRole("complementary", {name: "Selected recipe review"})).toBeVisible();
-  await expect(page.getByRole("main").filter({has: page.getByRole("heading", {name: "Choose a recipe"})})).toBeHidden();
+  await expect(page.getByRole("region", {name: "Choose a recipe"})).toBeHidden();
   await page.getByRole("button", {name: "Continue to confirm"}).click();
   await expect(page.getByRole("button", {name: /Import v1.2.0/})).toBeVisible();
   for (const control of await page.locator("button:visible, a.button:visible, input:not([type=checkbox]):visible, select:visible").all()) {

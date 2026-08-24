@@ -101,11 +101,26 @@ test("shows structured node evidence and a retryable history error", async () =>
   await userEvent.click(screen.getByText("Technical details"));
   expect(screen.getByText(node().id)).toBeVisible();
   expect(screen.getByText("valid")).toBeVisible();
+  expect(screen.getByText("Seen 1 second ago")).toHaveAttribute("title");
 
   fail = false;
   await userEvent.click(screen.getByRole("button", {name: "Retry history"}));
   expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("keeps the immutable identity in copyable technical details", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {configurable: true, value: {writeText}});
+  const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  expect(screen.queryByText(node().id)).not.toBeVisible();
+  await userEvent.click(screen.getByText("Technical details"));
+  await userEvent.click(screen.getByRole("button", {name: "Copy node ID"}));
+
+  expect(writeText).toHaveBeenCalledWith(node().id);
+  expect(await screen.findByText("Copied")).toBeVisible();
 });
 
 test("does not present the previous range as the newly selected history", async () => {

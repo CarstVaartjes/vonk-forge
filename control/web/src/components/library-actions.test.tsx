@@ -1,4 +1,4 @@
-import {act, render, screen, waitFor, within} from "@testing-library/react";
+import {act, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   ControlApi,
@@ -59,6 +59,7 @@ function detailWithOperationalActions() {
 
 afterEach(() => {
   history.replaceState(null, "", "/");
+  localStorage.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -81,6 +82,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: vi.fn(async () => detail),
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
     previewLibraryLoad,
     applyLibraryLoad,
     libraryOperation,
@@ -91,7 +93,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   render(<App api={api}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
-  const selector = within(placement).getByRole("button", {name: "Select complete group node-alpha and node-beta"});
+  const selector = await within(placement).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
   await user.click(selector);
   const review = within(selector.closest("article")!).getByRole("button", {name: "Review Load"});
   await user.click(review);
@@ -101,20 +103,62 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   expect(within(dialog).getByText("Endpoint alias qwen-chat")).toBeVisible();
   expect(within(dialog).getByText("Existing recipes remain loaded. Forge will not unload anything automatically.")).toBeVisible();
   expect(within(dialog).getByText("Authoritative capacity evidence permits Qwen Code to coexist.")).toBeVisible();
-  expect(within(dialog).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();
+  expect(within(dialog).getByText("Rank 0 · Leader · endpoint owner · MIA Alpha")).toBeVisible();
   expect(within(dialog).getAllByText("60.0 GiB required · 100.0 GiB available · 36.0 GiB after")).toHaveLength(2);
 
   await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
   expect(applyLibraryLoad).toHaveBeenCalledWith({installation_id: "installation-chat", alias: "qwen-chat", plan_digest: "load-plan-digest", request_key: expect.any(String)}, expect.any(AbortSignal));
   const progress = await screen.findByRole("region", {name: "Load operation progress"});
-  expect(within(progress).getByText("Operation incomplete")).toBeVisible();
-  expect(within(progress).getByText("1 of 2 ranks completed · 1 failed")).toBeVisible();
-  expect(within(progress).getByText("node-alpha + node-beta")).toBeVisible();
+  expect(await within(progress).findByText("Operation incomplete")).toBeVisible();
+  expect(await within(progress).findByText("1 of 2 ranks completed · 1 failed")).toBeVisible();
+  expect(within(progress).getByText("MIA Alpha + MIA Beta")).toBeVisible();
+  expect(within(progress).queryByText("node-alpha")).not.toBeInTheDocument();
+  await user.click(within(progress).getByText("Technical details"));
+  expect(within(progress).getByText("node-alpha")).toBeVisible();
   expect(selector).toHaveAttribute("aria-pressed", "true");
   expect(within(selector.closest("article")!).getByRole("button", {name: "Review Load"})).toBeDisabled();
 
   await user.click(within(progress).getByRole("button", {name: "Retry incomplete operation"}));
   expect(retryLibraryOperation).toHaveBeenCalledWith("operation-load", expect.any(AbortSignal));
+});
+
+test("locks global navigation and browser departure for the full Library apply and refresh", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  let resolveApply!: (value: LibraryOperation) => void;
+  const pendingApply = new Promise<LibraryOperation>(resolve => { resolveApply = resolve; });
+  const applyLibraryLoad = vi.fn(() => pendingApply);
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: vi.fn(async () => fullLibraryDetail),
+    previewLibraryLoad: vi.fn(async () => loadPlan()),
+    applyLibraryLoad,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  const selector = within(placement).getByRole("button", {name: /Select complete group/});
+  await user.click(selector);
+  await user.click(within(selector.closest("article")!).getByRole("button", {name: "Review Load"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Load"});
+  await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
+  await waitFor(() => expect(applyLibraryLoad).toHaveBeenCalledOnce());
+
+  expect(screen.getByRole("link", {name: "Fleet"})).toHaveAttribute("aria-disabled", "true");
+  const unloadDuringApply = new Event("beforeunload", {cancelable: true});
+  expect(dispatchEvent(unloadDuringApply)).toBe(false);
+  act(() => {
+    history.pushState(null, "", "/fleet");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() => expect(location.pathname).toBe("/library/recipes/recipe-chat"));
+  expect(screen.getByRole("dialog", {name: "Review Load"})).toBeVisible();
+
+  await act(async () => { resolveApply(operation("queued", {job_id: "job-load"})); });
+  expect(await screen.findByRole("region", {name: "Load operation progress"})).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-disabled"));
+  const unloadAfterApply = new Event("beforeunload", {cancelable: true});
+  expect(dispatchEvent(unloadAfterApply)).toBe(true);
 });
 
 test("keeps a stale preview open and returns focus when a review sheet closes", async () => {
@@ -194,7 +238,7 @@ test("applies Mapping and Install only from their distinct authoritative preview
 
   await user.click(within(group).getByRole("button", {name: "Review Mapping"}));
   const mapping = await screen.findByRole("dialog", {name: "Review Mapping"});
-  expect(within(mapping).getByText("Rank 0 · leader · endpoint owner · node-alpha")).toBeVisible();
+  expect(within(mapping).getByText("Rank 0 · Leader · endpoint owner · Spark node")).toBeVisible();
   expect(within(mapping).getAllByText("60.0 GiB disk required · 5.0 GiB reserved · 135.0 GiB after")).toHaveLength(2);
   expect(within(mapping).getAllByText("20.0 GiB exact artifacts reused")).toHaveLength(2);
   expect(within(mapping).getByText("Inventory fresh · 10s")).toBeVisible();
@@ -251,6 +295,43 @@ test("reuses one apply request key for ambiguous retries of the reviewed preview
   const second = applyLibraryLoad.mock.calls[1][0] as {request_key?: string};
   expect(first.request_key).toMatch(/^[0-9a-f-]{36}$/);
   expect(second.request_key).toBe(first.request_key);
+});
+
+test("locks dismissal while an apply is in flight and warns before leaving", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  let applySignal: AbortSignal | undefined;
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => fullLibraryDetail,
+    previewLibraryLoad: async () => loadPlan(),
+    applyLibraryLoad: (_input: unknown, signal?: AbortSignal) => {
+      applySignal = signal;
+      return new Promise<LibraryOperation>(() => undefined);
+    },
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  const rendered = render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  const selector = within(placement).getByRole("button", {name: /Select complete group/});
+  await user.click(selector);
+  await user.click(within(selector.closest("article")!).getByRole("button", {name: "Review Load"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Load"});
+  await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
+  await waitFor(() => expect(applySignal).toBeInstanceOf(AbortSignal));
+
+  expect(within(dialog).getByRole("button", {name: "Close review"})).toBeDisabled();
+  expect(within(dialog).getByRole("button", {name: "Cancel"})).toBeDisabled();
+  await user.keyboard("{Escape}");
+  expect(dialog).toBeVisible();
+  fireEvent.mouseDown(dialog.parentElement!);
+  expect(dialog).toBeVisible();
+  expect(applySignal?.aborted).toBe(false);
+  const unload = new Event("beforeunload", {cancelable: true});
+  expect(window.dispatchEvent(unload)).toBe(false);
+
+  rendered.unmount();
+  expect(applySignal?.aborted).toBe(true);
 });
 
 test("publishes deferred job progress and refreshes terminal authority before changing operation state", async () => {
@@ -367,9 +448,9 @@ test("aborts in-flight preview, apply, operation, and job requests on cleanup", 
   expect(retrySignal?.aborted).toBe(true);
 });
 
-test("aborts an apply-owned detail refresh and ignores its late authority response", async () => {
-  // Break caught: closing an applying review aborts the mutation but leaves its
-  // signal-less detail refresh alive to overwrite the still-mounted page.
+test("aborts an apply-owned detail refresh on unmount and ignores its late authority response", async () => {
+  // Break caught: unmounting during the apply-owned refresh leaves its request
+  // alive to overwrite state after the workspace is gone.
   history.replaceState(null, "", "/library/recipes/recipe-chat");
   let refreshSignal: AbortSignal | undefined;
   let resolveRefresh!: (value: typeof fullLibraryDetail) => void;
@@ -387,7 +468,7 @@ test("aborts an apply-owned detail refresh and ignores its late authority respon
     libraryOperation: vi.fn(async () => operation("running")),
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  const rendered = render(<App api={api}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -396,7 +477,8 @@ test("aborts an apply-owned detail refresh and ignores its late authority respon
   const dialog = await screen.findByRole("dialog", {name: "Review Load"});
   await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
   await waitFor(() => expect(libraryRecipe).toHaveBeenCalledTimes(2));
-  await user.click(within(dialog).getByRole("button", {name: "Close review"}));
+  expect(within(dialog).getByRole("button", {name: "Close review"})).toBeDisabled();
+  rendered.unmount();
 
   expect(refreshSignal).toBeInstanceOf(AbortSignal);
   expect(refreshSignal?.aborted).toBe(true);
@@ -489,17 +571,21 @@ test("previews Stop and Remove consequences without implying released capacity o
   const user = userEvent.setup();
   render(<App api={api}/>);
 
-  await user.click(await screen.findByRole("button", {name: "Review Stop run run-chat"}));
+  const stopTrigger = await screen.findByRole("button", {name: "Review stop of run 1"});
+  expect(stopTrigger).not.toHaveAccessibleName(/run-chat/);
+  await user.click(stopTrigger);
   const stop = await screen.findByRole("dialog", {name: "Review Stop"});
   expect(within(stop).getByText("Published route will be withdrawn.")).toBeVisible();
-  expect(within(stop).getByText("Rank 0 · leader · running")).toBeVisible();
-  expect(within(stop).getByText("Rank 1 · worker · running")).toBeVisible();
+  expect(within(stop).getByText("Rank 0 · Leader · Running · Spark node")).toBeVisible();
+  expect(within(stop).getByText("Rank 1 · Worker · Running · Spark node")).toBeVisible();
   expect(within(stop).getByText("Capacity remains reserved unless every rank stops successfully.")).toBeVisible();
   await user.click(within(stop).getByRole("button", {name: "Stop selected run"}));
   expect(applyLibraryStop).toHaveBeenCalledWith("run-chat", {plan_digest: "stop-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
   expect(await screen.findByRole("region", {name: "Stop operation progress"})).toHaveTextContent("Operation complete");
 
-  await user.click(screen.getByRole("button", {name: "Review Remove installation installation-chat"}));
+  const removeTrigger = screen.getByRole("button", {name: "Review removal of installation 1"});
+  expect(removeTrigger).not.toHaveAccessibleName(/installation-chat/);
+  await user.click(removeTrigger);
   const remove = await screen.findByRole("dialog", {name: "Review Remove"});
   expect(within(remove).getAllByText("Exact removable bytes are unknown.")).toHaveLength(2);
   expect(within(remove).getByText("uninstall.bytes_unknown")).toBeVisible();
@@ -509,7 +595,7 @@ test("previews Stop and Remove consequences without implying released capacity o
   expect(within(remove).getByRole("button", {name: "Remove selected installation"})).toBeDisabled();
   await user.click(within(remove).getByRole("button", {name: "Close review"}));
 
-  await user.click(screen.getByRole("button", {name: "Review Remove installation installation-chat"}));
+  await user.click(screen.getByRole("button", {name: "Review removal of installation 1"}));
   const allowedRemove = await screen.findByRole("dialog", {name: "Review Remove"});
   expect(within(allowedRemove).getByText("120.0 GiB will be removed.")).toBeVisible();
   await user.click(within(allowedRemove).getByRole("button", {name: "Remove selected installation"}));

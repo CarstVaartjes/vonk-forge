@@ -955,7 +955,16 @@ def create_app(
             ) from None
         return {
             "jobs": [
-                {"id": str(job.id), "state": str(job.state), "kind": str(job.kind)}
+                {
+                    "id": str(job.id),
+                    "state": str(job.state),
+                    "kind": str(job.kind),
+                    "created_at": (
+                        job.created_at.replace(tzinfo=UTC)
+                        if job.created_at.tzinfo is None
+                        else job.created_at.astimezone(UTC)
+                    ),
+                }
                 for job in page
             ],
             "next_cursor": next_cursor,
@@ -972,6 +981,9 @@ def create_app(
                     "action": event.action,
                     "authority_revision": event.authority_revision,
                     "targets": list(event.targets),
+                    "occurred_at": event.occurred_at.isoformat()
+                    if event.occurred_at is not None
+                    else None,
                 }
                 for event in audits.list()
             ]

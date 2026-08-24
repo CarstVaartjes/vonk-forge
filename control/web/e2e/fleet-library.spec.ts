@@ -1,5 +1,6 @@
+import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
-import {fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
@@ -7,6 +8,7 @@ const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
 const qwenModel = `qwen/3@${"e".repeat(64)}`;
 const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
+const qwenModelName = "Qwen 3";
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
@@ -16,6 +18,11 @@ type LibraryFixtureState = {
   snapshotFailuresRemaining: number;
 };
 const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
+
+async function expectNoSeriousAccessibilityViolations(page: Page) {
+  const results = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(results.violations, results.violations.map(value => `${value.id}: ${value.help}`).join("\n")).toEqual([]);
+}
 
 function libraryLoadPlan() {
   return {
@@ -67,7 +74,7 @@ function localSnapshot() {
     authority_revision: commit,
     nodes: [{
       id: nodeId,
-      display_name: "Aurora",
+      display_name: nodeId,
       hostname: "aurora.fixture.invalid",
       lifecycle: "managed",
       labels: {role: "inference"},
@@ -86,7 +93,7 @@ function localSnapshot() {
       warnings: [{code: "run.degraded", detail: "The Qwen pair route is not published.", severity: "warning"}],
     }, {
       id: borealisId,
-      display_name: "Borealis",
+      display_name: borealisId,
       hostname: "borealis.fixture.invalid",
       lifecycle: "managed",
       labels: {role: "inference"},
@@ -132,6 +139,10 @@ async function installLocalFleetFixture(page: Page) {
     }
     return route.fulfill({json: fullLibraryDetail});
   });
+  await page.route("**/api/v1/library/recipes/recipe-code", route => route.fulfill({json: {
+    ...fullLibraryDetail,
+    recipe: {...fullLibraryDetail.recipe, recipe_id: codeRecipe.recipe_id, slug: codeRecipe.slug, title: codeRecipe.title, description: codeRecipe.description},
+  }}));
   await page.route("**/api/v1/library/recipes/recipe-unlinked", route => route.fulfill({json: {
     ...minimalLibraryDetail,
     recipe: {
@@ -218,6 +229,7 @@ test("Fleet cards and bounded history are keyboard-accessible with local evidenc
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
   await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/1 reported buckets/);
+  await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
 });
@@ -266,6 +278,82 @@ test("Fleet has no document overflow from phone through large desktop", async ({
   expect(columns).toBeGreaterThanOrEqual(2);
 });
 
+test("Fleet compact and topology views persist, reflow, and keep technical IDs out of browse views", async ({page}, testInfo) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/fleet");
+  await page.getByRole("button", {name: "Topology"}).click();
+
+  await expect(page.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+  await expect(page.getByRole("button", {name: /View Aurora details/})).toBeVisible();
+  await expect(page.getByText("Qwen pair", {exact: true}).first()).toBeVisible();
+  await expect(page.getByText(nodeId, {exact: true})).toHaveCount(0);
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("fleet-topology-desktop.png"), fullPage: true});
+
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", {name: "Compact"}).click();
+  await expect(page.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
+
+  for (const width of [320, 360, 760, 1280]) {
+    await page.setViewportSize({width, height: width <= 360 ? 800 : 900});
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
+  await page.setViewportSize({width: 360, height: 800});
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
+});
+
+test("Add Spark preserves an in-flight and revealed one-time grant until an explicit decision", async ({page}) => {
+  let releaseGrant!: () => void;
+  const grantGate = new Promise<void>(resolve => { releaseGrant = resolve; });
+  let grantRequests = 0;
+  await page.route("**/api/v1/agents/enrollments/grants", async route => {
+    grantRequests += 1;
+    await grantGate;
+    await route.fulfill({status: 201, json: {
+      id: "grant-e2e", purpose: "new-node", token: "short-lived-e2e-secret", expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+      controller_endpoint: "https://controller.fixture.invalid:9443",
+      enrollment_endpoint: "https://enrollment.fixture.invalid:9444",
+      ca_fingerprint: "d".repeat(64),
+      controller_address: "192.168.1.231",
+      service_hostnames: ["controller.fixture.invalid", "enrollment.fixture.invalid"],
+    }});
+  });
+  await page.goto("/fleet");
+  await page.getByRole("button", {name: "Add Spark"}).click();
+  const dialog = page.getByRole("dialog", {name: "Add Spark"});
+  await dialog.getByRole("button", {name: "Create one-time enrollment command"}).click();
+  await expect.poll(() => grantRequests).toBe(1);
+
+  await expect(dialog).toHaveAttribute("aria-busy", "true");
+  await expect(dialog.getByRole("button", {name: "Close Add Spark"})).toBeDisabled();
+  await expect(dialog.getByRole("button", {name: "Cancel"})).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.locator(".library-dialog-backdrop").evaluate(element => element.dispatchEvent(new MouseEvent("mousedown", {bubbles: true})));
+  await expect(dialog).toBeVisible();
+  await page.getByRole("link", {name: "Library"}).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/fleet$/);
+
+  releaseGrant();
+  await expect(dialog.getByText("short-lived-e2e-secret")).toBeVisible();
+  await expect(dialog).not.toHaveAttribute("aria-busy");
+  await dialog.getByRole("button", {name: "Close Add Spark"}).click();
+  await expect(dialog.getByText("Discard this one-time grant?")).toBeVisible();
+  await expect(dialog.getByRole("button", {name: "Keep grant open"})).toBeFocused();
+  await expectNoSeriousAccessibilityViolations(page);
+  await dialog.getByRole("button", {name: "Keep grant open"}).click();
+  await expect(dialog.getByText("Discard this one-time grant?")).toBeHidden();
+  await dialog.getByRole("button", {name: "I saved these values — Done"}).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole("link", {name: "Library"}).click();
+  await expect(page).toHaveURL(/\/library$/);
+});
+
 test("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
   await page.setViewportSize({width: 360, height: 800});
   await page.goto("/library");
@@ -277,24 +365,24 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(recipes).toBeHidden();
   await expect(detail).toBeHidden();
 
-  await models.getByRole("link", {name: new RegExp(qwenModel)}).focus();
+  await models.getByRole("link", {name: new RegExp(qwenModelName)}).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeHidden();
 
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
   await expect(detail).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/library$/);
   await expect(models).toBeVisible();
@@ -311,10 +399,10 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(unlinked).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: new RegExp(qwenModel)}).click();
+  await models.getByRole("link", {name: new RegExp(qwenModelName)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
@@ -331,7 +419,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(detail).toBeVisible();
   await page.setViewportSize({width: 900, height: 900});
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
@@ -354,7 +442,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
     }
   });
   await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
   await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
   await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
 
@@ -363,12 +451,57 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await page.screenshot({path: testInfo.outputPath("library-mobile.png")});
 });
 
+test("Library view modes persist and compare friendly recipes without document overflow", async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library");
+
+  const models = page.getByRole("region", {name: "Models"});
+  const modelLink = models.getByRole("link", {name: /Qwen 3/});
+  await expect(modelLink).not.toContainText(/qwen\/3@/);
+  const modelRow = modelLink.locator("xpath=ancestor::article");
+  await modelRow.getByText("Technical details").click();
+  await expect(modelRow).toContainText("e".repeat(64));
+  await expect(modelRow.getByRole("button", {name: "Copy Model digest"})).toBeVisible();
+
+  await page.getByRole("button", {name: "Compact"}).click();
+  await expect(page.getByRole("region", {name: "Compact recipe list"})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("vonk-forge.library.view-mode"))).toBe("compact");
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", {name: "Compare"}).click();
+  const picker = page.getByRole("region", {name: "Choose recipes to compare"});
+  await picker.getByRole("checkbox", {name: /Qwen Chat/}).check();
+  await picker.getByRole("checkbox", {name: /Qwen Code/}).check();
+  const comparison = page.getByRole("region", {name: "Recipe comparison"});
+  await expect(comparison.getByLabel("Startup memory: 144.0 GiB")).toHaveCount(2);
+  await expect(comparison.getByText("2 Sparks")).toHaveCount(2);
+  await expect(comparison.getByText("Ready")).toHaveCount(2);
+
+  for (const width of [320, 360, 768, 1280]) {
+    await page.setViewportSize({width, height: width < 768 ? 800 : 900});
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
+
+  await page.setViewportSize({width: 360, height: 800});
+  await page.goto("/library");
+  const kpiLayout = await page.locator(".library-overview").evaluate(element => ({
+    horizontallyScrollable: element.scrollWidth > element.clientWidth,
+    rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
+  }));
+  expect(kpiLayout).toEqual({horizontallyScrollable: true, rows: 1});
+});
+
 test("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/recipes/recipe-chat");
 
   const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
   await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
   await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
@@ -376,7 +509,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await expect(authority).toContainText("Immutable revision 3");
   await expect(authority).toContainText("Bounded search is incomplete");
   await expect(authority).toContainText("Inventory fresh · 10s");
-  await expect(authority).toContainText("node-alpha + node-beta");
+  await expect(authority).toContainText("Spark node + Spark node");
   const authorityContrast = await authority.evaluate(element => {
     const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
     const luminance = (value: string) => {
@@ -393,7 +526,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   });
   expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
 
-  const selector = authority.getByRole("button", {name: "Select complete group node-alpha and node-beta"});
+  const selector = authority.getByRole("button", {name: "Select complete group Spark node and Spark node"});
   await selector.focus();
   await page.keyboard.press("Space");
   await expect(selector).toHaveAttribute("aria-pressed", "true");
@@ -423,12 +556,12 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
   const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
   await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
   const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
   await editor.fill(JSON.stringify(invalid, null, 2));
   await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
   await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
 
   const upload = advanced.getByLabel("Upload recipe JSON");
   const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
@@ -436,7 +569,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
   await expect(advanced.getByRole("alert")).toHaveCount(0);
   await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-uploaded@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen Uploaded");
   await expect(page.getByRole("link", {name: "Source and build"})).toHaveCount(0);
   await expect(page.getByRole("link", {name: "Cluster mapping"})).toHaveCount(0);
   await expect(page.getByRole("link", {name: "Raw editor"})).toHaveCount(0);
@@ -454,7 +587,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: new RegExp(qwenModel)}).click();
+  await page.getByRole("link", {name: new RegExp(qwenModelName)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();
@@ -462,6 +595,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
 
   state.empty = true;
   await page.goto("/library");
-  await expect(page.getByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
+  await expect(page.getByRole("region", {name: "Empty Library"}).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
   await expect(page.getByRole("link", {name: /advanced/i})).toHaveCount(0);
 });

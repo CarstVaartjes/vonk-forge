@@ -1,11 +1,12 @@
 import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ControlApi, PublicRecipe, PublicRecipePreview} from "../api/types";
+import type {ControlApi, LibraryRecipeDetail, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {App} from "../app";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../test-fixtures/library";
 
 const qwenModel = `qwen/3@${"e".repeat(64)}`;
 const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
+const qwenModelName = "Qwen 3";
 
 const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   publisher: "vonk-forge",
@@ -50,6 +51,7 @@ const publicRecipePreview = (overrides: Partial<PublicRecipePreview> = {}): Publ
 
 afterEach(() => {
   history.replaceState(null, "", "/");
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -66,13 +68,13 @@ test("summarizes the loaded Library window and filters recipes without changing 
   expect(within(summary).getByRole("group", {name: "2 linked"})).toBeVisible();
   expect(within(summary).getByRole("group", {name: "1 needs a model version"})).toBeVisible();
 
-  await user.click(screen.getByRole("link", {name: /qwen\/3/}));
+  await user.click(screen.getByRole("link", {name: /Qwen 3/}));
 
   const search = screen.getByRole("searchbox", {name: "Search Library"});
   await user.type(search, "Qwen Code");
 
   const models = screen.getByRole("region", {name: "Models"});
-  expect(within(models).getByRole("link", {name: /qwen\/3/})).toBeVisible();
+  expect(within(models).getByRole("link", {name: /Qwen 3/})).toBeVisible();
   const recipes = screen.getByRole("region", {name: /Recipes for/});
   expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
   expect(within(recipes).queryByRole("link", {name: /Qwen Chat/})).not.toBeInTheDocument();
@@ -84,6 +86,118 @@ test("summarizes the loaded Library window and filters recipes without changing 
   expect(location.pathname).toBe(qwenModelPath);
 });
 
+test("uses a friendly model name and keeps its immutable identity in copyable Technical details", async () => {
+  history.replaceState(null, "", "/library");
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const models = await screen.findByRole("region", {name: "Models"});
+  const modelLink = within(models).getByRole("link", {name: /Qwen 3/});
+  expect(modelLink).toBeVisible();
+  expect(modelLink).not.toHaveTextContent(/qwen\/3@/);
+  const modelRow = modelLink.closest("article")!;
+  expect(within(modelRow).queryByText("e".repeat(64))).not.toBeInTheDocument();
+
+  await user.click(within(modelRow).getByText("Technical details"));
+  expect(within(modelRow).getByText("e".repeat(64))).toBeVisible();
+  expect(within(modelRow).getByRole("button", {name: "Copy Model digest"})).toBeVisible();
+});
+
+test("persists the selected Library view mode across remounts", async () => {
+  history.replaceState(null, "", "/library");
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  const first = render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.click(screen.getByRole("button", {name: "Compact"}));
+  expect(localStorage.getItem("vonk-forge.library.view-mode")).toBe("compact");
+  expect(screen.getByRole("region", {name: "Compact recipe list"})).toBeVisible();
+  first.unmount();
+
+  render(<App api={api}/>);
+  expect(await screen.findByRole("region", {name: "Compact recipe list"})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
+});
+
+test("compares selected recipes with visual resources, topology, status, and technical details", async () => {
+  history.replaceState(null, "", "/library");
+  const codeDetail = structuredClone(fullLibraryDetail);
+  codeDetail.recipe = {...codeDetail.recipe, recipe_id: "recipe-code", slug: "qwen-code", title: "Qwen Code"};
+  codeDetail.topology = codeDetail.topology && {...codeDetail.topology, name: "single-spark", mode: "single", node_count: 1, roles: [codeDetail.topology.roles[0]]};
+  const libraryRecipe = vi.fn(async (recipeId: string) => recipeId === "recipe-code" ? codeDetail : fullLibraryDetail);
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.click(screen.getByRole("button", {name: "Compare"}));
+  const picker = screen.getByRole("region", {name: "Choose recipes to compare"});
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Chat/}));
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Code/}));
+
+  const comparison = screen.getByRole("region", {name: "Recipe comparison"});
+  expect(await within(comparison).findByLabelText("Startup memory: 144.0 GiB")).toBeVisible();
+  expect(within(comparison).getByLabelText("Startup memory: 72.0 GiB")).toBeVisible();
+  expect(within(comparison).getByText("2 Sparks")).toBeVisible();
+  expect(within(comparison).getByText("1 Spark")).toBeVisible();
+  expect(within(comparison).getAllByText("Ready")).toHaveLength(2);
+  expect(within(comparison).getAllByText("Technical details").filter(element => element.tagName === "SUMMARY")).toHaveLength(2);
+  expect(libraryRecipe).toHaveBeenCalledWith("recipe-chat", expect.any(AbortSignal));
+  expect(libraryRecipe).toHaveBeenCalledWith("recipe-code", expect.any(AbortSignal));
+});
+
+test("aborts comparison detail requests when selection changes and on unmount", async () => {
+  history.replaceState(null, "", "/library");
+  const signals: AbortSignal[] = [];
+  const libraryRecipe = vi.fn((_recipeId: string, signal?: AbortSignal) => {
+    if (signal) signals.push(signal);
+    return new Promise<LibraryRecipeDetail>(() => undefined);
+  });
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  const rendered = render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.click(screen.getByRole("button", {name: "Compare"}));
+  const picker = screen.getByRole("region", {name: "Choose recipes to compare"});
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Chat/}));
+  await waitFor(() => expect(signals).toHaveLength(1));
+  const firstSignal = signals[0];
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Code/}));
+  await waitFor(() => expect(firstSignal.aborted).toBe(true));
+  const activeSignal = signals.at(-1)!;
+  expect(activeSignal.aborted).toBe(false);
+
+  rendered.unmount();
+  expect(activeSignal.aborted).toBe(true);
+});
+
+test("recovers a failed comparison detail through its visible retry action", async () => {
+  history.replaceState(null, "", "/library");
+  const libraryRecipe = vi.fn()
+    .mockRejectedValueOnce(new Error("Topology authority is temporarily unavailable"))
+    .mockResolvedValueOnce(fullLibraryDetail);
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.click(screen.getByRole("button", {name: "Compare"}));
+  const picker = screen.getByRole("region", {name: "Choose recipes to compare"});
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Chat/}));
+
+  const comparison = screen.getByRole("region", {name: "Recipe comparison"});
+  const error = await within(comparison).findByRole("alert");
+  expect(error).toHaveTextContent("Topology authority is temporarily unavailable");
+  await user.click(within(error).getByRole("button", {name: "Retry Qwen Chat details"}));
+
+  expect(await within(comparison).findByText("2 Sparks")).toBeVisible();
+  expect(within(comparison).queryByText("Topology authority is temporarily unavailable")).not.toBeInTheDocument();
+  expect(libraryRecipe).toHaveBeenCalledTimes(2);
+});
+
 test("shows visual recipe truth and selects only one complete placement group on activation", async () => {
   // Break caught: the UI reduces placement to node checkboxes, hides stale or
   // reservation evidence, calls a bounded search optimal, or omits typed
@@ -92,35 +206,47 @@ test("shows visual recipe truth and selects only one complete placement group on
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: async () => fullLibraryDetail,
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
   } as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
 
   const detail = await screen.findByRole("region", {name: "Qwen Chat recipe authority"});
   expect(within(detail).getByText("Immutable revision 3")).toBeVisible();
-  expect(within(detail).getByText(`qwen/qwen3@${"e".repeat(64)}`)).toBeVisible();
-  expect(within(detail).getByText(`vonk-forge/vllm-openai@${"f".repeat(64)}`)).toBeVisible();
-  expect(within(detail).getByText(`vonk-forge/python-312-cuda@${"1".repeat(64)}`)).toBeVisible();
+  expect(within(detail).queryByText(`qwen/qwen3@${"e".repeat(64)}`)).not.toBeInTheDocument();
+  expect(within(detail).queryByText(`vonk-forge/vllm-openai@${"f".repeat(64)}`)).not.toBeInTheDocument();
+  expect(within(detail).queryByText(`vonk-forge/python-312-cuda@${"1".repeat(64)}`)).not.toBeInTheDocument();
+  expect(within(detail).getByText("Qwen 3")).toBeVisible();
+  expect(within(detail).getByText("vLLM OpenAI")).toBeVisible();
   const identity = within(detail).getByRole("region", {name: "Recipe identity"});
   expect(within(identity).getByText("Model version")).toBeVisible();
   expect(within(identity).getByText("Execution harness")).toBeVisible();
   expect(within(identity).getByText("Runtime distribution")).toBeVisible();
   expect(within(detail).getByRole("region", {name: "Lifecycle overview"})).toBeVisible();
   const topology = within(detail).getByRole("region", {name: "Topology and resources"});
-  expect(within(topology).getByText("2 nodes · tensor_parallel")).toBeVisible();
-  expect(within(topology).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();
-  expect(within(topology).getByText("Rank 1 · worker")).toBeVisible();
+  expect(within(topology).getByText("2 Sparks · Tensor Parallel")).toBeVisible();
+  expect(within(topology).getByText("Rank 0 · Leader · endpoint owner")).toBeVisible();
+  expect(within(topology).getByText("Rank 1 · Worker")).toBeVisible();
   expect(within(topology).getByText("144.0 GiB startup memory total")).toBeVisible();
   expect(within(topology).getByText("140.0 GiB disk envelope total")).toBeVisible();
-  expect(within(detail).getByText("Build succeeded")).toBeVisible();
-  expect(within(detail).getByText("Installation installed")).toBeVisible();
+  const lifecycle = within(detail).getByRole("list", {name: "Recipe lifecycle stages"});
+  expect(within(lifecycle).getByRole("listitem", {name: "Build: Complete. Succeeded"})).toBeVisible();
+  expect(within(lifecycle).getByRole("listitem", {name: "Map: Complete. Ready"})).toBeVisible();
+  expect(within(lifecycle).getByRole("listitem", {name: "Install: Complete. Installed"})).toBeVisible();
+  expect(within(lifecycle).getByRole("listitem", {name: "Run: Not started. No authority record"})).toBeVisible();
+  expect(within(topology).getByRole("figure", {name: "2-Spark Tensor Parallel topology over Connected fabric"})).toBeVisible();
+  expect(within(detail).getByText("Installation 1 installed")).toBeVisible();
   expect(within(detail).getByText("Visual recipe fields are bounded to the selected immutable revision.")).toBeVisible();
   expect(within(detail).queryByRole("link", {name: "Source and build"})).not.toBeInTheDocument();
   expect(within(detail).queryByRole("link", {name: "Cluster mapping"})).not.toBeInTheDocument();
   expect(within(detail).queryByRole("link", {name: "Raw editor"})).not.toBeInTheDocument();
 
   const groups = within(detail).getByRole("region", {name: "Complete placement groups"});
-  const select = within(groups).getByRole("button", {name: "Select complete group node-alpha and node-beta"});
+  const select = await within(groups).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
+  expect(within(groups).getByText("MIA Alpha")).toBeVisible();
+  expect(within(groups).queryByText("node-alpha")).not.toBeInTheDocument();
+  await user.click(within(select.closest("article")!).getAllByText("Technical details")[0]);
+  expect(within(select.closest("article")!).getByText("node-alpha")).toBeVisible();
   expect(select).toHaveAttribute("aria-pressed", "false");
   select.focus();
   expect(select).toHaveFocus();
@@ -131,13 +257,15 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(select).toHaveAttribute("aria-pressed", "true");
   const selected = select.closest("article")!;
   expect(within(selected).getByText("Complete group · Installed · Not loaded")).toBeVisible();
-  expect(within(selected).getByText("Rank 0 · leader")).toBeVisible();
-  expect(within(selected).getByText("Rank 1 · worker")).toBeVisible();
+  expect(within(selected).getByText("Rank 0 · Leader")).toBeVisible();
+  expect(within(selected).getByText("Rank 1 · Worker")).toBeVisible();
   expect(within(selected).getByText("Inventory fresh · 10s")).toBeVisible();
   expect(within(selected).getByText("Telemetry live · 2s")).toBeVisible();
   expect(within(selected).getByText("Telemetry delayed · 12s")).toBeVisible();
   expect(within(selected).getAllByText("5.0 GiB disk reserved", {exact: false})).toHaveLength(2);
   expect(within(selected).getAllByText("4.0 GiB memory reserved", {exact: false})).toHaveLength(2);
+  expect(within(selected).getAllByRole("img", {name: "Disk capacity: 60.0 GiB required, 5.0 GiB already reserved, 135.0 GiB free after"})).toHaveLength(2);
+  expect(within(selected).getAllByRole("img", {name: "Unified memory: 60.0 GiB required, 4.0 GiB already reserved, 36.0 GiB free after"})).toHaveLength(2);
   expect(within(selected).getByText("40.0 GiB of exact artifacts can be reused.")).toBeVisible();
   const boundedSearch = within(groups).getByRole("note");
   expect(within(boundedSearch).getByText(/stopped after 512 complete groups/)).toBeVisible();
@@ -155,6 +283,24 @@ test("shows visual recipe truth and selects only one complete placement group on
   const actions = within(selected).getByRole("region", {name: "Selected group actions"});
   const evidence = selected.querySelector(".placement-evidence")!;
   expect(actions.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("uses the Fleet hostname policy when a node display name is its technical ID", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const technicalName = "spk_0123456789abcdef0123456789abcdef";
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => fullLibraryDetail,
+    visualFleet: async () => ({nodes: [
+      {id: "node-alpha", display_name: technicalName, hostname: "carst-spark-3.internal", labels: {}},
+      {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}},
+    ]}),
+  } as unknown as ControlApi;
+  render(<App api={api}/>);
+
+  const groups = await screen.findByRole("region", {name: "Complete placement groups"});
+  expect(await within(groups).findByRole("button", {name: "Select complete group Carst Spark 3 and MIA Beta"})).toBeVisible();
+  expect(within(groups).queryByText(technicalName)).not.toBeInTheDocument();
 });
 
 test("loads and merges cursor pages without splitting model or unlinked recipe groups", async () => {
@@ -184,7 +330,7 @@ test("loads and merges cursor pages without splitting model or unlinked recipe g
 
   await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
   expect(within(models).getByText("2 recipes")).toBeVisible();
-  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
   expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
   expect(within(models).getByRole("link", {name: /Unlinked/})).toBeVisible();
@@ -239,8 +385,8 @@ test("bounds repeated cursor pages while pinning selected and unlinked navigatio
 
   const models = screen.getByRole("region", {name: "Models"});
   expect(within(models).getAllByRole("link").length).toBeLessThanOrEqual(41);
-  expect(within(models).getByRole("link", {name: new RegExp(qwenModel)})).toBeVisible();
-  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  expect(within(models).getByRole("link", {name: new RegExp(qwenModelName)})).toBeVisible();
+  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).getByRole("link", {name: /Pinned Recipe/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Recipe 3-19/})).toBeVisible();
@@ -296,7 +442,7 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   const user = userEvent.setup();
   render(<App api={api}/>);
 
-  let recipes = await screen.findByRole("region", {name: `Recipes for ${qwenModel}`});
+  let recipes = await screen.findByRole("region", {name: `Recipes for ${qwenModelName}`});
   await user.click(within(recipes).getByRole("link", {name: /Recipe A/}));
   await screen.findByRole("region", {name: "Recipe A recipe authority"});
   await user.click(within(recipes).getByRole("link", {name: /Recipe B/}));
@@ -304,7 +450,7 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   await user.click(screen.getByRole("button", {name: "Load more Library recipes"}));
   await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
 
-  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).queryByRole("link", {name: /Recipe A/})).not.toBeInTheDocument();
 
@@ -314,10 +460,10 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   });
 
   await screen.findByRole("region", {name: "Recipe A recipe authority"});
-  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).getByRole("link", {name: /Recipe A/})).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", {name: `Back to ${qwenModel} recipes`})).toHaveAttribute("href", qwenModelPath);
+  expect(screen.getByRole("link", {name: `Back to ${qwenModelName} recipes`})).toHaveAttribute("href", qwenModelPath);
 });
 
 test("changes URL selection only on activation and preserves drill-down history", async () => {
@@ -336,7 +482,7 @@ test("changes URL selection only on activation and preserves drill-down history"
 
   const heading = await screen.findByRole("heading", {name: "Library"});
   const models = await screen.findByRole("region", {name: "Models"});
-  const qwen = within(models).getByRole("link", {name: new RegExp(qwenModel)});
+  const qwen = within(models).getByRole("link", {name: new RegExp(qwenModelName)});
   expect(within(models).getByText("2 recipes")).toBeVisible();
   expect(within(models).getByRole("link", {name: /Unlinked/})).toBeVisible();
 
@@ -350,7 +496,7 @@ test("changes URL selection only on activation and preserves drill-down history"
   expect(pushState).toHaveBeenLastCalledWith(null, "", qwenModelPath);
   await waitFor(() => expect(heading).toHaveFocus());
 
-  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: "Back to Models"})).toHaveAttribute("href", "/library");
@@ -364,14 +510,14 @@ test("changes URL selection only on activation and preserves drill-down history"
   expect(location.pathname).toBe("/library/recipes/recipe-chat");
   expect(pushState).toHaveBeenLastCalledWith(null, "", "/library/recipes/recipe-chat");
   expect(await screen.findByRole("heading", {name: "Qwen Chat"})).toBeVisible();
-  expect(screen.getByRole("link", {name: `Back to ${qwenModel} recipes`})).toHaveAttribute("href", qwenModelPath);
+  expect(screen.getByRole("link", {name: `Back to ${qwenModelName} recipes`})).toHaveAttribute("href", qwenModelPath);
   expect(libraryRecipe).toHaveBeenCalledTimes(1);
 
   act(() => {
     history.replaceState(null, "", qwenModelPath);
     dispatchEvent(new PopStateEvent("popstate"));
   });
-  expect(screen.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  expect(screen.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await waitFor(() => expect(heading).toHaveFocus());
 });
 
@@ -448,31 +594,22 @@ test("keeps the empty Library state inside the reduced workspace", async () => {
   const empty = {...librarySnapshot, models: [], unlinked_recipes: []};
   render(<App api={{librarySnapshot: async () => empty} as unknown as ControlApi}/>);
 
-  expect(await screen.findByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
-  expect(screen.getByText("Recipes will appear here after they are added to the local library authority.")).toBeVisible();
+  expect(await screen.findByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
+  const emptyState = screen.getByRole("region", {name: "Empty Library"});
+  expect(within(emptyState).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
+  expect(within(emptyState).getByRole("link", {name: "Create custom recipe"})).toHaveAttribute("href", "/library/create");
   expect(screen.queryByRole("link", {name: "Open advanced catalog"})).not.toBeInTheDocument();
 });
-test("offers custom recipe authoring with validation and save", async () => {
+test("opens custom recipe authoring on its dedicated route", async () => {
   history.replaceState(null, "", "/library");
-  const createCatalogRecipe = vi.fn(async (input: {slug: string; document: Record<string, unknown>}) => ({recipe_id: "custom-1", revision_number: 1, lifecycle: "draft", slug: input.slug, document: input.document}));
-  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), createCatalogRecipe} as unknown as ControlApi;
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []})} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
-  await user.click(await screen.findByRole("button", {name: "Create custom recipe"}));
-  expect(screen.getByRole("group", {name: "Identity and description"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Model and execution"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Build and runtime"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Artifacts and interfaces"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Validation and provenance"})).toBeVisible();
-  expect(screen.getByText("Advanced JSON fallback")).toBeVisible();
-  const slug = screen.getByRole("textbox", {name: "Recipe slug"});
-  await user.clear(slug);
-  await user.type(slug, "custom-service");
-  await user.click(screen.getByRole("button", {name: "Validate recipe"}));
-  expect(screen.getByRole("status", {name: "Recipe validation"})).toHaveTextContent("Recipe document valid");
-  await user.click(screen.getByRole("button", {name: "Save custom recipe"}));
-  expect(createCatalogRecipe).toHaveBeenCalledWith(expect.objectContaining({slug: "custom-service", document: expect.any(Object)}));
-  expect(await screen.findByRole("status", {name: "Recipe authoring"})).toHaveTextContent("Recipe saved");
+  const create = await screen.findByRole("link", {name: "Create custom recipe"});
+  expect(create).toHaveAttribute("href", "/library/create");
+  await user.click(create);
+  expect(await screen.findByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+  expect(location.pathname).toBe("/library/create");
 });
 
 test("previews a public recipe import with exact identity and provenance before confirmation", async () => {
@@ -554,7 +691,10 @@ test("loads the current default catalog recipes when public import opens", async
   render(<App api={api}/>);
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
   expect(await screen.findAllByRole("heading", {name: /Qwen 3\.5/, level: 3})).toHaveLength(2);
-  expect(screen.getByText("@cccccccc")).toBeVisible();
+  const catalogCommit = screen.getByText("c".repeat(40));
+  expect(catalogCommit).not.toBeVisible();
+  await user.click(screen.getByText("Catalog snapshot"));
+  expect(catalogCommit).toBeVisible();
   expect(screen.getAllByText("By QwenLM")[0]).toBeVisible();
 
   const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});

@@ -1,135 +1,95 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {afterEach, vi} from "vitest";
+import {vi} from "vitest";
 import {AdminMenu} from "./admin-menu";
 
-afterEach(() => {
-  history.replaceState(null, "", "/");
+function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> = {}) {
+  const props: React.ComponentProps<typeof AdminMenu> = {
+    environment: "Development",
+    loggingOut: false,
+    logoutError: "",
+    onLogout: vi.fn(),
+    onNavigateToActivity: vi.fn(event => event.preventDefault()),
+    role: "Administrator",
+    subject: "admin",
+    ...overrides,
+  };
+  render(<AdminMenu {...props}/>);
+  return props;
+}
+
+test("opens a viewport-safe operator menu and moves focus to its first action", async () => {
+  const user = userEvent.setup();
+  renderMenu();
+
+  const trigger = screen.getByRole("button", {name: /admin/i});
+  expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+  await user.click(trigger);
+
+  const menu = screen.getByRole("menu", {name: "Operator menu"});
+  expect(within(menu).getByRole("menuitem", {name: "Open Activity"})).toHaveFocus();
+  expect(menu).toHaveClass("admin-menu-panel");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-test("opens audit log from the operator menu and closes it without leaving Fleet", async () => {
-  // Break caught: the authenticated operator menu stops exposing audit access
-  // inline, or opening and closing the audit panel mutates Fleet navigation.
-  history.replaceState(null, "", "/fleet");
+test("supports menu keyboard navigation and restores trigger focus on Escape", async () => {
   const user = userEvent.setup();
-  const loadAudit = vi.fn().mockResolvedValue({
-    events: [{
-      request_id: "audit-1",
-      actor: "admin",
-      action: "library.recipe.run.applied",
-      authority_revision: "a".repeat(64),
-      targets: ["node-1"],
-    }],
-  });
+  renderMenu();
+  const trigger = screen.getByRole("button", {name: /admin/i});
+  await user.click(trigger);
 
-  render(<AdminMenu
-    environment="Development"
-    loadAudit={loadAudit}
-    loggingOut={false}
-    logoutError=""
-    onLogout={() => undefined}
-    role="Administrator"
-    subject="admin"
-  />);
+  await user.keyboard("{ArrowDown}");
+  expect(screen.getByRole("menuitem", {name: "Logout"})).toHaveFocus();
+  await user.keyboard("{ArrowUp}");
+  expect(screen.getByRole("menuitem", {name: "Open Activity"})).toHaveFocus();
+  await user.keyboard("{Escape}");
 
-  await user.click(screen.getByRole("button", {name: /admin/i}));
-  await user.click(screen.getByRole("button", {name: "Audit log"}));
-
-  const dialog = await screen.findByRole("dialog", {name: "Audit log"});
-  expect(within(dialog).getByText("library.recipe.run.applied")).toBeVisible();
-  expect(within(dialog).getByText("Actor admin")).toBeVisible();
-
-  await user.click(within(dialog).getByRole("button", {name: "Close audit log"}));
-
-  await waitFor(() => {
-    expect(screen.queryByText("library.recipe.run.applied")).not.toBeInTheDocument();
-  });
-  expect(location.pathname).toBe("/fleet");
+  expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
 });
 
-test("renders only the first eight audit events inside the compact audit drawer", async () => {
-  // Break caught: the compact audit view stops bounding results, causing the
-  // operator drawer to grow without limit inside the shell.
+test("closes the menu before navigating to the top-level Activity page", async () => {
   const user = userEvent.setup();
-  const loadAudit = vi.fn().mockResolvedValue({
-    events: Array.from({length: 9}, (_, index) => ({
-      request_id: `audit-${index + 1}`,
-      actor: `admin-${index + 1}`,
-      action: `action-${index + 1}`,
-      authority_revision: "a".repeat(64),
-      targets: [`node-${index + 1}`],
-    })),
-  });
-
-  render(<AdminMenu
-    environment="Development"
-    loadAudit={loadAudit}
-    loggingOut={false}
-    logoutError=""
-    onLogout={() => undefined}
-    role="Administrator"
-    subject="admin"
-  />);
+  const onNavigateToActivity = vi.fn(event => event.preventDefault());
+  renderMenu({onNavigateToActivity});
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
-  await user.click(screen.getByRole("button", {name: "Audit log"}));
+  await user.click(screen.getByRole("menuitem", {name: "Open Activity"}));
 
-  const dialog = await screen.findByRole("dialog", {name: "Audit log"});
-  expect(within(dialog).getAllByRole("listitem")).toHaveLength(8);
-  expect(within(dialog).getByText("action-8")).toBeVisible();
-  expect(within(dialog).queryByText("action-9")).not.toBeInTheDocument();
+  expect(onNavigateToActivity).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-test("shows a loading state inside the audit drawer while audit history is pending", async () => {
-  // Break caught: opening audit history no longer exposes a pending state, so
-  // the operator drawer appears empty during an in-flight authority request.
+test("closes on outside interaction", async () => {
   const user = userEvent.setup();
-  let resolveAudit!: (value: {events: never[]}) => void;
-  const loadAudit = vi.fn().mockImplementation(() => new Promise(resolve => {
-    resolveAudit = resolve;
-  }));
-
-  render(<AdminMenu
-    environment="Development"
-    loadAudit={loadAudit}
-    loggingOut={false}
-    logoutError=""
-    onLogout={() => undefined}
-    role="Administrator"
-    subject="admin"
-  />);
+  const onNavigateToActivity = vi.fn(event => event.preventDefault());
+  render(<div>
+    <button type="button">Outside</button>
+    <AdminMenu environment="Development" loggingOut={false} logoutError="" onLogout={() => undefined} onNavigateToActivity={onNavigateToActivity} role="Administrator" subject="admin"/>
+  </div>);
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
-  await user.click(screen.getByRole("button", {name: "Audit log"}));
-
-  const dialog = await screen.findByRole("dialog", {name: "Audit log"});
-  expect(within(dialog).getByRole("status")).toHaveTextContent("Loading audit log…");
-
-  resolveAudit({events: []});
-  await waitFor(() => {
-    expect(within(dialog).queryByRole("status")).not.toBeInTheDocument();
-  });
+  await user.click(screen.getByRole("button", {name: "Outside"}));
+  await waitFor(() => expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument());
 });
 
-test("shows an audit error inside the drawer when audit history fails to load", async () => {
-  // Break caught: a failed audit request no longer surfaces an error in the
-  // operator drawer, leaving the operator without recovery context.
+test("closes and disables all operator actions while global navigation is locked", async () => {
   const user = userEvent.setup();
-  const loadAudit = vi.fn().mockRejectedValue(new Error("audit authority unavailable"));
+  const onLogout = vi.fn();
+  const onNavigateToActivity = vi.fn(event => event.preventDefault());
+  const props = {environment: "Development", loggingOut: false, logoutError: "", onLogout, onNavigateToActivity, role: "Administrator", subject: "admin"};
+  const view = render(<AdminMenu {...props}/>);
 
-  render(<AdminMenu
-    environment="Development"
-    loadAudit={loadAudit}
-    loggingOut={false}
-    logoutError=""
-    onLogout={() => undefined}
-    role="Administrator"
-    subject="admin"
-  />);
+  const trigger = screen.getByRole("button", {name: /admin/i});
+  await user.click(trigger);
+  expect(screen.getByRole("menuitem", {name: "Logout"})).toBeEnabled();
 
-  await user.click(screen.getByRole("button", {name: /admin/i}));
-  await user.click(screen.getByRole("button", {name: "Audit log"}));
-
-  const dialog = await screen.findByRole("dialog", {name: "Audit log"});
-  expect(await within(dialog).findByRole("alert")).toHaveTextContent("audit authority unavailable");
+  view.rerender(<AdminMenu {...props} navigationLocked/>);
+  expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument();
+  expect(trigger).toBeDisabled();
+  expect(trigger).toHaveAttribute("title", "Operator actions are unavailable while a change is applying");
+  await user.click(trigger);
+  expect(onLogout).not.toHaveBeenCalled();
+  expect(onNavigateToActivity).not.toHaveBeenCalled();
 });
