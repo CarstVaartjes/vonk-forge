@@ -438,8 +438,14 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
+    let model = roots
+        .agent_data
+        .join("models")
+        .join("sha256")
+        .join("a".repeat(64));
     fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
+    fs::create_dir_all(&model).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
     fs::write(
@@ -491,10 +497,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--env".to_owned(),
         "VONK_LISTEN_PORT=8888".to_owned(),
         "--mount".to_owned(),
-        format!(
-            "type=bind,src={},dst=/models,readonly",
-            roots.agent_data.join("models").display()
-        ),
+        format!("type=bind,src={},dst=/models,readonly", model.display()),
         "--mount".to_owned(),
         format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),
@@ -722,8 +725,14 @@ fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
+    let model = roots
+        .agent_data
+        .join("models")
+        .join("sha256")
+        .join("a".repeat(64));
     fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
+    fs::create_dir_all(&model).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
     fs::write(
@@ -779,10 +788,7 @@ fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
         "--env".to_owned(),
         "VONK_LISTEN_PORT=8888".to_owned(),
         "--mount".to_owned(),
-        format!(
-            "type=bind,src={},dst=/models,readonly",
-            roots.agent_data.join("models").display()
-        ),
+        format!("type=bind,src={},dst=/models,readonly", model.display()),
         "--mount".to_owned(),
         format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),

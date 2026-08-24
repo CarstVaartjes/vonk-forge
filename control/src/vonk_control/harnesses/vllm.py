@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 
 from .common import (
@@ -11,7 +12,9 @@ from .common import (
     compile_environment,
     decimal,
     integer,
+    model_artifact_mounts,
     one_of,
+    primary_model_artifact_mount,
     projection,
     require_entrypoint,
     require_openai_interface,
@@ -109,8 +112,20 @@ class VllmHarnessCompiler:
         role: str,
         rank: int,
     ) -> HarnessProjection:
-        require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", "/models"))
+        primary_artifact_id, primary_mount = primary_model_artifact_mount(recipe)
+        artifact_mounts = model_artifact_mounts(recipe)
+        if len(artifact_mounts) not in {1, 2}:
+            raise HarnessCompileError(
+                "vLLM recipes require one target and at most one companion artifact"
+            )
+        _require_role_artifacts(recipe, role, artifact_mounts)
+        require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", primary_mount))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
+        _validate_speculative_config(
+            parsed.get("--speculative-config"),
+            primary_artifact_id=primary_artifact_id,
+            artifact_mounts=artifact_mounts,
+        )
         port = require_openai_interface(recipe)
         mode = topology.get("mode") if isinstance(topology, Mapping) else None
         validate_topology(
@@ -279,7 +294,7 @@ class VllmHarnessCompiler:
             command=(
                 "/opt/vonk/bin/vllm",
                 "serve",
-                "/models",
+                primary_mount,
                 *arguments,
                 *distributed,
                 "--host",
@@ -291,3 +306,100 @@ class VllmHarnessCompiler:
             distribution=distribution,
             environment=environment,
         )
+
+
+def _require_role_artifacts(
+    recipe: Mapping[str, object],
+    role: str,
+    artifact_mounts: tuple[tuple[str, str], ...],
+) -> None:
+    artifacts = recipe.get("artifacts")
+    if type(artifacts) is not list:
+        raise HarnessCompileError("vLLM role artifact declarations are invalid")
+    declared: set[str] = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping):
+            raise HarnessCompileError("vLLM role artifact declarations are invalid")
+        artifact_id = artifact.get("id")
+        roles = artifact.get("roles")
+        mount = artifact.get("mount")
+        target = mount.get("target") if isinstance(mount, Mapping) else None
+        if (
+            len(artifacts) == 1
+            and artifact_id is None
+            and roles is None
+            and target == "/models"
+            and role == "entrypoint"
+        ):
+            # Preserve the minimal synthetic conformance recipe accepted by common.py.
+            declared.add("model")
+            continue
+        if (
+            type(artifact_id) is not str
+            or type(roles) is not list
+            or any(type(item) is not str for item in roles)
+            or len(set(roles)) != len(roles)
+        ):
+            raise HarnessCompileError("vLLM role artifact declarations are invalid")
+        if role in roles:
+            declared.add(artifact_id)
+    required = {artifact_id for artifact_id, _target in artifact_mounts}
+    if declared != required:
+        raise HarnessCompileError(
+            "vLLM role does not declare every required model artifact"
+        )
+
+
+def _validate_speculative_config(
+    value: str | bool | None,
+    *,
+    primary_artifact_id: str,
+    artifact_mounts: tuple[tuple[str, str], ...],
+) -> None:
+    if value is None:
+        if len(artifact_mounts) > 1:
+            raise HarnessCompileError(
+                "vLLM companion artifact requires a speculative config model path"
+            )
+        return
+    if type(value) is not str:
+        raise HarnessCompileError("vLLM speculative config JSON is invalid")
+    try:
+        parsed = json.loads(
+            value,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError) as error:
+        raise HarnessCompileError("vLLM speculative config JSON is invalid") from error
+    if not isinstance(parsed, Mapping):
+        raise HarnessCompileError("vLLM speculative config JSON is invalid")
+    companion_mounts = {
+        target
+        for artifact_id, target in artifact_mounts
+        if artifact_id != primary_artifact_id
+    }
+    if "model" not in parsed:
+        if companion_mounts:
+            raise HarnessCompileError(
+                "vLLM companion artifact requires a speculative config model path"
+            )
+        return
+    model = parsed["model"]
+    if type(model) is not str or model not in companion_mounts:
+        raise HarnessCompileError(
+            "vLLM speculative config model path must name one declared companion artifact"
+        )
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError("duplicate JSON member")
+        result[name] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> object:
+    raise ValueError(f"invalid JSON constant: {value}")

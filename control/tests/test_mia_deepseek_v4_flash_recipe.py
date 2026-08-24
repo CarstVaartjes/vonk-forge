@@ -312,6 +312,41 @@ def test_only_verified_distribution_owned_vllm_tp2_compiles() -> None:
         assert "sh" not in projection.command
         assert "-c" not in projection.command
 
+    missing_worker_artifact = copy.deepcopy(recipe)
+    target = missing_worker_artifact["artifacts"][0]
+    target["id"] = "target"
+    target["mount"]["target"] = "/models/target"
+    draft = copy.deepcopy(target)
+    draft["id"] = "draft"
+    draft["mount"]["target"] = "/models/draft"
+    draft["roles"] = ["entrypoint"]
+    missing_worker_artifact["artifacts"] = [target, draft]
+    missing_worker_artifact["topology"]["roles"][0]["artifacts"] = [
+        "target",
+        "draft",
+    ]
+    missing_worker_artifact["topology"]["roles"][1]["artifacts"] = ["target"]
+    missing_worker_artifact["runtime"]["entrypoint"][2] = "/models/target"
+    speculative_config = next(
+        argument
+        for argument in missing_worker_artifact["runtime"]["arguments"]
+        if argument["name"] == "speculative-config"
+    )
+    speculative_config["value"] = (
+        '{"method":"draft_model","model":"/models/draft"}'
+    )
+    with pytest.raises(HarnessCompileError, match="required model artifact"):
+        registry.compile(
+            harness,
+            missing_worker_artifact,
+            distribution,
+            patch,
+            {},
+            missing_worker_artifact["topology"],
+            "worker",
+            1,
+        )
+
     unverified = copy.deepcopy(distribution)
     unverified["capabilities"]["distributed_vllm"]["verified"] = False
     with pytest.raises(HarnessCompileError, match="runtime distribution"):

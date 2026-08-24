@@ -12,6 +12,7 @@ from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%={},"<>-]{1,2048}$')
 _SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+_SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(
     {"sh", "bash", "dash", "ash", "zsh", "ksh", "csh", "tcsh", "fish", "busybox"}
@@ -592,6 +593,61 @@ def projection(
     return value
 
 
+def model_artifact_mounts(
+    recipe: Mapping[str, object],
+) -> tuple[tuple[str, str], ...]:
+    """Return canonical artifact ids and their declared model mount targets."""
+    artifacts = recipe.get("artifacts")
+    if type(artifacts) is not list or not artifacts:
+        raise HarnessCompileError("harness recipe artifact mounts are invalid")
+    result: list[tuple[str, str]] = []
+    ids: set[str] = set()
+    targets: set[str] = set()
+    for artifact in artifacts:
+        artifact_id = artifact.get("id") if isinstance(artifact, Mapping) else None
+        mount = artifact.get("mount") if isinstance(artifact, Mapping) else None
+        target = mount.get("target") if isinstance(mount, Mapping) else None
+        if len(artifacts) == 1 and artifact_id is None and target == "/models":
+            # Synthetic harness conformance predates the full recipe schema. Keep its
+            # sole canonical root mount valid without weakening named mount checks.
+            artifact_id = "model"
+        if (
+            type(artifact_id) is not str
+            or _SAFE_ARTIFACT_ID.fullmatch(artifact_id) is None
+            or artifact_id in ids
+            or not isinstance(mount, Mapping)
+            or set(mount) != {"target", "read_only"}
+            or type(target) is not str
+            or mount.get("read_only") is not True
+            or target in targets
+        ):
+            raise HarnessCompileError("harness recipe artifact mounts are invalid")
+        result.append((artifact_id, target))
+        ids.add(artifact_id)
+        targets.add(target)
+    if len(result) == 1:
+        artifact_id, target = result[0]
+        if target not in {"/models", f"/models/{artifact_id}"}:
+            raise HarnessCompileError("harness recipe artifact mount path is invalid")
+    elif "target" not in ids or any(
+        target != f"/models/{artifact_id}" for artifact_id, target in result
+    ):
+        raise HarnessCompileError(
+            "multiple model artifacts require unique canonical mount paths and one target artifact"
+        )
+    return tuple(result)
+
+
+def primary_model_artifact_mount(
+    recipe: Mapping[str, object],
+) -> tuple[str, str]:
+    """Resolve the sole artifact, or the explicit ``target`` artifact."""
+    mounts = model_artifact_mounts(recipe)
+    if len(mounts) == 1:
+        return mounts[0]
+    return next(item for item in mounts if item[0] == "target")
+
+
 def integer(minimum: int, maximum: int) -> Callable[[str], bool]:
     def validate(value: str) -> bool:
         try:
@@ -740,7 +796,7 @@ def _validate_parameter_value(
 def _require_recipe_mounts(
     recipe: Mapping[str, object], user: str, *, allow_host_network: bool = False
 ) -> None:
-    artifacts = recipe.get("artifacts")
+    model_artifact_mounts(recipe)
     runtime = recipe.get("runtime")
     security = runtime.get("security") if isinstance(runtime, Mapping) else None
     mounts = security.get("mounts") if isinstance(security, Mapping) else None
@@ -752,16 +808,7 @@ def _require_recipe_mounts(
     if input_contract is not None:
         expected_mounts.add(("inputs", "/inputs", True))
     if (
-        type(artifacts) is not list
-        or not artifacts
-        or any(
-            not isinstance(artifact, Mapping)
-            or not isinstance(artifact.get("mount"), Mapping)
-            or artifact["mount"].get("target") != "/models"
-            or artifact["mount"].get("read_only") is not True
-            for artifact in artifacts
-        )
-        or not isinstance(security, Mapping)
+        not isinstance(security, Mapping)
         or security.get("user") != user
         or security.get("privileged") is not False
         or (

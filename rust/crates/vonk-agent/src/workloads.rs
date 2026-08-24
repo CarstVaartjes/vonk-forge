@@ -1,4 +1,4 @@
-use std::{net::IpAddr, path::Path};
+use std::{collections::BTreeSet, net::IpAddr, path::Path};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -196,8 +196,23 @@ impl WorkloadSpec {
         if self.artifacts.is_empty() || self.artifacts.len() > 16 {
             return Err(WorkloadError::Invalid("artifacts"));
         }
+        let mut artifact_ids = BTreeSet::new();
+        let mut artifact_targets = BTreeSet::new();
         for artifact in &self.artifacts {
             artifact.validate()?;
+            if !artifact_ids.insert(artifact.id.as_str())
+                || !artifact_targets.insert(artifact.mount.target.as_str())
+            {
+                return Err(WorkloadError::Invalid("artifact mounts"));
+            }
+        }
+        if self.artifacts.len() > 1
+            && self
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.mount.target != format!("/models/{}", artifact.id))
+        {
+            return Err(WorkloadError::Invalid("artifact mounts"));
         }
         if self.endpoint.protocol != "openai"
             || self.endpoint.port < 1024
@@ -301,10 +316,12 @@ impl ArtifactSpec {
             || self.download_bytes == 0
             || self.installed_bytes == 0
             || !valid_name(&self.id)
+            || matches!(self.id.as_str(), "." | "..")
             || self.roles.is_empty()
             || self.roles.iter().any(|role| !valid_role(role))
-            || !self.mount.target.starts_with('/')
-            || self.mount.target.contains("..")
+            || !self.mount.read_only
+            || (self.mount.target != "/models"
+                && self.mount.target != format!("/models/{}", self.id))
         {
             return Err(WorkloadError::Invalid("artifact"));
         }

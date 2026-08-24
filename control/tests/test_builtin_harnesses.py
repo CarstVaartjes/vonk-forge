@@ -344,6 +344,27 @@ def _compile(
     )
 
 
+def _multi_artifact_vllm_recipe(speculative_config: str) -> dict[str, object]:
+    recipe = _recipe("vllm")
+    target = copy.deepcopy(recipe["artifacts"][0])
+    target["id"] = "target"
+    target["mount"]["target"] = "/models/target"
+    draft = copy.deepcopy(target)
+    draft["id"] = "draft"
+    draft["mount"]["target"] = "/models/draft"
+    recipe["artifacts"] = [draft, target]
+    recipe["topology"]["roles"][0]["artifacts"] = ["target", "draft"]
+    recipe["runtime"]["entrypoint"] = [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models/target",
+    ]
+    recipe["runtime"]["arguments"].append(
+        {"name": "speculative-config", "value": speculative_config}
+    )
+    return recipe
+
+
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
 def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None:
     projection = _compile(slug)
@@ -359,6 +380,129 @@ def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None
     assert projection.no_new_privileges is True
     assert projection.capabilities == ()
     assert all(mount.read_only for mount in projection.model_mounts)
+
+
+def test_vllm_projects_the_single_artifacts_exact_named_mount_path() -> None:
+    recipe = _recipe("vllm")
+    recipe["artifacts"][0]["mount"]["target"] = "/models/weights"
+    recipe["runtime"]["entrypoint"][2] = "/models/weights"
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[2] == "/models/weights"
+    assert projection.model_mounts[0].target == "/models"
+
+
+def test_vllm_accepts_explicit_multi_artifact_mounts_independent_of_order() -> None:
+    speculative_config = '{"method":"draft_model","model":"/models/draft"}'
+    recipe = _multi_artifact_vllm_recipe(speculative_config)
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[2] == "/models/target"
+    assert projection.command[projection.command.index("--speculative-config") + 1] == (
+        speculative_config
+    )
+
+
+def test_vllm_keeps_model_less_mtp_config_valid_for_one_artifact() -> None:
+    recipe = _recipe("vllm")
+    speculative_config = '{"method":"dspark","num_speculative_tokens":5}'
+    recipe["runtime"]["arguments"].append(
+        {"name": "speculative-config", "value": speculative_config}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--speculative-config") + 1] == (
+        speculative_config
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact_ids", "artifact_targets"),
+    [
+        (("primary", "draft"), ("/models/primary", "/models/draft")),
+        (("target", "draft"), ("/models/target", "/models/target")),
+        (("target", "draft"), ("/models", "/models/draft")),
+        (("target", "draft"), ("/models/primary", "/models/draft")),
+    ],
+)
+def test_vllm_rejects_missing_or_ambiguous_multi_artifact_mounts(
+    artifact_ids: tuple[str, str], artifact_targets: tuple[str, str]
+) -> None:
+    recipe = _multi_artifact_vllm_recipe(
+        '{"method":"draft_model","model":"/models/draft"}'
+    )
+    for artifact, artifact_id, target in zip(
+        recipe["artifacts"], artifact_ids, artifact_targets, strict=True
+    ):
+        artifact["id"] = artifact_id
+        artifact["mount"]["target"] = target
+
+    with pytest.raises(HarnessCompileError, match="artifact|mount"):
+        _compile("vllm", recipe=recipe)
+
+
+def test_vllm_rejects_an_entrypoint_path_that_is_not_the_primary_mount() -> None:
+    recipe = _multi_artifact_vllm_recipe(
+        '{"method":"draft_model","model":"/models/draft"}'
+    )
+    recipe["runtime"]["entrypoint"][2] = "/models/draft"
+
+    with pytest.raises(HarnessCompileError, match="entrypoint"):
+        _compile("vllm", recipe=recipe)
+
+
+@pytest.mark.parametrize("include_speculative_config", [False, True])
+def test_vllm_rejects_an_unreferenced_companion_artifact(
+    include_speculative_config: bool,
+) -> None:
+    recipe = _multi_artifact_vllm_recipe(
+        '{"method":"dspark","num_speculative_tokens":5}'
+    )
+    if not include_speculative_config:
+        recipe["runtime"]["arguments"] = [
+            argument
+            for argument in recipe["runtime"]["arguments"]
+            if argument["name"] != "speculative-config"
+        ]
+
+    with pytest.raises(HarnessCompileError, match="companion artifact"):
+        _compile("vllm", recipe=recipe)
+
+
+def test_vllm_rejects_more_than_one_companion_artifact() -> None:
+    recipe = _multi_artifact_vllm_recipe(
+        '{"method":"draft_model","model":"/models/draft"}'
+    )
+    extra = copy.deepcopy(recipe["artifacts"][0])
+    extra["id"] = "extra"
+    extra["mount"]["target"] = "/models/extra"
+    recipe["artifacts"].append(extra)
+    recipe["topology"]["roles"][0]["artifacts"].append("extra")
+
+    with pytest.raises(HarnessCompileError, match="at most one companion"):
+        _compile("vllm", recipe=recipe)
+
+
+@pytest.mark.parametrize(
+    "speculative_config",
+    [
+        '{"method":"draft_model","model":"/models/target"}',
+        '{"method":"draft_model","model":"/models/unknown"}',
+        '{"method":"draft_model","model":null}',
+        '{"method":"draft_model","model":"/models/draft","model":"/models/target"}',
+        '{"method":"draft_model","model":',
+    ],
+)
+def test_vllm_rejects_unknown_missing_or_ambiguous_speculative_model_paths(
+    speculative_config: str,
+) -> None:
+    recipe = _multi_artifact_vllm_recipe(speculative_config)
+
+    with pytest.raises(HarnessCompileError, match="speculative config"):
+        _compile("vllm", recipe=recipe)
 
 
 def test_ds4_target_only_mode_omits_speculative_decoding_flags() -> None:
