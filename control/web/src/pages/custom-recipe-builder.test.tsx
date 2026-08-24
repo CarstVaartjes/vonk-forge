@@ -12,6 +12,10 @@ const exactDigests = {
 };
 const exactArtifactRevision = "e5".repeat(20);
 
+function replaceFieldValue(field: HTMLElement, value: string) {
+  fireEvent.change(field, {target: {value}});
+}
+
 afterEach(() => {
   history.replaceState(null, "", "/");
   vi.restoreAllMocks();
@@ -20,21 +24,18 @@ afterEach(() => {
 async function continueToReview(user: ReturnType<typeof userEvent.setup>) {
   const model = screen.queryByRole("textbox", {name: "Exact model digest"});
   if (model) {
-    await user.clear(model);
-    await user.type(model, exactDigests.model);
+    replaceFieldValue(model, exactDigests.model);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
   expect(await screen.findByRole("heading", {name: "Runtime"})).toBeVisible();
   for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
     const field = screen.getByRole("textbox", {name});
-    await user.clear(field);
-    await user.type(field, value);
+    replaceFieldValue(field, value);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
   expect(await screen.findByRole("heading", {name: "Artifacts"})).toBeVisible();
   const revision = screen.getByRole("textbox", {name: "Immutable revision"});
-  await user.clear(revision);
-  await user.type(revision, exactArtifactRevision);
+  replaceFieldValue(revision, exactArtifactRevision);
   for (const heading of ["Resources & topology", "Validation & provenance", "Review & create"]) {
     await user.click(screen.getByRole("button", {name: "Continue"}));
     expect(await screen.findByRole("heading", {name: heading})).toBeVisible();
@@ -58,8 +59,7 @@ test("guides a preset through six steps and submits the complete canonical docum
   expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("vLLM chat service");
 
   const modelDigest = screen.getByRole("textbox", {name: "Exact model digest"});
-  await user.clear(modelDigest);
-  await user.type(modelDigest, exactDigests.model);
+  replaceFieldValue(modelDigest, exactDigests.model);
   await user.click(screen.getByRole("button", {name: "Continue"}));
   expect(await screen.findByRole("heading", {name: "Runtime"})).toBeVisible();
   await user.click(screen.getByRole("button", {name: "Previous"}));
@@ -106,13 +106,11 @@ test("blocks placeholder artifact revisions and required empty collections", asy
   render(<App api={{} as unknown as ControlApi}/>);
 
   const model = await screen.findByRole("textbox", {name: "Exact model digest"});
-  await user.clear(model);
-  await user.type(model, exactDigests.model);
+  replaceFieldValue(model, exactDigests.model);
   await user.click(screen.getByRole("button", {name: "Continue"}));
   for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
     const field = screen.getByRole("textbox", {name});
-    await user.clear(field);
-    await user.type(field, value);
+    replaceFieldValue(field, value);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
   await user.click(screen.getByRole("button", {name: "Continue"}));
@@ -167,18 +165,15 @@ test("edits byte values in human units while keeping exact bytes in advanced JSO
   render(<App api={{} as unknown as ControlApi}/>);
 
   const model = await screen.findByRole("textbox", {name: "Exact model digest"});
-  await user.clear(model);
-  await user.type(model, exactDigests.model);
+  replaceFieldValue(model, exactDigests.model);
   await user.click(screen.getByRole("button", {name: "Continue"}));
   for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
     const field = screen.getByRole("textbox", {name});
-    await user.clear(field);
-    await user.type(field, value);
+    replaceFieldValue(field, value);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
   const revision = screen.getByRole("textbox", {name: "Immutable revision"});
-  await user.clear(revision);
-  await user.type(revision, exactArtifactRevision);
+  replaceFieldValue(revision, exactArtifactRevision);
   await user.click(screen.getByRole("button", {name: "Continue"}));
   expect(await screen.findByRole("heading", {name: "Resources & topology"})).toBeVisible();
 
