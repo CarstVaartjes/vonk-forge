@@ -10,9 +10,9 @@ use std::{
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_spark_setup::{
-    CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, ReleaseAuthority,
-    SetupError, SetupRequest, TtyPrompt, apply_setup_from_with_authority, handoff_to_root,
-    prepare_setup_with_authority,
+    CallerIdentity, Command, CommandOutput, CommandRunner, CommandStderr, InstallPaths, Prompt,
+    ReleaseAuthority, SetupError, SetupRequest, TtyPrompt, apply_setup_from_with_authority,
+    handoff_to_root, prepare_setup_with_authority,
 };
 
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
@@ -824,6 +824,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
         .unwrap();
     assert_eq!(pair.program, std::path::Path::new("/usr/bin/setpriv"));
     assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+    assert_eq!(pair.stderr, CommandStderr::Inherit);
     assert!(pair.args.iter().all(|argument| argument != TOKEN));
     assert!(apply_runner.commands.iter().all(|command| {
         command.program != std::path::Path::new("/usr/bin/curl")
@@ -860,13 +861,18 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "paired-v1\n"
     );
-    assert!(apply_runner.commands.iter().any(|command| {
-        command.program == install_paths.agent
-            && command
-                .args
-                .iter()
-                .any(|argument| argument == "verify-readiness")
-    }));
+    let readiness_probe = apply_runner
+        .commands
+        .iter()
+        .find(|command| {
+            command.program == install_paths.agent
+                && command
+                    .args
+                    .iter()
+                    .any(|argument| argument == "verify-readiness")
+        })
+        .expect("readiness probe");
+    assert_eq!(readiness_probe.stderr, CommandStderr::Suppress);
     assert!(apply_runner.commands.iter().any(|command| {
         command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args
