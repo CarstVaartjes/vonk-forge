@@ -30,11 +30,12 @@ scope it to the necessary repositories and actions, and store it under
 Run the NAS curl installer and select Hermes when prompted. The installer asks
 for the exact HTTPS dashboard origin and creates the Hermes API key, a separate
 LiteLLM client key, immutable image selection, and persistent named volumes
-inside the upload directory. At startup, a profile-scoped one-shot container
-uses the LiteLLM master key only long enough to register or reconcile the
-dedicated client key; Hermes receives only the client key. There is no host
-preparation, privileged helper, or firewall script. Normal upgrades preserve
-the existing Hermes selection and keys. Enable it
+inside the upload directory. A profile-scoped, health-checked reconciler uses
+the LiteLLM master key only to maintain the exact dedicated client-key policy;
+Hermes receives only the client key. It has no host mounts, published ports, or
+network beyond LiteLLM. There is no host preparation, privileged helper, or
+firewall script. Normal upgrades preserve the existing Hermes selection and
+keys. Enable it
 explicitly in an existing bundle with:
 
 ```sh

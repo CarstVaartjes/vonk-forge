@@ -90,8 +90,8 @@ def test_canonical_model_has_step_ca_without_an_overlay() -> None:
     assert not (COMPOSE_ROOT / "compose.dev.yaml").exists()
 
 
-def test_only_hermes_key_reconciliation_is_a_one_shot_runtime_service() -> None:
-    """Keeps the master-key-bearing helper profile-scoped and narrowly bounded."""
+def test_every_runtime_service_is_long_running() -> None:
+    """Keeps the canonical NAS project free of exited setup containers."""
     model = _canonical_model()
     services = model["services"]
     assert isinstance(services, dict)
@@ -100,12 +100,8 @@ def test_only_hermes_key_reconciliation_is_a_one_shot_runtime_service() -> None:
         assert isinstance(service, dict), name
         assert not _is_sleep_only(service.get("command")), name
         assert not _is_sleep_only(service.get("entrypoint")), name
-        if name == "hermes-litellm-key-provisioner":
-            assert service.get("restart") == "no"
-        else:
-            assert service.get("restart") != "no", name
-        completed = "service_completed_successfully" in _dependency_conditions(service)
-        assert completed is (name == "hermes-agent"), name
+        assert service.get("restart") != "no", name
+        assert "service_completed_successfully" not in _dependency_conditions(service)
 
 
 def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
@@ -116,10 +112,7 @@ def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
 
     for name, service in services.items():
         assert isinstance(service, dict), name
-        if name == "hermes-litellm-key-provisioner":
-            assert "healthcheck" not in service
-        else:
-            assert "healthcheck" in service, name
+        assert "healthcheck" in service, name
         image = service.get("image")
         assert isinstance(image, str), name
         if ":?set " in image:
