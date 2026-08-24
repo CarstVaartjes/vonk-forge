@@ -198,10 +198,16 @@ def nas_responses(
         )
     )
     if hermes:
-        responses.append(
+        responses.extend(
             (
-                "Hermes dashboard HTTPS origin: ",
-                f"https://{hermes_dashboard_hostname}",
+                (
+                    "Hermes dashboard HTTPS origin: ",
+                    f"https://{hermes_dashboard_hostname}",
+                ),
+                (
+                    "Dedicated Hermes LiteLLM client key (leave blank to generate): ",
+                    "",
+                ),
             )
         )
     return responses

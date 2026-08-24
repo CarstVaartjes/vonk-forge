@@ -55,6 +55,24 @@ def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
     assert acceptance.reference_rollout_bundles(default, hermes) == (hermes,)
 
 
+def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
+    acceptance = _acceptance_module()
+    arguments = {
+        "nas_ip": "192.0.2.10",
+        "tailnet_suffix": "acceptance.example.test",
+        "oauth_client_id": "client-id",
+        "oauth_client_secret": "client-secret",
+        "upstream_key": "upstream-key",
+    }
+
+    disabled = acceptance.nas_responses(**arguments, hermes=False)
+    enabled = acceptance.nas_responses(**arguments, hermes=True)
+    prompt = "Dedicated Hermes LiteLLM client key (leave blank to generate): "
+
+    assert (prompt, "") not in disabled
+    assert (prompt, "") in enabled
+
+
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
     tmp_path: Path, monkeypatch
 ) -> None:
