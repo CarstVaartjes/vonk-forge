@@ -26,6 +26,7 @@ SERVICES = {
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",
+    "hermes-litellm-key-provisioner",
     "postgres",
     "control-api",
     "control-worker",
@@ -156,7 +157,14 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
                 "validation": "https_origin",
             }
         ],
-        "secrets": [],
+        "secrets": [
+            {
+                "file": "hermes-litellm-key",
+                "prompt": "Dedicated Hermes LiteLLM client key",
+                "generate_bytes": 32,
+                "prefix": "sk-",
+            }
+        ],
     }
     runtime_files = {item["file"]: item for item in payload["runtime_files"]}
     assert len(runtime_files) == len(original_compose["configs"])
@@ -175,6 +183,9 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     installer_environment.update(
         item["env"] for item in payload["hermes"]["required_values"]
     )
+    installer_secret_files.update(
+        item["file"] for item in payload["hermes"]["secrets"]
+    )
 
     compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)
@@ -188,6 +199,9 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert "version" not in compose
     assert all("build" not in service for service in compose["services"].values())
     assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
+    assert compose["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
+        "hermes"
+    ]
     assert compose["services"]["caddy"]["ports"] == [
         {
             "target": 8443,

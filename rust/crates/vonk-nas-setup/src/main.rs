@@ -23,6 +23,12 @@ struct Cli {
     /// Preserve site-local values and atomically replace only docker-compose.yaml.
     #[arg(long)]
     upgrade: bool,
+    /// Explicitly enable Hermes while preserving all other site-local state.
+    #[arg(long, conflicts_with = "disable_hermes")]
+    enable_hermes: bool,
+    /// Explicitly disable Hermes while preserving its configuration for reuse.
+    #[arg(long)]
+    disable_hermes: bool,
 }
 
 fn main() {
@@ -48,6 +54,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         SetupRequest::install(&cli.output)
     };
+    let request = if cli.enable_hermes {
+        request.with_hermes_enabled(true)
+    } else if cli.disable_hermes {
+        request.with_hermes_enabled(false)
+    } else {
+        request
+    };
     let outcome = prepare(&payload, request, &mut prompt, &OsSecretGenerator)?;
     writeln!(tty, "Bundle ready at {}", outcome.root.display())?;
     Ok(())
@@ -64,5 +77,28 @@ mod tests {
 
         assert_eq!(cli.output, PathBuf::from("."));
         assert!(!cli.upgrade);
+        assert!(!cli.enable_hermes);
+        assert!(!cli.disable_hermes);
+    }
+
+    #[test]
+    fn hermes_switches_are_explicit_and_mutually_exclusive() {
+        let enabled = Cli::try_parse_from([
+            "vonk-nas-setup",
+            "--template",
+            "payload.json",
+            "--enable-hermes",
+        ])
+        .expect("enable flag accepted");
+        assert!(enabled.enable_hermes);
+
+        Cli::try_parse_from([
+            "vonk-nas-setup",
+            "--template",
+            "payload.json",
+            "--enable-hermes",
+            "--disable-hermes",
+        ])
+        .expect_err("conflicting Hermes flags rejected");
     }
 }

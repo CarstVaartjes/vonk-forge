@@ -39,6 +39,9 @@ def test_development_workflow_renders_only_the_canonical_graph() -> None:
 def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
     document = yaml.safe_load(HERMES_COMPOSE.read_text(encoding="utf-8"))
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
+    assert document["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
+        "hermes"
+    ]
     assert document["x-hermes-service"]["image"] == (
         "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
     )

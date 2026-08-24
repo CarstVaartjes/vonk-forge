@@ -22,6 +22,7 @@ SERVICES = {
     "tailscale-gateway",
     "tailscale-configurator",
     "hermes-agent",
+    "hermes-litellm-key-provisioner",
     "postgres",
     "control-api",
     "control-worker",
@@ -37,6 +38,7 @@ SECRET_FILES = {
     "tailscale-oauth-client-id": "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret": "tailscale-oauth-client-secret",
     "hermes-api-key": "hermes-api-key",
+    "hermes-litellm-key": "hermes-litellm-key",
     "database-url": "database-url",
     "postgres-password": "postgres-password",
     "litellm-database-password": "litellm-database-password",
@@ -123,8 +125,11 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
         if service.get("privileged") is True or service.get("network_mode") == "host":
             raise BundleError(f"Compose service {name} has an unsafe host privilege")
         profiles = service.get("profiles", [])
-        if profiles and (name != "hermes-agent" or profiles != ["hermes"]):
-            raise BundleError("Hermes must be the only optional Compose service")
+        if profiles and (
+            name not in {"hermes-agent", "hermes-litellm-key-provisioner"}
+            or profiles != ["hermes"]
+        ):
+            raise BundleError("only Hermes services may be optional")
         volumes = service.get("volumes", [])
         if not isinstance(volumes, list):
             raise BundleError(f"Compose service {name} volumes are invalid")
@@ -139,6 +144,8 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 )
     if services["hermes-agent"].get("profiles") != ["hermes"]:
         raise BundleError("Hermes must remain opt-in through its Compose profile")
+    if services["hermes-litellm-key-provisioner"].get("profiles") != ["hermes"]:
+        raise BundleError("Hermes key provisioning must remain profile-scoped")
     return services
 
 
@@ -375,7 +382,14 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
                     validation="https_origin",
                 )
             ],
-            "secrets": [],
+            "secrets": [
+                {
+                    "file": "hermes-litellm-key",
+                    "prompt": "Dedicated Hermes LiteLLM client key",
+                    "generate_bytes": 32,
+                    "prefix": "sk-",
+                }
+            ],
         },
     }
 

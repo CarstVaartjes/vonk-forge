@@ -10,7 +10,21 @@ fail() {
     exit 1
 }
 
-[ "$#" -eq 0 ] || fail "this installer does not accept arguments"
+hermes_option=
+case "$#" in
+    0) ;;
+    1)
+        case "$1" in
+            --enable-hermes|--disable-hermes) hermes_option=$1 ;;
+            *) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
+        esac
+        ;;
+    *) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
+esac
+set --
+if [ -n "$hermes_option" ]; then
+    set -- "$hermes_option"
+fi
 
 case $(uname -s) in
     Linux) platform=linux ;;
@@ -68,7 +82,7 @@ actual=$(sha256 "$artifact")
 
 chmod 0700 "$artifact"
 if [ -e ./vonk-forge ]; then
-    "$artifact" --template "$payload" --upgrade
+    "$artifact" --template "$payload" --upgrade "$@"
 else
-    "$artifact" --template "$payload"
+    "$artifact" --template "$payload" "$@"
 fi

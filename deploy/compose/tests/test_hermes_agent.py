@@ -115,6 +115,10 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     assert environment["MESSAGING_CWD"] == "/workspace"
     assert environment["API_SERVER_CORS_ORIGINS"] == "https://hermes.test.example"
     assert service["depends_on"] == {
+        "hermes-litellm-key-provisioner": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
         "caddy": {
             "condition": "service_healthy",
             "required": True,
@@ -130,14 +134,21 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     assert "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" not in environment
     assert "HERMES_DASHBOARD_BASIC_AUTH_SECRET" not in environment
     assert {secret["target"] for secret in service["secrets"]} == {
-        "/run/secrets/hermes-api-key"
+        "/run/secrets/hermes-api-key",
+        "/run/secrets/hermes-litellm-key",
     }
     health = json.dumps(service["healthcheck"]["test"])
     assert "127.0.0.1:8642" in health
     assert "127.0.0.1:9119" in health
 
 
-def _run_entrypoint(tmp_path: Path, payload: bytes | None, *, symlink: bool = False):
+def _run_entrypoint(
+    tmp_path: Path,
+    payload: bytes | None,
+    *,
+    symlink: bool = False,
+    litellm_payload: bytes | None = b"sk-" + b"b" * 64 + b"\n",
+):
     root = tmp_path / "root"
     secret = root / "run/secrets/hermes-api-key"
     secret.parent.mkdir(parents=True)
@@ -145,6 +156,9 @@ def _run_entrypoint(tmp_path: Path, payload: bytes | None, *, symlink: bool = Fa
         secret.symlink_to(root / "missing")
     elif payload is not None:
         secret.write_bytes(payload)
+    litellm_secret = root / "run/secrets/hermes-litellm-key"
+    if litellm_payload is not None:
+        litellm_secret.write_bytes(litellm_payload)
     return subprocess.run(
         ["sh", str(HERMES / "entrypoint.sh")],
         capture_output=True,
@@ -171,6 +185,45 @@ def test_entrypoint_rejects_symlink_and_accepts_32_byte_key(tmp_path: Path) -> N
     assert _run_entrypoint(tmp_path / "link", None, symlink=True).returncode != 0
     result = _run_entrypoint(tmp_path / "valid", b"a" * 32 + b"\n")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (None, b"", b"sk-short\n", b"not-sk-" + b"a" * 64 + b"\n", b"sk-" + b"a" * 64 + b" b\n"),
+)
+def test_entrypoint_rejects_invalid_litellm_client_keys(
+    tmp_path: Path, payload: bytes | None
+) -> None:
+    result = _run_entrypoint(
+        tmp_path, b"a" * 32 + b"\n", litellm_payload=payload
+    )
+
+    assert result.returncode != 0
+    assert "LiteLLM client key file is invalid" in result.stderr
+
+
+def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> None:
+    service = _rendered()["services"]["hermes-litellm-key-provisioner"]
+
+    assert service["profiles"] == ["hermes"]
+    assert service["restart"] == "no"
+    assert service["read_only"] is True
+    assert service["user"] == "0:0"
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert set(service["networks"]) == {"litellm-edge"}
+    assert {secret["target"] for secret in service["secrets"]} == {
+        "/run/secrets/hermes-litellm-key",
+        "/run/secrets/litellm-master-key",
+    }
+    assert service["depends_on"] == {
+        "litellm": {
+            "condition": "service_healthy",
+            "required": True,
+            "restart": True,
+        }
+    }
+    assert not service.get("ports")
 
 
 def test_runtime_harness_covers_security_health_and_persistence() -> None:

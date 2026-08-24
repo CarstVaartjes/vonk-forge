@@ -20,7 +20,8 @@ DEFAULT_SERVICES = {
     "tailscale-configurator",
     "tailscale-gateway",
 }
-ALL_SERVICES = DEFAULT_SERVICES | {"hermes-agent"}
+HERMES_SERVICES = {"hermes-agent", "hermes-litellm-key-provisioner"}
+ALL_SERVICES = DEFAULT_SERVICES | HERMES_SERVICES
 PINNED_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}(?:}|$)")
 
 
@@ -67,6 +68,7 @@ def test_canonical_model_has_the_exact_default_and_optional_service_sets() -> No
     assert default_services == DEFAULT_SERVICES
     assert set(services) == ALL_SERVICES
     assert services["hermes-agent"]["profiles"] == ["hermes"]
+    assert services["hermes-litellm-key-provisioner"]["profiles"] == ["hermes"]
     assert {
         profile
         for service in services.values()
@@ -88,20 +90,22 @@ def test_canonical_model_has_step_ca_without_an_overlay() -> None:
     assert not (COMPOSE_ROOT / "compose.dev.yaml").exists()
 
 
-def test_canonical_model_has_no_one_shot_runtime_service() -> None:
-    """Catches a completed helper container or sleep placeholder in the runtime graph."""
+def test_only_hermes_key_reconciliation_is_a_one_shot_runtime_service() -> None:
+    """Keeps the master-key-bearing helper profile-scoped and narrowly bounded."""
     model = _canonical_model()
     services = model["services"]
     assert isinstance(services, dict)
 
     for name, service in services.items():
         assert isinstance(service, dict), name
-        assert service.get("restart") != "no", name
         assert not _is_sleep_only(service.get("command")), name
         assert not _is_sleep_only(service.get("entrypoint")), name
-        assert "service_completed_successfully" not in _dependency_conditions(
-            service
-        ), name
+        if name == "hermes-litellm-key-provisioner":
+            assert service.get("restart") == "no"
+        else:
+            assert service.get("restart") != "no", name
+        completed = "service_completed_successfully" in _dependency_conditions(service)
+        assert completed is (name == "hermes-agent"), name
 
 
 def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
@@ -112,7 +116,10 @@ def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
 
     for name, service in services.items():
         assert isinstance(service, dict), name
-        assert "healthcheck" in service, name
+        if name == "hermes-litellm-key-provisioner":
+            assert "healthcheck" not in service
+        else:
+            assert "healthcheck" in service, name
         image = service.get("image")
         assert isinstance(image, str), name
         if ":?set " in image:
