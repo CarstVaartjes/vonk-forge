@@ -99,6 +99,30 @@ def test_model_version_requires_a_model_reference() -> None:
         validate_catalog_document(document)
 
 
+def test_model_version_accepts_exact_zero_byte_files_but_rejects_negative_sizes() -> (
+    None
+):
+    document = json.loads(MODEL_VERSION_FIXTURE.read_text())
+    empty = dict(document["artifacts"][0])
+    empty.update(
+        {
+            "id": "empty-runtime-module",
+            "path": "__init__.py",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "download_bytes": 0,
+            "installed_bytes": 0,
+            "roles": ["runtime"],
+        }
+    )
+    document["artifacts"].append(empty)
+
+    validate_catalog_document(document)
+
+    document["artifacts"][-1]["download_bytes"] = -1
+    with pytest.raises(CatalogContractError, match="minimum constraint"):
+        validate_catalog_document(document)
+
+
 def test_harness_source_bundle_is_an_exact_build_input_not_a_catalog_reference() -> (
     None
 ):
