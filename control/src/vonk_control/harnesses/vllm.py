@@ -41,6 +41,12 @@ _ARGUMENTS = {
     "max-cudagraph-capture-size": ArgumentSpec(
         "--max-cudagraph-capture-size", validate=integer(1, 65_536)
     ),
+    "kv-cache-memory-bytes": ArgumentSpec(
+        "--kv-cache-memory-bytes", validate=integer(1, 128_000_000_000)
+    ),
+    "compilation-config": ArgumentSpec(
+        "--compilation-config", validate=lambda value: _json_object(value)
+    ),
     "long-prefill-token-threshold": ArgumentSpec(
         "--long-prefill-token-threshold", validate=integer(1, 10_000_000)
     ),
@@ -54,7 +60,21 @@ _ARGUMENTS = {
     ),
     "kv-cache-dtype": ArgumentSpec(
         "--kv-cache-dtype",
-        validate=one_of("auto", "fp8", "fp8_e4m3", "fp8_e5m2", "nvfp4_ds_mla"),
+        validate=one_of(
+            "auto", "fp8", "fp8_e4m3", "fp8_e5m2", "fp8_ds_mla", "nvfp4_ds_mla"
+        ),
+    ),
+    "decode-context-parallel-size": ArgumentSpec(
+        "--decode-context-parallel-size", validate=integer(1, 16)
+    ),
+    "dcp-comm-backend": ArgumentSpec(
+        "--dcp-comm-backend", validate=one_of("ag_rs", "a2a")
+    ),
+    "mm-encoder-tp-mode": ArgumentSpec(
+        "--mm-encoder-tp-mode", validate=one_of("data", "weights")
+    ),
+    "hf-overrides": ArgumentSpec(
+        "--hf-overrides", validate=lambda value: _json_object(value)
     ),
     "served-model-name": ArgumentSpec("--served-model-name"),
     "tool-call-parser": ArgumentSpec("--tool-call-parser"),
@@ -80,6 +100,9 @@ _ARGUMENTS = {
     "mamba-cache-mode": ArgumentSpec("--mamba-cache-mode", validate=one_of("align")),
     "enable-flashinfer-autotune": ArgumentSpec(
         "--enable-flashinfer-autotune", takes_value=False
+    ),
+    "disable-flashinfer-autotune": ArgumentSpec(
+        "--no-enable-flashinfer-autotune", takes_value=False
     ),
     "speculative-config": ArgumentSpec("--speculative-config"),
     "tokenizer-mode": ArgumentSpec("--tokenizer-mode", validate=one_of("deepseek_v4")),
@@ -163,13 +186,18 @@ class VllmHarnessCompiler:
                 if isinstance(capability, Mapping)
                 else None
             )
+            mechanism = (
+                implementation.get("mechanism")
+                if isinstance(implementation, Mapping)
+                else None
+            )
             parallelism = topology.get("parallelism")
             node_count = topology.get("node_count")
             if (
                 patch is None
                 or not isinstance(implementation, Mapping)
                 or implementation.get("verified") is not True
-                or implementation.get("mechanism") != "vllm-mp"
+                or mechanism not in {"vllm-mp", "vllm-ray"}
                 or implementation.get("topology_mode") != "distributed"
                 or implementation.get("node_count") != node_count
                 or implementation.get("world_size") != node_count
@@ -251,7 +279,7 @@ class VllmHarnessCompiler:
                 "--pipeline-parallel-size",
                 str(parallelism["pipeline"]),
                 "--distributed-executor-backend",
-                "mp",
+                "mp" if mechanism == "vllm-mp" else "ray",
                 "--nnodes",
                 str(node_count),
                 "--node-rank",
@@ -273,17 +301,39 @@ class VllmHarnessCompiler:
                     "FLASHINFER_CUDA_ARCH_LIST",
                     "FLASHINFER_DISABLE_VERSION_CHECK",
                     "FLASHINFER_WORKSPACE_BASE",
+                    "GLM52_B12X_MLA",
+                    "GLM52_B12X_SCORE_MODE",
+                    "GLM52_BIND_HOST_TRITON",
+                    "GLM52_MQA_LOGITS_TRITON",
+                    "GLM52_PAGED_MQA_TOPK_CHUNK_SIZE",
+                    "GLM52_PAGED_MQA_TRITON",
+                    "GLM_MOE_AQLM_CB",
+                    "GLM_MOE_AQLM_STREAM",
+                    "GLM_MOE_LANE_ROWS",
+                    "GLM_NVFP4_STREAM",
+                    "GLM_NVFP4_LUT256",
+                    "GLM_SHARED_EXPERTS_DEBUG",
                     "HF_HUB_DISABLE_XET",
                     "HF_HUB_OFFLINE",
                     "NCCL_CROSS_NIC",
                     "NCCL_CUMEM_ENABLE",
                     "NCCL_DEBUG",
+                    "NCCL_BUFFSIZE",
+                    "NCCL_GIN_ENABLE",
+                    "NCCL_GRAPH_MIXING_SUPPORT",
                     "NCCL_IB_ADDR_FAMILY",
                     "NCCL_IB_DISABLE",
+                    "NCCL_IB_MERGE_NICS",
                     "NCCL_IB_ROCE_VERSION_NUM",
+                    "NCCL_IB_SUBNET_AWARE_ROUTING",
                     "NCCL_IGNORE_CPU_AFFINITY",
+                    "NCCL_MAX_NCHANNELS",
+                    "NCCL_MIN_NCHANNELS",
                     "NCCL_NET",
                     "NCCL_NVLS_ENABLE",
+                    "NCCL_P2P_DISABLE",
+                    "NCCL_PROTO",
+                    "NCCL_SHM_DISABLE",
                     "PYTORCH_CUDA_ALLOC_CONF",
                     "TILELANG_CACHE_DIR",
                     "TILELANG_CLEANUP_TEMP_FILES",
@@ -295,15 +345,21 @@ class VllmHarnessCompiler:
                     "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M",
                     "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS",
                     "VLLM_FLASHINFER_MOE_BACKEND",
+                    "VLLM_GLM_TP_PAD",
                     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS",
+                    "VLLM_MTP_INDEX_SHARE",
+                    "VLLM_NCCL_SO_PATH",
                     "VLLM_NO_USAGE_STATS",
                     "VLLM_NVFP4_GEMM_BACKEND",
                     "VLLM_PREFIX_CACHE_RETENTION_INTERVAL",
                     "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB",
                     "VLLM_USE_B12X_MOE",
+                    "VLLM_DISABLE_FP8_W8A16",
+                    "VLLM_MARLIN_USE_ATOMIC_ADD",
                     "VLLM_USE_FLASHINFER_SAMPLER",
                     "VLLM_USE_FLASHINFER_MOE_FP4",
                     "VLLM_USE_BREAKABLE_CUDAGRAPH",
+                    "VLLM_WORKER_MULTIPROC_METHOD",
                 }
             ),
         )
@@ -438,6 +494,18 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError("duplicate JSON member")
         result[name] = value
     return result
+
+
+def _json_object(value: str) -> bool:
+    try:
+        parsed = json.loads(
+            value,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(parsed, Mapping)
 
 
 def _reject_json_constant(value: str) -> object:

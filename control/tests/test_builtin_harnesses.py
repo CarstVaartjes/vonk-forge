@@ -16,6 +16,7 @@ from vonk_control.catalog_contract import (
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
 from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.vllm import VllmHarnessCompiler
 from vonk_control.models import Base
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -747,6 +748,161 @@ def test_vllm_accepts_glm_reasoning_parser() -> None:
 
     assert "--reasoning-parser" in projection.command
     assert "glm45" in projection.command
+
+
+def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "kv-cache-memory-bytes", "value": 11_811_160_064},
+            {"name": "kv-cache-dtype", "value": "fp8_ds_mla"},
+            {"name": "decode-context-parallel-size", "value": 1},
+            {"name": "dcp-comm-backend", "value": "ag_rs"},
+            {"name": "mm-encoder-tp-mode", "value": "data"},
+            {
+                "name": "hf-overrides",
+                "value": '{"num_experts_per_tok":4,"index_topk_freq":8}',
+            },
+            {
+                "name": "compilation-config",
+                "value": '{"cudagraph_mode":"FULL","pass_config":{"fuse_gemm_comms":true}}',
+            },
+            {"name": "disable-flashinfer-autotune", "value": True},
+        ]
+    )
+    recipe["runtime"]["environment"] = [
+        {"name": "GLM_MOE_AQLM_CB", "value": "l1"},
+        {"name": "GLM_MOE_AQLM_STREAM", "value": "1"},
+        {"name": "GLM_NVFP4_STREAM", "value": "1"},
+        {"name": "GLM52_B12X_MLA", "value": "1"},
+        {"name": "GLM52_BIND_HOST_TRITON", "value": "1"},
+        {"name": "GLM52_MQA_LOGITS_TRITON", "value": "1"},
+        {"name": "GLM52_PAGED_MQA_TRITON", "value": "1"},
+        {"name": "GLM52_PAGED_MQA_TOPK_CHUNK_SIZE", "value": "8192"},
+        {"name": "NCCL_MAX_NCHANNELS", "value": "4"},
+        {"name": "NCCL_MIN_NCHANNELS", "value": "4"},
+        {"name": "VLLM_DISABLE_FP8_W8A16", "value": "0"},
+        {"name": "VLLM_MARLIN_USE_ATOMIC_ADD", "value": "1"},
+    ]
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--kv-cache-memory-bytes" in projection.command
+    assert "--kv-cache-dtype" in projection.command
+    assert "fp8_ds_mla" in projection.command
+    assert "--decode-context-parallel-size" in projection.command
+    assert "--dcp-comm-backend" in projection.command
+    assert "--mm-encoder-tp-mode" in projection.command
+    assert "--hf-overrides" in projection.command
+    assert "--compilation-config" in projection.command
+    assert "--no-enable-flashinfer-autotune" in projection.command
+    assert set(projection.environment) == {
+        (item["name"], item["value"]) for item in recipe["runtime"]["environment"]
+    }
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["hf-overrides", "compilation-config"],
+)
+def test_vllm_rejects_invalid_json_object_options(name: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": name, "value": '{"mode":3,"mode":2}'}
+    )
+
+    with pytest.raises(HarnessCompileError, match="argument value is invalid"):
+        _compile("vllm", recipe=recipe)
+
+
+def test_vllm_projects_a_verified_ray_adapter_contract() -> None:
+    recipe = _recipe("vllm")
+    artifact = recipe["artifacts"][0]
+    artifact.update({"id": "weights", "roles": ["entrypoint", "worker"]})
+    role = copy.deepcopy(recipe["topology"]["roles"][0])
+    role["artifacts"] = ["weights"]
+    worker = copy.deepcopy(role)
+    worker.update({"name": "worker", "count": 2, "endpoint_owner": False})
+    recipe["topology"].update(
+        {
+            "name": "triple",
+            "mode": "distributed",
+            "node_count": 3,
+            "roles": [role, worker],
+            "parallelism": {
+                "world_size": 3,
+                "tensor": 3,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "mp",
+            },
+            "fabric": {
+                "connectivity": "connected",
+                "minimum_bandwidth_mbps": 200_000,
+            },
+            "start_order": ["entrypoint", "worker"],
+            "stop_order": ["entrypoint", "worker"],
+        }
+    )
+    tensor = next(
+        item
+        for item in recipe["runtime"]["arguments"]
+        if item["name"] == "tensor-parallel-size"
+    )
+    tensor["value"] = 3
+    recipe["runtime"]["security"]["host_network"] = True
+    harness = _harness_document("vllm")
+    distribution = _distribution("vllm", harness)
+    rank_environment = {
+        "GLOO_SOCKET_IFNAME": "enP7s7",
+        "NCCL_IB_GID_INDEX": "3",
+        "NCCL_IB_HCA": "=rocep1s0f0:1,rocep1s0f1:1",
+        "NCCL_SOCKET_IFNAME": "=enP7s7",
+        "TP_SOCKET_IFNAME": "enP7s7",
+    }
+    distribution["capabilities"] = {
+        "distributed_vllm": {
+            "verified": True,
+            "mechanism": "vllm-ray",
+            "topology_mode": "distributed",
+            "node_count": 3,
+            "world_size": 3,
+            "tensor_parallel_size": 3,
+            "pipeline_parallel_size": 1,
+            "data_parallel_size": 1,
+            "fabric": "nccl-roce",
+            "endpoint_role": "entrypoint",
+            "worker_role": "worker",
+            "rank_loss_withdraws_endpoint": True,
+            "launch": {
+                "rendezvous": {
+                    "local_address_environment": "VONK_LOCAL_ADDR",
+                    "master_address_environment": "VONK_MASTER_ADDR",
+                    "master_port_environment": "VONK_MASTER_PORT",
+                    "master_role": "entrypoint",
+                },
+                "rank_profiles": [
+                    {"rank": 0, "role": "entrypoint", "environment": rank_environment},
+                    {"rank": 1, "role": "worker", "environment": rank_environment},
+                    {"rank": 2, "role": "worker", "environment": rank_environment},
+                ],
+            },
+        }
+    }
+
+    projection = VllmHarnessCompiler().compile(
+        recipe,
+        distribution,
+        {},
+        {},
+        recipe["topology"],
+        "worker",
+        1,
+    )
+
+    backend = projection.command.index("--distributed-executor-backend")
+    assert projection.command[backend + 1] == "ray"
+    assert "--headless" in projection.command
 
 
 def test_vllm_accepts_gemma4_chat_protocol() -> None:
