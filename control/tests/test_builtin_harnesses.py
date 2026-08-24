@@ -593,6 +593,83 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
+@pytest.mark.parametrize(
+    ("parser", "plugin"),
+    [
+        ("nano_v3", "/models/nano_v3_reasoning_parser.py"),
+        ("super_v3", "/models/super_v3_reasoning_parser.py"),
+    ],
+)
+def test_vllm_accepts_only_snapshot_owned_nemotron_parser_plugins(
+    parser: str, plugin: str
+) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "reasoning-parser-plugin", "value": plugin},
+            {"name": "reasoning-parser", "value": parser},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert (
+        projection.command[projection.command.index("--reasoning-parser-plugin") + 1]
+        == plugin
+    )
+    assert (
+        projection.command[projection.command.index("--reasoning-parser") + 1] == parser
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [{"name": "reasoning-parser", "value": "nano_v3"}],
+        [
+            {
+                "name": "reasoning-parser-plugin",
+                "value": "/models/super_v3_reasoning_parser.py",
+            },
+            {"name": "reasoning-parser", "value": "nano_v3"},
+        ],
+        [
+            {
+                "name": "reasoning-parser-plugin",
+                "value": "/models/nano_v3_reasoning_parser.py",
+            },
+            {"name": "reasoning-parser", "value": "nemotron_v3"},
+        ],
+    ],
+)
+def test_vllm_rejects_missing_mismatched_or_unowned_reasoning_plugins(
+    arguments: list[dict[str, object]],
+) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(arguments)
+
+    with pytest.raises(HarnessCompileError, match="reasoning parser"):
+        _compile("vllm", recipe=recipe)
+
+
+def test_vllm_accepts_nemotron_fp4_and_flashinfer_backend() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "quantization", "value": "modelopt_fp4"}
+    )
+    recipe["runtime"]["environment"] = [
+        {"name": "VLLM_FLASHINFER_MOE_BACKEND", "value": "throughput"}
+    ]
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert (
+        projection.command[projection.command.index("--quantization") + 1]
+        == "modelopt_fp4"
+    )
+    assert ("VLLM_FLASHINFER_MOE_BACKEND", "throughput") in projection.environment
+
+
 def test_vllm_accepts_bounded_nemotron_dspark_options() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].extend(
