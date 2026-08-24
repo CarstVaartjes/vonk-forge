@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {KeyboardEvent as ReactKeyboardEvent} from "react";
-import type {ControlApi, EnrollmentGrantResponse} from "../api/types";
+import type {ControlApi, EnrollmentGrantResponse, VisualFleetNode} from "../api/types";
 import {CopyButton} from "../components/copy-button";
 import {FleetCompactView, FleetTopologyView} from "../components/fleet-views";
 import {Meter} from "../components/meter";
@@ -9,14 +9,17 @@ import {NodeDetail} from "../components/node-detail";
 import {StatusPill} from "../components/status-pill";
 import {useFleetStream} from "../hooks/use-fleet-stream";
 import {usePoliteAnnouncement} from "../hooks/use-polite-announcement";
-import {formatBytes, summarizeFleet} from "../lib/fleet";
+import {formatBytes, nodeDisplayName, nodeOperationalState, nodeSecondaryName, nodeWarningsAt, summarizeFleet} from "../lib/fleet";
 
 export const ENROLLMENT_GRANT_TTL_SECONDS = 900;
 export const FLEET_VIEW_STORAGE_KEY = "vonk-forge:fleet-view";
-export type FleetViewMode = "cards" | "compact" | "topology";
+export type FleetViewMode = "detailed" | "compact" | "topology";
+type FleetHealthFilter = ReturnType<typeof nodeOperationalState>;
+type FleetSort = "attention" | "name";
 
-const FLEET_VIEWS: readonly {label: string; value: FleetViewMode; icon: "cards" | "compact" | "topology"}[] = [
-  {label: "Cards", value: "cards", icon: "cards"},
+const HEALTH_STATES = ["live", "delayed", "stale", "offline"] as const satisfies readonly FleetHealthFilter[];
+const FLEET_VIEWS: readonly {label: string; value: FleetViewMode; icon: "detailed" | "compact" | "topology"}[] = [
+  {label: "Detailed", value: "detailed", icon: "detailed"},
   {label: "Compact", value: "compact", icon: "compact"},
   {label: "Topology", value: "topology", icon: "topology"},
 ];
@@ -24,16 +27,53 @@ const FLEET_VIEWS: readonly {label: string; value: FleetViewMode; icon: "cards" 
 function storedFleetView(): FleetViewMode {
   try {
     const value = localStorage.getItem(FLEET_VIEW_STORAGE_KEY);
-    return value === "compact" || value === "topology" ? value : "cards";
+    if (value === "compact" || value === "topology") return value;
+    // `cards` was persisted by releases before this view was renamed Detailed.
+    return "detailed";
   } catch {
-    return "cards";
+    return "detailed";
   }
 }
 
-function ViewIcon({kind}: {kind: "cards" | "compact" | "topology"}) {
-  if (kind === "cards") return <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/><rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/></svg>;
+function ViewIcon({kind}: {kind: "detailed" | "compact" | "topology"}) {
+  if (kind === "detailed") return <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/><rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/></svg>;
   if (kind === "compact") return <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="3" cy="5" r="1"/><circle cx="3" cy="10" r="1"/><circle cx="3" cy="15" r="1"/></svg>;
   return <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="10" cy="4" r="2"/><circle cx="4" cy="15" r="2"/><circle cx="16" cy="15" r="2"/><path d="M10 6v3M10 9 4 13M10 9l6 4"/></svg>;
+}
+
+function attentionRank(node: VisualFleetNode, now: Date): number {
+  const state = nodeOperationalState(node, now);
+  const stateRank: Record<FleetHealthFilter, number> = {offline: 4, stale: 3, delayed: 2, live: 0};
+  const warnings = nodeWarningsAt(node, now);
+  const errorCount = warnings.filter(warning => warning.severity === "error").length;
+  const degradedWork = node.installed.filter(item => !item.complete).length + node.loaded.filter(item => !item.healthy).length;
+  return stateRank[state] * 1_000 + errorCount * 100 + warnings.length * 10 + degradedWork;
+}
+
+function filterAndSortNodes(
+  nodes: readonly VisualFleetNode[],
+  now: Date,
+  query: string,
+  healthFilters: readonly FleetHealthFilter[],
+  warningsOnly: boolean,
+  sort: FleetSort,
+): VisualFleetNode[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return nodes
+    .filter(node => {
+      if (healthFilters.length > 0 && !healthFilters.includes(nodeOperationalState(node, now))) return false;
+      if (warningsOnly && nodeOperationalState(node, now) === "live" && nodeWarningsAt(node, now).length === 0) return false;
+      if (!normalizedQuery) return true;
+      const friendlyNames = [nodeDisplayName(node), nodeSecondaryName(node)].filter(Boolean).join(" ").toLocaleLowerCase();
+      return friendlyNames.includes(normalizedQuery);
+    })
+    .sort((left, right) => {
+      if (sort === "attention") {
+        const difference = attentionRank(right, now) - attentionRank(left, now);
+        if (difference !== 0) return difference;
+      }
+      return nodeDisplayName(left).localeCompare(nodeDisplayName(right), undefined, {numeric: true, sensitivity: "base"});
+    });
 }
 
 function countLabel(count: number, singular: string): string {
@@ -206,8 +246,13 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
   const [viewMode, setViewMode] = useState<FleetViewMode>(storedFleetView);
+  const [query, setQuery] = useState("");
+  const [healthFilters, setHealthFilters] = useState<FleetHealthFilter[]>([]);
+  const [warningsOnly, setWarningsOnly] = useState(false);
+  const [sort, setSort] = useState<FleetSort>("attention");
   const [gpuTrends, setGpuTrends] = useState<Record<string, number[]>>({});
   const detailTrigger = useRef<HTMLElement | null>(null);
+  const discoverySearch = useRef<HTMLInputElement>(null);
   const onboardingTrigger = useRef<HTMLElement | null>(null);
   const lastTrendSample = useRef(new Map<string, string>());
 
@@ -238,8 +283,21 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     ? `Fleet status: ${summary.live} live, ${summary.delayed} delayed, ${summary.stale} stale, ${summary.offline} offline; ${countLabel(summary.installedRecipes, "installed recipe")}; ${countLabel(summary.loadedRecipes, "loaded recipe")}; ${countLabel(summary.warnings, "warning")}.`
     : "";
   const announcement = usePoliteAnnouncement(announcementMessage);
-  const selectedNode = fleet.snapshot?.nodes.find(node => node.id === selectedNodeId);
+  const visibleNodes = useMemo(
+    () => filterAndSortNodes(fleet.snapshot?.nodes ?? [], fleet.now, query, healthFilters, warningsOnly, sort),
+    [fleet.now, fleet.snapshot?.nodes, healthFilters, query, sort, warningsOnly],
+  );
+  const selectedNode = visibleNodes.find(node => node.id === selectedNodeId);
   const connection = connectionPresentation(fleet.connection);
+  const filtersActive = query.trim().length > 0 || healthFilters.length > 0 || warningsOnly;
+
+  useEffect(() => {
+    if (!selectedNodeId || selectedNode) return;
+    const detailHadFocus = document.activeElement instanceof HTMLElement && Boolean(document.activeElement.closest(".node-detail"));
+    setSelectedNodeId(undefined);
+    detailTrigger.current = null;
+    if (detailHadFocus) queueMicrotask(() => discoverySearch.current?.focus());
+  }, [selectedNode, selectedNodeId]);
 
   function selectNode(nodeId: string) {
     if (document.activeElement instanceof HTMLElement) detailTrigger.current = document.activeElement;
@@ -248,7 +306,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
 
   function closeDetail() {
     setSelectedNodeId(undefined);
-    queueMicrotask(() => detailTrigger.current?.focus());
+    const trigger = detailTrigger.current;
+    queueMicrotask(() => (trigger?.isConnected ? trigger : discoverySearch.current)?.focus());
   }
 
   function closeOnboarding() {
@@ -259,6 +318,16 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   function changeView(next: FleetViewMode) {
     setViewMode(next);
     try { localStorage.setItem(FLEET_VIEW_STORAGE_KEY, next); } catch { /* Preference persistence is optional. */ }
+  }
+
+  function toggleHealthFilter(state: FleetHealthFilter) {
+    setHealthFilters(current => current.includes(state) ? current.filter(value => value !== state) : [...current, state]);
+  }
+
+  function clearDiscoveryFilters() {
+    setQuery("");
+    setHealthFilters([]);
+    setWarningsOnly(false);
   }
 
   return <div className="fleet-page">
@@ -300,17 +369,17 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         <div className="fleet-health-strip" role="img" aria-label={`${summary.live} live, ${summary.delayed} delayed, ${summary.stale} stale, ${summary.offline} offline`}>
           {(["live", "delayed", "stale", "offline"] as const).map(state => summary[state] > 0 && <span key={state} className={`health-${state}`} style={{flexGrow: summary[state]}} aria-hidden="true"/>)}
         </div>
-        <dl className="fleet-state-counts">
-          {(["live", "delayed", "stale", "offline"] as const).map(state => <div key={state} className={`summary-${state}`}>
-            <dt>{state.charAt(0).toUpperCase() + state.slice(1)}</dt>
-            <dd>{summary[state]}</dd>
-          </div>)}
-        </dl>
+        <div className="fleet-state-counts" role="group" aria-label="Filter Fleet by health">
+          {HEALTH_STATES.map(state => <button key={state} type="button" className={`summary-${state}`} aria-pressed={healthFilters.includes(state)} aria-label={`${healthFilters.includes(state) ? "Hide" : "Show"} ${state} nodes`} onClick={() => toggleHealthFilter(state)}>
+            <span>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
+            <strong>{summary[state]}</strong>
+          </button>)}
+        </div>
       </div>
       <div className="fleet-activity">
         <strong>{countLabel(summary.loadedRecipes, "loaded recipe")}</strong>
         <span>{countLabel(summary.installedRecipes, "installed recipe")}</span>
-        <span>{countLabel(summary.warnings, "active warning")}</span>
+        <button type="button" className="fleet-warning-filter" aria-pressed={warningsOnly} onClick={() => setWarningsOnly(value => !value)}>{countLabel(summary.warnings, "active warning")}</button>
         <small>{countLabel(summary.total, "registered node")}</small>
       </div>
     </section>}
@@ -335,6 +404,14 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     </section>}
 
     {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <>
+      <section className="fleet-discovery" aria-label="Fleet discovery">
+        <label className="fleet-search"><span>Find a Spark</span><input ref={discoverySearch} type="search" value={query} placeholder="Search friendly name or hostname" onChange={event => setQuery(event.currentTarget.value)}/></label>
+        <fieldset className="fleet-health-filters"><legend>Health</legend><div>
+          {HEALTH_STATES.map(state => <label key={state}><input type="checkbox" checked={healthFilters.includes(state)} onChange={() => toggleHealthFilter(state)}/><span>{state.charAt(0).toUpperCase() + state.slice(1)} <small>{summary?.[state] ?? 0}</small></span></label>)}
+        </div></fieldset>
+        <label className="fleet-sort"><span>Sort</span><select value={sort} onChange={event => setSort(event.currentTarget.value as FleetSort)}><option value="attention">Attention first</option><option value="name">Name A–Z</option></select></label>
+        <div className="fleet-discovery-footer"><span role="status">Showing {visibleNodes.length} of {fleet.snapshot.nodes.length} {fleet.snapshot.nodes.length === 1 ? "Spark" : "Sparks"}</span>{filtersActive && <button type="button" className="fleet-clear-filters" onClick={clearDiscoveryFilters}>Clear filters</button>}</div>
+      </section>
       <div className="fleet-view-toolbar">
         <div><strong>Fleet view</strong><span>Choose the level of detail that suits this task.</span></div>
         <div className="fleet-view-switcher" role="group" aria-label="Fleet view">
@@ -342,8 +419,9 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         </div>
       </div>
       <div className={`fleet-workspace fleet-view-${viewMode}${selectedNode ? " has-detail" : ""}`}>
-        {viewMode === "cards" && <section className="node-grid" aria-label="Fleet nodes cards">
-          {fleet.snapshot.nodes.map(node => <NodeCard
+        {visibleNodes.length === 0 && <section className="fleet-filter-empty" aria-label="No matching Sparks"><p className="fleet-kicker">No matches</p><h3>No Sparks match these filters</h3><p>Try another friendly name or include more health states.</p><button type="button" className="button secondary" onClick={clearDiscoveryFilters}>Clear filters</button></section>}
+        {visibleNodes.length > 0 && viewMode === "detailed" && <section className="node-grid" aria-label="Fleet nodes detailed">
+          {visibleNodes.map(node => <NodeCard
             key={node.id}
             node={node}
             now={fleet.now}
@@ -352,8 +430,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
             trend={gpuTrends[node.id]}
           />)}
         </section>}
-        {viewMode === "compact" && <FleetCompactView nodes={fleet.snapshot.nodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
-        {viewMode === "topology" && <FleetTopologyView nodes={fleet.snapshot.nodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
+        {visibleNodes.length > 0 && viewMode === "compact" && <FleetCompactView nodes={visibleNodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
+        {visibleNodes.length > 0 && viewMode === "topology" && <FleetTopologyView nodes={visibleNodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
         {selectedNode && <NodeDetail api={api} node={selectedNode} now={fleet.now} onClose={closeDetail}/>}
       </div>
     </>}

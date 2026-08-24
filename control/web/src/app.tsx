@@ -156,7 +156,6 @@ export function App({api}: {api: ControlApi}) {
     navigationLocked={navigationLocked}
     onNavigate={navigate}
     operator={auth ? {
-      environment: "Development",
       logoutError: auth.logoutError,
       loggingOut: auth.loggingOut,
       onLogout: () => requestNavigation("sign out", () => { void auth.logout(); }),

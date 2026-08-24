@@ -165,6 +165,7 @@ def bridge_api(tmp_path: Path, recipe_document):
     )
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\nUSER 65532:65532\n"})
     recipe_document = copy.deepcopy(recipe_document)
+    recipe_document["metadata"]["tags"].append("executable")
     recipe_document["build"]["context"]["sha256"] = bundle.sha256
     recipe_document["build"]["context"]["expected_bytes"] = len(bundle.archive)
     _seed_recipe_dependencies(service, recipe_document)
@@ -252,9 +253,10 @@ def test_public_recipe_qualification_requires_explicit_unambiguous_acceptance(
         ({"accepted", "chat"}, "not-declared"),
         ({"candidate", "integration-required"}, "integration-required"),
         ({"metadata-only", "non-executable"}, "not-executable"),
+        ({"metadata-only"}, "not-executable"),
+        ({"metadata-only", "executable"}, "not-executable"),
         ({"integration-required", "non-executable"}, "not-executable"),
         ({"executable", "integration-required"}, "integration-required"),
-        ({"metadata-only"}, "not-declared"),
     ],
 )
 def test_public_recipe_readiness_is_independent_and_fails_closed(
@@ -821,6 +823,94 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
     assert imported.status_code == 201, imported.text
     assert imported.json()["origin"] == "recipe_library"
     assert any(event.action == "catalog.public.import" for event in audits.list())
+
+
+@pytest.mark.parametrize(
+    ("readiness_tag", "expected_readiness"),
+    [
+        (None, "not-declared"),
+        ("non-executable", "not-executable"),
+        ("metadata-only", "not-executable"),
+        ("integration-required", "integration-required"),
+    ],
+)
+def test_public_catalog_hides_and_rejects_recipes_without_executable_contract(
+    bridge_api, readiness_tag: str | None, expected_readiness: str
+) -> None:
+    _client, _headers, audits, service, remote = bridge_api
+    document = copy.deepcopy(remote.document)
+    document["metadata"]["tags"].remove("executable")
+    if readiness_tag is not None:
+        document["metadata"]["tags"].append(readiness_tag)
+    digest = recipe_content_sha256(document)
+    item = RecipeLibraryItem(
+        library_commit="a" * 40,
+        source_path="recipes/unsupported-public-recipe.json",
+        publisher="vonk-forge",
+        slug="unsupported-public-recipe",
+        title="Unsupported public recipe",
+        description="A public recipe without an executable runtime contract.",
+        tags=tuple(document["metadata"]["tags"]),
+        content_sha256=digest,
+        uri=(
+            "vonk://catalog/vonk-forge/unsupported-public-recipe"
+            f"@sha256:{digest}"
+        ),
+        document=document,
+    )
+
+    class Library:
+        def list(self):
+            executable = RecipeLibraryItem(
+                library_commit="a" * 40,
+                source_path="recipes/synthetic-tiny-openai.json",
+                publisher=remote.publisher,
+                slug=remote.slug,
+                title="Synthetic Tiny OpenAI",
+                description="A complete executable public recipe.",
+                tags=tuple(remote.document["metadata"]["tags"]),
+                content_sha256=remote.content_sha256,
+                uri=remote.uri,
+                document=remote.document,
+            )
+            return RecipeLibrarySnapshot(
+                commit="a" * 40,
+                items=(item, executable),
+            )
+
+        def fetch(self, uri: str):
+            assert uri == item.uri
+            return item
+
+    codec = TokenCodec(b"x" * 32)
+    app = _catalog_app(codec, audits, service, recipe_library=Library())
+    client = TestClient(app)
+    token = codec.issue(
+        Actor("administrator", "administrator"), ttl_seconds=100, now=0
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+
+    listed = client.get("/api/v1/catalog/public-recipes", headers=auth)
+    preview = client.post(
+        "/api/v1/catalog/imports/public/preview",
+        headers=auth,
+        json={"uri": item.uri},
+    )
+    imported = client.post(
+        "/api/v1/catalog/imports/public",
+        headers=auth,
+        json={"uri": item.uri, "expected_content_sha256": digest},
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert [recipe["slug"] for recipe in listed.json()["recipes"]] == [remote.slug]
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["execution_readiness"] == expected_readiness
+    assert imported.status_code == 422, imported.text
+    assert imported.json()["code"] == "public.recipe_not_executable"
+    assert "complete executable runtime contract" in imported.json()["detail"]
+    assert service.list_recipes()[0] == []
+    assert not any(event.action == "catalog.public.import" for event in audits.list())
 
 
 def test_public_recipe_preview_explains_known_update_since_local_digest(

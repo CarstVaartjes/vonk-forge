@@ -101,6 +101,10 @@
   top: 1rem;
 }
 
+.public-import-page .public-import-mobile-filter-toggle {
+  display: none;
+}
+
 .public-import-compare {
   background: #07110ee8;
   border: 1px solid #68e5b34d;
@@ -433,9 +437,6 @@
 .public-import-recipe-list {
   display: grid;
   gap: 0.7rem;
-  max-height: calc(100vh - 15rem);
-  overflow: auto;
-  overscroll-behavior: contain;
   padding: 0.1rem 0.2rem 0.1rem 0.1rem;
 }
 
@@ -1053,6 +1054,15 @@
   border-color: #db765f66;
 }
 
+.public-import-state.is-slow {
+  background: #31250f;
+  border-color: #f5c86d73;
+}
+
+.public-import-active-request {
+  margin: 0 0 0.85rem;
+}
+
 .public-import-spinner {
   border: 3px solid #68e5b32e;
   border-radius: 50%;
@@ -1139,6 +1149,23 @@
     display: block;
   }
 
+  .public-import-page .public-import-mobile-filter-toggle {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    width: 100%;
+  }
+
+  .public-import-mobile-filter-count {
+    background: #173d30;
+    border: 1px solid #68e5b366;
+    border-radius: 999px;
+    color: var(--mint-strong);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+  }
+
   .public-import-filter-rail,
   .public-import-results,
   .public-import-review-pane {
@@ -1153,12 +1180,12 @@
   }
 
   .public-import-filter-rail {
+    display: none;
     margin-bottom: 0.75rem;
   }
 
-  .public-import-recipe-list {
-    max-height: none;
-    overflow: visible;
+  .public-import-filter-rail.is-mobile-open {
+    display: grid;
   }
 
   .public-import-review-pane {
@@ -1168,8 +1195,10 @@
 
   .public-import-page.step-review .public-import-filter-rail,
   .public-import-page.step-review .public-import-results,
+  .public-import-page.step-review .public-import-mobile-filter-toggle,
   .public-import-page.step-confirm .public-import-filter-rail,
-  .public-import-page.step-confirm .public-import-results {
+  .public-import-page.step-confirm .public-import-results,
+  .public-import-page.step-confirm .public-import-mobile-filter-toggle {
     display: none;
   }
 

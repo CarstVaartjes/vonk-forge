@@ -22,6 +22,36 @@ type CatalogView = "cards" | "compact";
 type Facet = "model" | "sourceOwner" | "repository" | "sparks" | "runtime" | "precision" | "topology" | "qualification" | "readiness" | "local" | "capability";
 
 const CATALOG_VIEW_STORAGE_KEY = "vonk.public-recipe-catalog.view";
+const PUBLIC_RECIPE_URI_PATTERN = /^vonk:\/\/catalog\/[a-z0-9][a-z0-9-]{1,62}\/[a-z0-9][a-z0-9-]{1,62}@sha256:[0-9a-f]{64}$/;
+const REQUEST_SLOW_MS = 5_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+class RequestTimeoutError extends Error {}
+
+function runBoundedRequest<T>(controller: AbortController, onSlow: () => void, timeoutMessage: string, request: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(deadlineTimer);
+      controller.signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(new DOMException("The request was canceled", "AbortError")));
+    const slowTimer = window.setTimeout(() => { if (!settled) onSlow(); }, REQUEST_SLOW_MS);
+    const deadlineTimer = window.setTimeout(() => {
+      finish(() => reject(new RequestTimeoutError(timeoutMessage)));
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+    controller.signal.addEventListener("abort", onAbort, {once: true});
+    void Promise.resolve().then(request).then(
+      value => finish(() => resolve(value)),
+      error => finish(() => reject(error)),
+    );
+  });
+}
 
 export type PublicRecipeFilters = {
   query: string;
@@ -47,7 +77,7 @@ const EMPTY_FILTERS: PublicRecipeFilters = {
 const VALID_SPARKS = new Set<SparkFilter>(["", "1", "2", "3", "4+"]);
 const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download"]);
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
-const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", "executable", "not-executable", "integration-required", "not-declared"]);
+const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", "executable"]);
 const VALID_CAPABILITIES = new Set(PUBLIC_RECIPE_CAPABILITIES.map(option => option.value));
 
 function storedCatalogView(): CatalogView {
@@ -329,17 +359,21 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   return items;
 }
 
-function Preview({preview, saving, status, onBack, onConfirm, onImport}: {
+function Preview({preview, saving, importError, importOutcomeUnknown, status, onBack, onConfirm, onImport, onRecheckImport}: {
   preview: PublicRecipePreview;
   saving: boolean;
+  importError: string;
+  importOutcomeUnknown: boolean;
   status: string;
   onBack(): void;
   onConfirm(): void;
   onImport(): void;
+  onRecheckImport(): void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { queueMicrotask(() => heading.current?.focus()); }, [preview.uri, status]);
   const requiredEffect = strongestUpgradeEffect(preview.changes_since_local);
+  const executable = preview.execution_readiness === "executable";
   return <section className={`public-import-preview${status === "confirm" ? " is-confirming" : ""}`} aria-labelledby="public-import-preview-title" aria-busy={saving}>
     <button type="button" className="button secondary public-import-mobile-back" disabled={saving} onClick={onBack}>Back to catalog</button>
     <header className="public-import-preview-header">
@@ -355,7 +389,10 @@ function Preview({preview, saving, status, onBack, onConfirm, onImport}: {
       <div><span>Upgrade effect</span><strong>{requiredEffect ? upgradeEffectLabel(requiredEffect) : preview.local.status === "not-imported" ? "New installation" : "No runtime change listed"}</strong></div>
       <div><span>Changes</span><strong>{preview.changes_since_local.reduce((total, release) => total + release.changes.length, 0)}</strong></div>
     </div>
-    {status === "confirm" && <div className={`public-import-confirmation-copy readiness-${preview.execution_readiness}`}><strong>{preview.execution_readiness === "not-executable" ? "Import this non-executable recipe metadata?" : preview.execution_readiness === "integration-required" ? "Import this integration-required recipe?" : preview.qualification === "candidate" ? "Import this candidate?" : "Import this recipe?"}</strong><p>This saves a new immutable local recipe revision. It does not prove the recipe can run, and it does not rebuild, reinstall, or restart running services.</p></div>}
+    {!executable && <div className="public-import-state is-error" role="alert"><div><strong>Import blocked: executable contract required</strong><p>This immutable recipe remains available for inspection, but Vonk Forge only imports recipes that declare a complete executable contract.</p></div></div>}
+    {status === "confirm" && executable && <div className={`public-import-confirmation-copy readiness-${preview.execution_readiness}`}><strong>{preview.qualification === "candidate" ? "Import this candidate?" : "Import this recipe?"}</strong><p>This saves a new immutable local recipe revision. It does not rebuild, reinstall, or restart running services.</p></div>}
+    {status === "confirm" && executable && importError && <div className="public-import-state is-error" role="alert"><div><strong>Import failed</strong><p>{importError}</p></div><button type="button" className="button secondary" disabled={saving} onClick={onImport}>Retry import</button></div>}
+    {status === "confirm" && executable && importOutcomeUnknown && <div className="public-import-state is-slow" role="status"><div><strong>Stopped waiting — import outcome unknown</strong><p>The server may still have completed the import. Check or recheck the local Library status before starting another import.</p></div><div><a className="button secondary" href="/library">Check local Library</a><button type="button" className="button secondary" onClick={onRecheckImport}>Recheck status</button></div></div>}
     {status !== "confirm" && <>
       <p className="public-import-description">{preview.description || "No description provided."}</p>
       <div className="public-import-tags" aria-label="Recipe capabilities">{preview.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
@@ -369,7 +406,7 @@ function Preview({preview, saving, status, onBack, onConfirm, onImport}: {
     </>}
     <footer className="public-import-preview-actions">
       <button type="button" className="button secondary" disabled={saving} onClick={onBack}>{status === "confirm" ? "Back to review" : "Choose another recipe"}</button>
-      {status === "confirm" ? <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onImport}>{saving ? "Importing…" : preview.local.status === "update-available" || preview.local.status === "different-revision" ? `Import${preview.release_version ? ` v${preview.release_version}` : " catalog revision"}` : preview.qualification === "candidate" ? "Import candidate" : "Import recipe"}</button> : <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onConfirm}>{preview.local.status === "current" ? "Already current" : "Continue to confirm"}</button>}
+      {executable && (status === "confirm" && !importError && !importOutcomeUnknown ? <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onImport}>{saving ? "Importing…" : preview.local.status === "update-available" || preview.local.status === "different-revision" ? `Import${preview.release_version ? ` v${preview.release_version}` : " catalog revision"}` : preview.qualification === "candidate" ? "Import candidate" : "Import recipe"}</button> : status !== "confirm" && <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onConfirm}>{preview.local.status === "current" ? "Already current" : "Continue to confirm"}</button>)}
     </footer>
     {status === "confirm" && <span className="sr-only">Confirm the selected immutable recipe before importing.</span>}
   </section>;
@@ -382,16 +419,25 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const [commit, setCommit] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [catalogSlow, setCatalogSlow] = useState(false);
+  const [catalogCancelled, setCatalogCancelled] = useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [preview, setPreview] = useState<PublicRecipePreview>();
   const [previewError, setPreviewError] = useState("");
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewSlow, setPreviewSlow] = useState(false);
+  const [previewCancelled, setPreviewCancelled] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importSlow, setImportSlow] = useState(false);
+  const [importOutcomeUnknown, setImportOutcomeUnknown] = useState(false);
+  const [importError, setImportError] = useState("");
   const [completion, setCompletion] = useState("");
   const [manualUri, setManualUri] = useState("");
+  const [manualUriError, setManualUriError] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const [catalogView, setCatalogView] = useState<CatalogView>(storedCatalogView);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [compareUris, setCompareUris] = useState<string[]>([]);
   const heading = useRef<HTMLHeadingElement>(null);
   const catalogRequest = useRef<AbortController | undefined>(undefined);
@@ -410,18 +456,39 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     const controller = new AbortController();
     catalogRequest.current = controller;
     setCatalogError("");
+    setCatalogCancelled(false);
+    setCatalogSlow(false);
     refresh ? setRefreshing(true) : setLoading(true);
     try {
-      const result = await api.listPublicRecipes(controller.signal);
+      const timeoutMessage = refresh
+        ? "The catalog refresh did not respond within 30 seconds. The previous catalog snapshot is still shown; try again."
+        : "The public catalog did not respond within 30 seconds. Try again.";
+      const result = await runBoundedRequest(controller, () => setCatalogSlow(true), timeoutMessage, () => api.listPublicRecipes(controller.signal));
       if (controller.signal.aborted) return;
       setRecipes(result.recipes);
       setCommit(result.commit);
     } catch (value) {
-      if (!controller.signal.aborted) setCatalogError(value instanceof Error ? value.message : "Unable to load the current recipe catalog");
+      if (value instanceof RequestTimeoutError || !controller.signal.aborted) setCatalogError(value instanceof Error ? value.message : "Unable to load the current recipe catalog");
     } finally {
-      if (!controller.signal.aborted) { setLoading(false); setRefreshing(false); }
-      if (catalogRequest.current === controller) catalogRequest.current = undefined;
+      if (catalogRequest.current === controller) {
+        setLoading(false);
+        setRefreshing(false);
+        setCatalogSlow(false);
+        catalogRequest.current = undefined;
+      }
     }
+  }
+
+  function cancelCatalogRequest() {
+    const controller = catalogRequest.current;
+    if (!controller) return;
+    catalogRequest.current = undefined;
+    controller.abort();
+    setLoading(false);
+    setRefreshing(false);
+    setCatalogSlow(false);
+    setCatalogError("");
+    setCatalogCancelled(true);
   }
 
   useEffect(() => {
@@ -434,27 +501,36 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   useEffect(() => {
-    if (!selectedUri) { previewRequest.current?.abort(); setPreview(undefined); setPreviewError(""); setPreviewLoading(false); return; }
+    if (!selectedUri) { previewRequest.current?.abort(); setPreview(undefined); setPreviewError(""); setImportError(""); setPreviewLoading(false); setPreviewSlow(false); setPreviewCancelled(false); return; }
     const controller = new AbortController();
     previewRequest.current?.abort();
     previewRequest.current = controller;
     const sequence = ++requestSequence.current;
     setPreview(undefined);
     setPreviewError("");
+    setImportError("");
     setCompletion("");
     setPreviewLoading(true);
-    void api.previewPublicRecipe(selectedUri, controller.signal).then(value => {
+    setPreviewSlow(false);
+    setPreviewCancelled(false);
+    void runBoundedRequest(controller, () => setPreviewSlow(true), "The recipe preview did not respond within 30 seconds. Try again.", () => api.previewPublicRecipe(selectedUri, controller.signal)).then(value => {
       if (!controller.signal.aborted && sequence === requestSequence.current && value.uri === selectedUri) setPreview(value);
     }).catch(value => {
-      if (!controller.signal.aborted && sequence === requestSequence.current) setPreviewError(value instanceof Error ? value.message : "Unable to preview import");
+      if (sequence === requestSequence.current && (value instanceof RequestTimeoutError || !controller.signal.aborted)) setPreviewError(value instanceof Error ? value.message : "Unable to preview import");
     }).finally(() => {
-      if (!controller.signal.aborted && sequence === requestSequence.current) setPreviewLoading(false);
-      if (previewRequest.current === controller) previewRequest.current = undefined;
+      if (previewRequest.current === controller && sequence === requestSequence.current) {
+        setPreviewLoading(false);
+        setPreviewSlow(false);
+        previewRequest.current = undefined;
+      }
     });
     return () => controller.abort();
   }, [api, selectedUri, previewAttempt]);
 
   useEffect(() => {
+    setImportError("");
+    setImportOutcomeUnknown(false);
+    setImportSlow(false);
     if (!importRequest.current) return;
     importSequence.current += 1;
     importRequest.current.abort();
@@ -483,10 +559,21 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     onNavigate(publicRecipeImportUrl(filters, {more, recipe: uri, step: "review"}));
   }
 
+  function reviewManualUri() {
+    const uri = manualUri.trim();
+    setManualUri(uri);
+    if (!PUBLIC_RECIPE_URI_PATTERN.test(uri)) {
+      setManualUriError("Enter an immutable URI in the form vonk://catalog/publisher/slug@sha256:digest.");
+      return;
+    }
+    setManualUriError("");
+    selectRecipe(uri);
+  }
+
   function chooseCatalogView(view: CatalogView) {
     setCatalogView(view);
     saveCatalogView(view);
-    setAnnouncement(`${view === "cards" ? "Cards" : "Compact list"} view selected.`);
+    setAnnouncement(`${view === "cards" ? "Detailed" : "Compact"} view selected.`);
   }
 
   function toggleComparison(uri: string) {
@@ -503,27 +590,73 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
       .find(element => element.dataset.recipeUri === selectedUri)?.focus());
   }
 
+  function cancelPreviewRequest() {
+    const controller = previewRequest.current;
+    if (!controller) return;
+    previewRequest.current = undefined;
+    requestSequence.current += 1;
+    controller.abort();
+    setPreviewLoading(false);
+    setPreviewSlow(false);
+    setPreviewError("");
+    setPreviewCancelled(true);
+  }
+
+  function retryPreview() {
+    setPreviewCancelled(false);
+    setPreviewAttempt(value => value + 1);
+  }
+
+  function stopWaitingForImport() {
+    const controller = importRequest.current;
+    if (!controller) return;
+    importRequest.current = undefined;
+    importSequence.current += 1;
+    controller.abort();
+    setSaving(false);
+    setImportSlow(false);
+    setImportError("");
+    setImportOutcomeUnknown(true);
+  }
+
+  function recheckImportOutcome() {
+    setImportOutcomeUnknown(false);
+    setImportError("");
+    setPreviewAttempt(value => value + 1);
+    onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "review"}));
+  }
+
   async function importRecipe() {
-    if (!preview) return;
+    if (!preview || preview.execution_readiness !== "executable") return;
     importRequest.current?.abort();
     const controller = new AbortController();
     importRequest.current = controller;
     const sequence = ++importSequence.current;
     const route = importRoute.current;
     setSaving(true);
-    setPreviewError("");
+    setImportError("");
+    setImportOutcomeUnknown(false);
+    setImportSlow(false);
     try {
-      await api.importPublicRecipe(preview.uri, preview.content_sha256, controller.signal);
+      await runBoundedRequest(controller, () => setImportSlow(true), "The import did not finish within 30 seconds. It may not have been saved; check the local Library before retrying.", () => api.importPublicRecipe(preview.uri, preview.content_sha256, controller.signal));
       if (controller.signal.aborted || sequence !== importSequence.current || route !== importRoute.current) return;
       const updated = preview.local.status === "update-available" || preview.local.status === "different-revision";
       setCompletion(updated && preview.release_version ? `Updated ${preview.title} to v${preview.release_version}` : `Imported ${preview.title}`);
       setPreview(current => current ? {...current, local: {...current.local, status: "current", content_sha256: current.content_sha256, release_version: current.release_version}} : current);
       await loadCatalog(true);
     } catch (value) {
-      if (!controller.signal.aborted) setPreviewError(value instanceof Error ? value.message : "Unable to import recipe");
+      if (sequence === importSequence.current && route === importRoute.current && value instanceof RequestTimeoutError) {
+        setImportError("");
+        setImportOutcomeUnknown(true);
+      } else if (sequence === importSequence.current && route === importRoute.current && !controller.signal.aborted) {
+        setImportError(value instanceof Error ? value.message : "Unable to import recipe");
+      }
     } finally {
-      if (!controller.signal.aborted && sequence === importSequence.current && route === importRoute.current) setSaving(false);
-      if (importRequest.current === controller) importRequest.current = undefined;
+      if (importRequest.current === controller && sequence === importSequence.current && route === importRoute.current) {
+        setSaving(false);
+        setImportSlow(false);
+        importRequest.current = undefined;
+      }
     }
   }
 
@@ -532,18 +665,23 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   return <div className={`public-import-page step-${step}`}>
     <header className="public-import-page-header">
       <div><a href="/library" className="public-import-back" aria-disabled={saving || undefined} tabIndex={saving ? -1 : undefined} onClick={saving ? event => event.preventDefault() : undefined}>← Library</a><span className="public-import-kicker">Digest-bound public catalog</span><h1 ref={heading} tabIndex={-1}>Import a public recipe</h1><p>Choose an immutable recipe, inspect its independent qualification and execution-readiness evidence, then confirm the local import.</p></div>
-      <ol aria-label="Import progress"><li aria-current={step === "catalog" ? "step" : undefined}>1 <span>Catalog</span></li><li aria-current={step === "review" ? "step" : undefined}>2 <span>Review</span></li><li aria-current={step === "confirm" ? "step" : undefined}>3 <span>Confirm</span></li></ol>
+      <ol aria-label="Import progress"><li aria-current={step === "catalog" ? "step" : undefined}>1 <span>Catalog</span></li><li aria-current={step === "review" ? "step" : undefined}>2 <span>Review</span></li><li aria-current={step === "confirm" ? "step" : undefined}>3 <span>{saving ? "Importing" : "Confirm"}</span></li></ol>
     </header>
     <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
+    {saving && preview && <div className={`public-import-state public-import-active-request${importSlow ? " is-slow" : ""}`} role="status" aria-live="polite"><span className="public-import-spinner" aria-hidden="true"/><div><strong>{importSlow ? "Import is taking longer than expected" : `Importing ${preview.title}`}</strong><p>{importSlow ? "The verified revision is still being saved. You can stop waiting, but the server may still complete it." : "Saving the verified immutable revision to your local Library…"}</p></div><button type="button" className="button secondary" onClick={stopWaitingForImport}>Stop waiting</button></div>}
     <fieldset className="public-import-workspace public-import-interaction-lock" disabled={saving} aria-busy={saving}>
       <legend className="sr-only">Recipe catalog and review</legend>
-      <aside className="public-import-filter-rail" aria-label="Recipe filters">
+      <button type="button" className="button secondary public-import-mobile-filter-toggle" aria-expanded={mobileFiltersOpen} aria-controls="public-import-filter-rail" onClick={() => setMobileFiltersOpen(open => !open)}>
+        <span>{mobileFiltersOpen ? "Hide filters" : "Show filters"}</span>
+        {applied.length > 0 && <span className="public-import-mobile-filter-count">{applied.length} applied</span>}
+      </button>
+      <aside id="public-import-filter-rail" className={`public-import-filter-rail${mobileFiltersOpen ? " is-mobile-open" : ""}`} aria-label="Recipe filters">
         <div className="public-import-filter-heading"><div><span className="public-import-kicker">Narrow the catalog</span><h2>Filters</h2></div>{applied.length > 0 && <button type="button" className="public-import-text-button" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear all</button>}</div>
         <label className="public-import-search"><span>Find a recipe</span><input type="search" value={filters.query} onChange={event => updateFilter("query", event.target.value)} placeholder="Model, modality, runtime…" /></label>
         <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
         <label><span>Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
         <label><span>Qualification</span><select aria-label="Filter by qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as PublicRecipeFilters["qualification"])}><option value="">Any status ({count("qualification", () => true)})</option><option value="cataloged" disabled={count("qualification", recipe => recipe.qualification === "cataloged") === 0}>Accepted ({count("qualification", recipe => recipe.qualification === "cataloged")})</option><option value="candidate" disabled={count("qualification", recipe => recipe.qualification === "candidate") === 0}>Candidate ({count("qualification", recipe => recipe.qualification === "candidate")})</option></select></label>
-        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">Any declaration ({count("readiness", () => true)})</option>{(["executable", "integration-required", "not-executable", "not-declared"] as PublicRecipeExecutionReadiness[]).map(value => { const available = count("readiness", recipe => recipe.execution_readiness === value); return <option key={value} value={value} disabled={available === 0}>{readinessLabel(value)} ({available})</option>; })}</select></label>
+        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">All executable recipes ({count("readiness", () => true)})</option><option value="executable" disabled={count("readiness", recipe => recipe.execution_readiness === "executable") === 0}>Executable contract ({count("readiness", recipe => recipe.execution_readiness === "executable")})</option></select></label>
         <label><span>Local status</span><select aria-label="Filter by local status" value={filters.local} onChange={event => updateFilter("local", event.target.value as LocalFilter)}><option value="">All ({count("local", () => true)})</option>{(["not-imported", "update-available", "current", "needs-review"] as LocalFilter[]).map(value => { const available = count("local", recipe => localMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value === "not-imported" ? "Not installed" : value === "update-available" ? "Update available" : value === "current" ? "Installed current" : "Needs review"} ({available})</option>; })}</select></label>
         <button type="button" className="button secondary public-import-more-toggle" aria-expanded={more} aria-controls="public-import-more-filters" onClick={() => onNavigate(publicRecipeImportUrl(filters, {more: !more}), true)}>{more ? "Hide more filters" : "More filters"}</button>
         <div id="public-import-more-filters" hidden={!more} className="public-import-more-filters">
@@ -555,20 +693,22 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
           <label><span>Sort</span><select aria-label="Sort recipes" value={filters.sort} onChange={event => updateFilter("sort", event.target.value as RecipeSort)}><option value="catalog">Catalog order</option><option value="model">Model A–Z</option><option value="sparks">Fewest Sparks</option><option value="download">Smallest download</option></select></label>
         </div>
         <fieldset className="public-import-capabilities"><legend>Capabilities <span>Must all match</span></legend>{PUBLIC_RECIPE_CAPABILITIES.map(option => { const selected = filters.capabilities.includes(option.value); const available = capabilityCount(option.value); return <label className={available === 0 && !selected ? "is-disabled" : ""} key={option.value}><input type="checkbox" checked={selected} disabled={available === 0 && !selected} onChange={() => updateFilter("capabilities", selected ? filters.capabilities.filter(value => value !== option.value) : [...filters.capabilities, option.value])}/><span>{option.label}</span><small>{available}</small></label>; })}</fieldset>
-        <details className="public-import-manual"><summary>Advanced: import URI</summary><div><label><span>Public recipe URI</span><input value={manualUri} onChange={event => setManualUri(event.target.value)} placeholder="vonk://catalog/…@sha256:…" /></label><button type="button" className="button secondary" disabled={!manualUri} onClick={() => selectRecipe(manualUri)}>Review URI</button></div></details>
+        <details className="public-import-manual"><summary>Advanced: import URI</summary><div><label><span>Public recipe URI</span><input value={manualUri} aria-invalid={manualUriError ? "true" : undefined} aria-describedby={manualUriError ? "public-recipe-uri-error" : undefined} onChange={event => { setManualUri(event.target.value); setManualUriError(""); }} placeholder="vonk://catalog/…@sha256:…" /></label>{manualUriError && <small id="public-recipe-uri-error" role="alert">{manualUriError}</small>}<button type="button" className="button secondary" disabled={!manualUri.trim()} onClick={reviewManualUri}>Review URI</button></div></details>
       </aside>
       <section className="public-import-results" aria-busy={loading || refreshing} aria-labelledby="public-recipe-results-heading">
         <header><div><span className="public-import-kicker">Public recipe library</span><h2 id="public-recipe-results-heading">Choose a recipe</h2></div><div><span>{refreshing ? "Refreshing…" : `${filtered.length} of ${recipes.length}`}</span><button type="button" className="public-import-icon-button" aria-label="Refresh public catalog" onClick={() => void loadCatalog(true)}>↻</button></div></header>
         <div className="public-import-results-tools">
           <div className="public-import-view-switch" role="group" aria-label="Catalog view">
-            <button type="button" aria-pressed={catalogView === "cards"} onClick={() => chooseCatalogView("cards")}><span aria-hidden="true">▦</span> Cards</button>
+            <button type="button" aria-pressed={catalogView === "cards"} onClick={() => chooseCatalogView("cards")}><span aria-hidden="true">▦</span> Detailed</button>
             <button type="button" aria-pressed={catalogView === "compact"} onClick={() => chooseCatalogView("compact")}><span aria-hidden="true">☷</span> Compact</button>
           </div>
           {commit && <details className="public-import-snapshot"><summary>Catalog snapshot</summary><div><span>Immutable commit</span><code>{commit}</code></div></details>}
         </div>
-        {loading && recipes.length === 0 && <div className="public-import-state" role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>Loading the public catalog</strong><p>Resolving one immutable library snapshot…</p></div></div>}
-        {catalogError && <div className="public-import-state is-error" role="alert"><div><strong>Catalog unavailable</strong><p>{catalogError}</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog()}>Try again</button></div>}
-        {!loading && !catalogError && recipes.length === 0 && <div className="public-import-state"><div><strong>The public catalog is empty</strong><p>No catalog recipes were returned. You can refresh or use an immutable URI.</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog(true)}>Refresh catalog</button></div>}
+        {loading && recipes.length === 0 && <div className={`public-import-state${catalogSlow ? " is-slow" : ""}`} role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>{catalogSlow ? "Catalog load is taking longer than expected" : "Loading the public catalog"}</strong><p>{catalogSlow ? "The catalog is still responding. You can cancel instead of waiting for the 30-second deadline." : "Resolving one immutable library snapshot…"}</p></div><button type="button" className="button secondary" onClick={cancelCatalogRequest}>Cancel load</button></div>}
+        {refreshing && catalogSlow && <div className="public-import-state is-slow" role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>Catalog refresh is taking longer than expected</strong><p>The previous snapshot remains available. You can cancel instead of waiting for the 30-second deadline.</p></div><button type="button" className="button secondary" onClick={cancelCatalogRequest}>Cancel refresh</button></div>}
+        {catalogError && <div className="public-import-state is-error" role="alert"><div><strong>Catalog unavailable</strong><p>{catalogError}</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog(recipes.length > 0)}>Try again</button></div>}
+        {catalogCancelled && <div className="public-import-state" role="status"><div><strong>{recipes.length > 0 ? "Catalog refresh canceled" : "Catalog load canceled"}</strong><p>{recipes.length > 0 ? "The previous catalog snapshot remains available." : "No error was reported. You can try loading the catalog again."}</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog(recipes.length > 0)}>{recipes.length > 0 ? "Retry refresh" : "Try again"}</button></div>}
+        {!loading && !catalogError && !catalogCancelled && recipes.length === 0 && <div className="public-import-state"><div><strong>The public catalog is empty</strong><p>No catalog recipes were returned. You can refresh or use an immutable URI.</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog(true)}>Refresh catalog</button></div>}
         {applied.length > 0 && <div className="public-import-applied" aria-label="Applied filters">{applied.map(item => <button type="button" key={item.key} onClick={() => navigateFilters(item.remove(filters))}>{item.label}<span aria-hidden="true">×</span><span className="sr-only"> Remove filter</span></button>)}</div>}
         {!loading && recipes.length > 0 && filtered.length === 0 && <div className="public-import-state"><div><strong>No matching recipes</strong><p>Remove one or more filters to broaden the catalog.</p></div><button type="button" className="button secondary" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear filters</button></div>}
         <div className={`public-import-recipe-list is-${catalogView}`} role="list" aria-label="Public recipes">{filtered.map(recipe => { const compared = compareUris.includes(recipe.uri); return <article role="listitem" className={selectedUri === recipe.uri ? "is-selected" : ""} key={recipe.uri}>
@@ -580,10 +720,11 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <RecipeComparisonTray recipes={comparedRecipes} onRemove={uri => setCompareUris(current => current.filter(value => value !== uri))} onClear={() => setCompareUris([])}/>
       </section>
       <aside className="public-import-review-pane" aria-label="Selected recipe review">
-        {previewLoading && <div className="public-import-state" role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>Loading recipe preview</strong><p>Verifying the selected immutable revision…</p></div></div>}
-        {previewError && <div className="public-import-state is-error" role="alert"><div><strong>Preview unavailable</strong><p>{previewError}</p></div><button type="button" className="button secondary" onClick={() => setPreviewAttempt(value => value + 1)}>Try again</button></div>}
+        {previewLoading && <div className={`public-import-state${previewSlow ? " is-slow" : ""}`} role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>{previewSlow ? "Recipe preview is taking longer than expected" : "Loading recipe preview"}</strong><p>{previewSlow ? "Verification is still running. You can cancel instead of waiting for the 30-second deadline." : "Verifying the selected immutable revision…"}</p></div><button type="button" className="button secondary" onClick={cancelPreviewRequest}>Cancel preview</button></div>}
+        {previewError && <div className="public-import-state is-error" role="alert"><div><strong>Preview unavailable</strong><p>{previewError}</p></div><button type="button" className="button secondary" onClick={retryPreview}>Try again</button></div>}
+        {previewCancelled && <div className="public-import-state" role="status"><div><strong>Preview canceled</strong><p>No error was reported. You can retry verification when you are ready.</p></div><button type="button" className="button secondary" onClick={retryPreview}>Try again</button></div>}
         {!selectedUri && !previewLoading && <div className="public-import-review-empty"><span aria-hidden="true">↗</span><strong>Select a recipe to review</strong><p>Execution readiness, qualification, version changes, resource needs and provenance will appear here.</p></div>}
-        {preview && <Preview preview={preview} saving={saving} status={step} onBack={step === "confirm" ? () => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "review"})) : returnToCatalog} onConfirm={() => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "confirm"}))} onImport={() => void importRecipe()}/>}
+        {preview && <Preview preview={preview} saving={saving} importError={importError} importOutcomeUnknown={importOutcomeUnknown} status={step} onBack={step === "confirm" ? () => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "review"})) : returnToCatalog} onConfirm={() => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "confirm"}))} onImport={() => void importRecipe()} onRecheckImport={recheckImportOutcome}/>}
       </aside>
     </fieldset>
   </div>;

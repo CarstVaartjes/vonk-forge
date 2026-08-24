@@ -1,4 +1,4 @@
-import {render, screen, waitFor, within} from "@testing-library/react";
+import {act, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {useState} from "react";
 import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
@@ -17,8 +17,8 @@ function recipe(slug: string, overrides: Partial<PublicRecipe> = {}): PublicReci
     model_title: slug, source_owner: "MiaLabs", source_repository: `https://github.com/MiaLabs/${slug}`,
     capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
     qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "BF16",
-    execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata",
-    execution_readiness_detail: "The immutable recipe does not explicitly declare execution readiness.",
+    execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
+    execution_readiness_detail: "The immutable recipe declares a complete executable contract.",
     execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64),
     artifact_count: 1, topology_name: "single-spark", topology_mode: "single", node_count: 1,
     topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}],
@@ -56,12 +56,22 @@ function deferred<T>() {
 }
 
 beforeEach(() => localStorage.clear());
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+async function advanceRequestTime(milliseconds: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(milliseconds);
+  });
+}
 
 it("round-trips validated URL state with readiness, source owner, and repeated capabilities", () => {
   const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?step=confirm").step).toBe("catalog");
 });
@@ -90,7 +100,7 @@ it("persists the compact catalog preference independently from URL state", async
 
   render(<Harness api={apiFor([alpha])}/>);
   expect(await screen.findByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", {name: "Cards"})).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "false");
 });
 
 it("shows friendly topology and honest requirement graphics while keeping immutable IDs collapsed", async () => {
@@ -155,20 +165,33 @@ it("hydrates legacy creator and original-repository filters under truthful sourc
   expect(screen.getByRole("button", {name: /Repository: MiaLabs\/Alpha/})).toBeVisible();
 });
 
-it("filters qualification and execution readiness independently and warns before metadata import", async () => {
+it("keeps unsupported readiness out of normal filters and blocks its import while preserving evidence", async () => {
   const executableCandidate = recipe("Executable", {execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable contract declared."});
   const blockedAccepted = recipe("Metadata", {qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted review evidence.", execution_readiness: "not-executable", execution_readiness_basis: "explicit-non-executable-metadata", execution_readiness_detail: "No executable runtime contract."});
-  render(<Harness api={apiFor([executableCandidate, blockedAccepted])} initialUrl="/library/import?qualification=cataloged&readiness=not-executable"/>);
+  const importPublicRecipe = vi.fn();
+  const api = apiFor([executableCandidate, blockedAccepted], {importPublicRecipe});
+  const view = render(<Harness api={api} initialUrl="/library/import?qualification=cataloged&readiness=not-executable"/>);
 
   expect(await screen.findByRole("heading", {name: "Metadata", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "Executable", level: 3})).not.toBeInTheDocument();
+  const readiness = screen.getByRole("combobox", {name: "Filter by execution readiness"});
+  expect(within(readiness).getAllByRole("option").map(option => option.getAttribute("value"))).toEqual(["", "executable"]);
   expect(screen.getByText("Not executable")).toBeVisible();
   expect(screen.getByText("Accepted · v1.1.0")).toBeVisible();
   await userEvent.click(screen.getByRole("button", {name: `Review ${blockedAccepted.title}`}));
   expect(await screen.findByText("No executable runtime contract.")).toBeVisible();
-  await userEvent.click(screen.getByRole("button", {name: "Continue to confirm"}));
-  expect(await screen.findByText("Import this non-executable recipe metadata?")).toBeVisible();
-  expect(screen.getByText(/does not prove the recipe can run/)).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Import blocked: executable contract required");
+  expect(screen.queryByRole("button", {name: "Continue to confirm"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: /Import/})).not.toBeInTheDocument();
+  expect(importPublicRecipe).not.toHaveBeenCalled();
+
+  view.unmount();
+  render(<Harness api={api} initialUrl={publicRecipeImportUrl(EMPTY_FILTERS, {recipe: blockedAccepted.uri, step: "confirm"})}/>);
+  expect(await screen.findByRole("heading", {name: blockedAccepted.title, level: 2})).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Import blocked: executable contract required");
+  expect(screen.getByText("No executable runtime contract.")).toBeVisible();
+  expect(screen.queryByRole("button", {name: /^Import/})).not.toBeInTheDocument();
+  expect(importPublicRecipe).not.toHaveBeenCalled();
 });
 
 it("aborts and ignores a stale preview when the user selects another recipe", async () => {
@@ -204,6 +227,81 @@ it("shows explicit candidate evidence and requires a separate confirmation step"
   await userEvent.click(screen.getByRole("button", {name: "Continue to confirm"}));
   expect(await screen.findByRole("button", {name: "Import candidate"})).toBeVisible();
   expect(screen.getByText("Import this candidate?")).toBeVisible();
+});
+
+it("keeps confirmation context after an import failure and retries the import operation", async () => {
+  const candidate = recipe("Candidate");
+  const firstImport = deferred<Awaited<ReturnType<CatalogApi["importPublicRecipe"]>>>();
+  const previewPublicRecipe = vi.fn(async () => preview(candidate));
+  const importPublicRecipe = vi.fn()
+    .mockImplementationOnce(() => firstImport.promise)
+    .mockResolvedValueOnce({recipe_id: "candidate-local", revision_number: 1, lifecycle: "draft", slug: "candidate"});
+  render(<Harness api={apiFor([candidate], {previewPublicRecipe, importPublicRecipe})}/>);
+
+  await userEvent.click(await screen.findByRole("button", {name: `Review ${candidate.title}`}));
+  await userEvent.click(await screen.findByRole("button", {name: "Continue to confirm"}));
+  await userEvent.click(await screen.findByRole("button", {name: "Import candidate"}));
+
+  expect(await screen.findByText(`Importing ${candidate.title}`)).toBeVisible();
+  expect(within(screen.getByRole("list", {name: "Import progress"})).getByText("Importing")).toBeVisible();
+  firstImport.reject(new Error("local database is temporarily unavailable"));
+
+  const failure = await screen.findByRole("alert");
+  expect(failure).toHaveTextContent("Import failed");
+  expect(failure).toHaveTextContent("local database is temporarily unavailable");
+  expect(screen.queryByText("Preview unavailable")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: candidate.title, level: 2})).toBeVisible();
+  expect(screen.getByText("Import this candidate?")).toBeVisible();
+
+  await userEvent.click(within(failure).getByRole("button", {name: "Retry import"}));
+  await waitFor(() => expect(importPublicRecipe).toHaveBeenCalledTimes(2));
+  expect(previewPublicRecipe).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText(`Imported ${candidate.title}`)).toBeVisible();
+});
+
+it("keeps preview failures retryable without invoking import", async () => {
+  const candidate = recipe("Candidate");
+  const previewPublicRecipe = vi.fn()
+    .mockRejectedValueOnce(new Error("preview verification failed"))
+    .mockResolvedValueOnce(preview(candidate));
+  const importPublicRecipe = vi.fn();
+  render(<Harness api={apiFor([candidate], {previewPublicRecipe, importPublicRecipe})}/>);
+
+  await userEvent.click(await screen.findByRole("button", {name: `Review ${candidate.title}`}));
+  const failure = await screen.findByRole("alert");
+  expect(failure).toHaveTextContent("Preview unavailable");
+  expect(failure).toHaveTextContent("preview verification failed");
+  await userEvent.click(within(failure).getByRole("button", {name: "Try again"}));
+
+  expect(await screen.findByRole("heading", {name: candidate.title, level: 2})).toBeVisible();
+  expect(previewPublicRecipe).toHaveBeenCalledTimes(2);
+  expect(importPublicRecipe).not.toHaveBeenCalled();
+});
+
+it("validates and trims a manually entered immutable URI before preview", async () => {
+  const manual = recipe("manual", {execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata", execution_readiness_detail: "The immutable recipe does not declare execution readiness."});
+  const previewPublicRecipe = vi.fn(async (uri: string) => preview({...manual, uri}));
+  render(<Harness api={apiFor([], {previewPublicRecipe})}/>);
+  await screen.findByText("The public catalog is empty");
+  await userEvent.click(screen.getByText("Advanced: import URI"));
+  const input = screen.getByRole("textbox", {name: "Public recipe URI"});
+
+  await userEvent.type(input, "  not-an-immutable-uri  ");
+  await userEvent.click(screen.getByRole("button", {name: "Review URI"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("vonk://catalog/publisher/slug@sha256:digest");
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(previewPublicRecipe).not.toHaveBeenCalled();
+
+  const validUri = `vonk://catalog/vonk-forge/manual@sha256:${"a".repeat(64)}`;
+  await userEvent.clear(input);
+  await userEvent.type(input, `  ${validUri}  `);
+  await userEvent.click(screen.getByRole("button", {name: "Review URI"}));
+  await waitFor(() => expect(previewPublicRecipe).toHaveBeenCalledWith(validUri, expect.any(AbortSignal)));
+  expect(input).toHaveValue(validUri);
+  expect(screen.queryByText("Enter an immutable URI")).not.toBeInTheDocument();
+  expect(await screen.findByText("The immutable recipe does not declare execution readiness.")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Import blocked: executable contract required");
+  expect(screen.queryByRole("button", {name: "Continue to confirm"})).not.toBeInTheDocument();
 });
 
 it("summarizes the strongest required action across every release since local", async () => {
@@ -252,6 +350,121 @@ it("distinguishes an empty catalog, filtered zero state, and a retryable load er
   render(<Harness api={failing}/>);
   expect(await screen.findByRole("alert")).toHaveTextContent("network down");
   expect(screen.getByRole("button", {name: "Try again"})).toBeVisible();
+});
+
+it("shows a slow catalog refresh, times it out, and keeps the last good snapshot", async () => {
+  const alpha = recipe("Alpha");
+  const hungRefresh = deferred<Awaited<ReturnType<CatalogApi["listPublicRecipes"]>>>();
+  let refreshSignal: AbortSignal | undefined;
+  const listPublicRecipes = vi.fn((signal?: AbortSignal) => {
+    if (listPublicRecipes.mock.calls.length === 1) return Promise.resolve({repository: "CarstVaartjes/vonk-forge-recipes", commit: "a".repeat(40), recipes: [alpha]});
+    refreshSignal = signal;
+    return hungRefresh.promise;
+  });
+  render(<Harness api={apiFor([alpha], {listPublicRecipes})}/>);
+  expect(await screen.findByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
+
+  vi.useFakeTimers();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {name: "Refresh public catalog"}));
+    await Promise.resolve();
+  });
+  await advanceRequestTime(5_000);
+  expect(screen.getByText("Catalog refresh is taking longer than expected")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Cancel refresh"})).toBeVisible();
+  expect(screen.getByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
+
+  await advanceRequestTime(25_000);
+  expect(screen.getByRole("alert")).toHaveTextContent("catalog refresh did not respond within 30 seconds");
+  expect(screen.getByRole("alert")).toHaveTextContent("previous catalog snapshot is still shown");
+  expect(screen.getByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
+  expect(refreshSignal?.aborted).toBe(true);
+});
+
+it("cancels a hung preview without an error, then bounds a retry and allows another retry", async () => {
+  const alpha = recipe("Alpha");
+  const firstPreview = deferred<PublicRecipePreview>();
+  const secondPreview = deferred<PublicRecipePreview>();
+  const signals: AbortSignal[] = [];
+  const previewPublicRecipe = vi.fn((_uri: string, signal?: AbortSignal) => {
+    if (signal) signals.push(signal);
+    if (previewPublicRecipe.mock.calls.length === 1) return firstPreview.promise;
+    if (previewPublicRecipe.mock.calls.length === 2) return secondPreview.promise;
+    return Promise.resolve(preview(alpha));
+  });
+  render(<Harness api={apiFor([alpha], {previewPublicRecipe})}/>);
+  expect(await screen.findByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
+
+  vi.useFakeTimers();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {name: `Review ${alpha.title}`}));
+    await Promise.resolve();
+  });
+  await advanceRequestTime(5_000);
+  expect(screen.getByText("Recipe preview is taking longer than expected")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Cancel preview"}));
+  expect(screen.getByText("Preview canceled")).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(signals[0]?.aborted).toBe(true);
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {name: "Try again"}));
+    await Promise.resolve();
+  });
+  await advanceRequestTime(30_000);
+  expect(screen.getByRole("alert")).toHaveTextContent("recipe preview did not respond within 30 seconds");
+  expect(signals[1]?.aborted).toBe(true);
+
+  await act(async () => {
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", {name: "Try again"}));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.getByRole("heading", {name: alpha.title, level: 2})).toBeVisible();
+  expect(previewPublicRecipe).toHaveBeenCalledTimes(3);
+});
+
+it("treats a stopped or timed-out import as unknown until status is rechecked", async () => {
+  const alpha = recipe("Alpha");
+  const hungImport = deferred<Awaited<ReturnType<CatalogApi["importPublicRecipe"]>>>();
+  const initialPreview = preview(alpha);
+  const previewPublicRecipe = vi.fn()
+    .mockResolvedValueOnce(initialPreview)
+    .mockResolvedValueOnce({...initialPreview, local: {...initialPreview.local, status: "current", recipe_id: "alpha-local"}});
+  let importSignal: AbortSignal | undefined;
+  const importPublicRecipe = vi.fn((_uri: string, _digest: string, signal?: AbortSignal) => {
+    importSignal = signal;
+    return hungImport.promise;
+  });
+  render(<Harness api={apiFor([alpha], {importPublicRecipe, previewPublicRecipe})}/>);
+  await userEvent.click(await screen.findByRole("button", {name: `Review ${alpha.title}`}));
+  await userEvent.click(await screen.findByRole("button", {name: "Continue to confirm"}));
+
+  vi.useFakeTimers();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {name: "Import candidate"}));
+    await Promise.resolve();
+  });
+  await advanceRequestTime(5_000);
+  expect(screen.getByText("Import is taking longer than expected")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Stop waiting"})).toBeEnabled();
+
+  await advanceRequestTime(25_000);
+  expect(screen.getByText("Stopped waiting — import outcome unknown")).toBeVisible();
+  expect(screen.getByText(/server may still have completed the import/i)).toBeVisible();
+  expect(importSignal?.aborted).toBe(true);
+  expect(screen.queryByRole("button", {name: "Retry import"})).not.toBeInTheDocument();
+  expect(screen.getByRole("link", {name: "Check local Library"})).toHaveAttribute("href", "/library");
+  expect(screen.getByRole("button", {name: "Back to review"})).toBeEnabled();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {name: "Recheck status"}));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(previewPublicRecipe).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("button", {name: "Already current"})).toBeDisabled();
+  expect(importPublicRecipe).toHaveBeenCalledTimes(1);
 });
 
 it("keeps filtering correct at the API maximum of 256 recipes", async () => {

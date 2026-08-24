@@ -1039,6 +1039,38 @@
   font-weight: 750;
 }
 
+.library-catalog-scan {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.library-qualification {
+  background: #14231f;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.25;
+  padding: 0.24rem 0.48rem;
+  width: fit-content;
+}
+
+.library-qualification.qualification-candidate {
+  background: #46381d55;
+  border-color: #6c5627;
+  color: var(--warning);
+}
+
+.library-qualification.qualification-cataloged {
+  background: #17362d;
+  border-color: #68e5b366;
+  color: var(--mint-strong);
+}
+
 .library-row .library-release-label.status-update-available {
   color: var(--mint-strong);
 }
@@ -1075,6 +1107,18 @@
   gap: 0.2rem;
 }
 
+.library-release-context > .library-release-summary {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.library-release-summary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
 .library-release-context > div span {
   color: var(--text-subtle);
   font-size: 0.66rem;
@@ -1088,6 +1132,10 @@
   font-size: 0.78rem;
   line-height: 1.45;
   margin: 0;
+}
+
+.library-release-context .library-qualification-detail strong {
+  color: var(--text);
 }
 
 .library-release-context .button {
@@ -1256,6 +1304,10 @@
   background: #07110e;
   border: 1px solid var(--border);
   border-radius: 999px;
+  padding: 0.26rem 0.48rem;
+}
+
+.library-compact-facts .library-qualification {
   padding: 0.26rem 0.48rem;
 }
 
@@ -1433,6 +1485,7 @@
 }
 
 .library-compare-empty,
+.library-filter-empty,
 .library-empty {
   justify-items: center;
   padding: 2rem 1rem;
@@ -1440,8 +1493,29 @@
 }
 
 .library-compare-empty :where(h3, p),
+.library-filter-empty :where(h3, p),
 .library-empty :where(h3, p) {
   max-width: 34rem;
+}
+
+.library-filter-empty {
+  background: var(--surface-panel, #101d1a);
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.9rem;
+  color: var(--text);
+  display: grid;
+  gap: 0.65rem;
+  justify-items: center;
+  padding: 2.25rem 1rem;
+  text-align: center;
+}
+
+.library-filter-empty :where(h3, p) {
+  margin: 0;
+}
+
+.library-filter-empty p {
+  color: var(--text-muted);
 }
 
 .library-empty-visual {

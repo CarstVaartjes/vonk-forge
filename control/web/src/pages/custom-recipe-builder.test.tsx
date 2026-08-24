@@ -28,7 +28,7 @@ async function continueToReview(user: ReturnType<typeof userEvent.setup>) {
     replaceFieldValue(model, exactDigests.model);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
-  expect(await screen.findByRole("heading", {name: "Runtime"})).toBeVisible();
+  expect(await screen.findByRole("heading", {name: "Runtime", level: 2})).toHaveFocus();
   for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
     const field = screen.getByRole("textbox", {name});
     replaceFieldValue(field, value);
@@ -39,7 +39,7 @@ async function continueToReview(user: ReturnType<typeof userEvent.setup>) {
   replaceFieldValue(revision, exactArtifactRevision);
   for (const heading of ["Resources & topology", "Validation & provenance", "Review & create"]) {
     await user.click(screen.getByRole("button", {name: "Continue"}));
-    expect(await screen.findByRole("heading", {name: heading})).toBeVisible();
+    expect(await screen.findByRole("heading", {name: heading, level: 2})).toHaveFocus();
   }
 }
 
@@ -72,7 +72,11 @@ test("guides a preset through six steps and submits the complete canonical docum
   expect(screen.getByText("80 GiB")).toBeVisible();
   expect(screen.getByText("Technical identities and digests")).toBeVisible();
 
-  await user.click(screen.getByRole("button", {name: "Create recipe"}));
+  expect(screen.getByRole("heading", {name: "Draft preflight"})).toBeVisible();
+  expect(screen.getByText("Not uploaded by this builder")).toBeVisible();
+  expect(screen.getByText(/pass policy checks before build or resolve/i)).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Save recipe draft"}));
   expect(createCatalogRecipe).toHaveBeenCalledWith(expect.objectContaining({
     slug: "custom-vllm-chat",
     document: expect.objectContaining({
@@ -85,8 +89,8 @@ test("guides a preset through six steps and submits the complete canonical docum
       validation: expect.objectContaining({validators: [expect.objectContaining({interface: "openai"})]}),
     }),
   }));
-  expect(await screen.findByText("Recipe saved")).toBeVisible();
-  expect(screen.getByRole("button", {name: "View saved recipe"})).toBeVisible();
+  expect(await screen.findByText("Recipe draft saved")).toBeVisible();
+  expect(screen.getByRole("button", {name: "View saved draft"})).toBeVisible();
   expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).toBeNull();
 });
 
@@ -99,6 +103,9 @@ test("requires starter component digests to be replaced before continuing", asyn
   const summary = screen.getByRole("alert");
   expect(summary).toHaveTextContent("Model digest is still a starter placeholder. Replace it with the exact SHA-256.");
   expect(screen.getByRole("textbox", {name: "Exact model digest"})).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByRole("textbox", {name: "Exact model digest"})).toBeRequired();
+  expect(screen.getByRole("textbox", {name: "Exact model digest"})).toHaveAttribute("aria-describedby", "model-digest-help model-digest-error");
+  expect(screen.getByRole("textbox", {name: "Display name"})).toBeRequired();
   expect(screen.getByText("Step 1 of 6")).toBeVisible();
 });
 
@@ -190,6 +197,27 @@ test("edits byte values in human units while keeping exact bytes in advanced JSO
   expect((screen.getByRole("textbox", {name: "Recipe document"}) as HTMLTextAreaElement).value).toContain(`"memory_bytes": ${24 * GIB}`);
 });
 
+test("keeps an artifact editor mounted and focused while its ID changes", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={{} as unknown as ControlApi}/>);
+
+  replaceFieldValue(await screen.findByRole("textbox", {name: "Exact model digest"}), exactDigests.model);
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
+    replaceFieldValue(screen.getByRole("textbox", {name}), value);
+  }
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+
+  const artifactName = screen.getByRole("textbox", {name: "Artifact name"});
+  await user.clear(artifactName);
+  await user.type(artifactName, "weights-v2");
+
+  expect(screen.getByRole("textbox", {name: "Artifact name"})).toBe(artifactName);
+  expect(artifactName).toHaveFocus();
+  expect(artifactName).toHaveValue("weights-v2");
+});
+
 test("keeps invalid advanced JSON for correction without corrupting the guided form", async () => {
   history.replaceState(null, "", "/library/create");
   const user = userEvent.setup();
@@ -197,10 +225,19 @@ test("keeps invalid advanced JSON for correction without corrupting the guided f
 
   await user.click(await screen.findByText("Advanced JSON"));
   const json = screen.getByRole("textbox", {name: "Recipe document"});
+  const validJson = (json as HTMLTextAreaElement).value;
   fireEvent.change(json, {target: {value: "{"}});
   expect(json).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByText(/Invalid JSON at line 1/)).toBeVisible();
-  expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("Custom model service");
+  const guidedTitle = screen.getByRole("textbox", {name: "Display name"});
+  expect(guidedTitle).toHaveValue("Custom model service");
+  expect(guidedTitle).toBeDisabled();
+  expect(screen.getByRole("alert", {name: ""})).toHaveTextContent("Guided editing is paused");
+  expect(json).toHaveValue("{");
+
+  fireEvent.change(json, {target: {value: validJson}});
+  expect(guidedTitle).toBeEnabled();
+  expect(screen.queryByText("Guided editing is paused")).not.toBeInTheDocument();
 });
 
 test("keeps deeply malformed advanced JSON out of guided state", async () => {
@@ -274,12 +311,12 @@ test("locks navigation and form controls during save and surfaces an API rejecti
   await continueToReview(user);
   await user.click(screen.getByText("Advanced JSON"));
 
-  await user.click(screen.getByRole("button", {name: "Create recipe"}));
-  expect(screen.getByRole("button", {name: "Creating recipe…"})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name: "Save recipe draft"}));
+  expect(screen.getByRole("button", {name: "Saving draft…"})).toBeDisabled();
   expect(screen.getByRole("textbox", {name: "Recipe document"})).toBeDisabled();
   expect(screen.getByRole("button", {name: "Back to Library"})).toBeDisabled();
   expect(createCatalogRecipe).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole("button", {name: "Creating recipe…"}));
+  await user.click(screen.getByRole("button", {name: "Saving draft…"}));
   expect(createCatalogRecipe).toHaveBeenCalledTimes(1);
 
   await user.click(screen.getByRole("link", {name: "Fleet"}));
@@ -287,6 +324,6 @@ test("locks navigation and form controls during save and surfaces an API rejecti
   rejectSave(new Error("Catalog write was rejected"));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Catalog write was rejected");
-  await waitFor(() => expect(screen.getByRole("button", {name: "Create recipe"})).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", {name: "Save recipe draft"})).toBeEnabled());
   expect(createCatalogRecipe).toHaveBeenCalledTimes(1);
 });

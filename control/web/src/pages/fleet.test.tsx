@@ -162,6 +162,88 @@ test("switches between persisted compact and graphical topology views without ex
   expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
 });
 
+test("accepts the legacy cards preference while naming and persisting the view as Detailed", async () => {
+  localStorage.setItem(FLEET_VIEW_STORAGE_KEY, "cards");
+  render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
+  await flush();
+
+  expect(screen.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByRole("button", {name: "Cards"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Compact"}));
+  fireEvent.click(screen.getByRole("button", {name: "Detailed"}));
+  expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("detailed");
+});
+
+test("sorts attention first and combines friendly-name search with multi-select health filters", async () => {
+  const live = node("node-a", "Alpha Studio", "2026-08-15T11:59:58Z");
+  const delayed = node("node-b", "Beta Lab", "2026-08-15T11:59:45Z");
+  const stale = node("node-c", "Gamma Suite", null);
+  const offline = node("node-d", "Delta Rack", "2026-08-15T11:59:59Z", true);
+  render(<FleetPage api={control(async () => snapshot([live, delayed, stale, offline]))}/>);
+  await flush();
+
+  const detailed = screen.getByRole("region", {name: "Fleet nodes detailed"});
+  expect(within(detailed).getAllByRole("article").map(article => article.getAttribute("aria-label"))).toEqual([
+    "Delta Rack — Offline",
+    "Gamma Suite — Stale",
+    "Beta Lab — Delayed",
+    "Alpha Studio — Live",
+  ]);
+  fireEvent.change(screen.getByRole("combobox", {name: "Sort"}), {target: {value: "name"}});
+  expect(within(detailed).getAllByRole("article").map(article => article.getAttribute("aria-label"))).toEqual([
+    "Alpha Studio — Live",
+    "Beta Lab — Delayed",
+    "Delta Rack — Offline",
+    "Gamma Suite — Stale",
+  ]);
+
+  fireEvent.click(screen.getByRole("button", {name: "Show offline nodes"}));
+  fireEvent.click(screen.getByRole("button", {name: "Show delayed nodes"}));
+  expect(screen.getByText("Showing 2 of 4 Sparks", {selector: "[role='status']"})).toBeVisible();
+  expect(screen.getByRole("article", {name: "Delta Rack — Offline"})).toBeVisible();
+  expect(screen.getByRole("article", {name: "Beta Lab — Delayed"})).toBeVisible();
+  expect(screen.queryByRole("article", {name: "Alpha Studio — Live"})).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", {name: "Clear filters"}));
+  fireEvent.click(screen.getByRole("button", {name: "3 active warnings"}));
+  expect(screen.getByText("Showing 3 of 4 Sparks", {selector: "[role='status']"})).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Clear filters"}));
+  const search = screen.getByRole("searchbox", {name: "Find a Spark"});
+  fireEvent.change(search, {target: {value: "node-a.internal"}});
+  expect(screen.getByRole("article", {name: "Alpha Studio — Live"})).toBeVisible();
+  expect(screen.getByText("Showing 1 of 4 Sparks", {selector: "[role='status']"})).toBeVisible();
+  fireEvent.change(search, {target: {value: "missing"}});
+  expect(screen.getByRole("region", {name: "No matching Sparks"})).toBeVisible();
+});
+
+test("keeps selected details across views and clears them with safe focus when filtering hides the Spark", async () => {
+  render(<FleetPage api={control(async () => snapshot([
+    node("node-a", "Alpha", "2026-08-15T11:59:58Z"),
+    node("node-b", "Beta", "2026-08-15T11:59:59Z", true),
+  ]))}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "View Alpha details"}));
+  await flush();
+  fireEvent.click(screen.getByRole("button", {name: "Compact"}));
+  expect(screen.getByRole("complementary", {name: "Alpha details"})).toBeVisible();
+
+  const search = screen.getByRole("searchbox", {name: "Find a Spark"});
+  search.focus();
+  fireEvent.change(search, {target: {value: "Beta"}});
+  expect(screen.queryByRole("complementary", {name: "Alpha details"})).not.toBeInTheDocument();
+  expect(search).toHaveFocus();
+
+  fireEvent.click(screen.getByRole("button", {name: "Clear filters"}));
+  fireEvent.click(screen.getByRole("button", {name: "View Alpha details"}));
+  await flush();
+  fireEvent.click(screen.getByRole("button", {name: "Topology"}));
+  expect(screen.getByRole("complementary", {name: "Alpha details"})).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Close Alpha details"}));
+  await flush();
+  expect(search).toHaveFocus();
+});
+
 test("builds a short in-session GPU trend from live samples", async () => {
   render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
   await flush();
