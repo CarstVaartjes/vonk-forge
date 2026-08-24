@@ -4,7 +4,7 @@ import {StatusPill} from "../components/status-pill";
 
 type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful";
-type ActivityRecord = AuditSummary & {occurred_at?: string; source: "audit" | "operation"};
+type ActivityRecord = AuditSummary & {occurred_at?: string | null; source: "audit" | "operation"};
 type TimestampedJob = JobSummary & {created_at?: string};
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
