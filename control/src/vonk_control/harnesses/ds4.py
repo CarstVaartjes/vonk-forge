@@ -48,8 +48,9 @@ class Ds4HarnessCompiler:
         del patch
         require_entrypoint(recipe, ("/opt/vonk/bin/ds4-serve",))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
-        if "--model" not in parsed or "--mtp" not in parsed:
-            raise HarnessCompileError("DS4 requires target and draft model paths")
+        if "--model" not in parsed:
+            raise HarnessCompileError("DS4 requires a target model path")
+        speculative_arguments = ("--dspark",) if "--mtp" in parsed else ()
         port = require_openai_interface(recipe)
         validate_topology(
             topology,
@@ -65,7 +66,7 @@ class Ds4HarnessCompiler:
             command=(
                 "/opt/vonk/bin/ds4-serve",
                 *arguments,
-                "--dspark",
+                *speculative_arguments,
                 "--cuda",
                 "--host",
                 "0.0.0.0",

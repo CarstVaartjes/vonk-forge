@@ -361,6 +361,44 @@ def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None
     assert all(mount.read_only for mount in projection.model_mounts)
 
 
+def test_ds4_target_only_mode_omits_speculative_decoding_flags() -> None:
+    recipe = _recipe("ds4")
+    recipe["runtime"]["arguments"] = [
+        argument
+        for argument in recipe["runtime"]["arguments"]
+        if argument["name"] != "draft-model"
+    ]
+
+    projection = _compile("ds4", recipe=recipe)
+
+    assert projection.command == (
+        "/opt/vonk/bin/ds4-serve",
+        "--model",
+        "/models/target.gguf",
+        "--ctx",
+        "32768",
+        "--cuda",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    )
+    assert "--mtp" not in projection.command
+    assert "--dspark" not in projection.command
+
+
+def test_ds4_still_requires_a_target_model() -> None:
+    recipe = _recipe("ds4")
+    recipe["runtime"]["arguments"] = [
+        argument
+        for argument in recipe["runtime"]["arguments"]
+        if argument["name"] != "model"
+    ]
+
+    with pytest.raises(HarnessCompileError, match="target model path"):
+        _compile("ds4", recipe=recipe)
+
+
 @pytest.mark.parametrize(
     ("slug", "name", "value", "emitted"),
     [

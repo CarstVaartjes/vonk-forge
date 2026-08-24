@@ -11,7 +11,7 @@
     "kind": "execution-harness",
     "publisher": "vonk-forge",
     "slug": "ds4",
-    "content_sha256": "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3"
+    "content_sha256": "a1dbca13724678dbce47a1caff4a7ae4b6c557a6ac6ca5c0e3a99733fcc3f2b0"
   },
   "platform": "linux/arm64",
   "source": {
