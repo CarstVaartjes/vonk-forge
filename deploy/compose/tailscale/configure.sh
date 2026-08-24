@@ -103,7 +103,7 @@ hermes_is_available() {
 }
 
 withdraw_hermes_services() {
-    # Tailscale v1.98.8 stores Serve config and AdvertiseServices
+    # Tailscale stores Serve config and AdvertiseServices
     # independently. Drain before reading the map so stale advertisements are
     # removed even when there is no corresponding Serve config to inspect.
     # Clear then removes any remaining handler. Both commands are idempotent;
