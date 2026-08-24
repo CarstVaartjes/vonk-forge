@@ -18,7 +18,10 @@ type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type RecipeSort = "catalog" | "model" | "sparks" | "download";
 type LocalFilter = "" | "not-imported" | "update-available" | "current" | "needs-review";
 type ImportStep = "catalog" | "review" | "confirm";
+type CatalogView = "cards" | "compact";
 type Facet = "model" | "creator" | "repository" | "sparks" | "runtime" | "precision" | "topology" | "qualification" | "local" | "capability";
+
+const CATALOG_VIEW_STORAGE_KEY = "vonk.public-recipe-catalog.view";
 
 export type PublicRecipeFilters = {
   query: string;
@@ -44,6 +47,22 @@ const VALID_SPARKS = new Set<SparkFilter>(["", "1", "2", "3", "4+"]);
 const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download"]);
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
 const VALID_CAPABILITIES = new Set(PUBLIC_RECIPE_CAPABILITIES.map(option => option.value));
+
+function storedCatalogView(): CatalogView {
+  try {
+    return window.localStorage.getItem(CATALOG_VIEW_STORAGE_KEY) === "compact" ? "compact" : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+function saveCatalogView(view: CatalogView) {
+  try {
+    window.localStorage.setItem(CATALOG_VIEW_STORAGE_KEY, view);
+  } catch {
+    // A blocked storage preference must not block the catalog itself.
+  }
+}
 
 export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeFilters; more: boolean; recipe: string; step: ImportStep} {
   const search = new URL(url, "https://vonk.invalid").searchParams;
@@ -169,6 +188,85 @@ function qualificationLabel(recipe: PublicRecipe): string {
   return recipe.qualification === "candidate" ? "Candidate" : "Accepted";
 }
 
+function topologyModeLabel(value: string): string {
+  const normalized = value.replaceAll("-", "_");
+  if (normalized === "single") return "Single Spark";
+  if (normalized === "tensor_parallel") return "Tensor parallel";
+  if (normalized === "pipeline_parallel") return "Pipeline parallel";
+  if (normalized === "data_parallel") return "Data parallel";
+  const label = runtimeLabel(value);
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+}
+
+function RecipeTopology({recipe}: {recipe: PublicRecipe}) {
+  const multiSpark = recipe.node_count > 1;
+  return <section className="public-import-topology" aria-labelledby="public-import-topology-title">
+    <header>
+      <div><span className="public-import-kicker">How it runs</span><h3 id="public-import-topology-title">{sparkLabel(recipe.node_count)} · {topologyModeLabel(recipe.topology_mode)}</h3></div>
+      {multiSpark && <span className="public-import-fabric-label">Shared fabric</span>}
+    </header>
+    <div className={`public-import-topology-map${multiSpark ? " is-distributed" : ""}`} role="img" aria-label={multiSpark ? `One leader Spark serving the endpoint and ${recipe.node_count - 1} worker ${recipe.node_count - 1 === 1 ? "Spark" : "Sparks"} connected over shared fabric` : "One Spark runs the model and serves the endpoint"}>
+      <div className="public-import-endpoint" aria-hidden="true"><span>API</span><strong>Endpoint</strong></div>
+      <span className="public-import-topology-connector" aria-hidden="true" />
+      <div className="public-import-spark-nodes" aria-hidden="true">
+        {Array.from({length: recipe.node_count}, (_, index) => <div className={index === 0 ? "is-leader" : ""} key={index}>
+          <span>S{index + 1}</span>
+          <strong>{multiSpark ? index === 0 ? "Leader" : "Worker" : "Spark"}</strong>
+          <small>{index === 0 ? "Endpoint owner" : "Model worker"}</small>
+        </div>)}
+      </div>
+    </div>
+    {multiSpark && <p>Friendly role view based on the catalog topology summary. Exact role names remain in the immutable recipe.</p>}
+  </section>;
+}
+
+function RecipeRequirements({recipe}: {recipe: PublicRecipe}) {
+  const values = [
+    {label: "Download total", value: recipe.expected_download_bytes},
+    {label: "Storage / Spark", value: recipe.maximum_installed_bytes_per_node},
+    {label: "Memory / Spark", value: recipe.maximum_runtime_memory_bytes_per_node},
+  ];
+  const maximum = Math.max(...values.map(item => item.value));
+  return <section className="public-import-requirements" aria-labelledby="public-import-requirements-title">
+    <header><span className="public-import-kicker">Resource requirements</span><h3 id="public-import-requirements-title">Largest per-Spark envelope</h3></header>
+    <div>{values.map(item => <div className="public-import-requirement" key={item.label}>
+      <div><span>{item.label}</span><strong>{formatBytes(item.value)}</strong></div>
+      <meter min={0} max={maximum} value={item.value} aria-label={`${item.label}: ${formatBytes(item.value)}`}>{formatBytes(item.value)}</meter>
+    </div>)}</div>
+    <p>Bars compare byte requirements within this recipe; they do not claim a fit against your current fleet.</p>
+  </section>;
+}
+
+function RecipeComparisonTray({recipes, onRemove, onClear}: {recipes: PublicRecipe[]; onRemove(uri: string): void; onClear(): void}) {
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { if (recipes.length < 2) setExpanded(false); }, [recipes.length]);
+  if (recipes.length === 0) return null;
+  return <section className="public-import-compare" aria-labelledby="public-import-compare-title">
+    <header>
+      <div><span className="public-import-kicker">Compare tray</span><h3 id="public-import-compare-title">{recipes.length} of 3 recipes</h3></div>
+      <button type="button" className="public-import-text-button" onClick={onClear}>Clear</button>
+    </header>
+    <div className="public-import-compare-chips" aria-label="Recipes selected for comparison">{recipes.map(recipe => <span key={recipe.uri}>{recipe.model_title}<button type="button" onClick={() => onRemove(recipe.uri)} aria-label={`Remove ${recipe.title} from comparison`}>×</button></span>)}</div>
+    <button type="button" className="button secondary" disabled={recipes.length < 2} aria-expanded={expanded} aria-controls="public-import-comparison-table" onClick={() => setExpanded(value => !value)}>{expanded ? "Hide comparison" : `Compare ${recipes.length} recipes`}</button>
+    {recipes.length < 2 && <p>Select one more recipe to compare.</p>}
+    {expanded && <div className="public-import-comparison-table-wrap" id="public-import-comparison-table" tabIndex={0}>
+      <table>
+        <caption>Selected public recipe comparison</caption>
+        <thead><tr><th scope="col">Attribute</th>{recipes.map(recipe => <th scope="col" key={recipe.uri}>{recipe.model_title}</th>)}</tr></thead>
+        <tbody>
+          <tr><th scope="row">Recipe</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.title}</td>)}</tr>
+          <tr><th scope="row">Sparks</th>{recipes.map(recipe => <td key={recipe.uri}>{sparkLabel(recipe.node_count)}</td>)}</tr>
+          <tr><th scope="row">Topology</th>{recipes.map(recipe => <td key={recipe.uri}>{topologyModeLabel(recipe.topology_mode)}</td>)}</tr>
+          <tr><th scope="row">Memory / Spark</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</td>)}</tr>
+          <tr><th scope="row">Download</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.expected_download_bytes)}</td>)}</tr>
+          <tr><th scope="row">Precision</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.precision ?? "Not specified"}</td>)}</tr>
+          <tr><th scope="row">Creator</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.source_owner ?? "Not specified"}</td>)}</tr>
+        </tbody>
+      </table>
+    </div>}
+  </section>;
+}
+
 function sortRecipes(recipes: PublicRecipe[], sort: RecipeSort): PublicRecipe[] {
   if (sort === "catalog") return recipes;
   return [...recipes].sort((left, right) => {
@@ -228,6 +326,8 @@ function Preview({preview, saving, status, onBack, onConfirm, onImport}: {
       <p className="public-import-description">{preview.description || "No description provided."}</p>
       <div className="public-import-tags" aria-label="Recipe capabilities">{preview.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
       <dl className="public-import-primary-facts"><div><dt>Sparks</dt><dd>{sparkLabel(preview.node_count)}</dd></div><div><dt>Download</dt><dd>{formatBytes(preview.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(preview.maximum_runtime_memory_bytes_per_node)}</dd></div><div><dt>Creator</dt><dd>{preview.source_owner ?? "Not specified"}</dd></div></dl>
+      <RecipeTopology recipe={preview}/>
+      <RecipeRequirements recipe={preview}/>
       {preview.local.status === "update-available" && <p className="public-import-note">Existing installations and running services remain pinned to their current revision until you rebuild or reinstall them.</p>}
       {["different-revision", "conflict", "local-ahead"].includes(preview.local.status) && <p className="public-import-warning" role="alert">{preview.local.status === "different-revision" ? "The local digest is not in catalog history, so an exact change list cannot be proven." : preview.local.status === "conflict" ? "A different local recipe owns this slug. Resolve the conflict before importing." : "The local release is newer than this catalog snapshot. Import is disabled to avoid a downgrade."}</p>}
       {preview.changes_since_local.length > 0 && <section className="public-import-changelog" aria-labelledby="public-import-changelog-title"><header><span className="public-import-kicker">Release notes</span><h3 id="public-import-changelog-title">{preview.local.status === "update-available" ? `Changes since local v${preview.local.release_version}` : "Catalog changelog"}</h3></header>{preview.changes_since_local.map((release, releaseIndex) => <details open={releaseIndex === 0} key={`${release.version}:${release.content_sha256}`}><summary><strong>v{release.version}</strong><span>{release.released_at} · {upgradeEffectLabel(release.upgrade_effect)}</span></summary><ul>{release.changes.map((change, index) => <li key={`${change.kind}:${index}`}><span>{change.kind}</span><strong>{change.summary}</strong>{change.details && <p>{change.details}</p>}{change.references.length > 0 && <div>{change.references.map((reference, referenceIndex) => <a href={reference} target="_blank" rel="noreferrer" key={reference}>Source {referenceIndex + 1}<span className="sr-only"> (opens in a new tab)</span></a>)}</div>}</li>)}</ul></details>)}</section>}
@@ -257,6 +357,8 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const [completion, setCompletion] = useState("");
   const [manualUri, setManualUri] = useState("");
   const [announcement, setAnnouncement] = useState("");
+  const [catalogView, setCatalogView] = useState<CatalogView>(storedCatalogView);
+  const [compareUris, setCompareUris] = useState<string[]>([]);
   const heading = useRef<HTMLHeadingElement>(null);
   const catalogRequest = useRef<AbortController | undefined>(undefined);
   const previewRequest = useRef<AbortController | undefined>(undefined);
@@ -336,6 +438,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const count = (facet: Facet, predicate: (recipe: PublicRecipe) => boolean) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, facet) && predicate(recipe)).length;
   const capabilityCount = (capability: PublicRecipeCapability) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, "capability") && filters.capabilities.filter(value => value !== capability).every(value => recipe.capabilities.includes(value)) && recipe.capabilities.includes(capability)).length;
   const applied = activeFilters(filters);
+  const comparedRecipes = compareUris.flatMap(uri => recipes.find(recipe => recipe.uri === uri) ?? []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setAnnouncement(`Showing ${filtered.length} of ${recipes.length} recipes.`), 250);
@@ -344,6 +447,20 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
 
   function selectRecipe(uri: string) {
     onNavigate(publicRecipeImportUrl(filters, {more, recipe: uri, step: "review"}));
+  }
+
+  function chooseCatalogView(view: CatalogView) {
+    setCatalogView(view);
+    saveCatalogView(view);
+    setAnnouncement(`${view === "cards" ? "Cards" : "Compact list"} view selected.`);
+  }
+
+  function toggleComparison(uri: string) {
+    setCompareUris(current => {
+      if (current.includes(uri)) return current.filter(value => value !== uri);
+      if (current.length >= 3) return current;
+      return [...current, uri];
+    });
   }
 
   function returnToCatalog() {
@@ -406,18 +523,26 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <details className="public-import-manual"><summary>Advanced: import URI</summary><div><label><span>Public recipe URI</span><input value={manualUri} onChange={event => setManualUri(event.target.value)} placeholder="vonk://catalog/…@sha256:…" /></label><button type="button" className="button secondary" disabled={!manualUri} onClick={() => selectRecipe(manualUri)}>Review URI</button></div></details>
       </aside>
       <main className="public-import-results" aria-busy={loading || refreshing}>
-        <header><div><span className="public-import-kicker">Public recipe library</span><h2>Choose a recipe</h2></div><div><span>{refreshing ? "Refreshing…" : `${filtered.length} of ${recipes.length}`}</span>{commit && <code title={commit}>@{commit.slice(0, 8)}</code>}<button type="button" className="public-import-icon-button" aria-label="Refresh public catalog" onClick={() => void loadCatalog(true)}>↻</button></div></header>
+        <header><div><span className="public-import-kicker">Public recipe library</span><h2>Choose a recipe</h2></div><div><span>{refreshing ? "Refreshing…" : `${filtered.length} of ${recipes.length}`}</span><button type="button" className="public-import-icon-button" aria-label="Refresh public catalog" onClick={() => void loadCatalog(true)}>↻</button></div></header>
+        <div className="public-import-results-tools">
+          <div className="public-import-view-switch" role="group" aria-label="Catalog view">
+            <button type="button" aria-pressed={catalogView === "cards"} onClick={() => chooseCatalogView("cards")}><span aria-hidden="true">▦</span> Cards</button>
+            <button type="button" aria-pressed={catalogView === "compact"} onClick={() => chooseCatalogView("compact")}><span aria-hidden="true">☷</span> Compact</button>
+          </div>
+          {commit && <details className="public-import-snapshot"><summary>Catalog snapshot</summary><div><span>Immutable commit</span><code>{commit}</code></div></details>}
+        </div>
         {loading && recipes.length === 0 && <div className="public-import-state" role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>Loading the public catalog</strong><p>Resolving one immutable library snapshot…</p></div></div>}
         {catalogError && <div className="public-import-state is-error" role="alert"><div><strong>Catalog unavailable</strong><p>{catalogError}</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog()}>Try again</button></div>}
         {!loading && !catalogError && recipes.length === 0 && <div className="public-import-state"><div><strong>The public catalog is empty</strong><p>No catalog recipes were returned. You can refresh or use an immutable URI.</p></div><button type="button" className="button secondary" onClick={() => void loadCatalog(true)}>Refresh catalog</button></div>}
         {applied.length > 0 && <div className="public-import-applied" aria-label="Applied filters">{applied.map(item => <button type="button" key={item.key} onClick={() => navigateFilters(item.remove(filters))}>{item.label}<span aria-hidden="true">×</span><span className="sr-only"> Remove filter</span></button>)}</div>}
         {!loading && recipes.length > 0 && filtered.length === 0 && <div className="public-import-state"><div><strong>No matching recipes</strong><p>Remove one or more filters to broaden the catalog.</p></div><button type="button" className="button secondary" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear filters</button></div>}
-        <div className="public-import-recipe-list" role="list" aria-label="Public recipes">{filtered.map(recipe => <article role="listitem" className={selectedUri === recipe.uri ? "is-selected" : ""} key={recipe.uri}>
+        <div className={`public-import-recipe-list is-${catalogView}`} role="list" aria-label="Public recipes">{filtered.map(recipe => { const compared = compareUris.includes(recipe.uri); return <article role="listitem" className={selectedUri === recipe.uri ? "is-selected" : ""} key={recipe.uri}>
           <header><div><span className={`public-import-qualification qualification-${recipe.qualification}`}>{qualificationLabel(recipe)}{recipe.release_version ? ` · v${recipe.release_version}` : ""}</span><span className={`public-import-local status-${recipe.local.status}`}>{localStatusLabel(recipe)}</span></div><h3>{recipe.model_title}</h3><p>{recipe.title}{recipe.precision ? ` · ${recipe.precision}` : ""}</p></header>
           <dl><div><dt>Sparks</dt><dd>{sparkLabel(recipe.node_count)}</dd></div><div><dt>Download</dt><dd>{formatBytes(recipe.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</dd></div></dl>
           <div className="public-import-tags" aria-label={`${recipe.title} capabilities`}>{recipe.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
-          <footer>{recipe.source_owner && <span>By {recipe.source_owner}</span>}<button type="button" className="button secondary" data-recipe-uri={recipe.uri} aria-current={selectedUri === recipe.uri ? "true" : undefined} onClick={() => selectRecipe(recipe.uri)}>{recipe.local.status === "update-available" ? `Review update for ${recipe.title}` : `Review ${recipe.title}`}</button></footer>
-        </article>)}</div>
+          <footer><label className="public-import-compare-toggle"><input type="checkbox" checked={compared} disabled={!compared && compareUris.length >= 3} onChange={() => toggleComparison(recipe.uri)}/><span>Compare<span className="sr-only"> {recipe.title}</span></span></label>{recipe.source_owner && <span>By {recipe.source_owner}</span>}<button type="button" className="button secondary" data-recipe-uri={recipe.uri} aria-current={selectedUri === recipe.uri ? "true" : undefined} onClick={() => selectRecipe(recipe.uri)}>{catalogView === "compact" ? <>Review<span className="sr-only">{recipe.local.status === "update-available" ? ` update for ${recipe.title}` : ` ${recipe.title}`}</span></> : recipe.local.status === "update-available" ? `Review update for ${recipe.title}` : `Review ${recipe.title}`}</button></footer>
+        </article>; })}</div>
+        <RecipeComparisonTray recipes={comparedRecipes} onRemove={uri => setCompareUris(current => current.filter(value => value !== uri))} onClear={() => setCompareUris([])}/>
       </main>
       <aside className="public-import-review-pane" aria-label="Selected recipe review">
         {previewLoading && <div className="public-import-state" role="status"><span className="public-import-spinner" aria-hidden="true"/><div><strong>Loading recipe preview</strong><p>Verifying the selected immutable revision…</p></div></div>}

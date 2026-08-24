@@ -554,7 +554,10 @@ test("loads the current default catalog recipes when public import opens", async
   render(<App api={api}/>);
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
   expect(await screen.findAllByRole("heading", {name: /Qwen 3\.5/, level: 3})).toHaveLength(2);
-  expect(screen.getByText("@cccccccc")).toBeVisible();
+  const catalogCommit = screen.getByText("c".repeat(40));
+  expect(catalogCommit).not.toBeVisible();
+  await user.click(screen.getByText("Catalog snapshot"));
+  expect(catalogCommit).toBeVisible();
   expect(screen.getAllByText("By QwenLM")[0]).toBeVisible();
 
   const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});
