@@ -14,7 +14,11 @@ from vonk_control import operation_api
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_projection import FleetSnapshot, TelemetryHistoryResponse
+from vonk_control.fleet_projection import (
+    FleetNodeIdentity,
+    FleetSnapshot,
+    TelemetryHistoryResponse,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -78,6 +82,7 @@ class Repository:
 class ProjectedFleet:
     def __init__(self) -> None:
         self.history_calls: list[tuple[object, ...]] = []
+        self.profile_calls: list[tuple[str, str]] = []
 
     def read(self) -> FleetSnapshot:
         return FleetSnapshot(
@@ -106,6 +111,19 @@ class ProjectedFleet:
             resolution=resolution,
             maximum_points=maximum_points,
             points=[],
+        )
+
+    def update_display_name(
+        self, node_id: str, display_name: str
+    ) -> FleetNodeIdentity:
+        self.profile_calls.append((node_id, display_name))
+        if node_id != NODE_ID:
+            raise KeyError(node_id)
+        return FleetNodeIdentity(
+            id=node_id,
+            display_name=display_name,
+            hostname="spark-3542.internal",
+            management_address="192.168.1.211",
         )
 
 
@@ -233,7 +251,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         client.get(
             f"/api/v1/nodes/{NODE_ID}/telemetry",
             headers=operator,
-            params={**params, "maximum_points": "1501"},
+            params={**params, "maximum_points": "3001"},
         ).status_code
         == 422
     )
@@ -246,6 +264,60 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         ).status_code
         == 404
     )
+
+
+def test_operator_can_rename_node_without_mutating_technical_identity() -> None:
+    projection = ProjectedFleet()
+    client, operator, _, audits = _client(fleet_projection=projection)
+
+    response = client.patch(
+        f"/api/v1/nodes/{NODE_ID}/profile",
+        headers=operator,
+        json={"display_name": "  Studio Spark  "},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": NODE_ID,
+        "display_name": "Studio Spark",
+        "hostname": "spark-3542.internal",
+        "management_address": "192.168.1.211",
+    }
+    assert projection.profile_calls == [(NODE_ID, "Studio Spark")]
+    assert audits.list()[0].action == "fleet.node.rename"
+    assert audits.list()[0].targets == (NODE_ID,)
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    ["", "   ", "bad\nname", "x" * 81],
+)
+def test_node_rename_rejects_invalid_friendly_names(display_name: str) -> None:
+    projection = ProjectedFleet()
+    client, operator, *_ = _client(fleet_projection=projection)
+
+    response = client.patch(
+        f"/api/v1/nodes/{NODE_ID}/profile",
+        headers=operator,
+        json={"display_name": display_name},
+    )
+
+    assert response.status_code == 422
+    assert projection.profile_calls == []
+
+
+def test_viewer_cannot_rename_node() -> None:
+    projection = ProjectedFleet()
+    client, viewer, *_ = _client(fleet_projection=projection, role="viewer")
+
+    response = client.patch(
+        f"/api/v1/nodes/{NODE_ID}/profile",
+        headers=viewer,
+        json={"display_name": "Studio Spark"},
+    )
+
+    assert response.status_code == 403
+    assert projection.profile_calls == []
 
 
 def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:

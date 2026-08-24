@@ -20,6 +20,7 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
+    AgentPresence,
     Base,
     ClusterMapping,
     ClusterMappingNode,
@@ -308,6 +309,15 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 _certificate(EXTRA_NODE, "bounded-external"),
             ]
         )
+        session.add(
+            AgentPresence(
+                node_id=NODE_A,
+                certificate_serial="bounded-a",
+                certificate_fingerprint="fingerprint-bounded-a",
+                management_address="192.168.1.211",
+                observed_at=NOW,
+            )
+        )
         session.add_all(
             [
                 _inventory(NODE_A, NOW - timedelta(minutes=2), free_bytes=600),
@@ -366,6 +376,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "id": NODE_A,
                 "display_name": "Alpha",
                 "hostname": "alpha.internal",
+                "management_address": "192.168.1.211",
                 "lifecycle": "managed",
                 "labels": {"rack": "left"},
                 "connection": {
@@ -440,6 +451,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "id": NODE_B,
                 "display_name": "Beta",
                 "hostname": "beta.internal",
+                "management_address": None,
                 "lifecycle": "managed",
                 "labels": {"rack": "right"},
                 "connection": {
@@ -490,7 +502,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 10
+    assert len(selects) == 11
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]
@@ -513,6 +525,47 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         in (inventory_reads[0])
     )
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
+
+
+def test_display_name_update_preserves_identity_and_emits_projection_refresh() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        node = AgentNode(node_id=NODE_A, state="active", capabilities=[])
+        session.add(node)
+        session.flush([node])
+        session.add(
+            _profile(
+                NODE_A,
+                display_name=NODE_A,
+                hostname="spark-3542.internal",
+            )
+        )
+        session.add(_certificate(NODE_A, "profile-a"))
+        session.add(
+            AgentPresence(
+                node_id=NODE_A,
+                certificate_serial="profile-a",
+                certificate_fingerprint="fingerprint-profile-a",
+                management_address="192.168.1.211",
+                observed_at=NOW,
+            )
+        )
+
+    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+    identity = projection.update_display_name(NODE_A, "Studio Spark")
+
+    assert identity.model_dump() == {
+        "id": NODE_A,
+        "display_name": "Studio Spark",
+        "hostname": "spark-3542.internal",
+        "management_address": "192.168.1.211",
+    }
+    snapshot = projection.read()
+    assert snapshot.nodes[0].display_name == "Studio Spark"
+    assert snapshot.nodes[0].management_address == "192.168.1.211"
+    assert snapshot.event_cursor == 1
 
 
 def test_read_captures_the_committed_cursor_before_repository_projection() -> None:
@@ -1471,7 +1524,7 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
             NODE_A,
             start=NOW - timedelta(hours=1),
             end=NOW,
-            maximum_points=1_501,
+            maximum_points=3_001,
             resolution="raw",
         )
     with pytest.raises(ValueError, match="raw window"):

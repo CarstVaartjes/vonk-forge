@@ -6,8 +6,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_presence import RecipePresence
@@ -43,6 +45,7 @@ class FleetNode:
             reservations (CapacityReservations):
             telemetry (Union['TelemetryState', None]):
             warnings (list['ProjectionReason']):
+            management_address (Union[None, Unset, str]):
      """
 
     connection: 'NodeConnection'
@@ -57,6 +60,7 @@ class FleetNode:
     reservations: 'CapacityReservations'
     telemetry: Union['TelemetryState', None]
     warnings: list['ProjectionReason']
+    management_address: Union[None, Unset, str] = UNSET
 
 
 
@@ -118,6 +122,12 @@ class FleetNode:
 
 
 
+        management_address: Union[None, Unset, str]
+        if isinstance(self.management_address, Unset):
+            management_address = UNSET
+        else:
+            management_address = self.management_address
+
 
         field_dict: dict[str, Any] = {}
 
@@ -135,6 +145,8 @@ class FleetNode:
             "telemetry": telemetry,
             "warnings": warnings,
         })
+        if management_address is not UNSET:
+            field_dict["management_address"] = management_address
 
         return field_dict
 
@@ -240,6 +252,16 @@ class FleetNode:
             warnings.append(warnings_item)
 
 
+        def _parse_management_address(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        management_address = _parse_management_address(d.pop("management_address", UNSET))
+
+
         fleet_node = cls(
             connection=connection,
             display_name=display_name,
@@ -253,6 +275,7 @@ class FleetNode:
             reservations=reservations,
             telemetry=telemetry,
             warnings=warnings,
+            management_address=management_address,
         )
 
         return fleet_node

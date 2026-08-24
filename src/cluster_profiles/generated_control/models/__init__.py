@@ -24,6 +24,7 @@ from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .fleet_node import FleetNode
+from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
 from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
@@ -87,6 +88,7 @@ from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
 from .node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from .node_connection_online_state import NodeConnectionOnlineState
+from .node_profile_update_request import NodeProfileUpdateRequest
 from .node_status import NodeStatus
 from .node_status_labels import NodeStatusLabels
 from .operation_response import OperationResponse
@@ -263,6 +265,7 @@ __all__ = (
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "FleetNode",
+    "FleetNodeIdentity",
     "FleetNodeLabels",
     "FleetSnapshot",
     "FleetStatusResponse",
@@ -326,6 +329,7 @@ __all__ = (
     "NodeConnectionCertificateState",
     "NodeConnectionOfflineReasonType0",
     "NodeConnectionOnlineState",
+    "NodeProfileUpdateRequest",
     "NodeStatus",
     "NodeStatusLabels",
     "OperationalBuild",

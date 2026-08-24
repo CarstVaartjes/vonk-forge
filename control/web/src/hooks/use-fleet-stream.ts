@@ -50,6 +50,9 @@ export function useFleetStream(api: ControlApi) {
     dispatch({type: "retry"});
     setGeneration(value => value + 1);
   }, []);
+  const updateNodeProfile = useCallback((nodeId: string, displayName: string) => {
+    dispatch({type: "node-profile-updated", nodeId, displayName});
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -212,6 +215,7 @@ export function useFleetStream(api: ControlApi) {
       source.addEventListener("error", onError);
       source.addEventListener("fleet-snapshot", onSnapshot);
       source.addEventListener("node-telemetry", onTelemetry);
+      source.addEventListener("node-profile", onSparse);
       source.addEventListener("recipe-state", onSparse);
       source.addEventListener("operation-state", onSparse);
     } else {
@@ -228,6 +232,7 @@ export function useFleetStream(api: ControlApi) {
       source?.removeEventListener("error", onError);
       source?.removeEventListener("fleet-snapshot", onSnapshot);
       source?.removeEventListener("node-telemetry", onTelemetry);
+      source?.removeEventListener("node-profile", onSparse);
       source?.removeEventListener("recipe-state", onSparse);
       source?.removeEventListener("operation-state", onSparse);
       source?.close();
@@ -236,5 +241,5 @@ export function useFleetStream(api: ControlApi) {
     };
   }, [api, generation]);
 
-  return {...state, now, retry};
+  return {...state, now, retry, updateNodeProfile};
 }

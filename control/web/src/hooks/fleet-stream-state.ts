@@ -26,6 +26,7 @@ export type FleetStreamAction =
   | {type: "requested-snapshot"; snapshot: VisualFleetSnapshot}
   | {type: "reset-snapshot"; snapshot: VisualFleetSnapshot; reason: string}
   | {type: "node-telemetry"; cursor: number; nodeId: string; sample: TelemetryPoint; receivedAt: Date}
+  | {type: "node-profile-updated"; nodeId: string; displayName: string}
   | {type: "projection-refresh"; cursor: number}
   | {type: "stream-open"}
   | {type: "stream-error"}
@@ -80,6 +81,17 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         },
       };
     }
+    case "node-profile-updated":
+      if (!state.snapshot) return state;
+      return {
+        ...state,
+        snapshot: {
+          ...state.snapshot,
+          nodes: state.snapshot.nodes.map(node => node.id === action.nodeId
+            ? {...node, display_name: action.displayName}
+            : node),
+        },
+      };
     case "projection-refresh":
       if (!state.snapshot || action.cursor <= Math.max(state.snapshot.event_cursor, state.requiredRefreshCursor ?? -1)) return state;
       return {

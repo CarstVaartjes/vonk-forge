@@ -1668,7 +1668,7 @@ class FleetStreamEvent(Base):
     __tablename__ = "fleet_stream_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('node-telemetry','recipe-state','operation-state')",
+            "event_type IN ('node-telemetry','node-profile','recipe-state','operation-state')",
             name="ck_fleet_stream_events_event_type",
         ),
         CheckConstraint(

@@ -10,6 +10,7 @@ import type {
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetEvidenceResponse,
+  FleetNodeIdentity,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -26,6 +27,7 @@ import type {
   TelemetryHistory,
   TelemetryResolution,
   VisualFleetSnapshot,
+  NodeProfileUpdate,
   SourceBundleReceipt,
   SourcePolicyReport,
   RecipeBuildPlan,
@@ -273,6 +275,14 @@ export class ApiClient implements ControlApi {
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
     return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+  }
+
+  async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
+    return resultData(await this.generated.PATCH("/api/v1/nodes/{node_id}/profile", {
+      body: input,
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
   }
 
   async librarySnapshot(cursor?: string, signal?: AbortSignal) {

@@ -63,7 +63,11 @@ from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
 )
-from .fleet_projection import FleetSnapshot, TelemetryHistoryResponse
+from .fleet_projection import (
+    FleetNodeIdentity,
+    FleetSnapshot,
+    TelemetryHistoryResponse,
+)
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
 from .library_api import install_library_routes
@@ -399,6 +403,15 @@ class ChangeRequest(BaseModel):
     proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class NodeProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    display_name: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+    )
+
+
 def create_app(
     *,
     jobs: JobQueue,
@@ -600,8 +613,10 @@ def create_app(
                 raise HTTPException(status_code=403, detail="CSRF validation failed")
         return authenticated
 
-    def require_mutation_role(authenticated: Actor, path: str) -> None:
-        if authenticated.role not in MUTATION_ROLES[("POST", path)]:
+    def require_mutation_role(
+        authenticated: Actor, path: str, method: str = "POST"
+    ) -> None:
+        if authenticated.role not in MUTATION_ROLES[(method, path)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
     def browser_session_actor(request: Request) -> Actor:
@@ -753,6 +768,43 @@ def create_app(
     def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
         return fleet_response(fleet())
 
+    @app.patch(
+        "/api/v1/nodes/{node_id}/profile",
+        response_model=FleetNodeIdentity,
+        responses=bounded_error_responses(401, 403, 404, 422, 503),
+        operation_id="updateNodeProfile",
+    )
+    def update_node_profile(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        body: NodeProfileUpdateRequest,
+        request: Request,
+        authenticated: Actor = authenticated_actor,
+    ) -> FleetNodeIdentity:
+        route = "/api/v1/nodes/{node_id}/profile"
+        require_mutation_role(authenticated, route, "PATCH")
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            identity = fleet_projection.update_display_name(
+                node_id, body.display_name
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Fleet node not found") from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(
+                status_code=503, detail="Fleet profile update unavailable"
+            ) from None
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                authenticated.subject,
+                "fleet.node.rename",
+                None,
+                (node_id,),
+            )
+        )
+        return identity
+
     @app.get(
         "/api/v1/nodes/{node_id}/telemetry",
         response_model=TelemetryHistoryResponse,
@@ -764,7 +816,7 @@ def create_app(
         start: Annotated[datetime, Query()],
         end: Annotated[datetime, Query()],
         resolution: Annotated[TelemetryResolution, Query()],
-        maximum_points: Annotated[int, Query(ge=1, le=1_500)] = 1_500,
+        maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryHistoryResponse:
         if fleet_projection is None:

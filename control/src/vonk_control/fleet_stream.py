@@ -227,7 +227,7 @@ class FleetStream:
                 "node_id": sample.node_id,
                 "sample": telemetry_point(sample).model_dump(mode="json"),
             }
-        if event.event_type not in {"recipe-state", "operation-state"}:
+        if event.event_type not in {"node-profile", "recipe-state", "operation-state"}:
             raise RuntimeError("Fleet stream event type is invalid")
         return {
             "schema_version": 1,
