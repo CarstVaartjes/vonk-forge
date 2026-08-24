@@ -11,6 +11,7 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     settings = Settings.from_env_and_secrets()
     assert settings.database_host == "postgres"
     assert settings.global_catalog_url == "https://vonkforge.ai"
+    assert settings.recipe_library_api_url == "https://api.github.com"
 
 
 def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> None:
@@ -25,6 +26,17 @@ def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> Non
     monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "https://user:secret@catalog.example")
     with pytest.raises(SettingsError, match="global catalog URL"):
         Settings.from_env_and_secrets()
+
+
+def test_recipe_library_api_uses_only_github_or_the_internal_relay(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_API_URL", "http://caddy:8083/")
+    assert Settings.from_env_and_secrets().recipe_library_api_url == "http://caddy:8083"
+
+    for invalid in ("http://api.github.com", "https://github.example"):
+        monkeypatch.setenv("VONK_RECIPE_LIBRARY_API_URL", invalid)
+        with pytest.raises(SettingsError, match="recipe library API URL"):
+            Settings.from_env_and_secrets()
 
 
 def test_management_networks_are_explicit_and_policy_validated(monkeypatch) -> None:

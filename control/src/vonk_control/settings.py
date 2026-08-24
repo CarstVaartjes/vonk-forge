@@ -147,6 +147,7 @@ class Settings:
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
+    recipe_library_api_url: str = "https://api.github.com"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
 
@@ -364,6 +365,16 @@ class Settings:
             or parsed_catalog.password is not None
         ):
             raise SettingsError("global catalog URL must be a fixed HTTPS origin")
+        recipe_library_api_url = os.environ.get(
+            "VONK_RECIPE_LIBRARY_API_URL", "https://api.github.com"
+        ).rstrip("/")
+        if recipe_library_api_url not in {
+            "https://api.github.com",
+            "http://caddy:8083",
+        }:
+            raise SettingsError(
+                "recipe library API URL must be GitHub or the fixed internal relay"
+            )
         return cls(
             database_url=database_url,
             state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
@@ -397,6 +408,7 @@ class Settings:
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             global_catalog_url=global_catalog_url,
+            recipe_library_api_url=recipe_library_api_url,
             agent_controller_address=agent_controller_address,
             agent_service_hostnames=agent_service_hostnames,
         )

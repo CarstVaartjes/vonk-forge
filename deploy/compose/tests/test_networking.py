@@ -130,6 +130,10 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "data",
         "worker-authority",
     }
+    assert services["control-api"]["environment"]["VONK_RECIPE_LIBRARY_API_URL"] == (
+        "http://caddy:8083"
+    )
+    assert rendered["networks"]["ingress"].get("internal", False) is False
     assert rendered["networks"]["worker-authority"]["internal"] is True
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",

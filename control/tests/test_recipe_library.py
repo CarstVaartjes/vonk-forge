@@ -566,3 +566,29 @@ def test_recipe_library_rejects_a_changed_document_digest() -> None:
         RecipeLibraryClient(transport=httpx.MockTransport(handler)).fetch(
             "vonk://catalog/vonk-forge/synthetic-tiny-openai@sha256:" + "0" * 64
         )
+
+
+def test_recipe_library_allows_only_the_fixed_internal_http_relay() -> None:
+    observed: list[tuple[str, int | None, str]] = []
+
+    def relay(request: httpx.Request) -> httpx.Response:
+        observed.append((request.url.host, request.url.port, request.url.path))
+        return httpx.Response(503)
+
+    client = RecipeLibraryClient(
+        base_url="http://caddy:8083/",
+        transport=httpx.MockTransport(relay),
+    )
+    with pytest.raises(RecipeLibraryError) as relay_error:
+        client.list()
+    client.close()
+
+    assert relay_error.value.code == "recipe_library.unavailable"
+    assert observed == [
+        ("caddy", 8083, "/repos/CarstVaartjes/vonk-forge-recipes/commits/main")
+    ]
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        RecipeLibraryClient(base_url="http://api.github.com")
+
+    assert exc_info.value.code == "recipe_library.url_insecure"
