@@ -189,6 +189,14 @@ def test_runtime_distribution_requires_one_exact_implemented_harness() -> None:
         validate_catalog_document(document)
 
 
+def test_runtime_distribution_accepts_verified_vllm_ray_mechanism() -> None:
+    path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["capabilities"]["distributed_vllm"]["mechanism"] = "vllm-ray"
+
+    validate_catalog_document(document)
+
+
 def test_model_version_accepts_complete_strict_74_file_inventory() -> None:
     model = {
         "kind": "model",

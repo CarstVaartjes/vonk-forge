@@ -765,7 +765,7 @@ def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
             },
             {
                 "name": "compilation-config",
-                "value": '{"cudagraph_mode":"FULL","pass_config":{"fuse_gemm_comms":true}}',
+                "value": '{"cudagraph_mode":"FULL","cudagraph_capture_sizes":[4,8],"pass_config":{"fuse_gemm_comms":true}}',
             },
             {"name": "disable-flashinfer-autotune", "value": True},
         ]

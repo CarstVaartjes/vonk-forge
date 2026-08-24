@@ -10,7 +10,7 @@ from pathlib import PurePosixPath
 
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
-_SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%={},"<>-]{1,2048}$')
+_SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
 _SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
