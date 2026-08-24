@@ -790,7 +790,7 @@
 .library-overview {
   display: grid;
   gap: 0.7rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   margin: 0 0 1rem;
 }
 
@@ -833,6 +833,15 @@
 
 .library-stat-warning strong {
   color: var(--warning);
+}
+
+.library-stat-update {
+  border-color: #68e5b399;
+  box-shadow: inset 0 0 0 1px #68e5b31f;
+}
+
+.library-stat-update strong {
+  color: var(--mint-strong);
 }
 
 .library-toolbar {
@@ -964,6 +973,41 @@
   color: var(--mint-strong);
 }
 
+.library-catalog-state,
+.library-update-summary {
+  align-items: center;
+  background: #0c1815;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.8rem;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+}
+
+.library-catalog-state.is-error {
+  border-color: #e9b36c66;
+  color: #ffd099;
+}
+
+.library-update-summary {
+  background: linear-gradient(110deg, #143229, #0c1815);
+  border-color: #68e5b366;
+}
+
+.library-update-summary > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.library-update-summary span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
 .library-row-shell {
   border-top: 1px solid var(--border);
   min-width: 0;
@@ -979,6 +1023,75 @@
   flex-wrap: wrap;
   gap: 0.7rem;
   padding: 0 1rem 0.75rem;
+}
+
+.library-release-link {
+  align-items: center;
+  color: var(--mint-strong);
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 750;
+  min-height: 36px;
+}
+
+.library-row .library-release-label {
+  color: var(--text-subtle);
+  font-weight: 750;
+}
+
+.library-row .library-release-label.status-update-available {
+  color: var(--mint-strong);
+}
+
+.library-row .library-release-label.status-conflict,
+.library-row .library-release-label.status-different-revision,
+.library-row .library-release-label.status-local-ahead {
+  color: #ffd099;
+}
+
+.library-release-context {
+  background: #0c1815;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 1rem 0.9rem;
+  padding: 0.85rem;
+}
+
+.library-release-context.status-update-available {
+  background: linear-gradient(135deg, #143229, #0c1815);
+  border-color: #68e5b366;
+}
+
+.library-release-context.status-conflict,
+.library-release-context.status-different-revision,
+.library-release-context.status-local-ahead {
+  border-color: #e9b36c66;
+}
+
+.library-release-context > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.library-release-context > div span {
+  color: var(--text-subtle);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.library-release-context p {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.library-release-context .button {
+  justify-self: start;
 }
 
 .library-compare-control {
@@ -1630,6 +1743,18 @@
   .library-view-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .library-catalog-state,
+  .library-update-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .library-catalog-state .button,
+  .library-update-summary .button {
+    justify-content: center;
+    width: 100%;
   }
 
   .library-view-toolbar > div {

@@ -19,6 +19,22 @@ type LibraryFixtureState = {
 };
 const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
 
+function libraryCatalogUpdate() {
+  const contentDigest = "b".repeat(64);
+  return {
+    publisher: "vonk-forge", slug: "qwen-chat", title: "Qwen Chat catalog recipe", description: "A digest-bound Qwen Chat recipe.", tags: ["qwen", "chat"],
+    uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${contentDigest}`, content_sha256: contentDigest,
+    model_publisher: "qwen", model_slug: "3", model_title: "Qwen 3", source_owner: "QwenLM", source_repository: "https://github.com/QwenLM/Qwen3",
+    capabilities: ["chat"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "The reviewed immutable recipe explicitly declares accepted qualification.",
+    execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "This recipe explicitly declares an executable contract; fleet compatibility and operator review still apply.",
+    precision: "BF16", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1,
+    topology_name: "pair", topology_mode: "tensor_parallel", node_count: 2, topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "worker", count: 1, endpoint_owner: false}],
+    fabric: {connectivity: "connected", minimum_bandwidth_mbps: 25_000}, expected_download_bytes: 80 * GIB, maximum_installed_bytes_per_node: 100 * GIB, maximum_runtime_memory_bytes_per_node: 72 * GIB,
+    release_version: "1.2.0", release_released_at: "2026-08-24",
+    local: {status: "update-available", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "a".repeat(64), release_version: "1.0.0"},
+  };
+}
+
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const results = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(results.violations, results.violations.map(value => `${value.id}: ${value.help}`).join("\n")).toEqual([]);
@@ -124,6 +140,7 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: []}}));
   await page.route("**/api/v1/library?*", route => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
@@ -494,6 +511,34 @@ test("Library view modes persist and compare friendly recipes without document o
     rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
   }));
   expect(kpiLayout).toEqual({horizontallyScrollable: true, rows: 1});
+});
+
+test("Library exposes a versioned catalog update and opens its changelog review", async ({page}) => {
+  const update = libraryCatalogUpdate();
+  await page.unroute("**/api/v1/catalog/public-recipes");
+  await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: [update]}}));
+  await page.route("**/api/v1/catalog/imports/public/preview", route => route.fulfill({json: {
+    ...update,
+    source: "recipe_library",
+    changes_since_local: [{
+      version: "1.2.0", released_at: "2026-08-24", content_sha256: update.content_sha256, upgrade_effect: "rebuild",
+      changes: [{kind: "performance", summary: "Improved distributed defaults.", details: "Uses the current upstream topology guidance.", references: ["https://github.com/QwenLM/Qwen3"]}],
+    }],
+  }}));
+
+  await page.goto("/library");
+  await expect(page.getByRole("group", {name: "1 catalog update available"})).toBeVisible();
+  await page.getByRole("link", {name: /Qwen 3/}).click();
+  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModelName}`});
+  await expect(recipes.getByText("Update available · v1.0.0 → v1.2.0")).toBeVisible();
+  await recipes.getByRole("link", {name: "Review update for Qwen Chat"}).click();
+
+  await expect(page).toHaveURL(/\/library\/import\?recipe=/);
+  const changelog = page.getByRole("region", {name: "Changes since local v1.0.0"});
+  await expect(changelog).toContainText("Improved distributed defaults.");
+  await expect(changelog).toContainText("Rebuild required");
+  await expect(page.getByText(/Existing installations and running services remain pinned/)).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {

@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
 import {nodeDisplayName} from "../lib/fleet";
@@ -130,6 +130,10 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const [nodeDisplayNames, setNodeDisplayNames] = useState<Record<string, string>>({});
+  const [publicRecipes, setPublicRecipes] = useState<PublicRecipe[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -148,6 +152,34 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
       });
     return () => controller.abort();
   }, [api]);
+
+  const catalogSupported = typeof (api as Partial<CatalogApi>).listPublicRecipes === "function";
+  useEffect(() => {
+    const catalogApi = api as LibraryApi & Partial<Pick<CatalogApi, "listPublicRecipes">>;
+    if (!catalogApi.listPublicRecipes) {
+      setPublicRecipes([]);
+      setCatalogLoading(false);
+      setCatalogError("");
+      return;
+    }
+    const controller = new AbortController();
+    setPublicRecipes([]);
+    setCatalogLoading(true);
+    setCatalogError("");
+    void (async () => {
+      try {
+        const value = await catalogApi.listPublicRecipes?.(controller.signal);
+        if (!controller.signal.aborted && value) setPublicRecipes(value.recipes);
+      } catch (value) {
+        if (!controller.signal.aborted) {
+          setCatalogError(value instanceof Error ? value.message.slice(0, 256) : "Unable to check recipe updates");
+        }
+      } finally {
+        if (!controller.signal.aborted) setCatalogLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [api, catalogAttempt]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -246,6 +278,8 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const linkedRecipeCount = snapshot?.models.reduce((total, model) => total + model.recipes.length, 0) ?? 0;
   const unlinkedRecipeCount = snapshot?.unlinked_recipes.length ?? 0;
   const recipeCount = linkedRecipeCount + unlinkedRecipeCount;
+  const updateCount = new Set(publicRecipes.flatMap(recipe => recipe.local.status === "update-available" && recipe.local.recipe_id ? [recipe.local.recipe_id] : [])).size;
+  const catalogLinkedCount = new Set(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [recipe.local.recipe_id] : [])).size;
 
   return <div className="library-page">
     <header className="fleet-hero">
@@ -265,6 +299,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
         <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
         <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
+        {catalogSupported && <div className={`library-stat${updateCount > 0 ? " library-stat-update" : ""}`} role="group" aria-label={catalogLoading ? "Checking catalog updates" : catalogError ? "Catalog update check unavailable" : `${updateCount} catalog update${updateCount === 1 ? "" : "s"} available`}><span>Catalog updates</span><strong>{catalogLoading ? "…" : catalogError ? "—" : updateCount}</strong><small>{catalogLoading ? "Checking immutable releases" : catalogError ? "Check unavailable" : updateCount > 0 ? "Across all catalog-linked recipes" : catalogLinkedCount > 0 ? `${catalogLinkedCount} local recipe${catalogLinkedCount === 1 ? "" : "s"} checked` : "No local catalog links"}</small></div>}
       </section>
       <div className="library-toolbar">
         <label className="library-search">
@@ -292,10 +327,14 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         detail={detail}
         detailError={detailError}
         detailLoading={detailLoading}
+        catalogError={catalogError}
+        catalogLoading={catalogLoading}
         onNavigate={onNavigate}
         onBusyChange={onBusyChange}
         onRefresh={refreshDetail}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
+        onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
+        publicRecipes={publicRecipes}
         query={query}
         route={route}
         snapshot={browserSnapshot}
