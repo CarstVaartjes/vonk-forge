@@ -22,6 +22,8 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   source_repository: "https://github.com/QwenLM/Qwen3",
   capabilities: ["chat"],
   qualification: "candidate",
+  qualification_basis: "explicit-candidate-metadata",
+  qualification_detail: "This immutable recipe explicitly declares candidate qualification.",
   precision: "BF16",
   execution_harness: "vllm-openai",
   runtime_distribution: "vllm-0-27-1",
@@ -474,27 +476,29 @@ test("offers custom recipe authoring with validation and save", async () => {
 });
 
 test("previews a public recipe import with exact identity and provenance before confirmation", async () => {
-  history.replaceState(null, "", "/library");
+  history.replaceState(null, "", "/library/import");
   const previewPublicRecipe = vi.fn(async () => publicRecipePreview({publisher: "vonk", slug: "service", title: "Service", description: "", tags: [], uri: "vonk://catalog/vonk/service@sha256:" + "a".repeat(64), content_sha256: "a".repeat(64), source: "global"}));
   const importPublicRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
   const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes: async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "a".repeat(40), recipes: []}), previewPublicRecipe, importPublicRecipe} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
-  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
-  await user.click(screen.getByText("Import a public recipe URI"));
+  await user.click(await screen.findByText("Advanced: import URI"));
   await user.type(screen.getByRole("textbox", {name: "Public recipe URI"}), "vonk://catalog/vonk/service@sha256:" + "a".repeat(64));
   await user.click(screen.getByRole("button", {name: "Review URI"}));
-  const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
-  expect(within(preview).getAllByText("vonk/service")).toHaveLength(2);
+  const preview = await screen.findByRole("region", {name: "Service"});
+  expect(within(preview).getByRole("heading", {name: "Service"})).toHaveFocus();
   expect(within(preview).getByText("QwenLM")).toBeVisible();
+  await user.click(within(preview).getByText("Technical details"));
+  expect(within(preview).getByText("vonk/service")).toBeVisible();
   expect(within(preview).getByRole("link", {name: /View source/})).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
-  await user.click(within(preview).getByRole("button", {name: "Import recipe"}));
-  expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
+  await user.click(within(preview).getByRole("button", {name: "Continue to confirm"}));
+  await user.click(await screen.findByRole("button", {name: "Import candidate"}));
+  expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64), expect.any(AbortSignal));
 });
 
 test("loads the current default catalog recipes when public import opens", async () => {
-  history.replaceState(null, "", "/library");
+  history.replaceState(null, "", "/library/import");
   const uri = "vonk://catalog/vonk-forge/qwen@sha256:" + "b".repeat(64);
   const listPublicRecipes = vi.fn(async () => ({
     repository: "CarstVaartjes/vonk-forge-recipes",
@@ -548,21 +552,19 @@ test("loads the current default catalog recipes when public import opens", async
   const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
-  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
-
   expect(listPublicRecipes).toHaveBeenCalledTimes(1);
-  expect(await screen.findByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
+  expect(await screen.findAllByRole("heading", {name: /Qwen 3\.5/, level: 3})).toHaveLength(2);
   expect(screen.getByText("@cccccccc")).toBeVisible();
-  expect(screen.getAllByRole("link", {name: /QwenLM/})[0]).toHaveAttribute("href", "https://github.com/QwenLM/Qwen3");
+  expect(screen.getAllByText("By QwenLM")[0]).toBeVisible();
 
   const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});
-  expect(within(qualification).getByRole("option", {name: "Accepted"})).toHaveValue("cataloged");
+  expect(within(qualification).getByRole("option", {name: /^Accepted \(/})).toHaveValue("cataloged");
   expect(within(qualification).queryByRole("option", {name: "Cataloged"})).not.toBeInTheDocument();
   await user.selectOptions(qualification, "cataloged");
-  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
   expect(screen.getByText("Accepted · v1.0.0")).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
 
   const localStatus = screen.getByRole("combobox", {name: "Filter by local status"});
   expect(within(localStatus).getByRole("option", {name: "All (4)"})).toBeVisible();
@@ -571,75 +573,81 @@ test("loads the current default catalog recipes when public import opens", async
   expect(within(localStatus).getByRole("option", {name: "Installed current (1)"})).toBeVisible();
   expect(within(localStatus).getByRole("option", {name: "Needs review (1)"})).toBeVisible();
   await user.selectOptions(localStatus, "update-available");
-  expect(screen.getByRole("heading", {name: /Qwen Vision/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 3})).toBeVisible();
+  expect(screen.queryByText(/Qwen 3\.5 · vLLM · single Spark/)).not.toBeInTheDocument();
   await user.selectOptions(localStatus, "current");
-  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
   await user.selectOptions(localStatus, "needs-review");
-  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
   await user.selectOptions(localStatus, "not-imported");
-  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 3})).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "More filters"}));
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
   expect(localStatus).toHaveValue("");
 
-  const creator = screen.getByRole("combobox", {name: "Filter by creator or source"});
-  expect(within(creator).getByRole("option", {name: "MiaAI-Lab"})).toBeVisible();
+  const creator = screen.getByRole("combobox", {name: "Filter by creator"});
+  expect(within(creator).getByRole("option", {name: /^MiaAI-Lab \(/})).toBeVisible();
   await user.selectOptions(creator, "MiaAI-Lab");
-  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
+  const repository = screen.getByRole("combobox", {name: "Filter by original repository"});
+  expect(within(repository).getByRole("option", {name: /^MiaAI-Lab\/wan-spark \(/})).toBeVisible();
+  await user.selectOptions(repository, "https://github.com/MiaAI-Lab/wan-spark");
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
 
   const sparks = screen.getByRole("combobox", {name: "Filter by required Sparks"});
-  expect(within(sparks).getByRole("option", {name: "1 Spark"})).toBeVisible();
-  expect(within(sparks).getByRole("option", {name: "2 Sparks"})).toBeVisible();
-  expect(within(sparks).getByRole("option", {name: "3 Sparks"})).toBeVisible();
-  expect(within(sparks).queryByRole("option", {name: "4 Sparks"})).not.toBeInTheDocument();
-  expect(within(sparks).getByRole("option", {name: "4+ Sparks"})).toBeVisible();
+  expect(within(sparks).getByRole("option", {name: /^1 Spark \(/})).toBeVisible();
+  expect(within(sparks).getByRole("option", {name: /^2 Sparks \(/})).toBeVisible();
+  expect(within(sparks).getByRole("option", {name: /^3 Sparks \(/})).toBeVisible();
+  expect(within(sparks).queryByRole("option", {name: /^4 Sparks \(/})).not.toBeInTheDocument();
+  expect(within(sparks).getByRole("option", {name: /^4\+ Sparks \(/})).toBeVisible();
   await user.selectOptions(sparks, "2");
-  expect(screen.getByRole("heading", {name: /Qwen Vision/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
-  await user.selectOptions(sparks, "3");
-  expect(screen.getByText("No matching recipes")).toBeVisible();
+  expect(screen.getByRole("button", {name: /Review update for Qwen Vision · two Sparks/})).toBeVisible();
+  expect(screen.queryByText(/Qwen 3\.5 · vLLM · single Spark/)).not.toBeInTheDocument();
+  expect(within(sparks).getByRole("option", {name: /^3 Sparks \(/})).toBeDisabled();
   await user.selectOptions(sparks, "4+");
-  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
-  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen Vision/, level: 5})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
+  expect(screen.queryByText(/Qwen Vision · two Sparks/)).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
-  await user.click(screen.getByRole("button", {name: /^Vision/}));
-  await user.click(screen.getByRole("button", {name: /^Reasoning/}));
-  expect(screen.getByRole("button", {name: /^Vision/})).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", {name: /^Reasoning/})).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen Vision/, level: 5})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
+  await user.click(screen.getByRole("checkbox", {name: /^Vision/}));
+  await user.click(screen.getByRole("checkbox", {name: /^Reasoning/}));
+  expect(screen.getByRole("checkbox", {name: /^Vision/})).toBeChecked();
+  expect(screen.getByRole("checkbox", {name: /^Reasoning/})).toBeChecked();
+  expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 3})).toBeVisible();
+  expect(screen.queryByText(/Qwen Vision · two Sparks/)).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
   await user.selectOptions(screen.getByRole("combobox", {name: "Filter by model"}), "qwen/qwen-audio");
-  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Wan Video/, level: 5})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Wan 2\.2/, level: 3})).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
   await user.selectOptions(screen.getByRole("combobox", {name: "Filter by precision"}), "FP8");
-  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Audio model/, level: 5})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen Audio/, level: 3})).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
   await user.selectOptions(screen.getByRole("combobox", {name: "Filter by topology"}), "distributed");
-  expect(screen.getByRole("heading", {name: /Wan Video/, level: 5})).toBeVisible();
-  expect(screen.getByRole("heading", {name: /Audio model/, level: 5})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 5})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
   await user.selectOptions(screen.getByRole("combobox", {name: "Sort recipes"}), "model");
-  expect(screen.getByRole("button", {name: "Clear filters"})).toBeEnabled();
+  expect(screen.getByRole("button", {name: "Clear all"})).toBeEnabled();
 
-  await user.click(screen.getByRole("button", {name: "Clear filters"}));
-  await user.type(screen.getByRole("searchbox", {name: "Search public recipes"}), "nonexistent model");
+  await user.click(screen.getByRole("button", {name: "Clear all"}));
+  await user.type(screen.getByRole("searchbox", {name: "Find a recipe"}), "nonexistent model");
   expect(screen.getByText("No matching recipes")).toBeVisible();
 });
 
 test("shows a digest-proven update and its changelog before importing", async () => {
-  history.replaceState(null, "", "/library");
+  history.replaceState(null, "", "/library/import");
   const localDigest = "a".repeat(64);
   const remoteDigest = "b".repeat(64);
   const update = publicRecipe({
@@ -664,20 +672,20 @@ test("shows a digest-proven update and its changelog before importing", async ()
   const user = userEvent.setup();
   render(<App api={api}/>);
 
-  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
   expect(await screen.findByText("Update from v1.0.0")).toBeVisible();
-  await user.click(screen.getByRole("button", {name: "Review update"}));
+  await user.click(screen.getByRole("button", {name: /Review update for/}));
 
-  const changelog = await screen.findByRole("region", {name: "Changes since local recipe"});
+  const changelog = await screen.findByRole("region", {name: "Changes since local v1.0.0"});
   expect(within(changelog).getByRole("heading", {name: "Changes since local v1.0.0"})).toBeVisible();
   expect(within(changelog).getByText("Removed a reverted upstream hotfix.")).toBeVisible();
   expect(within(changelog).getByText("Rebuild required", {exact: false})).toBeVisible();
   expect(screen.getByText(/Existing installations and running services remain pinned/)).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Continue to confirm"}));
   expect(screen.getByRole("button", {name: "Import v2.0.0"})).toBeEnabled();
 });
 
 test("keeps the API client binding and leaves loading state on a synchronous catalog failure", async () => {
-  history.replaceState(null, "", "/library");
+  history.replaceState(null, "", "/library/import");
   class ApiWithBoundCatalogState {
     calls = 0;
     async librarySnapshot() { return {...librarySnapshot, models: [], unlinked_recipes: []}; }
@@ -692,10 +700,9 @@ test("keeps the API client binding and leaves loading state on a synchronous cat
   const user = userEvent.setup();
   render(<App api={api}/>);
 
-  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("catalog temporarily unavailable");
   expect(screen.queryByText("Looking up the latest recipes now…")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Try again"}));
-  expect(await screen.findByText("0 recipes")).toBeVisible();
+  expect(await screen.findByText("The public catalog is empty")).toBeVisible();
   expect(boundApi.calls).toBe(2);
 });

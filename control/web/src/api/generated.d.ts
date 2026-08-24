@@ -2435,6 +2435,13 @@ export interface components {
              * @enum {string}
              */
             qualification: "candidate" | "cataloged";
+            /**
+             * Qualification Basis
+             * @enum {string}
+             */
+            qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
+            /** Qualification Detail */
+            qualification_detail: string;
             /** Release Released At */
             release_released_at?: string | null;
             /** Release Version */
@@ -2523,6 +2530,13 @@ export interface components {
              * @enum {string}
              */
             qualification: "candidate" | "cataloged";
+            /**
+             * Qualification Basis
+             * @enum {string}
+             */
+            qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
+            /** Qualification Detail */
+            qualification_detail: string;
             /** Release Released At */
             release_released_at?: string | null;
             /** Release Version */

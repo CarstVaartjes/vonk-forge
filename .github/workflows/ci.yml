@@ -300,9 +300,33 @@ jobs:
       - name: Build admin web application
         run: npm run build --prefix control/web
 
+  web-browser-acceptance:
+    name: Admin web browser acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install locked admin web dependencies
+        run: npm ci --prefix control/web
+      - name: Install pinned Chromium browser
+        run: npm exec --prefix control/web -- playwright install --with-deps chromium
+      - name: Run fixture-backed browser acceptance
+        run: npm run test:e2e --prefix control/web -- --project=chromium
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: admin-web-browser-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            control/web/playwright-report
+            control/web/test-results
+
   catalog-runtime:
     name: Catalog and service suites
-    needs: [repository-suite, control-suite, web-suite]
+    needs: [repository-suite, control-suite, web-suite, web-browser-acceptance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -312,10 +336,12 @@ jobs:
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
+          BROWSER_RESULT: ${{ needs.web-browser-acceptance.result }}
         run: |
           test "$REPOSITORY_RESULT" = success
           test "$CONTROL_RESULT" = success
           test "$WEB_RESULT" = success
+          test "$BROWSER_RESULT" = success
 
   release-metadata:
     name: Validate container release tag

@@ -4229,6 +4229,22 @@
             "title": "Qualification",
             "type": "string"
           },
+          "qualification_basis": {
+            "enum": [
+              "explicit-accepted-metadata",
+              "explicit-candidate-metadata",
+              "missing-accepted-metadata",
+              "conflicting-metadata"
+            ],
+            "title": "Qualification Basis",
+            "type": "string"
+          },
+          "qualification_detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Qualification Detail",
+            "type": "string"
+          },
           "release_released_at": {
             "anyOf": [
               {
@@ -4342,6 +4358,8 @@
           "model_title",
           "capabilities",
           "qualification",
+          "qualification_basis",
+          "qualification_detail",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",
@@ -4575,6 +4593,22 @@
             "title": "Qualification",
             "type": "string"
           },
+          "qualification_basis": {
+            "enum": [
+              "explicit-accepted-metadata",
+              "explicit-candidate-metadata",
+              "missing-accepted-metadata",
+              "conflicting-metadata"
+            ],
+            "title": "Qualification Basis",
+            "type": "string"
+          },
+          "qualification_detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Qualification Detail",
+            "type": "string"
+          },
           "release_released_at": {
             "anyOf": [
               {
@@ -4696,6 +4730,8 @@
           "model_title",
           "capabilities",
           "qualification",
+          "qualification_basis",
+          "qualification_detail",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",

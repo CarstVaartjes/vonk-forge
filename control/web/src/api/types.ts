@@ -57,6 +57,7 @@ export type GlobalRecipeRevision = {
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
 export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d";
+export type PublicRecipeQualificationBasis = "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
 export type PublicRecipeChange = {kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata"; summary: string; details: string | null; references: string[]};
 export type PublicRecipeRelease = {version: string; released_at: string; content_sha256: string; upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild"; changes: PublicRecipeChange[]};
 export type PublicRecipeLocalState = {status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict"; recipe_id: string | null; revision_number: number | null; content_sha256: string | null; release_version: string | null};
@@ -65,7 +66,8 @@ export type PublicRecipe = {
   uri: string; content_sha256: string;
   model_publisher: string; model_slug: string; model_title: string;
   source_owner: string | null; source_repository: string | null;
-  capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged"; precision: string | null;
+  capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged";
+  qualification_basis: PublicRecipeQualificationBasis; qualification_detail: string; precision: string | null;
   execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
   topology_name: string; topology_mode: string; node_count: number;
   expected_download_bytes: number; maximum_installed_bytes_per_node: number; maximum_runtime_memory_bytes_per_node: number;
@@ -82,9 +84,9 @@ export interface CatalogApi {
   forkCatalogRecipe(recipeId: string, revision: number, slug: string): Promise<CatalogRecipeRevision>;
   previewGlobalRecipe(uri: string): Promise<GlobalRecipeRevision>;
   importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision>;
-  listPublicRecipes(): Promise<PublicRecipeList>;
-  previewPublicRecipe(uri: string): Promise<PublicRecipePreview>;
-  importPublicRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision>;
+  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
+  previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview>;
+  importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision>;
   attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void>;
   publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>>;
   uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt>;
