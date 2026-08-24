@@ -47,7 +47,10 @@ DEFAULT_SERVICES = {
     "tailscale-configurator",
     "tailscale-gateway",
 }
-HERMES_SERVICES = DEFAULT_SERVICES | {"hermes-agent"}
+HERMES_SERVICES = DEFAULT_SERVICES | {
+    "hermes-agent",
+    "hermes-litellm-key-provisioner",
+}
 SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"

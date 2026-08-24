@@ -55,6 +55,15 @@ def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
     assert acceptance.reference_rollout_bundles(default, hermes) == (hermes,)
 
 
+def test_canonical_hermes_topology_includes_the_key_provisioner() -> None:
+    acceptance = _acceptance_module()
+
+    assert acceptance.HERMES_SERVICES == acceptance.DEFAULT_SERVICES | {
+        "hermes-agent",
+        "hermes-litellm-key-provisioner",
+    }
+
+
 def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
     acceptance = _acceptance_module()
     arguments = {
