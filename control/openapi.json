@@ -1894,6 +1894,11 @@
       "JobSummary": {
         "additionalProperties": false,
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "id": {
             "maxLength": 128,
             "minLength": 1,
@@ -1916,7 +1921,8 @@
         "required": [
           "id",
           "state",
-          "kind"
+          "kind",
+          "created_at"
         ],
         "title": "JobSummary",
         "type": "object"

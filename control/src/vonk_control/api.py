@@ -955,7 +955,16 @@ def create_app(
             ) from None
         return {
             "jobs": [
-                {"id": str(job.id), "state": str(job.state), "kind": str(job.kind)}
+                {
+                    "id": str(job.id),
+                    "state": str(job.state),
+                    "kind": str(job.kind),
+                    "created_at": (
+                        job.created_at.replace(tzinfo=UTC)
+                        if job.created_at.tzinfo is None
+                        else job.created_at.astimezone(UTC)
+                    ),
+                }
                 for job in page
             ],
             "next_cursor": next_cursor,
