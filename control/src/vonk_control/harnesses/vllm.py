@@ -87,7 +87,14 @@ _ARGUMENTS = {
     ),
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
-        validate=one_of("deepseek_v4", "glm45", "nemotron_v3", "poolside_v1", "qwen3"),
+        validate=one_of(
+            "deepseek_v4",
+            "gemma4",
+            "glm45",
+            "nemotron_v3",
+            "poolside_v1",
+            "qwen3",
+        ),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
