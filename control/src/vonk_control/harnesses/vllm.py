@@ -180,22 +180,7 @@ class VllmHarnessCompiler:
         _require_role_artifacts(recipe, role, artifact_mounts)
         require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", primary_mount))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
-        if parsed.get("--allowed-local-media-path") is not None:
-            interfaces = recipe.get("interfaces")
-            input_contract = (
-                interfaces[0].get("input")
-                if type(interfaces) is list
-                and len(interfaces) == 1
-                and isinstance(interfaces[0], Mapping)
-                else None
-            )
-            if (
-                not isinstance(input_contract, Mapping)
-                or input_contract.get("path") != "/inputs"
-            ):
-                raise HarnessCompileError(
-                    "vLLM local media path requires the declared /inputs contract"
-                )
+        local_media_input = parsed.get("--allowed-local-media-path") is not None
         _validate_reasoning_plugin(parsed, primary_mount=primary_mount)
         _validate_speculative_config(
             parsed.get("--speculative-config"),
@@ -415,6 +400,7 @@ class VllmHarnessCompiler:
             recipe=recipe,
             distribution=distribution,
             environment=environment,
+            allow_local_media_input=local_media_input,
         )
 
 
