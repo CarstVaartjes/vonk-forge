@@ -853,6 +853,18 @@
               }
             ]
           },
+          "ip_address": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
           "labels": {
             "additionalProperties": {
               "maxLength": 256,
@@ -880,18 +892,6 @@
             "maxItems": 512,
             "title": "Loaded",
             "type": "array"
-          },
-          "management_address": {
-            "anyOf": [
-              {
-                "maxLength": 45,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Management Address"
           },
           "reservations": {
             "$ref": "#/components/schemas/CapacityReservations"
@@ -951,7 +951,7 @@
             "title": "Id",
             "type": "string"
           },
-          "management_address": {
+          "ip_address": {
             "anyOf": [
               {
                 "maxLength": 45,
@@ -961,7 +961,7 @@
                 "type": "null"
               }
             ],
-            "title": "Management Address"
+            "title": "Ip Address"
           }
         },
         "required": [

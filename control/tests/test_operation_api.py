@@ -123,7 +123,7 @@ class ProjectedFleet:
             id=node_id,
             display_name=display_name,
             hostname="spark-3542.internal",
-            management_address="192.168.1.211",
+            ip_address="192.168.1.211",
         )
 
 
@@ -281,7 +281,7 @@ def test_operator_can_rename_node_without_mutating_technical_identity() -> None:
         "id": NODE_ID,
         "display_name": "Studio Spark",
         "hostname": "spark-3542.internal",
-        "management_address": "192.168.1.211",
+        "ip_address": "192.168.1.211",
     }
     assert projection.profile_calls == [(NODE_ID, "Studio Spark")]
     assert audits.list()[0].action == "fleet.node.rename"

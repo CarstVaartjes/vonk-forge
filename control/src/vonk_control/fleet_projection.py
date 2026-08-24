@@ -273,7 +273,7 @@ class FleetNode(_StrictModel):
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
-    management_address: Annotated[str, StringConstraints(max_length=45)] | None = None
+    ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
     lifecycle: Text64
     labels: dict[Text64, Text256] = Field(max_length=64)
     connection: NodeConnection
@@ -297,7 +297,7 @@ class FleetNodeIdentity(_StrictModel):
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
-    management_address: Annotated[str, StringConstraints(max_length=45)] | None = None
+    ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
 
 
 class TelemetryHistoryResponse(_StrictModel):
@@ -442,7 +442,7 @@ class FleetProjection:
                 id=node_id,
                 display_name=profile.display_name,
                 hostname=profile.hostname,
-                management_address=(
+                ip_address=(
                     None if presence is None else presence.management_address
                 ),
             )
@@ -1051,7 +1051,7 @@ class FleetProjection:
             id=node_id,
             display_name=node_id if profile is None else profile.display_name,
             hostname="" if profile is None else profile.hostname,
-            management_address=(
+            ip_address=(
                 None if presence is None else presence.management_address
             ),
             lifecycle="managed" if profile is None else profile.lifecycle,

@@ -1351,6 +1351,8 @@ export interface components {
             /** Installed */
             installed: components["schemas"]["RecipePresence"][];
             inventory: components["schemas"]["InventoryState"] | null;
+            /** Ip Address */
+            ip_address?: string | null;
             /** Labels */
             labels: {
                 [key: string]: string;
@@ -1359,8 +1361,6 @@ export interface components {
             lifecycle: string;
             /** Loaded */
             loaded: components["schemas"]["RunPresence"][];
-            /** Management Address */
-            management_address?: string | null;
             reservations: components["schemas"]["CapacityReservations"];
             telemetry: components["schemas"]["TelemetryState"] | null;
             /** Warnings */
@@ -1374,8 +1374,8 @@ export interface components {
             hostname: string;
             /** Id */
             id: string;
-            /** Management Address */
-            management_address?: string | null;
+            /** Ip Address */
+            ip_address?: string | null;
         };
         /** FleetSnapshot */
         FleetSnapshot: {

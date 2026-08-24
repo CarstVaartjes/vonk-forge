@@ -59,7 +59,7 @@ function snapshot(nodes: VisualFleetNode[], cursor = 5): VisualFleetSnapshot {
 function control(
   visualFleet: ControlApi["visualFleet"],
   history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []}),
-  updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, management_address: null}),
+  updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, ip_address: null}),
 ): ControlApi {
   return {visualFleet, nodeTelemetryHistory: history, updateNodeProfile} as ControlApi;
 }
@@ -278,8 +278,8 @@ test("defaults card trends to 24h, supports the four bounded ranges, and appends
 test("edits the friendly name while exposing read-only Spark identity facts", async () => {
   const alpha = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
   alpha.hostname = "spark-3542.internal";
-  alpha.management_address = "192.168.1.211";
-  const updateNodeProfile = vi.fn(async (nodeId: string, input: {display_name: string}) => ({id: nodeId, display_name: input.display_name, hostname: alpha.hostname, management_address: alpha.management_address}));
+  alpha.ip_address = "192.168.1.211";
+  const updateNodeProfile = vi.fn(async (nodeId: string, input: {display_name: string}) => ({id: nodeId, display_name: input.display_name, hostname: alpha.hostname, ip_address: alpha.ip_address}));
   render(<FleetPage api={control(async () => snapshot([alpha]), undefined, updateNodeProfile as ControlApi["updateNodeProfile"])}/>);
   await flush();
 

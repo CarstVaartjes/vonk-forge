@@ -45,7 +45,7 @@ class FleetNode:
             reservations (CapacityReservations):
             telemetry (Union['TelemetryState', None]):
             warnings (list['ProjectionReason']):
-            management_address (Union[None, Unset, str]):
+            ip_address (Union[None, Unset, str]):
      """
 
     connection: 'NodeConnection'
@@ -60,7 +60,7 @@ class FleetNode:
     reservations: 'CapacityReservations'
     telemetry: Union['TelemetryState', None]
     warnings: list['ProjectionReason']
-    management_address: Union[None, Unset, str] = UNSET
+    ip_address: Union[None, Unset, str] = UNSET
 
 
 
@@ -122,11 +122,11 @@ class FleetNode:
 
 
 
-        management_address: Union[None, Unset, str]
-        if isinstance(self.management_address, Unset):
-            management_address = UNSET
+        ip_address: Union[None, Unset, str]
+        if isinstance(self.ip_address, Unset):
+            ip_address = UNSET
         else:
-            management_address = self.management_address
+            ip_address = self.ip_address
 
 
         field_dict: dict[str, Any] = {}
@@ -145,8 +145,8 @@ class FleetNode:
             "telemetry": telemetry,
             "warnings": warnings,
         })
-        if management_address is not UNSET:
-            field_dict["management_address"] = management_address
+        if ip_address is not UNSET:
+            field_dict["ip_address"] = ip_address
 
         return field_dict
 
@@ -252,14 +252,14 @@ class FleetNode:
             warnings.append(warnings_item)
 
 
-        def _parse_management_address(data: object) -> Union[None, Unset, str]:
+        def _parse_ip_address(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(Union[None, Unset, str], data)
 
-        management_address = _parse_management_address(d.pop("management_address", UNSET))
+        ip_address = _parse_ip_address(d.pop("ip_address", UNSET))
 
 
         fleet_node = cls(
@@ -275,7 +275,7 @@ class FleetNode:
             reservations=reservations,
             telemetry=telemetry,
             warnings=warnings,
-            management_address=management_address,
+            ip_address=ip_address,
         )
 
         return fleet_node

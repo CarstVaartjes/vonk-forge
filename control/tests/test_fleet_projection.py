@@ -376,7 +376,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "id": NODE_A,
                 "display_name": "Alpha",
                 "hostname": "alpha.internal",
-                "management_address": "192.168.1.211",
+                "ip_address": "192.168.1.211",
                 "lifecycle": "managed",
                 "labels": {"rack": "left"},
                 "connection": {
@@ -451,7 +451,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "id": NODE_B,
                 "display_name": "Beta",
                 "hostname": "beta.internal",
-                "management_address": None,
+                "ip_address": None,
                 "lifecycle": "managed",
                 "labels": {"rack": "right"},
                 "connection": {
@@ -560,11 +560,11 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         "id": NODE_A,
         "display_name": "Studio Spark",
         "hostname": "spark-3542.internal",
-        "management_address": "192.168.1.211",
+        "ip_address": "192.168.1.211",
     }
     snapshot = projection.read()
     assert snapshot.nodes[0].display_name == "Studio Spark"
-    assert snapshot.nodes[0].management_address == "192.168.1.211"
+    assert snapshot.nodes[0].ip_address == "192.168.1.211"
     assert snapshot.event_cursor == 1
 
 

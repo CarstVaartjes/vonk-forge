@@ -80,7 +80,7 @@ export function NodeProfileDialog({
         {error && <p className="dialog-error" role="alert">{error}</p>}
         <dl className="profile-identity-facts">
           <div><dt>Internal hostname</dt><dd><code>{node.hostname || "Not reported by this agent"}</code></dd></div>
-          <div><dt>Management IP</dt><dd><code>{node.management_address || "Not currently reported"}</code></dd></div>
+          <div><dt>Management IP</dt><dd><code>{node.ip_address || "Not currently reported"}</code></dd></div>
           <div><dt>Immutable Spark ID</dt><dd><span className="technical-identifier"><code>{node.id}</code><CopyButton label="Spark ID" value={node.id}/></span></dd></div>
         </dl>
       </form>

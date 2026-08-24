@@ -92,7 +92,7 @@ function localSnapshot() {
       id: nodeId,
       display_name: nodeId,
       hostname: "aurora.fixture.invalid",
-      management_address: "192.168.1.211",
+      ip_address: "192.168.1.211",
       lifecycle: "managed",
       labels: {role: "inference"},
       connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: observedAt, last_seen_age_seconds: 0},
@@ -112,7 +112,7 @@ function localSnapshot() {
       id: borealisId,
       display_name: borealisId,
       hostname: "borealis.fixture.invalid",
-      management_address: "192.168.1.212",
+      ip_address: "192.168.1.212",
       lifecycle: "managed",
       labels: {role: "inference"},
       connection: {agent_state: "inactive", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
@@ -150,7 +150,7 @@ async function installLocalFleetFixture(page: Page) {
       id: nodeId,
       display_name: input.display_name,
       hostname: node?.hostname ?? "",
-      management_address: node?.management_address ?? null,
+      ip_address: node?.ip_address ?? null,
     }});
   });
   await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: []}}));

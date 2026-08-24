@@ -188,7 +188,7 @@ export function NodeDetail({
       <dl className="detail-facts">
         <div><dt>Node ID</dt><dd><div className="technical-identifier"><code>{node.id}</code><CopyButton label="node ID" value={node.id}/></div></dd></div>
         <div><dt>Hostname</dt><dd><code>{node.hostname || "Not reported"}</code></dd></div>
-        <div><dt>Management IP</dt><dd><code>{node.management_address || "Not reported"}</code></dd></div>
+        <div><dt>Management IP</dt><dd><code>{node.ip_address || "Not reported"}</code></dd></div>
         <div><dt>Certificate</dt><dd>{node.connection.certificate_state}</dd></div>
         <div><dt>Telemetry sample</dt><dd><code>{node.telemetry?.sample.id ?? "Not reported"}</code></dd></div>
         <div><dt>Boot ID</dt><dd><code>{node.telemetry?.sample.boot_id ?? "Not reported"}</code></dd></div>
