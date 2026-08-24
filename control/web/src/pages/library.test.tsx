@@ -550,7 +550,7 @@ test("keeps the empty Library state inside the reduced workspace", async () => {
   expect(await screen.findByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
   const emptyState = screen.getByRole("region", {name: "Empty Library"});
   expect(within(emptyState).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
-  expect(within(emptyState).getByRole("button", {name: "Create custom recipe"})).toBeVisible();
+  expect(within(emptyState).getByRole("link", {name: "Create custom recipe"})).toHaveAttribute("href", "/library/create");
   expect(screen.queryByRole("link", {name: "Open advanced catalog"})).not.toBeInTheDocument();
 });
 test("opens custom recipe authoring on its dedicated route", async () => {

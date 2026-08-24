@@ -153,7 +153,8 @@ it("aborts and ignores a stale preview when the user selects another recipe", as
   await waitFor(() => expect(previewPublicRecipe).toHaveBeenCalledTimes(2));
   expect(signals[0]?.aborted).toBe(true);
   betaResult.resolve(preview(beta));
-  expect(await screen.findByRole("heading", {name: beta.title, level: 2})).toHaveFocus();
+  const betaHeading = await screen.findByRole("heading", {name: beta.title, level: 2});
+  await waitFor(() => expect(betaHeading).toHaveFocus());
   alphaResult.resolve(preview(alpha));
   await waitFor(() => expect(screen.queryByRole("heading", {name: alpha.title, level: 2})).not.toBeInTheDocument());
 });

@@ -97,7 +97,7 @@ test("mobile uses Catalog → Review → Confirm and preserves usable targets", 
   await page.goto("/library/import");
   await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();
   await expect(page.getByRole("complementary", {name: "Selected recipe review"})).toBeVisible();
-  await expect(page.getByRole("main").filter({has: page.getByRole("heading", {name: "Choose a recipe"})})).toBeHidden();
+  await expect(page.getByRole("region", {name: "Choose a recipe"})).toBeHidden();
   await page.getByRole("button", {name: "Continue to confirm"}).click();
   await expect(page.getByRole("button", {name: /Import v1.2.0/})).toBeVisible();
   for (const control of await page.locator("button:visible, a.button:visible, input:not([type=checkbox]):visible, select:visible").all()) {

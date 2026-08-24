@@ -210,3 +210,22 @@ progress{width:min(36rem,100%);height:1rem;accent-color:#71e6b1}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
 }
+@media(prefers-contrast:more){
+  :root{--border:#68827a;--border-strong:#9cb3ac;--text-muted:#c2d1cc;--text-subtle:#aebfba}
+  .status-pill,.catalog-stat,.recipe-card,.fleet-summary,.node-card,.topology-map,.activity-overview>div:not(.activity-outcome-bar),.activity-event article,.activity-table-wrap,.library-action-dialog{border-width:2px}
+  .nav-link[aria-current="page"],.fleet-view-switcher button[aria-pressed="true"],.activity-view-switcher button[aria-pressed="true"]{outline:2px solid var(--mint-strong);outline-offset:1px}
+}
+@media(forced-colors:active){
+  :root{forced-color-adjust:auto}
+  .mark,.status,.status-pill,.environment-badge,.activity-marker,.activity-outcome-bar span,.meter meter,.comparison-resource-track>span,.placement-capacity-track>span{forced-color-adjust:none}
+  .mark,.environment-badge{background:Highlight;color:HighlightText;border:1px solid HighlightText}
+  .status,.status-pill{background:Canvas;color:CanvasText;border:2px solid currentColor}
+  .status-pill-healthy{color:LinkText}.status-pill-warning{color:CanvasText}.status-pill-danger{color:Mark}.status-pill-info{color:Highlight}
+  .nav-link[aria-current="page"],.fleet-view-switcher button[aria-pressed="true"],.activity-view-switcher button[aria-pressed="true"]{outline:2px solid Highlight;outline-offset:2px}
+  .activity-timeline::before,.topology-node-list::before,.topology-node::before,.topology-trunk::before{background:CanvasText}
+  .activity-marker{background:Highlight;border-color:Canvas;box-shadow:0 0 0 2px CanvasText}
+  .activity-outcome-bar{border:1px solid CanvasText}.activity-outcome-bar span{background:Highlight!important;border-right:1px solid Canvas}
+  .meter meter,.comparison-resource-track,.placement-capacity-track{border:1px solid CanvasText}
+  .comparison-resource-track>span,.placement-capacity-required{background:Highlight!important}.placement-capacity-reserved{background:CanvasText!important}.placement-capacity-after{background:GrayText!important}
+  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline-color:Highlight}
+}

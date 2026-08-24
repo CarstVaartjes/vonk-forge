@@ -267,7 +267,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
       <p>Start with a reviewed public recipe, or create a custom runtime when your model needs a bespoke setup.</p>
       <div className="button-row">
         <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Browse public recipes</a>
-        <button type="button" className="button secondary" onClick={() => { const next = defaultDocument(); setCustomDocument(next); setDocumentText(JSON.stringify(next, null, 2)); setSlug(next.identity.slug); setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
+        <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
       </div>
     </section>}
     {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryBrowser
