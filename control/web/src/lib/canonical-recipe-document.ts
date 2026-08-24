@@ -119,19 +119,119 @@ function requireArray(parent: JsonObject, key: string, path = `$`): unknown[] {
   return arrayAt(parent[key], `${path}.${key}`);
 }
 
+function stringAt(value: unknown, path: string): string {
+  if (typeof value !== "string") throw new ShapeError(`${path} must be a string.`);
+  return value;
+}
+
+function requireString(parent: JsonObject, key: string, path = "$"): string {
+  return stringAt(parent[key], `${path}.${key}`);
+}
+
+function integerAt(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value)) throw new ShapeError(`${path} must be an integer.`);
+  return value as number;
+}
+
+function requireInteger(parent: JsonObject, key: string, path = "$"): number {
+  return integerAt(parent[key], `${path}.${key}`);
+}
+
+function requireBoolean(parent: JsonObject, key: string, path = "$"): boolean {
+  if (typeof parent[key] !== "boolean") throw new ShapeError(`${path}.${key} must be a boolean.`);
+  return parent[key] as boolean;
+}
+
+function scalarAt(value: unknown, path: string): Scalar {
+  if (typeof value !== "string" && typeof value !== "boolean" && !Number.isSafeInteger(value)) throw new ShapeError(`${path} must be a string, integer, or boolean.`);
+  return value as Scalar;
+}
+
+function stringsAt(value: unknown, path: string): string[] {
+  return arrayAt(value, path).map((item, index) => stringAt(item, `${path}[${index}]`));
+}
+
+function requireStrings(parent: JsonObject, key: string, path = "$"): string[] {
+  return stringsAt(parent[key], `${path}.${key}`);
+}
+
+function optionalString(parent: JsonObject, key: string, path: string): void {
+  if (parent[key] !== undefined) stringAt(parent[key], `${path}.${key}`);
+}
+
+function validateReference(value: unknown, path: string): void {
+  const reference = objectAt(value, path);
+  requireString(reference, "kind", path);
+  requireString(reference, "publisher", path);
+  requireString(reference, "slug", path);
+  requireString(reference, "content_sha256", path);
+}
+
+function validateMount(value: unknown, path: string): void {
+  const mount = objectAt(value, path);
+  requireString(mount, "source", path);
+  requireString(mount, "target", path);
+  requireBoolean(mount, "read_only", path);
+}
+
 function validateShape(value: unknown): CanonicalRecipeDocument {
   const root = objectAt(value, "$");
   if (root.schema_version !== 1) throw new ShapeError("$.schema_version must equal 1.");
-  requireObject(root, "identity"); requireObject(root, "metadata"); requireObject(root, "model");
-  const execution = requireObject(root, "execution"); requireObject(execution, "harness", "$.execution");
-  const build = requireObject(root, "build"); requireObject(build, "context", "$.build"); requireObject(build, "network", "$.build"); requireObject(build, "resources", "$.build"); requireArray(build, "arguments", "$.build");
-  requireArray(root, "parameters");
-  requireArray(root, "artifacts").forEach((item, index) => requireObject(objectAt(item, `$.artifacts[${index}]`), "mount", `$.artifacts[${index}]`));
-  const runtime = requireObject(root, "runtime"); requireObject(runtime, "distribution", "$.runtime"); requireArray(runtime, "entrypoint", "$.runtime"); requireArray(runtime, "arguments", "$.runtime"); requireArray(runtime, "environment", "$.runtime"); requireObject(runtime, "security", "$.runtime"); requireObject(runtime, "lifecycle", "$.runtime");
-  const topology = requireObject(root, "topology"); requireArray(topology, "roles", "$.topology").forEach((item, index) => { const role = objectAt(item, `$.topology.roles[${index}]`); const resources = requireObject(role, "resources", `$.topology.roles[${index}]`); requireObject(resources, "disk", `$.topology.roles[${index}].resources`); requireObject(resources, "memory", `$.topology.roles[${index}].resources`); }); requireObject(topology, "parallelism", "$.topology"); requireObject(topology, "fabric", "$.topology"); requireArray(topology, "start_order", "$.topology"); requireArray(topology, "stop_order", "$.topology");
-  requireArray(root, "interfaces");
-  const validation = requireObject(root, "validation"); requireArray(validation, "validators", "$.validation"); requireArray(validation, "benchmarks", "$.validation");
-  requireObject(root, "provenance");
+  const identity = requireObject(root, "identity");
+  requireString(identity, "publisher", "$.identity"); requireString(identity, "slug", "$.identity");
+  const metadata = requireObject(root, "metadata");
+  requireString(metadata, "title", "$.metadata"); requireString(metadata, "description", "$.metadata"); requireStrings(metadata, "tags", "$.metadata");
+  validateReference(root.model, "$.model");
+  if (root.dependencies !== undefined) arrayAt(root.dependencies, "$.dependencies").forEach((item, index) => validateReference(item, `$.dependencies[${index}]`));
+
+  const execution = requireObject(root, "execution");
+  validateReference(execution.harness, "$.execution.harness");
+  if (execution.patch_bundle !== null) validateReference(execution.patch_bundle, "$.execution.patch_bundle");
+
+  const build = requireObject(root, "build");
+  const context = requireObject(build, "context", "$.build");
+  requireString(context, "sha256", "$.build.context"); requireInteger(context, "expected_bytes", "$.build.context"); requireString(context, "media_type", "$.build.context"); optionalString(context, "path", "$.build.context");
+  requireString(build, "dockerfile", "$.build"); optionalString(build, "target", "$.build"); requireString(build, "platform", "$.build");
+  requireArray(build, "arguments", "$.build").forEach((item, index) => { const path = `$.build.arguments[${index}]`; const argument = objectAt(item, path); requireString(argument, "name", path); scalarAt(argument.value, `${path}.value`); });
+  const network = requireObject(build, "network", "$.build"); requireString(network, "mode", "$.build.network"); requireStrings(network, "hosts", "$.build.network");
+  const buildResources = requireObject(build, "resources", "$.build");
+  for (const key of ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"]) requireInteger(buildResources, key, "$.build.resources");
+
+  requireArray(root, "parameters").forEach((item, index) => {
+    const path = `$.parameters[${index}]`; const parameter = objectAt(item, path);
+    requireString(parameter, "name", path); requireString(parameter, "description", path); requireString(parameter, "type", path); scalarAt(parameter.default, `${path}.default`); requireString(parameter, "change_effect", path);
+    if (parameter.minimum !== undefined) integerAt(parameter.minimum, `${path}.minimum`); if (parameter.maximum !== undefined) integerAt(parameter.maximum, `${path}.maximum`); if (parameter.allowed_values !== undefined) arrayAt(parameter.allowed_values, `${path}.allowed_values`).forEach((entry, itemIndex) => scalarAt(entry, `${path}.allowed_values[${itemIndex}]`)); optionalString(parameter, "pattern", path);
+  });
+  requireArray(root, "artifacts").forEach((item, index) => {
+    const path = `$.artifacts[${index}]`; const artifact = objectAt(item, path);
+    for (const key of ["id", "kind", "repository", "revision"]) requireString(artifact, key, path);
+    requireInteger(artifact, "download_bytes", path); requireInteger(artifact, "installed_bytes", path);
+    const mount = requireObject(artifact, "mount", path); requireString(mount, "target", `${path}.mount`); requireBoolean(mount, "read_only", `${path}.mount`); requireStrings(artifact, "roles", path);
+  });
+
+  const runtime = requireObject(root, "runtime");
+  validateReference(runtime.distribution, "$.runtime.distribution"); requireStrings(runtime, "entrypoint", "$.runtime");
+  requireArray(runtime, "arguments", "$.runtime").forEach((item, index) => { const path = `$.runtime.arguments[${index}]`; const argument = objectAt(item, path); requireString(argument, "name", path); if (argument.value !== undefined) scalarAt(argument.value, `${path}.value`); optionalString(argument, "parameter", path); });
+  requireArray(runtime, "environment", "$.runtime").forEach((item, index) => { const path = `$.runtime.environment[${index}]`; const environment = objectAt(item, path); requireString(environment, "name", path); if (environment.value !== undefined) scalarAt(environment.value, `${path}.value`); optionalString(environment, "secret", path); });
+  const security = requireObject(runtime, "security", "$.runtime"); requireStrings(security, "devices", "$.runtime.security"); requireStrings(security, "capabilities", "$.runtime.security"); requireBoolean(security, "host_network", "$.runtime.security"); requireBoolean(security, "privileged", "$.runtime.security"); requireString(security, "user", "$.runtime.security"); requireArray(security, "mounts", "$.runtime.security").forEach((item, index) => validateMount(item, `$.runtime.security.mounts[${index}]`));
+  const lifecycle = requireObject(runtime, "lifecycle", "$.runtime");
+  for (const key of ["pre_start", "post_stop"]) requireArray(lifecycle, key, "$.runtime.lifecycle").forEach((command, index) => stringsAt(command, `$.runtime.lifecycle.${key}[${index}]`));
+  requireInteger(lifecycle, "stop_timeout_seconds", "$.runtime.lifecycle");
+  if (lifecycle.readiness !== undefined) { const readiness = objectAt(lifecycle.readiness, "$.runtime.lifecycle.readiness"); requireString(readiness, "strategy", "$.runtime.lifecycle.readiness"); requireString(readiness, "path", "$.runtime.lifecycle.readiness"); requireInteger(readiness, "timeout_seconds", "$.runtime.lifecycle.readiness"); }
+  if (lifecycle.failure !== undefined) { const failure = objectAt(lifecycle.failure, "$.runtime.lifecycle.failure"); requireString(failure, "rank_loss", "$.runtime.lifecycle.failure"); requireString(failure, "recovery", "$.runtime.lifecycle.failure"); }
+
+  const topology = requireObject(root, "topology"); requireString(topology, "name", "$.topology"); requireString(topology, "mode", "$.topology"); requireInteger(topology, "node_count", "$.topology");
+  requireArray(topology, "roles", "$.topology").forEach((item, index) => {
+    const path = `$.topology.roles[${index}]`; const role = objectAt(item, path); requireString(role, "name", path); requireInteger(role, "count", path); requireBoolean(role, "endpoint_owner", path); requireStrings(role, "artifacts", path);
+    const resources = requireObject(role, "resources", path); const disk = requireObject(resources, "disk", `${path}.resources`); for (const key of ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"]) requireInteger(disk, key, `${path}.resources.disk`);
+    const memory = requireObject(resources, "memory", `${path}.resources`); requireString(memory, "kind", `${path}.resources.memory`); for (const key of ["startup_peak_bytes", "steady_state_bytes", "runtime_growth_bytes", "system_reserve_bytes"]) requireInteger(memory, key, `${path}.resources.memory`);
+  });
+  const parallelism = requireObject(topology, "parallelism", "$.topology"); for (const key of ["world_size", "tensor", "pipeline", "data"]) requireInteger(parallelism, key, "$.topology.parallelism"); requireString(parallelism, "backend", "$.topology.parallelism");
+  const fabric = requireObject(topology, "fabric", "$.topology"); requireString(fabric, "connectivity", "$.topology.fabric"); requireInteger(fabric, "minimum_bandwidth_mbps", "$.topology.fabric"); requireStrings(topology, "start_order", "$.topology"); requireStrings(topology, "stop_order", "$.topology");
+
+  requireArray(root, "interfaces").forEach((item, index) => { const path = `$.interfaces[${index}]`; const itemObject = objectAt(item, path); requireString(itemObject, "adapter", path); if (itemObject.port !== undefined) integerAt(itemObject.port, `${path}.port`); optionalString(itemObject, "health_path", path); optionalString(itemObject, "path", path); if (itemObject.model_aliases !== undefined) stringsAt(itemObject.model_aliases, `${path}.model_aliases`); if (itemObject.input !== undefined) { const input = objectAt(itemObject.input, `${path}.input`); requireString(input, "path", `${path}.input`); requireBoolean(input, "required", `${path}.input`); requireStrings(input, "media_types", `${path}.input`); requireInteger(input, "max_bytes", `${path}.input`); } });
+  const validation = requireObject(root, "validation"); requireArray(validation, "validators", "$.validation").forEach((item, index) => { const path = `$.validation.validators[${index}]`; const validator = objectAt(item, path); requireString(validator, "interface", path); requireStrings(validator, "checks", path); }); requireArray(validation, "benchmarks", "$.validation").forEach((item, index) => { const path = `$.validation.benchmarks[${index}]`; const benchmark = objectAt(item, path); requireString(benchmark, "name", path); requireString(benchmark, "framework", path); const configuration = requireObject(benchmark, "configuration", path); for (const [key, entry] of Object.entries(configuration)) scalarAt(entry, `${path}.configuration.${key}`); });
+  const provenance = requireObject(root, "provenance"); requireString(provenance, "source_kind", "$.provenance"); if (provenance.source_reference !== null) stringAt(provenance.source_reference, "$.provenance.source_reference"); requireStrings(provenance, "attribution", "$.provenance");
   return value as CanonicalRecipeDocument;
 }
 

@@ -206,6 +206,23 @@ test("keeps invalid advanced JSON for correction without corrupting the guided f
   expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("Custom model service");
 });
 
+test("keeps deeply malformed advanced JSON out of guided state", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={{} as unknown as ControlApi}/>);
+
+  await user.click(await screen.findByText("Advanced JSON"));
+  const json = screen.getByRole("textbox", {name: "Recipe document"});
+  const malformed = JSON.parse((json as HTMLTextAreaElement).value) as Record<string, unknown>;
+  malformed.identity = {};
+  fireEvent.change(json, {target: {value: JSON.stringify(malformed)}});
+
+  expect(json).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByText("$.identity.publisher must be a string.")).toBeVisible();
+  expect(screen.getByRole("textbox", {name: "Publisher"})).toHaveValue("local");
+  expect(screen.getByRole("textbox", {name: "Recipe slug"})).toHaveValue("custom-service");
+});
+
 test("locks navigation and form controls during save and surfaces an API rejection", async () => {
   history.replaceState(null, "", "/library/create");
   let rejectSave: (reason: Error) => void = () => undefined;
