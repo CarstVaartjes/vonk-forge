@@ -10,12 +10,14 @@
   margin-bottom: 1rem;
 }
 
-.builder-hero h2 {
+.builder-hero h1 {
   font-size: clamp(2.2rem, 5vw, 4rem);
   letter-spacing: -0.055em;
   line-height: 0.98;
   margin: 0 0 0.55rem;
 }
+.builder-draft-restored{margin:0 0 1rem;padding:.8rem 1rem;border:1px solid var(--border-strong);border-radius:.8rem;background:#15342a;color:var(--text-muted)}.builder-draft-restored strong{color:var(--mint-strong)}
+.builder-preset-confirmation{display:grid;gap:.75rem;margin-top:.85rem;padding:.85rem;border:1px solid #8a6a2c;border-radius:.75rem;background:#332916}.builder-preset-confirmation p{margin:.25rem 0 0;color:#f8d88f}.builder-preset-confirmation>div:last-child{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.55rem}
 
 .builder-hero p:last-child {
   color: var(--text-muted);

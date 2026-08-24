@@ -32,9 +32,29 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
   }}));
   await page.goto("/library");
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeVisible();
+  await expect(page.locator("h1")).toHaveCount(1);
   const primaryLinks = page.getByRole("navigation", {name: "Primary"}).getByRole("link");
   await expect(primaryLinks).toHaveText(["Fleet", "Library", "Activity"]);
   await expect(page).toHaveURL(/\/library$/);
+
+  for (const width of [760, 761, 768, 864, 865]) {
+    await page.setViewportSize({width, height: 900});
+    const toggle = page.getByRole("button", {name: "Open system navigation"});
+    if (width <= 864) {
+      await expect(toggle).toBeVisible();
+      await toggle.click();
+      await expect(primaryLinks.first()).toBeFocused();
+      await primaryLinks.first().press("Shift+Tab");
+      await expect(page.getByRole("button", {name: /admin/i})).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", {name: "Open system navigation"})).toBeFocused();
+      await expect(primaryLinks.first()).toBeHidden();
+    } else {
+      await expect(toggle).toBeHidden();
+      await expect(primaryLinks.first()).toBeVisible();
+    }
+    await expectNoDocumentOverflow(page);
+  }
 });
 
 test("Activity combines friendly audit history and current operations", async ({page}) => {
@@ -75,6 +95,7 @@ test("the sign-in screen remains focused, accessible, and usable on small screen
   await expect(page.getByRole("heading", {name: "Sign in"})).toBeVisible();
   await expect(page.getByRole("textbox", {name: "Administrator account"})).toHaveAttribute("autocomplete", "username");
   await expect(page.getByLabel("Password")).toHaveAttribute("autocomplete", "current-password");
+  await expect(page.getByLabel("Password")).toBeFocused();
   for (const width of [320, 1280]) {
     await page.setViewportSize({width, height: width === 320 ? 700 : 900});
     await expectNoDocumentOverflow(page);
@@ -90,9 +111,26 @@ test("the custom recipe builder guides a complete, responsive, accessible creati
   });
   await page.goto("/library/create");
   await expect(page.getByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+  await expect(page.locator("h1")).toHaveCount(1);
+  await page.getByRole("textbox", {name: "Display name"}).fill("Protected browser draft");
+  await page.getByRole("link", {name: "Fleet"}).click();
+  const discard = page.getByRole("alertdialog", {name: "Discard this draft?"});
+  await expect(discard).toBeVisible();
+  await expect(page).toHaveURL(/\/library\/create$/);
+  await discard.getByRole("button", {name: "Keep editing"}).click();
+  await expect(page.getByRole("textbox", {name: "Display name"})).toHaveValue("Protected browser draft");
   await page.setViewportSize({width: 320, height: 800});
   await expectNoDocumentOverflow(page);
   await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole("button", {name: "Open system navigation"}).click();
+  await page.getByRole("link", {name: "Fleet"}).click();
+  const mobileDiscard = page.getByRole("alertdialog", {name: "Discard this draft?"});
+  await expect(mobileDiscard).toBeVisible();
+  await mobileDiscard.getByRole("button", {name: "Keep editing"}).click();
+  await expect(page.getByRole("link", {name: "Fleet"})).toBeFocused();
+  await expect(page.getByRole("button", {name: "Close system navigation"})).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", {name: "Open system navigation"})).toBeFocused();
 
   await page.getByRole("textbox", {name: "Exact model digest"}).fill("a1".repeat(32));
   await page.getByRole("button", {name: "Continue"}).click();

@@ -13,11 +13,13 @@ it.each([
   render(<LoginPage onLogin={login}/>);
 
   const password = screen.getByLabelText("Password");
+  expect(password).toHaveFocus();
   await user.type(password, "synthetic-test-password");
   await user.click(screen.getByRole("button", {name: "Sign in"}));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(message);
   expect(screen.getByLabelText("Password")).toHaveValue("");
+  expect(screen.getByLabelText("Password")).toHaveFocus();
   expect(screen.getByRole("button", {name: "Sign in"})).toBeDisabled();
   expect(login).toHaveBeenCalledWith("admin", "synthetic-test-password");
   expect(screen.queryByText("synthetic credential detail")).not.toBeInTheDocument();
