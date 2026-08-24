@@ -452,27 +452,16 @@ test("keeps the empty Library state inside the reduced workspace", async () => {
   expect(screen.getByText("Recipes will appear here after they are added to the local library authority.")).toBeVisible();
   expect(screen.queryByRole("link", {name: "Open advanced catalog"})).not.toBeInTheDocument();
 });
-test("offers custom recipe authoring with validation and save", async () => {
+test("opens custom recipe authoring on its dedicated route", async () => {
   history.replaceState(null, "", "/library");
-  const createCatalogRecipe = vi.fn(async (input: {slug: string; document: Record<string, unknown>}) => ({recipe_id: "custom-1", revision_number: 1, lifecycle: "draft", slug: input.slug, document: input.document}));
-  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), createCatalogRecipe} as unknown as ControlApi;
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []})} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
-  await user.click(await screen.findByRole("button", {name: "Create custom recipe"}));
-  expect(screen.getByRole("group", {name: "Identity and description"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Model and execution"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Build and runtime"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Artifacts and interfaces"})).toBeVisible();
-  expect(screen.getByRole("group", {name: "Validation and provenance"})).toBeVisible();
-  expect(screen.getByText("Advanced JSON fallback")).toBeVisible();
-  const slug = screen.getByRole("textbox", {name: "Recipe slug"});
-  await user.clear(slug);
-  await user.type(slug, "custom-service");
-  await user.click(screen.getByRole("button", {name: "Validate recipe"}));
-  expect(screen.getByRole("status", {name: "Recipe validation"})).toHaveTextContent("Recipe document valid");
-  await user.click(screen.getByRole("button", {name: "Save custom recipe"}));
-  expect(createCatalogRecipe).toHaveBeenCalledWith(expect.objectContaining({slug: "custom-service", document: expect.any(Object)}));
-  expect(await screen.findByRole("status", {name: "Recipe authoring"})).toHaveTextContent("Recipe saved");
+  const create = await screen.findByRole("link", {name: "Create custom recipe"});
+  expect(create).toHaveAttribute("href", "/library/create");
+  await user.click(create);
+  expect(await screen.findByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+  expect(location.pathname).toBe("/library/create");
 });
 
 test("previews a public recipe import with exact identity and provenance before confirmation", async () => {

@@ -3,6 +3,7 @@ import {useOptionalAuth} from "./auth";
 import type {CatalogApi, ControlApi} from "./api/types";
 import {AppShell} from "./components/app-shell";
 import type {AppRoute} from "./components/app-shell";
+import {CustomRecipeBuilderPage} from "./pages/custom-recipe-builder";
 import {FleetPage} from "./pages/fleet";
 import {LibraryPage} from "./pages/library";
 import {PublicRecipeImportPage} from "./pages/public-recipe-import";
@@ -50,6 +51,8 @@ export function App({api}: {api: ControlApi}) {
     fleet: <FleetPage api={api}/>,
     library: pathname === "/library/import"
       ? <PublicRecipeImportPage api={api as ControlApi & CatalogApi} url={url} onNavigate={navigateUrl} onBusyChange={setNavigationLocked}/>
+      : pathname === "/library/create"
+        ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationLocked}/>
       : <LibraryPage api={api} path={pathname} onNavigate={navigatePath}/>,
   }[page] : null;
 

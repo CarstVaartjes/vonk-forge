@@ -1,97 +1,10 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {CatalogApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
-import {parseVisualRecipeDocument} from "../lib/library-recipe-document";
 import "./library.css";
-
-type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
-
-const defaultDocument = (): VisualRecipeDocument => ({schema_version: 1, identity: {publisher: "local", slug: "custom"}, metadata: {title: "Custom recipe", description: "Custom service recipe", tags: []}, model: {kind: "model-version", publisher: "local", slug: "model", content_sha256: "0".repeat(64)}, execution: {harness: {kind: "execution-harness", publisher: "local", slug: "harness", content_sha256: "1".repeat(64)}, patch_bundle: null}, build: {context: {sha256: "2".repeat(64), expected_bytes: 0, media_type: "application/octet-stream"}, dockerfile: "Dockerfile", platform: "linux/arm64", network_mode: "none", network_hosts: [], download_bytes: 0, temporary_bytes: 0, memory_bytes: 1, timeout_seconds: 1}, artifacts: [], runtime: {distribution: {kind: "runtime-distribution", publisher: "local", slug: "runtime", content_sha256: "3".repeat(64)}, entrypoint: ["run"], lifecycle_pre_start_count: 0, lifecycle_post_stop_count: 0, stop_timeout_seconds: 1}, interfaces: [], validation: {checks: [], benchmark_count: 0}, provenance: {source_kind: "local", source_reference: null, attribution: []} });
-
-function splitList(value: string): string[] {
-  return value.split(/[,\n]/).map(item => item.trim()).filter(Boolean);
-}
-
-function joinList(value: readonly string[]): string {
-  return value.join(", ");
-}
-
-function CustomRecipeForm({document, slug, onSlugChange, onChange}: {
-  document: VisualRecipeDocument;
-  slug: string;
-  onSlugChange(value: string): void;
-  onChange(updater: (document: VisualRecipeDocument) => VisualRecipeDocument): void;
-}) {
-  const update = (updater: (document: VisualRecipeDocument) => VisualRecipeDocument) => onChange(updater);
-  const updateArtifact = (index: number, changes: Partial<VisualRecipeDocument["artifacts"][number]>) => update(current => ({...current, artifacts: current.artifacts.map((item, itemIndex) => itemIndex === index ? {...item, ...changes} : item)}));
-  const updateInterface = (index: number, changes: Partial<VisualRecipeDocument["interfaces"][number]>) => update(current => ({...current, interfaces: current.interfaces.map((item, itemIndex) => itemIndex === index ? {...item, ...changes} : item)}));
-  return <div className="custom-recipe-form">
-    <p className="library-form-intro">Fill in the recipe as a readable form. The advanced JSON editor below is available for uncommon fields and import/export.</p>
-    <fieldset className="custom-recipe-section">
-      <legend>Identity and description</legend>
-      <p className="custom-recipe-section-help">Give the recipe a stable name, explain what it runs, and add searchable tags.</p>
-      <div className="custom-recipe-fields custom-recipe-fields-two">
-        <label>Publisher<input value={document.identity.publisher} onChange={event => update(current => ({...current, identity: {...current.identity, publisher: event.target.value}}))} /></label>
-        <label>Recipe slug<input aria-label="Recipe slug" value={slug} onChange={event => { onSlugChange(event.target.value); update(current => ({...current, identity: {...current.identity, slug: event.target.value}})); }} /></label>
-        <label>Title<input value={document.metadata.title} onChange={event => update(current => ({...current, metadata: {...current.metadata, title: event.target.value}}))} /></label>
-        <label>Tags<input value={joinList(document.metadata.tags)} onChange={event => update(current => ({...current, metadata: {...current.metadata, tags: splitList(event.target.value)}}))} placeholder="chat, gpu, production" /></label>
-        <label className="custom-recipe-wide">Description<textarea rows={3} value={document.metadata.description} onChange={event => update(current => ({...current, metadata: {...current.metadata, description: event.target.value}}))} /></label>
-      </div>
-    </fieldset>
-
-    <fieldset className="custom-recipe-section">
-      <legend>Model and execution</legend>
-      <p className="custom-recipe-section-help">Choose the exact immutable components that make up this runtime chain.</p>
-      <div className="custom-recipe-card-grid">
-        <div className="custom-recipe-card"><h4>Model version</h4><div className="custom-recipe-fields"><label>Publisher<input value={document.model.publisher} onChange={event => update(current => ({...current, model: {...current.model, publisher: event.target.value}}))} /></label><label>Slug<input value={document.model.slug} onChange={event => update(current => ({...current, model: {...current.model, slug: event.target.value}}))} /></label><label className="custom-recipe-wide">Content SHA-256<input className="custom-recipe-monospace" value={document.model.content_sha256} onChange={event => update(current => ({...current, model: {...current.model, content_sha256: event.target.value}}))} /></label></div></div>
-        <div className="custom-recipe-card"><h4>Execution harness</h4><div className="custom-recipe-fields"><label>Publisher<input value={document.execution.harness.publisher} onChange={event => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, publisher: event.target.value}}}))} /></label><label>Slug<input value={document.execution.harness.slug} onChange={event => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, slug: event.target.value}}}))} /></label><label className="custom-recipe-wide">Content SHA-256<input className="custom-recipe-monospace" value={document.execution.harness.content_sha256} onChange={event => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, content_sha256: event.target.value}}}))} /></label></div></div>
-      </div>
-      <label className="custom-recipe-checkbox"><input type="checkbox" checked={document.execution.patch_bundle !== null} onChange={event => update(current => ({...current, execution: {...current.execution, patch_bundle: event.target.checked ? {kind: "patch-bundle", publisher: "local", slug: "patch", content_sha256: "4".repeat(64)} : null}}))} /> Use an immutable patch bundle</label>
-      {document.execution.patch_bundle && <div className="custom-recipe-card custom-recipe-patch"><h4>Patch bundle</h4><div className="custom-recipe-fields custom-recipe-fields-three"><label>Publisher<input value={document.execution.patch_bundle.publisher} onChange={event => update(current => ({...current, execution: {...current.execution, patch_bundle: current.execution.patch_bundle ? {...current.execution.patch_bundle, publisher: event.target.value} : null}}))} /></label><label>Slug<input value={document.execution.patch_bundle.slug} onChange={event => update(current => ({...current, execution: {...current.execution, patch_bundle: current.execution.patch_bundle ? {...current.execution.patch_bundle, slug: event.target.value} : null}}))} /></label><label>Content SHA-256<input className="custom-recipe-monospace" value={document.execution.patch_bundle.content_sha256} onChange={event => update(current => ({...current, execution: {...current.execution, patch_bundle: current.execution.patch_bundle ? {...current.execution.patch_bundle, content_sha256: event.target.value} : null}}))} /></label></div></div>}
-    </fieldset>
-
-    <fieldset className="custom-recipe-section">
-      <legend>Build and runtime</legend>
-      <p className="custom-recipe-section-help">Set the build boundary, resource expectations, network policy, and process contract.</p>
-      <div className="custom-recipe-fields custom-recipe-fields-three">
-        <label>Dockerfile<input value={document.build.dockerfile} onChange={event => update(current => ({...current, build: {...current.build, dockerfile: event.target.value}}))} /></label>
-        <label>Platform<input value={document.build.platform} onChange={event => update(current => ({...current, build: {...current.build, platform: event.target.value}}))} /></label>
-        <label>Network mode<input value={document.build.network_mode} onChange={event => update(current => ({...current, build: {...current.build, network_mode: event.target.value}}))} /></label>
-        <label>Context SHA-256<input className="custom-recipe-monospace" value={document.build.context.sha256} onChange={event => update(current => ({...current, build: {...current.build, context: {...current.build.context, sha256: event.target.value}}}))} /></label>
-        <label>Context bytes<input type="number" min="0" value={document.build.context.expected_bytes} onChange={event => update(current => ({...current, build: {...current.build, context: {...current.build.context, expected_bytes: Number(event.target.value)}}}))} /></label>
-        <label>Context media type<input value={document.build.context.media_type} onChange={event => update(current => ({...current, build: {...current.build, context: {...current.build.context, media_type: event.target.value}}}))} /></label>
-        <label>Allowed network hosts<input value={joinList(document.build.network_hosts)} onChange={event => update(current => ({...current, build: {...current.build, network_hosts: splitList(event.target.value)}}))} placeholder="registry.example.com" /></label>
-        <label>Download bytes<input type="number" min="0" value={document.build.download_bytes} onChange={event => update(current => ({...current, build: {...current.build, download_bytes: Number(event.target.value)}}))} /></label>
-        <label>Temporary bytes<input type="number" min="0" value={document.build.temporary_bytes} onChange={event => update(current => ({...current, build: {...current.build, temporary_bytes: Number(event.target.value)}}))} /></label>
-        <label>Memory bytes<input type="number" min="0" value={document.build.memory_bytes} onChange={event => update(current => ({...current, build: {...current.build, memory_bytes: Number(event.target.value)}}))} /></label>
-        <label>Timeout seconds<input type="number" min="1" value={document.build.timeout_seconds} onChange={event => update(current => ({...current, build: {...current.build, timeout_seconds: Number(event.target.value)}}))} /></label>
-      </div>
-      <div className="custom-recipe-subsection"><h4>Runtime distribution</h4><div className="custom-recipe-fields custom-recipe-fields-three"><label>Publisher<input value={document.runtime.distribution.publisher} onChange={event => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, publisher: event.target.value}}}))} /></label><label>Slug<input value={document.runtime.distribution.slug} onChange={event => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, slug: event.target.value}}}))} /></label><label>Content SHA-256<input className="custom-recipe-monospace" value={document.runtime.distribution.content_sha256} onChange={event => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, content_sha256: event.target.value}}}))} /></label><label className="custom-recipe-wide">Entrypoint<input value={joinList(document.runtime.entrypoint)} onChange={event => update(current => ({...current, runtime: {...current.runtime, entrypoint: splitList(event.target.value)}}))} placeholder="run, --config, /etc/service.yaml" /></label><label>Pre-start phases<input type="number" min="0" value={document.runtime.lifecycle_pre_start_count} onChange={event => update(current => ({...current, runtime: {...current.runtime, lifecycle_pre_start_count: Number(event.target.value)}}))} /></label><label>Post-stop phases<input type="number" min="0" value={document.runtime.lifecycle_post_stop_count} onChange={event => update(current => ({...current, runtime: {...current.runtime, lifecycle_post_stop_count: Number(event.target.value)}}))} /></label><label>Stop timeout seconds<input type="number" min="1" value={document.runtime.stop_timeout_seconds} onChange={event => update(current => ({...current, runtime: {...current.runtime, stop_timeout_seconds: Number(event.target.value)}}))} /></label></div></div>
-    </fieldset>
-
-    <fieldset className="custom-recipe-section">
-      <legend>Artifacts and interfaces</legend>
-      <p className="custom-recipe-section-help">Declare downloaded artifacts and the interfaces that operators can reach after startup.</p>
-      <div className="custom-recipe-repeat-list">
-        {document.artifacts.map((artifact, index) => <div className="custom-recipe-card" key={`${artifact.id}-${index}`}><div className="custom-recipe-card-heading"><h4>Artifact {index + 1}</h4><button type="button" className="button secondary" onClick={() => update(current => ({...current, artifacts: current.artifacts.filter((_, itemIndex) => itemIndex !== index)}))}>Remove</button></div><div className="custom-recipe-fields custom-recipe-fields-three"><label>ID<input value={artifact.id} onChange={event => updateArtifact(index, {id: event.target.value})} /></label><label>Kind<input value={artifact.kind} onChange={event => updateArtifact(index, {kind: event.target.value})} /></label><label>Repository<input value={artifact.repository} onChange={event => updateArtifact(index, {repository: event.target.value})} /></label><label>Revision<input value={artifact.revision} onChange={event => updateArtifact(index, {revision: event.target.value})} /></label><label>Download bytes<input type="number" min="0" value={artifact.download_bytes} onChange={event => updateArtifact(index, {download_bytes: Number(event.target.value)})} /></label><label>Installed bytes<input type="number" min="0" value={artifact.installed_bytes} onChange={event => updateArtifact(index, {installed_bytes: Number(event.target.value)})} /></label><label className="custom-recipe-wide">Roles<input value={joinList(artifact.roles)} onChange={event => updateArtifact(index, {roles: splitList(event.target.value)})} /></label></div></div>)}
-        <button type="button" className="button secondary custom-recipe-add" onClick={() => update(current => ({...current, artifacts: [...current.artifacts, {id: `artifact-${current.artifacts.length + 1}`, kind: "model", repository: "", revision: "", download_bytes: 0, installed_bytes: 0, roles: []}]}))}>Add artifact</button>
-      </div>
-      <div className="custom-recipe-repeat-list">
-        {document.interfaces.map((item, index) => <div className="custom-recipe-card" key={`${item.adapter}-${index}`}><div className="custom-recipe-card-heading"><h4>Interface {index + 1}</h4><button type="button" className="button secondary" onClick={() => update(current => ({...current, interfaces: current.interfaces.filter((_, itemIndex) => itemIndex !== index)}))}>Remove</button></div><div className="custom-recipe-fields custom-recipe-fields-three"><label>Adapter<input value={item.adapter} onChange={event => updateInterface(index, {adapter: event.target.value})} /></label><label>Port<input type="number" min="1" value={item.port ?? ""} onChange={event => updateInterface(index, {port: event.target.value ? Number(event.target.value) : null})} /></label><label>Health path<input value={item.health_path ?? ""} onChange={event => updateInterface(index, {health_path: event.target.value || null})} /></label><label>Job path<input value={item.path ?? ""} onChange={event => updateInterface(index, {path: event.target.value || null})} /></label><label>Model aliases<input value={joinList(item.model_aliases ?? [])} onChange={event => updateInterface(index, {model_aliases: splitList(event.target.value)})} /></label></div></div>)}
-        <button type="button" className="button secondary custom-recipe-add" onClick={() => update(current => ({...current, interfaces: [...current.interfaces, {adapter: "http", port: 8000, model_aliases: [], health_path: "/health", path: "/v1"}]}))}>Add interface</button>
-      </div>
-    </fieldset>
-
-    <fieldset className="custom-recipe-section">
-      <legend>Validation and provenance</legend>
-      <p className="custom-recipe-section-help">Keep the recipe reviewable by recording checks, benchmarks, and where it came from.</p>
-      <div className="custom-recipe-fields custom-recipe-fields-two"><label>Validation checks<input value={joinList(document.validation.checks)} onChange={event => update(current => ({...current, validation: {...current.validation, checks: splitList(event.target.value)}}))} placeholder="smoke-test, health-check" /></label><label>Benchmark count<input type="number" min="0" value={document.validation.benchmark_count} onChange={event => update(current => ({...current, validation: {...current.validation, benchmark_count: Number(event.target.value)}}))} /></label><label>Source kind<select value={document.provenance.source_kind} onChange={event => update(current => ({...current, provenance: {...current.provenance, source_kind: event.target.value as VisualRecipeDocument["provenance"]["source_kind"]}}))}><option value="local">Local</option><option value="workload_run">Workload run</option><option value="global">Global</option><option value="fork">Fork</option></select></label><label>Source reference<input value={document.provenance.source_reference ?? ""} onChange={event => update(current => ({...current, provenance: {...current.provenance, source_reference: event.target.value || null}}))} /></label><label className="custom-recipe-wide">Attribution<input value={joinList(document.provenance.attribution)} onChange={event => update(current => ({...current, provenance: {...current.provenance, attribution: splitList(event.target.value)}}))} /></label></div>
-    </fieldset>
-  </div>;
-}
 
 const LIBRARY_MODEL_WINDOW = 40;
 const LIBRARY_RECIPE_WINDOW = 50;
@@ -210,12 +123,6 @@ export function LibraryPage({api, path, onNavigate}: {
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
   const [paginationWindowed, setPaginationWindowed] = useState(false);
-  const catalog = api as LibraryApi & Partial<CatalogApi>;
-  const [authoring, setAuthoring] = useState<"create">();
-  const [slug, setSlug] = useState(() => defaultDocument().identity.slug);
-  const [customDocument, setCustomDocument] = useState<VisualRecipeDocument>(() => defaultDocument());
-  const [documentText, setDocumentText] = useState(() => JSON.stringify(defaultDocument(), null, 2));
-  const [authoringStatus, setAuthoringStatus] = useState("");
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -322,38 +229,15 @@ export function LibraryPage({api, path, onNavigate}: {
   const unlinkedRecipeCount = snapshot?.unlinked_recipes.length ?? 0;
   const recipeCount = linkedRecipeCount + unlinkedRecipeCount;
 
-  function updateCustomDocument(updater: (document: VisualRecipeDocument) => VisualRecipeDocument) {
-    const next = updater(customDocument);
-    setCustomDocument(next);
-    setDocumentText(JSON.stringify(next, null, 2));
-  }
-
-  function updateCustomDocumentText(value: string) {
-    setDocumentText(value);
-    const result = parseVisualRecipeDocument(value);
-    if (result.ok) {
-      setCustomDocument(result.document);
-      setSlug(result.document.identity.slug);
-    }
-  }
-
   return <div className="library-page">
     <header className="fleet-hero">
       <div>
         <p className="fleet-kicker">Model control</p>
         <h2 ref={heading} tabIndex={-1}>Library</h2>
       <div className="library-toolbar-actions">
-        <button type="button" className="button secondary" onClick={() => { const next = defaultDocument(); setCustomDocument(next); setDocumentText(JSON.stringify(next, null, 2)); setSlug(next.identity.slug); setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
+        <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
         <a href="/library/import" className="button secondary" onClick={event => onNavigate(event, "/library/import")}>Import public recipe</a>
       </div>
-      {authoring === "create" && <section className="library-section library-authoring-panel" aria-label="Recipe authoring">
-        <div className="library-panel-heading"><div><p className="fleet-kicker">Local recipe builder</p><h3>Create custom recipe</h3><p>Describe every part of the runtime in a guided form. Use advanced JSON only when you need a field-level escape hatch.</p></div><span className="library-panel-badge">Draft</span></div>
-        <CustomRecipeForm document={customDocument} slug={slug} onSlugChange={setSlug} onChange={updateCustomDocument} />
-        <details className="library-json-fallback"><summary>Advanced JSON fallback</summary><div className="library-json-fallback-content"><p>Paste or edit the complete canonical recipe document. Valid JSON updates the form above; invalid JSON is kept for correction.</p><label>Recipe document<textarea aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} onChange={event => updateCustomDocumentText(event.target.value)} /></label></div></details>
-        <div className="button-row"><button type="button" className="button secondary" onClick={() => { const result = parseVisualRecipeDocument(documentText); if (result.ok) { setCustomDocument(result.document); setSlug(result.document.identity.slug); } setAuthoringStatus(result.ok ? "Recipe document valid" : result.error); }}>Validate recipe</button><button type="button" className="button" disabled={!catalog.createCatalogRecipe} onClick={() => { try { const result = parseVisualRecipeDocument(documentText); if (!result.ok) { setAuthoringStatus(result.error); return; } void catalog.createCatalogRecipe?.({slug, document: result.document}).then(() => setAuthoringStatus("Recipe saved")); } catch { setAuthoringStatus("Unable to save recipe"); } }}>Save custom recipe</button></div>
-        {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" || authoringStatus.startsWith("Updated to v") ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
-        <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close authoring</button>
-      </section>}
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
     </header>
