@@ -1639,14 +1639,16 @@ fn verify_installation_migrates_valid_legacy_http_cache_without_redownloading() 
         },
         roles: vec!["entrypoint".to_owned()],
     };
-    let runtime = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    };
-    runtime
-        .install(&workload, "cb555393-764b-4eb6-8f15-b416d289428f", DIGEST)
-        .unwrap();
+    {
+        let runtime = OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        runtime
+            .install(&workload, "cb555393-764b-4eb6-8f15-b416d289428f", DIGEST)
+            .unwrap();
+    }
     let installed = fs::read_dir(directory.path().join("models").join("sha256"))
         .unwrap()
         .next()
@@ -1672,8 +1674,6 @@ fn verify_installation_migrates_valid_legacy_http_cache_without_redownloading() 
     )
     .unwrap();
     runner.calls.borrow_mut().clear();
-    drop(runtime);
-
     let restarted_runtime = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
@@ -1724,13 +1724,15 @@ fn verify_installation_repairs_interrupted_http_cache_migration() {
         },
         roles: vec!["entrypoint".to_owned()],
     };
-    let runtime = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    };
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    runtime.install(&workload, installation_id, DIGEST).unwrap();
+    {
+        let runtime = OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        runtime.install(&workload, installation_id, DIGEST).unwrap();
+    }
     let installed = fs::read_dir(directory.path().join("models").join("sha256"))
         .unwrap()
         .next()
@@ -1757,8 +1759,6 @@ fn verify_installation_repairs_interrupted_http_cache_migration() {
     let orphan = installed.join("..vonk-manifest.json.4242.tmp");
     fs::write(&orphan, b"{\"schema_version\":1,\"files\":").unwrap();
     runner.calls.borrow_mut().clear();
-    drop(runtime);
-
     let restarted_runtime = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
