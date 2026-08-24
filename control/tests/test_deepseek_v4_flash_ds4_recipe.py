@@ -74,6 +74,12 @@ def test_ds4_recipe_is_one_node_and_uses_ds4_harness() -> None:
     assert version["format"]["precision"] == "mixed"
     assert version["format"]["quantization"] == "iq2_xxs-q2_k-mixed"
     assert distribution["capabilities"]["distributed_vllm"] is None
+    assert [artifact["id"] for artifact in recipe["artifacts"]] == ["target"]
+    assert all(
+        argument["name"] != "draft-model"
+        for argument in recipe["runtime"]["arguments"]
+    )
+    assert recipe["topology"]["roles"][0]["artifacts"] == ["target"]
 
 
 def test_ds4_model_version_has_exact_current_target_and_dspark_support() -> None:

@@ -2,9 +2,9 @@
   "schema_version": 1,
   "identity": {"publisher": "vonk-forge", "slug": "deepseek-v4-flash-0731-ds4-single"},
   "metadata": {
-    "title": "DeepSeek V4 Flash 0731 DS4 single Spark",
-    "description": "One DGX Spark running DS4 with the current 96/128-GB mixed IQ2_XXS/Q2_K target and DSpark support GGUF.",
-    "tags": ["deepseek", "ds4", "openai", "single", "spark"]
+    "title": "DeepSeek V4 Flash 0731 DS4 batched concurrency single Spark",
+    "description": "One DGX Spark target-only profile using DS4 native two-session batching for concurrent serving; the DSpark drafter is omitted because upstream disables speculative decoding during native batching.",
+    "tags": ["deepseek", "ds4", "openai", "concurrency", "batched", "target-only", "single", "spark"]
   },
   "model": {
     "kind": "model-version",
@@ -50,16 +50,6 @@
       "installed_bytes": 86720111488,
       "mount": {"target": "/models", "read_only": true},
       "roles": ["entrypoint"]
-    },
-    {
-      "id": "drafter",
-      "kind": "http.file",
-      "repository": "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/e7f04037032990db0346398d249baf9fb9df1ccc/DeepSeek-V4-Flash-DSpark-support-0731.gguf",
-      "revision": "sha256:7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360",
-      "download_bytes": 5989114272,
-      "installed_bytes": 5989114272,
-      "mount": {"target": "/models", "read_only": true},
-      "roles": ["entrypoint"]
     }
   ],
   "runtime": {
@@ -72,7 +62,6 @@
     "entrypoint": ["/opt/vonk/bin/ds4-serve"],
     "arguments": [
       {"name": "model", "value": "/models/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf"},
-      {"name": "draft-model", "value": "/models/DeepSeek-V4-Flash-DSpark-support-0731.gguf"},
       {"name": "ctx-size", "value": 131072},
       {"name": "batch-size", "value": 2}
     ],
@@ -108,11 +97,11 @@
         "name": "entrypoint",
         "count": 1,
         "endpoint_owner": true,
-        "artifacts": ["target", "drafter"],
+        "artifacts": ["target"],
         "resources": {
           "disk": {
             "image_bytes": 10000000000,
-            "artifact_bytes": 92709225760,
+            "artifact_bytes": 86720111488,
             "staging_bytes": 10000000000,
             "cache_bytes": 8000000000,
             "rollback_bytes": 0,

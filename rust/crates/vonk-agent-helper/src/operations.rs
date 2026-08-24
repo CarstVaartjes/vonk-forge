@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -606,7 +607,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let (image_digest, docker) = arguments
             .split_first()
             .ok_or(OperationError::InvalidOperation)?;
-        let validated = validate_docker_run(docker, &self.roots)?;
+        let validated = validate_docker_run(docker, &self.roots, self.runtime_request_owner_uid)?;
         if image_digest != &validated.image_digest {
             return Err(OperationError::InvalidOperation);
         }
@@ -689,7 +690,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let (image_digest, docker) = arguments
             .split_first()
             .ok_or(OperationError::InvalidOperation)?;
-        let validated = validate_docker_run(docker, &self.roots)?;
+        let validated = validate_docker_run(docker, &self.roots, self.runtime_request_owner_uid)?;
         if image_digest != &validated.image_digest || !validated.detached {
             return Err(OperationError::InvalidOperation);
         }
@@ -716,24 +717,33 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
-        for (path, access) in [
-            (&run.models, "rX"),
-            (&run.outputs, "rwx"),
-            (&run.runtime_contract, "r"),
-        ] {
+        for path in &run.models {
             let output = self
                 .runner
                 .run(
                     Path::new("/usr/bin/setfacl"),
                     &[
-                        if path == &run.models { "-R" } else { "-m" }.to_owned(),
-                        if path == &run.models { "-m" } else { "--" }.to_owned(),
+                        "-R".to_owned(),
+                        "-m".to_owned(),
+                        format!("u:{}:rX", run.uid),
+                        path.display().to_string(),
+                    ],
+                )
+                .map_err(|_| OperationError::CommandFailed)?;
+            if !output.success {
+                return Err(OperationError::CommandFailed);
+            }
+        }
+        for (path, access) in [(&run.outputs, "rwx"), (&run.runtime_contract, "r")] {
+            let output = self
+                .runner
+                .run(
+                    Path::new("/usr/bin/setfacl"),
+                    &[
+                        "-m".to_owned(),
                         format!("u:{}:{access}", run.uid),
                         path.display().to_string(),
-                    ]
-                    .into_iter()
-                    .filter(|value| value != "--")
-                    .collect::<Vec<_>>(),
+                    ],
                 )
                 .map_err(|_| OperationError::CommandFailed)?;
             if !output.success {
@@ -1001,17 +1011,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
-        let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_dir()
-            || metadata.mode() & 0o022 != 0
-            || self
-                .required_owner_uid
-                .is_some_and(|uid| metadata.uid() != uid)
-        {
-            return Err(OperationError::UnsafePath);
-        }
-        Ok(())
+        require_safe_directory(path, self.required_owner_uid)
     }
 }
 
@@ -1023,7 +1023,7 @@ struct ValidatedDockerRun {
     image_index: usize,
     run_id: String,
     uid: u32,
-    models: PathBuf,
+    models: Vec<PathBuf>,
     outputs: PathBuf,
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
@@ -1032,6 +1032,7 @@ struct ValidatedDockerRun {
 fn validate_docker_run(
     arguments: &[String],
     roots: &ManagedRoots,
+    agent_data_owner_uid: Option<u32>,
 ) -> Result<ValidatedDockerRun, OperationError> {
     if arguments.first().map(String::as_str) != Some("run") {
         return Err(OperationError::InvalidOperation);
@@ -1064,7 +1065,9 @@ fn validate_docker_run(
     let mut environments = 0_usize;
     let mut listen_port = None;
     let mut gpu = false;
-    let mut models = None;
+    let mut models = Vec::new();
+    let mut model_sources = BTreeSet::new();
+    let mut model_targets = BTreeSet::new();
     let mut outputs = None;
     let mut runtime_contract = None;
 
@@ -1242,12 +1245,13 @@ fn validate_docker_run(
                     .get(index)
                     .ok_or(OperationError::InvalidOperation)?;
                 let (source, target, readonly) = parse_mount(value)?;
-                if target == "/models"
-                    && readonly
-                    && source == roots.agent_data.join("models")
-                    && models.is_none()
-                {
-                    models = Some(source);
+                if readonly && valid_model_mount(&source, target, roots) {
+                    if !model_sources.insert(source.clone())
+                        || !model_targets.insert(target.to_owned())
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    models.push(source);
                 } else if target == "/outputs"
                     && !readonly
                     && source.file_name().and_then(|value| value.to_str()) == Some("outputs")
@@ -1319,8 +1323,23 @@ fn validate_docker_run(
     {
         return Err(OperationError::InvalidOperation);
     }
-    let models = models.ok_or(OperationError::InvalidOperation)?;
-    for path in [&models, &outputs, &runtime_contract] {
+    if models.is_empty()
+        || models.len() > 16
+        || models.len() > 1 && model_targets.contains("/models")
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    let canonical_model_root = canonical_model_root(roots, agent_data_owner_uid)?;
+    for path in &models {
+        require_safe_directory(path, agent_data_owner_uid)?;
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| OperationError::UnsafePath)?;
+        if canonical.parent() != Some(canonical_model_root.as_path()) {
+            return Err(OperationError::UnsafePath);
+        }
+    }
+    for path in [&outputs, &runtime_contract] {
         let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
         if metadata.file_type().is_symlink()
             || !(metadata.is_dir() || metadata.is_file())
@@ -1368,6 +1387,73 @@ fn parse_mount(value: &str) -> Result<(PathBuf, &str, bool), OperationError> {
         return Err(OperationError::InvalidOperation);
     }
     Ok((source, target, readonly))
+}
+
+fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
+    let model_root = roots.agent_data.join("models").join("sha256");
+    let Some(key) = source.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if !lower_hex(key, 64) || source != model_root.join(key) {
+        return false;
+    }
+    if target == "/models" {
+        return true;
+    }
+    target
+        .strip_prefix("/models/")
+        .is_some_and(valid_artifact_id)
+}
+
+fn canonical_model_root(
+    roots: &ManagedRoots,
+    agent_data_owner_uid: Option<u32>,
+) -> Result<PathBuf, OperationError> {
+    let agent_data = &roots.agent_data;
+    let models = agent_data.join("models");
+    let model_root = models.join("sha256");
+    for path in [agent_data, &models, &model_root] {
+        require_safe_directory(path, agent_data_owner_uid)?;
+    }
+    let canonical_agent_data = agent_data
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_models = models
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_model_root = model_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if canonical_models.parent() != Some(canonical_agent_data.as_path())
+        || canonical_model_root.parent() != Some(canonical_models.as_path())
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    Ok(canonical_model_root)
+}
+
+fn require_safe_directory(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+) -> Result<(), OperationError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.mode() & 0o022 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    Ok(())
+}
+
+fn valid_artifact_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && !matches!(value, "." | "..")
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
 }
 
 fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), OperationError> {
@@ -1490,7 +1576,112 @@ fn sync_directory(path: &Path) -> Result<(), OperationError> {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_publication;
+    use std::fs;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+    use std::path::PathBuf;
+
+    use tempfile::TempDir;
+
+    use super::{ManagedRoots, valid_publication, validate_docker_run};
+
+    const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
+
+    fn runtime_fixture() -> (TempDir, ManagedRoots) {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("data"));
+        fs::create_dir_all(roots.agent_data.join("models").join("sha256")).unwrap();
+        fs::create_dir_all(roots.agent_data.join("runs").join(RUN_ID).join("outputs")).unwrap();
+        let metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+        (temp, roots)
+    }
+
+    fn artifact_path(roots: &ManagedRoots, key: char) -> PathBuf {
+        roots
+            .agent_data
+            .join("models")
+            .join("sha256")
+            .join(key.to_string().repeat(64))
+    }
+
+    fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
+        let mut arguments = vec![
+            "run".to_owned(),
+            "--detach".to_owned(),
+            "--name".to_owned(),
+            format!("vonk-{RUN_ID}"),
+            "--restart".to_owned(),
+            "no".to_owned(),
+            "--read-only".to_owned(),
+            "--tmpfs".to_owned(),
+            "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
+            "--init".to_owned(),
+            "--pull".to_owned(),
+            "never".to_owned(),
+            "--log-driver".to_owned(),
+            "local".to_owned(),
+            "--log-opt".to_owned(),
+            "max-size=10m".to_owned(),
+            "--log-opt".to_owned(),
+            "max-file=3".to_owned(),
+            "--cap-drop=ALL".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+            "--network".to_owned(),
+            "bridge".to_owned(),
+            "--pids-limit".to_owned(),
+            "4096".to_owned(),
+            "--memory".to_owned(),
+            "1000000000".to_owned(),
+            "--memory-swap".to_owned(),
+            "1000000000".to_owned(),
+            "--shm-size".to_owned(),
+            "134217728".to_owned(),
+            "--user".to_owned(),
+            "10001:10001".to_owned(),
+            "--publish".to_owned(),
+            "192.168.1.211:8101:8000".to_owned(),
+            "--env".to_owned(),
+            "VONK_LISTEN_PORT=8000".to_owned(),
+        ];
+        for (source, target, readonly) in mounts {
+            arguments.extend([
+                "--mount".to_owned(),
+                format!(
+                    "type=bind,src={},dst={target}{}",
+                    source.display(),
+                    if *readonly { ",readonly" } else { "" }
+                ),
+            ]);
+        }
+        arguments.extend([
+            "--mount".to_owned(),
+            format!(
+                "type=bind,src={},dst=/outputs",
+                roots
+                    .agent_data
+                    .join("runs")
+                    .join(RUN_ID)
+                    .join("outputs")
+                    .display()
+            ),
+            "--mount".to_owned(),
+            format!(
+                "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
+                roots
+                    .agent_data
+                    .join("run-metadata")
+                    .join(RUN_ID)
+                    .join("runtime.json")
+                    .display()
+            ),
+            format!(
+                "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002@sha256:{}",
+                "c".repeat(64)
+            ),
+        ]);
+        arguments
+    }
 
     #[test]
     fn runtime_publications_require_an_explicit_routable_bind_address() {
@@ -1509,6 +1700,211 @@ mod tests {
             "192.168.1.211:8101:80",
         ] {
             assert!(!valid_publication(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn runtime_accepts_exact_single_and_multiple_artifact_mounts() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        let tokenizer = artifact_path(&roots, 'b');
+        fs::create_dir_all(&model).unwrap();
+        fs::create_dir_all(&tokenizer).unwrap();
+
+        let single = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+        let validated = validate_docker_run(&single, &roots, None).unwrap();
+        assert_eq!(validated.models, vec![model.clone()]);
+
+        let multiple = runtime_arguments(
+            &roots,
+            &[
+                (model.clone(), "/models/model", true),
+                (tokenizer.clone(), "/models/tokenizer-v2", true),
+            ],
+        );
+        let validated = validate_docker_run(&multiple, &roots, None).unwrap();
+        assert_eq!(validated.models, vec![model, tokenizer]);
+    }
+
+    #[test]
+    fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        let tokenizer = artifact_path(&roots, 'b');
+        fs::create_dir_all(&model).unwrap();
+        fs::create_dir_all(&tokenizer).unwrap();
+
+        let invalid_single_mounts = [
+            (roots.agent_data.join("models"), "/models", true),
+            (
+                roots.agent_data.join("models").join("sha256"),
+                "/models",
+                true,
+            ),
+            (
+                roots.agent_data.join("models").join("a".repeat(64)),
+                "/models",
+                true,
+            ),
+            (
+                roots
+                    .agent_data
+                    .join("models")
+                    .join("sha256")
+                    .join("..")
+                    .join("sha256")
+                    .join("a".repeat(64)),
+                "/models",
+                true,
+            ),
+            (artifact_path(&roots, 'A'), "/models", true),
+            (model.clone(), "/models", false),
+            (model.clone(), "/model", true),
+            (model.clone(), "/models/..", true),
+            (model.clone(), "/models/model/nested", true),
+            (model.clone(), "/models/model/", true),
+            (model.clone(), "/models/Model", true),
+        ];
+        for mount in invalid_single_mounts {
+            assert!(
+                validate_docker_run(&runtime_arguments(&roots, &[mount]), &roots, None).is_err()
+            );
+        }
+
+        for mounts in [
+            vec![
+                (model.clone(), "/models/model", true),
+                (model.clone(), "/models/tokenizer", true),
+            ],
+            vec![
+                (model.clone(), "/models/model", true),
+                (tokenizer.clone(), "/models/model", true),
+            ],
+            vec![
+                (model.clone(), "/models", true),
+                (tokenizer.clone(), "/models/tokenizer", true),
+            ],
+        ] {
+            assert!(
+                validate_docker_run(&runtime_arguments(&roots, &mounts), &roots, None).is_err()
+            );
+        }
+
+        let too_many = (0..17)
+            .map(|index| {
+                let source = roots
+                    .agent_data
+                    .join("models")
+                    .join("sha256")
+                    .join(format!("{index:064x}"));
+                fs::create_dir(&source).unwrap();
+                (source, format!("/models/artifact-{index}"))
+            })
+            .collect::<Vec<_>>();
+        let too_many = too_many
+            .iter()
+            .map(|(source, target)| (source.clone(), target.as_str(), true))
+            .collect::<Vec<_>>();
+        assert!(validate_docker_run(&runtime_arguments(&roots, &too_many), &roots, None).is_err());
+
+        let symlinked = artifact_path(&roots, 'd');
+        symlink(&model, &symlinked).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(symlinked, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
+        {
+            let (temp, roots) = runtime_fixture();
+            let models = roots.agent_data.join("models");
+            fs::remove_dir_all(&models).unwrap();
+            let outside_models = temp.path().join("outside-models");
+            let outside_model = outside_models.join("sha256").join("a".repeat(64));
+            fs::create_dir_all(&outside_model).unwrap();
+            symlink(&outside_models, &models).unwrap();
+
+            let mount = artifact_path(&roots, 'a');
+            assert!(
+                validate_docker_run(
+                    &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                    &roots,
+                    None,
+                )
+                .is_err()
+            );
+        }
+
+        {
+            let (temp, roots) = runtime_fixture();
+            let model_root = roots.agent_data.join("models").join("sha256");
+            fs::remove_dir(&model_root).unwrap();
+            let outside_model_root = temp.path().join("outside-sha256");
+            fs::create_dir_all(outside_model_root.join("a".repeat(64))).unwrap();
+            symlink(&outside_model_root, &model_root).unwrap();
+
+            let mount = artifact_path(&roots, 'a');
+            assert!(
+                validate_docker_run(
+                    &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                    &roots,
+                    None,
+                )
+                .is_err()
+            );
+        }
+
+        {
+            let temp = tempfile::tempdir().unwrap();
+            let outside = temp.path().join("outside-agent-data");
+            let agent_data = temp.path().join("agent-data-link");
+            let roots = ManagedRoots::under(&agent_data);
+            let model = outside.join("models").join("sha256").join("a".repeat(64));
+            fs::create_dir_all(&model).unwrap();
+            fs::create_dir_all(outside.join("runs").join(RUN_ID).join("outputs")).unwrap();
+            let metadata = outside.join("run-metadata").join(RUN_ID);
+            fs::create_dir_all(&metadata).unwrap();
+            fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+            symlink(&outside, &agent_data).unwrap();
+
+            let mount = artifact_path(&roots, 'a');
+            assert!(
+                validate_docker_run(
+                    &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                    &roots,
+                    None,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_rejects_unsafe_model_ownership_and_modes() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&model).unwrap();
+        let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+
+        let owner = fs::symlink_metadata(&roots.agent_data).unwrap().uid();
+        assert!(validate_docker_run(&arguments, &roots, Some(owner ^ 1)).is_err());
+        validate_docker_run(&arguments, &roots, Some(owner)).unwrap();
+
+        for path in [
+            roots.agent_data.clone(),
+            roots.agent_data.join("models"),
+            roots.agent_data.join("models").join("sha256"),
+            model,
+        ] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o770)).unwrap();
+            assert!(validate_docker_run(&arguments, &roots, Some(owner)).is_err());
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).unwrap();
         }
     }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -213,6 +214,47 @@ def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
     )
 
     assert spec["model_dependencies"] == [dependency]
+
+
+def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    target = copy.deepcopy(document["artifacts"][0])
+    target["id"] = "target"
+    target["mount"]["target"] = "/models/target"
+    draft = copy.deepcopy(target)
+    draft["id"] = "draft"
+    draft["mount"]["target"] = "/models/draft"
+    document["artifacts"] = [draft, target]
+    document["topology"]["roles"][0]["artifacts"] = ["target", "draft"]
+    document["runtime"]["entrypoint"][2] = "/models/target"
+    document["runtime"]["arguments"].append(
+        {
+            "name": "speculative-config",
+            "value": '{"method":"draft_model","model":"/models/draft"}',
+        }
+    )
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters=parameters,
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["runtime"]["entrypoint"][2] == "/models/target"
+    assert [artifact["mount"]["target"] for artifact in spec["artifacts"]] == [
+        "/models/draft",
+        "/models/target",
+    ]
+    assert spec["security"]["mounts"][0] == {
+        "source": "model",
+        "target": "/models",
+        "read_only": True,
+    }
 
 
 def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:
