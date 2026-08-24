@@ -17,7 +17,7 @@ test("the redesigned shell exposes only Fleet and Library", async ({page}) => {
     next_cursor: null,
   }}));
   await page.goto("/library");
-  await expect(page.getByRole("heading", {name: "Library"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeVisible();
   const primaryLinks = page.getByRole("navigation", {name: "Primary"}).getByRole("link");
   await expect(primaryLinks).toHaveText(["Fleet", "Library"]);
   await expect(page).toHaveURL(/\/library$/);

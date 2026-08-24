@@ -210,16 +210,16 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
   }
 
-  listPublicRecipes(): Promise<PublicRecipeList> {
-    return this.request("/api/v1/catalog/public-recipes");
+  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList> {
+    return this.request("/api/v1/catalog/public-recipes", {signal});
   }
 
-  previewPublicRecipe(uri: string): Promise<PublicRecipePreview> {
-    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri})});
+  previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview> {
+    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri}), signal});
   }
 
-  importPublicRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
+  importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision> {
+    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256}), signal});
   }
 
   async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {

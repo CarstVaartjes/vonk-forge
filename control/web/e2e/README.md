@@ -22,7 +22,11 @@ detail, Library URL/back history, one model with many recipes, unlinked recipes,
 complete two-node recommendations, visual recipe details, action
 preview/cancel/apply/progress/partial failure/retry, Advanced JSON upload with
 last-valid visualization, mobile drill-down, keyboard focus return, and
-empty/error recovery. Run at 360, 768, 1280, and 1920 CSS pixels; assert no
+empty/error recovery. Public recipe import additionally covers the dedicated
+Catalog → Review → Confirm journey, qualification evidence, URL-backed filters,
+conditional facets, 256-item scale, Axe checks, and attached desktop/mobile
+screenshots. Run import acceptance at 320, 360, 768, 895, 896, 1280, and 1920
+CSS pixels; assert no
 document overflow, visible focus, status announcements, and no console
 warnings/errors.
 

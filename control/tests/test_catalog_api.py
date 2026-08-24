@@ -17,6 +17,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog_api import (
     _canonical_source_repository,
+    _public_recipe_qualification,
     install_catalog_routes,
 )
 from vonk_control.catalog_service import CatalogService
@@ -192,6 +193,41 @@ def test_operator_cannot_author_recipe(api, recipe_document) -> None:
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("tags", "qualification", "basis"),
+    [
+        (
+            {"accepted", "openai"},
+            "cataloged",
+            "explicit-accepted-metadata",
+        ),
+        (
+            {"candidate", "openai"},
+            "candidate",
+            "explicit-candidate-metadata",
+        ),
+        (
+            {"accepted", "candidate"},
+            "candidate",
+            "conflicting-metadata",
+        ),
+        (
+            {"openai"},
+            "candidate",
+            "missing-accepted-metadata",
+        ),
+    ],
+)
+def test_public_recipe_qualification_requires_explicit_unambiguous_acceptance(
+    tags: set[str], qualification: str, basis: str
+) -> None:
+    actual_qualification, actual_basis, detail = _public_recipe_qualification(tags)
+
+    assert actual_qualification == qualification
+    assert actual_basis == basis
+    assert detail
 
 
 def test_create_list_get_and_resolve_recipe(api, recipe_document) -> None:
@@ -925,7 +961,9 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
         "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks"
     )
     assert listed_recipe["capabilities"] == ["chat"]
-    assert listed_recipe["qualification"] == "cataloged"
+    assert listed_recipe["qualification"] == "candidate"
+    assert listed_recipe["qualification_basis"] == "missing-accepted-metadata"
+    assert "No explicit accepted qualification" in listed_recipe["qualification_detail"]
     assert listed_recipe["runtime_distribution"] == "development-vllm-shim-arm64"
     assert listed_recipe["topology_mode"] == "single"
     assert listed_recipe["node_count"] == 1
@@ -936,6 +974,11 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert preview_recipe["capabilities"] == listed_recipe["capabilities"]
     assert preview_recipe["source_owner"] == listed_recipe["source_owner"]
     assert preview_recipe["source_repository"] == listed_recipe["source_repository"]
+    assert preview_recipe["qualification"] == listed_recipe["qualification"]
+    assert preview_recipe["qualification_basis"] == listed_recipe["qualification_basis"]
+    assert (
+        preview_recipe["qualification_detail"] == listed_recipe["qualification_detail"]
+    )
     assert imported.json()["origin"] == "recipe_library"
     assert len(service.entities.list_entities(limit=100)[0]) == 5
     assert service.read_source_bundle(bundle.sha256) == bundle.archive

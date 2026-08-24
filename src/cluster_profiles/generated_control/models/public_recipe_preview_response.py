@@ -10,6 +10,8 @@ from ..models.public_recipe_preview_response_capabilities_item import check_publ
 from ..models.public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
 from ..models.public_recipe_preview_response_qualification import check_public_recipe_preview_response_qualification
 from ..models.public_recipe_preview_response_qualification import PublicRecipePreviewResponseQualification
+from ..models.public_recipe_preview_response_qualification_basis import check_public_recipe_preview_response_qualification_basis
+from ..models.public_recipe_preview_response_qualification_basis import PublicRecipePreviewResponseQualificationBasis
 from ..models.public_recipe_preview_response_source import check_public_recipe_preview_response_source
 from ..models.public_recipe_preview_response_source import PublicRecipePreviewResponseSource
 from ..types import UNSET, Unset
@@ -49,6 +51,8 @@ class PublicRecipePreviewResponse:
             node_count (int):
             publisher (str):
             qualification (PublicRecipePreviewResponseQualification):
+            qualification_basis (PublicRecipePreviewResponseQualificationBasis):
+            qualification_detail (str):
             runtime_distribution (str):
             slug (str):
             source (PublicRecipePreviewResponseSource):
@@ -81,6 +85,8 @@ class PublicRecipePreviewResponse:
     node_count: int
     publisher: str
     qualification: PublicRecipePreviewResponseQualification
+    qualification_basis: PublicRecipePreviewResponseQualificationBasis
+    qualification_detail: str
     runtime_distribution: str
     slug: str
     source: PublicRecipePreviewResponseSource
@@ -144,6 +150,10 @@ class PublicRecipePreviewResponse:
         publisher = self.publisher
 
         qualification: str = self.qualification
+
+        qualification_basis: str = self.qualification_basis
+
+        qualification_detail = self.qualification_detail
 
         runtime_distribution = self.runtime_distribution
 
@@ -215,6 +225,8 @@ class PublicRecipePreviewResponse:
             "node_count": node_count,
             "publisher": publisher,
             "qualification": qualification,
+            "qualification_basis": qualification_basis,
+            "qualification_detail": qualification_detail,
             "runtime_distribution": runtime_distribution,
             "slug": slug,
             "source": source,
@@ -298,6 +310,13 @@ class PublicRecipePreviewResponse:
 
 
 
+
+        qualification_basis = check_public_recipe_preview_response_qualification_basis(d.pop("qualification_basis"))
+
+
+
+
+        qualification_detail = d.pop("qualification_detail")
 
         runtime_distribution = d.pop("runtime_distribution")
 
@@ -388,6 +407,8 @@ class PublicRecipePreviewResponse:
             node_count=node_count,
             publisher=publisher,
             qualification=qualification,
+            qualification_basis=qualification_basis,
+            qualification_detail=qualification_detail,
             runtime_distribution=runtime_distribution,
             slug=slug,
             source=source,

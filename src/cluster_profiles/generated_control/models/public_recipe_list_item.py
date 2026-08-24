@@ -10,6 +10,8 @@ from ..models.public_recipe_list_item_capabilities_item import check_public_reci
 from ..models.public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
 from ..models.public_recipe_list_item_qualification import check_public_recipe_list_item_qualification
 from ..models.public_recipe_list_item_qualification import PublicRecipeListItemQualification
+from ..models.public_recipe_list_item_qualification_basis import check_public_recipe_list_item_qualification_basis
+from ..models.public_recipe_list_item_qualification_basis import PublicRecipeListItemQualificationBasis
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -45,6 +47,8 @@ class PublicRecipeListItem:
             node_count (int):
             publisher (str):
             qualification (PublicRecipeListItemQualification):
+            qualification_basis (PublicRecipeListItemQualificationBasis):
+            qualification_detail (str):
             runtime_distribution (str):
             slug (str):
             source_bundle_sha256 (str):
@@ -75,6 +79,8 @@ class PublicRecipeListItem:
     node_count: int
     publisher: str
     qualification: PublicRecipeListItemQualification
+    qualification_basis: PublicRecipeListItemQualificationBasis
+    qualification_detail: str
     runtime_distribution: str
     slug: str
     source_bundle_sha256: str
@@ -129,6 +135,10 @@ class PublicRecipeListItem:
         publisher = self.publisher
 
         qualification: str = self.qualification
+
+        qualification_basis: str = self.qualification_basis
+
+        qualification_detail = self.qualification_detail
 
         runtime_distribution = self.runtime_distribution
 
@@ -197,6 +207,8 @@ class PublicRecipeListItem:
             "node_count": node_count,
             "publisher": publisher,
             "qualification": qualification,
+            "qualification_basis": qualification_basis,
+            "qualification_detail": qualification_detail,
             "runtime_distribution": runtime_distribution,
             "slug": slug,
             "source_bundle_sha256": source_bundle_sha256,
@@ -268,6 +280,13 @@ class PublicRecipeListItem:
 
 
 
+
+        qualification_basis = check_public_recipe_list_item_qualification_basis(d.pop("qualification_basis"))
+
+
+
+
+        qualification_detail = d.pop("qualification_detail")
 
         runtime_distribution = d.pop("runtime_distribution")
 
@@ -352,6 +371,8 @@ class PublicRecipeListItem:
             node_count=node_count,
             publisher=publisher,
             qualification=qualification,
+            qualification_basis=qualification_basis,
+            qualification_detail=qualification_detail,
             runtime_distribution=runtime_distribution,
             slug=slug,
             source_bundle_sha256=source_bundle_sha256,

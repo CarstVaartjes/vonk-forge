@@ -423,12 +423,12 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
   const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
   await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
   const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
   await editor.fill(JSON.stringify(invalid, null, 2));
   await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
   await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
 
   const upload = advanced.getByLabel("Upload recipe JSON");
   const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
@@ -436,10 +436,10 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
   await expect(advanced.getByRole("alert")).toHaveCount(0);
   await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-uploaded@");
-  await expect(page.getByRole("link", {name: "Source and build"})).toBeVisible();
-  await expect(page.getByRole("link", {name: "Cluster mapping"})).toBeVisible();
-  await expect(page.getByRole("link", {name: "Raw editor"})).toBeVisible();
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-uploaded@");
+  await expect(page.getByRole("link", {name: "Source and build"})).toHaveCount(0);
+  await expect(page.getByRole("link", {name: "Cluster mapping"})).toHaveCount(0);
+  await expect(page.getByRole("link", {name: "Raw editor"})).toHaveCount(0);
 
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({path: testInfo.outputPath("library-desktop.png")});

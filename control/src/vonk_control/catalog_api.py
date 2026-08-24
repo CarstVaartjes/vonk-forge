@@ -65,6 +65,13 @@ PublicRecipeCapability = Literal[
     "audio",
     "3d",
 ]
+PublicRecipeQualification = Literal["candidate", "cataloged"]
+PublicRecipeQualificationBasis = Literal[
+    "explicit-accepted-metadata",
+    "explicit-candidate-metadata",
+    "missing-accepted-metadata",
+    "conflicting-metadata",
+]
 
 CATALOG_OPERATION_IDS = {
     ("get", "/api/v1/catalog/entities"): "listCatalogEntities",
@@ -259,7 +266,9 @@ class PublicRecipeListItem(StrictModel):
     source_owner: str | None = Field(default=None, min_length=1, max_length=120)
     source_repository: str | None = Field(default=None, min_length=1, max_length=512)
     capabilities: list[PublicRecipeCapability] = Field(max_length=8)
-    qualification: Literal["candidate", "cataloged"]
+    qualification: PublicRecipeQualification
+    qualification_basis: PublicRecipeQualificationBasis
+    qualification_detail: str = Field(min_length=1, max_length=256)
     precision: str | None = Field(default=None, min_length=2, max_length=24)
     execution_harness: str = Field(pattern=_SLUG)
     runtime_distribution: str = Field(pattern=_SLUG)
@@ -531,6 +540,9 @@ def _public_recipe_metadata(
         None,
     )
     source_owner, source_repository = _public_recipe_source(document)
+    qualification, qualification_basis, qualification_detail = (
+        _public_recipe_qualification(tags)
+    )
     return {
         "model_publisher": model_publisher,
         "model_slug": model_slug,
@@ -542,10 +554,53 @@ def _public_recipe_metadata(
             for capability in _PUBLIC_CAPABILITIES
             if capability in capabilities
         ],
-        "qualification": "candidate" if "candidate" in tags else "cataloged",
+        "qualification": qualification,
+        "qualification_basis": qualification_basis,
+        "qualification_detail": qualification_detail,
         "precision": precision,
         **_document_summary(document),
     }
+
+
+def _public_recipe_qualification(
+    tags: set[str],
+) -> tuple[
+    PublicRecipeQualification,
+    PublicRecipeQualificationBasis,
+    str,
+]:
+    """Project explicit immutable recipe qualification, failing closed.
+
+    ``cataloged`` remains the accepted response literal for client compatibility.
+    The reviewed recipe document must now explicitly carry the ``accepted`` tag;
+    an absent or contradictory declaration cannot silently grant acceptance.
+    """
+
+    accepted = "accepted" in tags
+    candidate = "candidate" in tags
+    if accepted and not candidate:
+        return (
+            "cataloged",
+            "explicit-accepted-metadata",
+            "The reviewed immutable recipe explicitly declares accepted qualification.",
+        )
+    if accepted and candidate:
+        return (
+            "candidate",
+            "conflicting-metadata",
+            "Conflicting accepted and candidate declarations fail closed to Candidate.",
+        )
+    if candidate:
+        return (
+            "candidate",
+            "explicit-candidate-metadata",
+            "The reviewed immutable recipe explicitly remains a Candidate.",
+        )
+    return (
+        "candidate",
+        "missing-accepted-metadata",
+        "No explicit accepted qualification is attached to this immutable recipe.",
+    )
 
 
 def _public_recipe_source(

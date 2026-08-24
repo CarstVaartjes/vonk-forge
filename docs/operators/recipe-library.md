@@ -84,6 +84,14 @@ token file and the control-plane URL:
 Container and Spark qualification still require the native ARM64/NVIDIA
 environment and exact artifact cache described in the acceptance runbook.
 
+The public Library API also fails closed when it projects qualification. It
+returns the existing `cataloged` wire value (shown as **Accepted** in the UI)
+only when the exact indexed recipe document explicitly carries the `accepted`
+metadata tag. An explicit `candidate` tag, a missing declaration, or conflicting
+`accepted` and `candidate` tags is shown as **Candidate**. This prevents missing
+metadata from silently becoming an acceptance claim while preserving existing
+API clients and filters.
+
 ## Custom libraries
 
 Operators may maintain a private or forked recipe library. It must pass the
