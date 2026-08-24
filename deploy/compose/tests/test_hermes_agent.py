@@ -116,8 +116,9 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     assert environment["API_SERVER_CORS_ORIGINS"] == "https://hermes.test.example"
     assert service["depends_on"] == {
         "hermes-litellm-key-provisioner": {
-            "condition": "service_completed_successfully",
+            "condition": "service_healthy",
             "required": True,
+            "restart": True,
         },
         "caddy": {
             "condition": "service_healthy",
@@ -206,7 +207,7 @@ def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> N
     service = _rendered()["services"]["hermes-litellm-key-provisioner"]
 
     assert service["profiles"] == ["hermes"]
-    assert service["restart"] == "no"
+    assert service["restart"] == "unless-stopped"
     assert service["read_only"] is True
     assert service["user"] == "0:0"
     assert service["cap_drop"] == ["ALL"]
@@ -224,6 +225,17 @@ def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> N
             "restart": True,
         }
     }
+    assert service["entrypoint"] == [
+        "python",
+        "/usr/local/bin/provision-hermes-litellm-key",
+        "--reconcile-forever",
+    ]
+    assert service["healthcheck"]["test"] == [
+        "CMD",
+        "python",
+        "/usr/local/bin/provision-hermes-litellm-key",
+        "--check",
+    ]
     assert not service.get("ports")
 
 

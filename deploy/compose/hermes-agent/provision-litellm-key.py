@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +23,7 @@ ALLOWED_ROUTES = ["openai_routes"]
 MAX_SECRET_BYTES = 4096
 MAX_RESPONSE_BYTES = 64 * 1024
 TOKEN = re.compile(r"^[A-Za-z0-9_.~-]+$")
+DEFAULT_RECONCILE_INTERVAL_SECONDS = 300
 
 
 class ProvisionError(RuntimeError):
@@ -203,13 +205,46 @@ def reconcile(master_key: str, hermes_key: str) -> None:
         raise ProvisionError("LiteLLM did not persist the exact Hermes key policy")
 
 
-def main() -> int:
+def check(master_key: str, hermes_key: str) -> None:
+    status, info = _key_info(master_key, hermes_key)
+    if status != 200 or not _is_exact(info):
+        raise ProvisionError("LiteLLM does not have the exact Hermes key policy")
+
+
+def _reconcile_interval() -> int:
+    raw = os.environ.get(
+        "HERMES_LITELLM_RECONCILE_INTERVAL_SECONDS",
+        str(DEFAULT_RECONCILE_INTERVAL_SECONDS),
+    )
+    if not raw.isdigit() or not 30 <= int(raw) <= 3600:
+        raise ProvisionError("Hermes key reconcile interval is invalid")
+    return int(raw)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    arguments = [] if arguments is None else arguments
+    if arguments not in ([], ["--check"], ["--reconcile-forever"]):
+        print("ERROR: invalid Hermes key provisioner mode", file=sys.stderr)
+        return 64
     master_path = Path(os.environ.get("LITELLM_MASTER_KEY_FILE", MASTER_KEY_FILE))
     hermes_path = Path(os.environ.get("HERMES_LITELLM_KEY_FILE", HERMES_KEY_FILE))
     try:
         master_key = _read_secret(master_path)
         hermes_key = _read_secret(hermes_path, prefix="sk-")
-        reconcile(master_key, hermes_key)
+        if arguments == ["--check"]:
+            check(master_key, hermes_key)
+            return 0
+        if arguments == ["--reconcile-forever"]:
+            interval = _reconcile_interval()
+            ready_logged = False
+            while True:
+                reconcile(master_key, hermes_key)
+                if not ready_logged:
+                    print("Hermes LiteLLM client key is ready.", flush=True)
+                    ready_logged = True
+                time.sleep(interval)
+        else:
+            reconcile(master_key, hermes_key)
     except ProvisionError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
@@ -218,4 +253,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -44,7 +44,7 @@ services:
   hermes-litellm-key-provisioner:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
     profiles: [hermes]
-    restart: "no"
+    restart: unless-stopped
     logging:
       driver: local
       options:
@@ -52,10 +52,13 @@ services:
         max-file: "5"
     read_only: true
     # Local Compose secrets retain the installer file's owner-only mode. Run as
-    # UID 0 with only DAC_OVERRIDE so this one-shot can read its two owner-only
-    # local Compose secret mounts without gaining host or write authority.
+    # UID 0 with only DAC_OVERRIDE so this narrow reconciler can read its two
+    # owner-only local Compose secret mounts without gaining host authority.
     user: "0:0"
-    entrypoint: [python, /usr/local/bin/provision-hermes-litellm-key]
+    entrypoint:
+      - python
+      - /usr/local/bin/provision-hermes-litellm-key
+      - --reconcile-forever
     cap_drop: [ALL]
     cap_add: [DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
@@ -75,6 +78,16 @@ services:
       litellm:
         condition: service_healthy
         restart: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /usr/local/bin/provision-hermes-litellm-key
+        - --check
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 15s
 
   hermes-agent:
     <<: *hermes-service
@@ -86,7 +99,8 @@ services:
       - hermes-inference
     depends_on:
       hermes-litellm-key-provisioner:
-        condition: service_completed_successfully
+        condition: service_healthy
+        restart: true
       caddy:
         condition: service_healthy
         restart: true

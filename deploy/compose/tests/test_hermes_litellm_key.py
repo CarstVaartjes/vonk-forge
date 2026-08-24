@@ -150,6 +150,41 @@ def test_exact_existing_key_is_not_recreated_or_updated(monkeypatch) -> None:
     assert all(path.startswith("/key/info?") for path in calls)
 
 
+def test_health_check_is_read_only_and_requires_the_exact_policy(monkeypatch) -> None:
+    module = _module()
+    calls: list[str] = []
+
+    def key_info(_master_key, _hermes_key):
+        calls.append("info")
+        return 200, _exact(module)
+
+    monkeypatch.setattr(module, "_key_info", key_info)
+    monkeypatch.setattr(
+        module,
+        "reconcile",
+        lambda *_arguments: pytest.fail("health check must not reconcile"),
+    )
+
+    module.check(MASTER_KEY, HERMES_KEY)
+    assert calls == ["info"]
+
+    monkeypatch.setattr(module, "_key_info", lambda *_arguments: (404, {}))
+    with pytest.raises(module.ProvisionError, match="exact Hermes key policy"):
+        module.check(MASTER_KEY, HERMES_KEY)
+
+
+def test_reconcile_interval_is_bounded(monkeypatch) -> None:
+    module = _module()
+
+    monkeypatch.delenv("HERMES_LITELLM_RECONCILE_INTERVAL_SECONDS", raising=False)
+    assert module._reconcile_interval() == 300
+
+    for value in ("29", "3601", "not-a-number"):
+        monkeypatch.setenv("HERMES_LITELLM_RECONCILE_INTERVAL_SECONDS", value)
+        with pytest.raises(module.ProvisionError, match="interval"):
+            module._reconcile_interval()
+
+
 def test_main_reads_bounded_files_without_printing_keys(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
