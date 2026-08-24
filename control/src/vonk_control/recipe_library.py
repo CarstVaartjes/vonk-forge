@@ -61,6 +61,7 @@ _SEMVER = re.compile(
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 _REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
+_INTERNAL_PROXY_URL = "http://caddy:8083"
 _INDEX_PATH = "catalog-index.json"
 _ENTITY_DIRECTORY = {
     CatalogKind.MODEL_GROUP: "model-groups",
@@ -185,8 +186,11 @@ class RecipeLibraryClient:
         timeout_seconds: float = 8.0,
         cache_ttl_seconds: float = 60.0,
     ) -> None:
-        parsed = urlsplit(base_url)
-        if parsed.scheme != "https" or not parsed.hostname:
+        normalized_base_url = base_url.rstrip("/")
+        parsed = urlsplit(normalized_base_url)
+        if (
+            parsed.scheme != "https" and normalized_base_url != _INTERNAL_PROXY_URL
+        ) or not parsed.hostname:
             raise RecipeLibraryError(
                 "recipe_library.url_insecure",
                 "recipe library URL must use HTTPS",
@@ -210,7 +214,7 @@ class RecipeLibraryClient:
         self._hydrated_bundles: dict[str, bytes] = {}
         self._cache_lock = threading.Lock()
         self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
+            base_url=normalized_base_url,
             timeout=httpx.Timeout(timeout_seconds),
             follow_redirects=False,
             trust_env=False,

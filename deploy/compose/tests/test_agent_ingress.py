@@ -508,6 +508,19 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     assert "[::]:2019" not in listeners
 
 
+def test_recipe_library_relay_is_read_only_and_repository_scoped() -> None:
+    adapted = _adapted_caddy(_environment())
+    relay = _server_on_port(adapted, 8083)
+    serialized = json.dumps(relay, sort_keys=True)
+
+    assert relay["listen"] == [":8083"]
+    assert '"method": ["GET"]' in serialized
+    assert "/repos/CarstVaartjes/vonk-forge-recipes/*" in serialized
+    assert "api.github.com:443" in serialized
+    assert '"status_code": 404' in serialized
+    assert "control-api:8000" not in serialized
+
+
 def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> (
     None
 ):

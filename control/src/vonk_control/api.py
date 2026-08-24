@@ -1320,7 +1320,7 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
-    recipe_library = RecipeLibraryClient()
+    recipe_library = RecipeLibraryClient(base_url=settings.recipe_library_api_url)
     catalog_service = CatalogService(
         sessions,
         clock=clock,

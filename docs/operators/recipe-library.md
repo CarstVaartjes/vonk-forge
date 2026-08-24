@@ -92,6 +92,12 @@ metadata tag. An explicit `candidate` tag, a missing declaration, or conflicting
 metadata from silently becoming an acceptance claim while preserving existing
 API clients and filters.
 
+In the production Compose topology the control API retains no general outbound
+network. Its GitHub client uses an internal Caddy listener that accepts only
+`GET` requests beneath the `CarstVaartjes/vonk-forge-recipes` API path, removes
+credentials, and relays them over HTTPS to `api.github.com`. The NAS therefore
+needs ordinary outbound HTTPS and DNS access, but it never needs a GitHub token.
+
 ## Custom libraries
 
 Operators may maintain a private or forked recipe library. It must pass the
