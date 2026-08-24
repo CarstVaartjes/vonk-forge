@@ -84,13 +84,17 @@ function CopyField({label, value, code = false}: {label: string; value: string; 
   </span>;
 }
 
-function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
+function SparkOnboarding({api, onBusyChange, onClose}: {api: ControlApi; onBusyChange?(busy: boolean): void; onClose(): void}) {
   const [grant, setGrant] = useState<EnrollmentGrantResponse>();
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const creatingGrant = useRef(false);
+  const keepGrantButton = useRef<HTMLButtonElement>(null);
   const grantSuccess = useRef<HTMLDivElement>(null);
+  const protectsGrant = creating || Boolean(grant);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -101,10 +105,43 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
 
   useEffect(() => { if (grant) grantSuccess.current?.focus(); }, [grant]);
 
+  useEffect(() => {
+    onBusyChange?.(protectsGrant);
+    return () => onBusyChange?.(false);
+  }, [onBusyChange, protectsGrant]);
+
+  useEffect(() => {
+    if (!protectsGrant) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    addEventListener("beforeunload", warnBeforeUnload);
+    return () => removeEventListener("beforeunload", warnBeforeUnload);
+  }, [protectsGrant]);
+
+  useEffect(() => {
+    if (confirmDiscard) keepGrantButton.current?.focus();
+  }, [confirmDiscard]);
+
+  function requestClose() {
+    if (creating) return;
+    if (grant) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      if (confirmDiscard) {
+        setConfirmDiscard(false);
+        closeButton.current?.focus();
+      } else {
+        requestClose();
+      }
       return;
     }
     if (event.key !== "Tab") return;
@@ -122,6 +159,8 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
   }
 
   async function createGrant() {
+    if (creatingGrant.current || grant) return;
+    creatingGrant.current = true;
     setCreating(true);
     setError("");
     try {
@@ -129,34 +168,40 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
     } catch (value) {
       setError(value instanceof Error ? value.message : "The enrollment grant could not be created.");
     } finally {
+      creatingGrant.current = false;
       setCreating(false);
     }
   }
 
-  return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={dialog} className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title" onKeyDown={handleKeyDown}>
-      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button ref={closeButton} type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
+  return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}>
+    <div ref={dialog} className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title" aria-busy={creating || undefined} onKeyDown={handleKeyDown}>
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button ref={closeButton} type="button" className="icon-button" disabled={creating} onClick={requestClose} aria-label="Close Add Spark">×</button></header>
       <div className="library-action-dialog-body">
         {!grant && <>
           <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><span className="onboarding-step-number" aria-hidden="true">1</span><div><strong>Create grant</strong><span>Generate a one-time authorization here.</span></div></li><li><span className="onboarding-step-number" aria-hidden="true">2</span><div><strong>Run installer</strong><span>Run the public installer on the Spark.</span></div></li><li><span className="onboarding-step-number" aria-hidden="true">3</span><div><strong>Enter credentials</strong><span>Provide the values shown when prompted.</span></div></li></ol>
           <p className="onboarding-guidance">Use a descriptive hostname on the Spark; Fleet uses it as the friendly fallback name. The Spark generates its immutable <code>spk_…</code> identity locally. The installer verifies the release before requesting sudo and pins the controller CA.</p>
           {error && <p role="alert" className="dialog-error">{error}</p>}
+          {creating && <p id="grant-creation-status" role="status" className="onboarding-locked-note"><strong>Creating the one-time authorization…</strong> Keep this window open until the setup values appear.</p>}
         </>}
         {grant && <>
           <div ref={grantSuccess} className="grant-success" tabIndex={-1}><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><ExpiryCountdown expiresAt={grant.expires_at}/></div></div>
           <p className="grant-secret-warning"><strong>Keep these setup values private.</strong> The one-time token authorizes one Spark and will not be shown again after closing.</p>
           <p>Run this command on the Spark. Enter the enrollment URL, CA fingerprint, and one-time token below when prompted. The installer pins the controller CA and configures the NAS LAN route automatically.</p>
-          <div className="onboarding-command-block"><code className="onboarding-command">{bootstrapCommand(grant)}</code><CopyButton label="installer command" value={bootstrapCommand(grant)}/></div>
+          <div className="onboarding-command-block"><code className="onboarding-command" tabIndex={0} aria-label="Spark installer command">{bootstrapCommand(grant)}</code><CopyButton label="installer command" value={bootstrapCommand(grant)}/></div>
           <dl className="grant-facts"><div><dt>One-time token</dt><dd><CopyField label="one-time token" value={grant.token} code/></dd></div><div><dt>Controller</dt><dd><CopyField label="controller endpoint" value={grant.controller_endpoint}/></dd></div><div><dt>Enrollment</dt><dd><CopyField label="enrollment endpoint" value={grant.enrollment_endpoint}/></dd></div>{grant.controller_address && <div><dt>NAS LAN address</dt><dd><CopyField label="NAS LAN address" value={grant.controller_address} code/></dd></div>}<div><dt>CA fingerprint</dt><dd><CopyField label="CA fingerprint" value={grant.ca_fingerprint} code/></dd></div></dl>
+          {confirmDiscard && <section className="grant-discard-confirmation" role="alert" aria-labelledby="discard-grant-title">
+            <div><strong id="discard-grant-title">Discard this one-time grant?</strong><p>This token will not be shown again. Only leave if you saved every value or no longer intend to enroll this Spark.</p></div>
+            <div className="grant-discard-actions"><button ref={keepGrantButton} type="button" className="button secondary" onClick={() => setConfirmDiscard(false)}>Keep grant open</button><button type="button" className="button danger" onClick={onClose}>Discard grant</button></div>
+          </section>}
         </>}
       </div>
-      <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
+      <footer>{grant ? <button type="button" className="button" onClick={onClose}>I saved these values — Done</button> : <><button type="button" className="button secondary" disabled={creating} onClick={requestClose}>Cancel</button><button type="button" className="button" disabled={creating} aria-describedby={creating ? "grant-creation-status" : undefined} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
     </div>
   </div>;
 }
 
 
-export function FleetPage({api}: {api: ControlApi}) {
+export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(busy: boolean): void}) {
   const fleet = useFleetStream(api);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
@@ -231,7 +276,7 @@ export function FleetPage({api}: {api: ControlApi}) {
         </div>
       </div>
     </header>
-    {onboarding && <SparkOnboarding api={api} onClose={closeOnboarding}/>}
+    {onboarding && <SparkOnboarding api={api} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 

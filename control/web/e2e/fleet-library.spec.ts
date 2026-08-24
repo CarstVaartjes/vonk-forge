@@ -308,6 +308,52 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
 });
 
+test("Add Spark preserves an in-flight and revealed one-time grant until an explicit decision", async ({page}) => {
+  let releaseGrant!: () => void;
+  const grantGate = new Promise<void>(resolve => { releaseGrant = resolve; });
+  let grantRequests = 0;
+  await page.route("**/api/v1/agents/enrollments/grants", async route => {
+    grantRequests += 1;
+    await grantGate;
+    await route.fulfill({status: 201, json: {
+      id: "grant-e2e", purpose: "new-node", token: "short-lived-e2e-secret", expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+      controller_endpoint: "https://controller.fixture.invalid:9443",
+      enrollment_endpoint: "https://enrollment.fixture.invalid:9444",
+      ca_fingerprint: "d".repeat(64),
+      controller_address: "192.168.1.231",
+      service_hostnames: ["controller.fixture.invalid", "enrollment.fixture.invalid"],
+    }});
+  });
+  await page.goto("/fleet");
+  await page.getByRole("button", {name: "Add Spark"}).click();
+  const dialog = page.getByRole("dialog", {name: "Add Spark"});
+  await dialog.getByRole("button", {name: "Create one-time enrollment command"}).click();
+  await expect.poll(() => grantRequests).toBe(1);
+
+  await expect(dialog).toHaveAttribute("aria-busy", "true");
+  await expect(dialog.getByRole("button", {name: "Close Add Spark"})).toBeDisabled();
+  await expect(dialog.getByRole("button", {name: "Cancel"})).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.locator(".library-dialog-backdrop").evaluate(element => element.dispatchEvent(new MouseEvent("mousedown", {bubbles: true})));
+  await expect(dialog).toBeVisible();
+  await page.getByRole("link", {name: "Library"}).dispatchEvent("click");
+  await expect(page).toHaveURL(/\/fleet$/);
+
+  releaseGrant();
+  await expect(dialog.getByText("short-lived-e2e-secret")).toBeVisible();
+  await expect(dialog).not.toHaveAttribute("aria-busy");
+  await dialog.getByRole("button", {name: "Close Add Spark"}).click();
+  await expect(dialog.getByText("Discard this one-time grant?")).toBeVisible();
+  await expect(dialog.getByRole("button", {name: "Keep grant open"})).toBeFocused();
+  await expectNoSeriousAccessibilityViolations(page);
+  await dialog.getByRole("button", {name: "Keep grant open"}).click();
+  await expect(dialog.getByText("Discard this one-time grant?")).toBeHidden();
+  await dialog.getByRole("button", {name: "I saved these values — Done"}).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole("link", {name: "Library"}).click();
+  await expect(page).toHaveURL(/\/library$/);
+});
+
 test("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
   await page.setViewportSize({width: 360, height: 800});
   await page.goto("/library");

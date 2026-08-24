@@ -1,5 +1,6 @@
 import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import type {ControlApi, TelemetryPoint, VisualFleetNode, VisualFleetSnapshot} from "../api/types";
+import {App} from "../app";
 import {ENROLLMENT_GRANT_TTL_SECONDS, FLEET_VIEW_STORAGE_KEY, FleetPage} from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -68,10 +69,12 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  history.replaceState(null, "", "/fleet");
   localStorage.clear();
 });
 
 afterEach(() => {
+  history.replaceState(null, "", "/");
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -245,6 +248,96 @@ test("keeps Add Spark modal focus contained and restores the trigger on Escape",
   expect(document.body.style.overflow).toBe("");
 });
 
+test("protects an in-flight or revealed enrollment grant from accidental dismissal", async () => {
+  let releaseGrant!: (value: Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>) => void;
+  const pendingGrant = new Promise<Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>>(resolve => { releaseGrant = resolve; });
+  const api = control(async () => snapshot([])) as ControlApi;
+  api.createEnrollmentGrant = vi.fn(() => pendingGrant);
+  const onBusyChange = vi.fn();
+  render(<FleetPage api={api} onBusyChange={onBusyChange}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
+  const dialog = screen.getByRole("dialog", {name: "Add Spark"});
+  const create = screen.getByRole("button", {name: "Create one-time enrollment command"});
+  fireEvent.click(create);
+  fireEvent.click(create);
+
+  expect(api.createEnrollmentGrant).toHaveBeenCalledTimes(1);
+  expect(dialog).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("button", {name: "Close Add Spark"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Cancel"})).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("Keep this window open");
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  fireEvent.mouseDown(document.querySelector(".library-dialog-backdrop")!);
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+  const beforeUnload = new Event("beforeunload", {cancelable: true});
+  dispatchEvent(beforeUnload);
+  expect(beforeUnload.defaultPrevented).toBe(true);
+  expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+  await act(async () => releaseGrant({
+    id: "grant-locked", purpose: "new-node", token: "short-lived-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "b".repeat(64),
+    controller_address: "192.168.1.231",
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
+  }));
+
+  expect(dialog).not.toHaveAttribute("aria-busy");
+  fireEvent.click(screen.getByRole("button", {name: "Close Add Spark"}));
+  expect(screen.getByText("Discard this one-time grant?")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Keep grant open"})).toHaveFocus();
+  expect(screen.getByText("short-lived-secret")).toBeVisible();
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  expect(screen.queryByText("Discard this one-time grant?")).not.toBeInTheDocument();
+  fireEvent.mouseDown(document.querySelector(".library-dialog-backdrop")!);
+  expect(screen.getByText("Discard this one-time grant?")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Discard grant"}));
+
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+});
+
+test("blocks primary and browser-history navigation while enrollment credentials are unresolved", async () => {
+  let releaseGrant!: (value: Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>) => void;
+  const pendingGrant = new Promise<Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>>(resolve => { releaseGrant = resolve; });
+  const api = control(async () => snapshot([])) as ControlApi;
+  api.createEnrollmentGrant = vi.fn(() => pendingGrant);
+  api.librarySnapshot = vi.fn().mockResolvedValue({schema_version: 1, generated_at: NOW.toISOString(), freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null});
+  render(<App api={api}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
+  fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
+  const libraryLink = screen.getByRole("link", {name: "Library"});
+  expect(libraryLink).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(libraryLink);
+  expect(location.pathname).toBe("/fleet");
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+
+  act(() => {
+    history.replaceState(null, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(location.pathname).toBe("/fleet");
+  expect(screen.getByRole("dialog", {name: "Add Spark"})).toBeVisible();
+
+  await act(async () => releaseGrant({
+    id: "grant-nav", purpose: "new-node", token: "navigation-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "c".repeat(64),
+    controller_address: null,
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
+  }));
+  fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
+  expect(libraryLink).not.toHaveAttribute("aria-disabled");
+  fireEvent.click(libraryLink);
+  expect(location.pathname).toBe("/library");
+});
+
 test("renders the one-command Spark installer with enrollment inputs", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", {...navigator, clipboard: {writeText}});
@@ -286,4 +379,6 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   await flush();
   expect(writeText).toHaveBeenCalledWith("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
   expect(screen.getAllByRole("status").some(status => status.textContent === "Copied")).toBe(true);
+  fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
 });
