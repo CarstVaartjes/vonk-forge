@@ -10,6 +10,7 @@ const exactDigests = {
   runtime: "c3".repeat(32),
   context: "d4".repeat(32),
 };
+const exactArtifactRevision = "e5".repeat(20);
 
 afterEach(() => {
   history.replaceState(null, "", "/");
@@ -29,7 +30,12 @@ async function continueToReview(user: ReturnType<typeof userEvent.setup>) {
     await user.clear(field);
     await user.type(field, value);
   }
-  for (const heading of ["Artifacts", "Resources & topology", "Validation & provenance", "Review & create"]) {
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(await screen.findByRole("heading", {name: "Artifacts"})).toBeVisible();
+  const revision = screen.getByRole("textbox", {name: "Immutable revision"});
+  await user.clear(revision);
+  await user.type(revision, exactArtifactRevision);
+  for (const heading of ["Resources & topology", "Validation & provenance", "Review & create"]) {
     await user.click(screen.getByRole("button", {name: "Continue"}));
     expect(await screen.findByRole("heading", {name: heading})).toBeVisible();
   }
@@ -70,9 +76,12 @@ test("guides a preset through six steps and submits the complete canonical docum
     slug: "custom-vllm-chat",
     document: expect.objectContaining({
       schema_version: 1,
-      artifacts: [expect.objectContaining({download_bytes: 80 * GIB})],
+      build: expect.objectContaining({arguments: [], network: expect.any(Object), resources: expect.any(Object)}),
+      artifacts: [expect.objectContaining({download_bytes: 80 * GIB, mount: {target: "/models", read_only: true}, roles: ["entrypoint"]})],
       interfaces: [expect.objectContaining({adapter: "openai", port: 8000})],
-      runtime: expect.objectContaining({entrypoint: ["python", "-m", "vllm.entrypoints.openai.api_server"]}),
+      runtime: expect.objectContaining({entrypoint: ["python", "-m", "vllm.entrypoints.openai.api_server"], arguments: [], environment: [], security: expect.any(Object), lifecycle: expect.any(Object)}),
+      topology: expect.objectContaining({roles: expect.any(Array), parallelism: expect.any(Object)}),
+      validation: expect.objectContaining({validators: [expect.objectContaining({interface: "openai"})]}),
     }),
   }));
   expect(await screen.findByText("Recipe saved")).toBeVisible();
@@ -89,6 +98,47 @@ test("requires starter component digests to be replaced before continuing", asyn
   expect(summary).toHaveTextContent("Model digest is still a starter placeholder. Replace it with the exact SHA-256.");
   expect(screen.getByRole("textbox", {name: "Exact model digest"})).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByText("Step 1 of 6")).toBeVisible();
+});
+
+test("blocks placeholder artifact revisions and required empty collections", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={{} as unknown as ControlApi}/>);
+
+  const model = await screen.findByRole("textbox", {name: "Exact model digest"});
+  await user.clear(model);
+  await user.type(model, exactDigests.model);
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  for (const [name, value] of [["Exact harness digest", exactDigests.harness], ["Exact runtime digest", exactDigests.runtime], ["Exact build context digest", exactDigests.context]] as const) {
+    const field = screen.getByRole("textbox", {name});
+    await user.clear(field);
+    await user.type(field, value);
+  }
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("revision is still a starter placeholder");
+
+  await user.click(screen.getByRole("button", {name: "Remove artifact 1"}));
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("Add at least one immutable artifact.");
+});
+
+test("requires an interface and a bound validator before review", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={{} as unknown as ControlApi}/>);
+  await continueToReview(user);
+
+  await user.click(screen.getByRole("button", {name: "Change resources and topology"}));
+  await user.click(screen.getByRole("button", {name: "Remove interface 1"}));
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("Add at least one service interface.");
+
+  await user.click(screen.getByRole("button", {name: "Add interface"}));
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(await screen.findByRole("heading", {name: "Validation & provenance"})).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Continue"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("Add at least one validator and check.");
 });
 
 test("blocks forward navigation with a focused error summary and inline field error", async () => {
@@ -126,6 +176,9 @@ test("edits byte values in human units while keeping exact bytes in advanced JSO
     await user.type(field, value);
   }
   await user.click(screen.getByRole("button", {name: "Continue"}));
+  const revision = screen.getByRole("textbox", {name: "Immutable revision"});
+  await user.clear(revision);
+  await user.type(revision, exactArtifactRevision);
   await user.click(screen.getByRole("button", {name: "Continue"}));
   expect(await screen.findByRole("heading", {name: "Resources & topology"})).toBeVisible();
 

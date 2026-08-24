@@ -1,17 +1,28 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import type {CatalogApi, LibraryRecipeDetail} from "../api/types";
-import {parseVisualRecipeDocument} from "../lib/library-recipe-document";
+import type {CatalogApi} from "../api/types";
+import {
+  createCanonicalRecipeDocument,
+  parseCanonicalRecipeDocument,
+} from "../lib/canonical-recipe-document";
+import type {
+  CanonicalArtifact,
+  CanonicalInterface,
+  CanonicalRecipeDocument,
+  InterfaceAdapter,
+  PresetName,
+  TopologyMode,
+} from "../lib/canonical-recipe-document";
 import "./library.css";
 import "./custom-recipe-builder.css";
 
-type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
 type BuilderStep = 0 | 1 | 2 | 3 | 4 | 5;
-type Preset = "custom" | "vllm" | "diffusers";
 type FieldError = {field: string; message: string; step: BuilderStep};
 
 const GIB = 1024 ** 3;
 const MIB = 1024 ** 2;
 const SHA256 = /^[0-9a-f]{64}$/;
+const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
+const NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const TEMPLATE_DIGESTS = new Set(["0", "1", "2", "3", "4"].map(value => value.repeat(64)));
 const steps = [
   {name: "Identity & model", short: "Identity", description: "Name the recipe and bind its exact model."},
@@ -22,26 +33,7 @@ const steps = [
   {name: "Review & create", short: "Review", description: "Check the complete recipe before saving."},
 ] as const;
 
-const defaultDocument = (): VisualRecipeDocument => ({
-  schema_version: 1,
-  identity: {publisher: "local", slug: "custom-service"},
-  metadata: {title: "Custom model service", description: "A locally maintained model service recipe.", tags: ["custom"]},
-  model: {kind: "model-version", publisher: "model-owner", slug: "model-name", content_sha256: "0".repeat(64)},
-  execution: {harness: {kind: "execution-harness", publisher: "local", slug: "service", content_sha256: "1".repeat(64)}, patch_bundle: null},
-  build: {
-    context: {sha256: "2".repeat(64), expected_bytes: 512 * MIB, media_type: "application/octet-stream"},
-    dockerfile: "Dockerfile", platform: "linux/arm64", network_mode: "none", network_hosts: [],
-    download_bytes: 0, temporary_bytes: 4 * GIB, memory_bytes: 16 * GIB, timeout_seconds: 3600,
-  },
-  artifacts: [],
-  runtime: {
-    distribution: {kind: "runtime-distribution", publisher: "local", slug: "runtime", content_sha256: "3".repeat(64)},
-    entrypoint: ["run"], lifecycle_pre_start_count: 0, lifecycle_post_stop_count: 0, stop_timeout_seconds: 30,
-  },
-  interfaces: [],
-  validation: {checks: ["health-check"], benchmark_count: 0},
-  provenance: {source_kind: "local", source_reference: null, attribution: []},
-});
+const defaultDocument = () => createCanonicalRecipeDocument("custom");
 
 function splitList(value: string): string[] {
   return value.split(/[,\n]/).map(item => item.trim()).filter(Boolean);
@@ -51,6 +43,45 @@ function joinList(value: readonly string[]): string {
   return value.join(", ");
 }
 
+function resizeCommands(commands: string[][], count: number, prefix: string): string[][] {
+  const size = Math.max(0, Math.trunc(count));
+  return commands.slice(0, size).concat(Array.from({length: Math.max(0, size - commands.length)}, (_, index) => [prefix, String(commands.length + index + 1)]));
+}
+
+function interfaceDefaults(adapter: InterfaceAdapter): CanonicalInterface {
+  return adapter === "openai"
+    ? {adapter, port: 8000, model_aliases: ["model-name"], health_path: "/health"}
+    : {adapter, path: "/jobs"};
+}
+
+function topologyWithNodeCount(document: CanonicalRecipeDocument, count: number): CanonicalRecipeDocument {
+  const nodeCount = Math.max(1, Math.trunc(count));
+  const template = document.topology.roles[0] ?? createCanonicalRecipeDocument().topology.roles[0];
+  const artifactIds = document.artifacts.map(artifact => artifact.id);
+  const roles = nodeCount === 1
+    ? [{...structuredClone(template), name: "entrypoint", count: 1, endpoint_owner: true, artifacts: artifactIds}]
+    : [
+        {...structuredClone(template), name: "leader", count: 1, endpoint_owner: true, artifacts: artifactIds},
+        {...structuredClone(template), name: "worker", count: nodeCount - 1, endpoint_owner: false, artifacts: artifactIds},
+      ];
+  const roleNames = roles.map(role => role.name);
+  return {
+    ...document,
+    artifacts: document.artifacts.map(artifact => ({...artifact, roles: roleNames})),
+    topology: {
+      ...document.topology,
+      name: nodeCount === 1 ? "solo" : `${nodeCount}-spark`,
+      mode: nodeCount === 1 ? "single" : "tensor_parallel",
+      node_count: nodeCount,
+      roles,
+      parallelism: {...document.topology.parallelism, world_size: nodeCount, tensor: nodeCount, pipeline: 1, data: 1},
+      fabric: {...document.topology.fabric, connectivity: nodeCount === 1 ? "none" : "connected"},
+      start_order: roleNames,
+      stop_order: [...roleNames].reverse(),
+    },
+  };
+}
+
 function formatBytes(value: number): string {
   if (value >= GIB && value % GIB === 0) return `${value / GIB} GiB`;
   if (value >= MIB && value % MIB === 0) return `${value / MIB} MiB`;
@@ -58,7 +89,7 @@ function formatBytes(value: number): string {
   return `${value.toLocaleString()} B`;
 }
 
-function errorsFor(document: VisualRecipeDocument, slug: string, selectedStep?: BuilderStep): FieldError[] {
+function errorsFor(document: CanonicalRecipeDocument, slug: string, selectedStep?: BuilderStep): FieldError[] {
   const errors: FieldError[] = [];
   const add = (step: BuilderStep, field: string, message: string) => {
     if (selectedStep === undefined || selectedStep === step) errors.push({step, field, message});
@@ -73,17 +104,26 @@ function errorsFor(document: VisualRecipeDocument, slug: string, selectedStep?: 
   const integer = (step: BuilderStep, field: string, value: number, label: string, minimum = 0) => {
     if (!Number.isSafeInteger(value) || value < minimum) add(step, field, `${label} must be at least ${minimum}.`);
   };
+  const catalogSlug = (step: BuilderStep, field: string, value: string, label: string) => {
+    if (value && !SLUG.test(value)) add(step, field, `${label} must be 2–63 lowercase letters, numbers, or hyphens.`);
+  };
 
   required(0, "recipe-publisher", document.identity.publisher, "a publisher");
+  catalogSlug(0, "recipe-publisher", document.identity.publisher, "Publisher");
   required(0, "recipe-slug", slug, "a recipe slug");
+  catalogSlug(0, "recipe-slug", slug, "Recipe slug");
   required(0, "recipe-title", document.metadata.title, "a title");
   required(0, "recipe-description", document.metadata.description, "a description");
   required(0, "model-publisher", document.model.publisher, "a model publisher");
+  catalogSlug(0, "model-publisher", document.model.publisher, "Model publisher");
   required(0, "model-slug", document.model.slug, "a model name");
+  catalogSlug(0, "model-slug", document.model.slug, "Model name");
   digest(0, "model-digest", document.model.content_sha256, "Model digest");
 
   required(1, "harness-publisher", document.execution.harness.publisher, "an execution harness publisher");
+  catalogSlug(1, "harness-publisher", document.execution.harness.publisher, "Execution harness publisher");
   required(1, "harness-slug", document.execution.harness.slug, "an execution harness name");
+  catalogSlug(1, "harness-slug", document.execution.harness.slug, "Execution harness name");
   digest(1, "harness-digest", document.execution.harness.content_sha256, "Execution harness digest");
   if (document.execution.patch_bundle) {
     required(1, "patch-publisher", document.execution.patch_bundle.publisher, "a patch bundle publisher");
@@ -91,49 +131,82 @@ function errorsFor(document: VisualRecipeDocument, slug: string, selectedStep?: 
     digest(1, "patch-digest", document.execution.patch_bundle.content_sha256, "Patch bundle digest");
   }
   required(1, "runtime-publisher", document.runtime.distribution.publisher, "a runtime publisher");
+  catalogSlug(1, "runtime-publisher", document.runtime.distribution.publisher, "Runtime publisher");
   required(1, "runtime-slug", document.runtime.distribution.slug, "a runtime name");
+  catalogSlug(1, "runtime-slug", document.runtime.distribution.slug, "Runtime name");
   digest(1, "runtime-digest", document.runtime.distribution.content_sha256, "Runtime digest");
   if (document.runtime.entrypoint.length === 0) add(1, "runtime-entrypoint", "Add at least one entrypoint argument.");
   required(1, "build-dockerfile", document.build.dockerfile, "a Dockerfile path");
   required(1, "build-platform", document.build.platform, "a target platform");
-  required(1, "build-network-mode", document.build.network_mode, "a build network mode");
+  required(1, "build-network-mode", document.build.network.mode, "a build network mode");
   digest(1, "context-digest", document.build.context.sha256, "Build context digest");
   required(1, "context-media-type", document.build.context.media_type, "a build context media type");
 
+  if (document.artifacts.length === 0) add(2, "add-artifact", "Add at least one immutable artifact.");
   document.artifacts.forEach((artifact, index) => {
     required(2, `artifact-${index}-id`, artifact.id, `an ID for artifact ${index + 1}`);
+    if (artifact.id && !NAME.test(artifact.id)) add(2, `artifact-${index}-id`, `Artifact ${index + 1} name must start with a lowercase letter and use letters, numbers, underscores, or hyphens.`);
     required(2, `artifact-${index}-kind`, artifact.kind, `a kind for artifact ${index + 1}`);
     required(2, `artifact-${index}-repository`, artifact.repository, `a repository for artifact ${index + 1}`);
     required(2, `artifact-${index}-revision`, artifact.revision, `an immutable revision for artifact ${index + 1}`);
-    integer(2, `artifact-${index}-download`, artifact.download_bytes, `Artifact ${index + 1} download size`);
-    integer(2, `artifact-${index}-installed`, artifact.installed_bytes, `Artifact ${index + 1} installed size`);
+    if (artifact.revision === "0123456789abcdef0123456789abcdef01234567") add(2, `artifact-${index}-revision`, `Artifact ${index + 1} revision is still a starter placeholder. Replace it with an immutable commit or content revision.`);
+    else if (artifact.revision.length < 40 || artifact.revision.length > 71) add(2, `artifact-${index}-revision`, `Artifact ${index + 1} revision must be 40–71 characters.`);
+    integer(2, `artifact-${index}-download`, artifact.download_bytes, `Artifact ${index + 1} download size`, 1);
+    integer(2, `artifact-${index}-installed`, artifact.installed_bytes, `Artifact ${index + 1} installed size`, 1);
+    required(2, `artifact-${index}-mount`, artifact.mount.target, `a mount target for artifact ${index + 1}`);
+    if (artifact.roles.length === 0) add(2, `artifact-${index}-roles`, `Assign artifact ${index + 1} to at least one topology role.`);
   });
 
-  integer(3, "context-size", document.build.context.expected_bytes, "Build context size");
-  integer(3, "download-size", document.build.download_bytes, "Additional download size");
-  integer(3, "temporary-size", document.build.temporary_bytes, "Temporary storage");
-  integer(3, "memory-size", document.build.memory_bytes, "Build memory");
-  integer(3, "build-timeout", document.build.timeout_seconds, "Build timeout", 1);
-  integer(3, "pre-start-count", document.runtime.lifecycle_pre_start_count, "Pre-start phase count");
-  integer(3, "post-stop-count", document.runtime.lifecycle_post_stop_count, "Post-stop phase count");
-  integer(3, "stop-timeout", document.runtime.stop_timeout_seconds, "Stop timeout", 1);
+  integer(3, "context-size", document.build.context.expected_bytes, "Build context size", 1);
+  integer(3, "download-size", document.build.resources.download_bytes, "Additional download size");
+  integer(3, "temporary-size", document.build.resources.temporary_bytes, "Temporary storage", 1);
+  integer(3, "memory-size", document.build.resources.memory_bytes, "Build memory", 1);
+  integer(3, "build-timeout", document.build.resources.timeout_seconds, "Build timeout", 1);
+  integer(3, "pre-start-count", document.runtime.lifecycle.pre_start.length, "Pre-start phase count");
+  integer(3, "post-stop-count", document.runtime.lifecycle.post_stop.length, "Post-stop phase count");
+  integer(3, "stop-timeout", document.runtime.lifecycle.stop_timeout_seconds, "Stop timeout", 1);
+  required(3, "topology-name", document.topology.name, "a topology name");
+  integer(3, "topology-nodes", document.topology.node_count, "Spark count", 1);
+  if (document.topology.roles.length === 0) add(3, "topology-role", "Add at least one topology role in Advanced JSON.");
+  const roleNames = new Set(document.topology.roles.map(role => role.name));
+  if (document.topology.roles.reduce((sum, role) => sum + role.count, 0) !== document.topology.node_count) add(3, "topology-role", "Topology role counts must equal the Spark count.");
+  if (document.topology.roles.filter(role => role.endpoint_owner && role.count === 1).length !== 1) add(3, "topology-role", "Exactly one single-Spark role must own the endpoint.");
+  if (document.topology.parallelism.tensor * document.topology.parallelism.pipeline * document.topology.parallelism.data !== document.topology.node_count || document.topology.parallelism.world_size !== document.topology.node_count) add(3, "topology-role", "Topology parallelism and world size must equal the Spark count.");
+  if ((document.topology.node_count === 1) !== (document.topology.fabric.connectivity === "none")) add(3, "topology-role", "Only a one-Spark topology may use no fabric connectivity.");
+  if (new Set(document.topology.start_order).size !== roleNames.size || document.topology.start_order.some(name => !roleNames.has(name)) || new Set(document.topology.stop_order).size !== roleNames.size || document.topology.stop_order.some(name => !roleNames.has(name))) add(3, "topology-role", "Start and stop order must each name every topology role once.");
+  document.artifacts.forEach((artifact, index) => {
+    if (artifact.roles.some(role => !roleNames.has(role))) add(2, `artifact-${index}-roles`, `Artifact ${index + 1} names a role that is not in the topology.`);
+    const assigned = new Set(document.topology.roles.filter(role => role.artifacts.includes(artifact.id)).map(role => role.name));
+    if (artifact.roles.some(role => !assigned.has(role)) || [...assigned].some(role => !artifact.roles.includes(role))) add(2, `artifact-${index}-roles`, `Artifact ${index + 1} role assignments must match the topology.`);
+  });
+  if (document.interfaces.length === 0) add(3, "add-interface", "Add at least one service interface.");
+  const seenAdapters = new Set<InterfaceAdapter>();
   document.interfaces.forEach((item, index) => {
     required(3, `interface-${index}-adapter`, item.adapter, `an adapter for interface ${index + 1}`);
-    if (item.port !== null && item.port !== undefined && (!Number.isSafeInteger(item.port) || item.port < 1 || item.port > 65535)) {
-      add(3, `interface-${index}-port`, `Interface ${index + 1} port must be between 1 and 65535.`);
+    if (seenAdapters.has(item.adapter)) add(3, `interface-${index}-adapter`, `Interface adapter ${item.adapter} is already declared.`);
+    seenAdapters.add(item.adapter);
+    if (item.adapter === "openai" && (!Number.isSafeInteger(item.port) || (item.port ?? 0) < 1024 || (item.port ?? 0) > 65535)) {
+      add(3, `interface-${index}-port`, `Interface ${index + 1} port must be between 1024 and 65535.`);
     }
+    if (item.adapter === "openai" && (item.model_aliases?.length ?? 0) === 0) add(3, `interface-${index}-aliases`, `Interface ${index + 1} needs at least one model alias.`);
+    if (item.adapter === "openai" && !item.health_path) add(3, `interface-${index}-health`, `Interface ${index + 1} needs a health path.`);
+    if (item.adapter !== "openai" && !item.path) add(3, `interface-${index}-path`, `Interface ${index + 1} needs a job path.`);
   });
 
-  integer(4, "benchmark-count", document.validation.benchmark_count, "Benchmark count");
+  if (document.validation.validators.length === 0) add(4, "validation-checks", "Add at least one validator and check.");
+  document.validation.validators.forEach((validator, index) => {
+    if (!seenAdapters.has(validator.interface)) add(4, `validator-${index}-interface`, `Validator ${index + 1} must use a declared interface.`);
+    if (validator.checks.length === 0) add(4, `validator-${index}-checks`, `Validator ${index + 1} needs at least one check.`);
+  });
   return errors;
 }
 
-function TextField({id, label, value, onChange, error, helper, type = "text", min, max}: {
+function TextField({id, label, value, onChange, error, helper, type = "text", min, max, readOnly = false}: {
   id: string; label: string; value: string | number; onChange(value: string): void; error?: string; helper?: string;
-  type?: "text" | "number" | "url"; min?: number; max?: number;
+  type?: "text" | "number" | "url"; min?: number; max?: number; readOnly?: boolean;
 }) {
   const describedBy = [helper ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
-  return <label htmlFor={id}><span id={`${id}-label`}>{label}</span><input id={id} type={type} min={min} max={max} value={value} onChange={event => onChange(event.target.value)} aria-labelledby={`${id}-label`} aria-invalid={error ? true : undefined} aria-describedby={describedBy}/>{helper && <small id={`${id}-help`} className="builder-field-help">{helper}</small>}{error && <span id={`${id}-error`} className="builder-field-error">{error}</span>}</label>;
+  return <label htmlFor={id}><span id={`${id}-label`}>{label}</span><input id={id} type={type} min={min} max={max} value={value} readOnly={readOnly} onChange={event => onChange(event.target.value)} aria-labelledby={`${id}-label`} aria-invalid={error ? true : undefined} aria-describedby={describedBy}/>{helper && <small id={`${id}-help`} className="builder-field-help">{helper}</small>}{error && <span id={`${id}-error`} className="builder-field-error">{error}</span>}</label>;
 }
 
 function DigestField(props: Omit<Parameters<typeof TextField>[0], "helper">) {
@@ -186,7 +259,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
   const [highestStep, setHighestStep] = useState<BuilderStep>(0);
   const [errors, setErrors] = useState<FieldError[]>([]);
   const [jsonError, setJsonError] = useState("");
-  const [preset, setPreset] = useState<Preset>("custom");
+  const [preset, setPreset] = useState<PresetName>("custom");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [createdRecipeId, setCreatedRecipeId] = useState("");
@@ -195,7 +268,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
   useEffect(() => { heading.current?.focus(); }, []);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
-  function update(updater: (current: VisualRecipeDocument) => VisualRecipeDocument) {
+  function update(updater: (current: CanonicalRecipeDocument) => CanonicalRecipeDocument) {
     setDocument(current => {
       const next = updater(current);
       setDocumentText(JSON.stringify(next, null, 2));
@@ -212,33 +285,9 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
   }
 
   function applyPreset() {
-    update(current => {
-      if (preset === "custom") return defaultDocument();
-      if (preset === "vllm") return {
-        ...current,
-        identity: {...current.identity, slug: "custom-vllm-chat"},
-        metadata: {title: "vLLM chat service", description: "An OpenAI-compatible text generation service powered by vLLM.", tags: ["chat", "reasoning", "vllm"]},
-        execution: {...current.execution, harness: {...current.execution.harness, slug: "vllm-openai"}},
-        build: {...current.build, download_bytes: 80 * GIB, temporary_bytes: 16 * GIB, memory_bytes: 64 * GIB},
-        artifacts: [{id: "model-weights", kind: "model", repository: "owner/model-name", revision: "immutable-revision", download_bytes: 80 * GIB, installed_bytes: 80 * GIB, roles: ["leader", "worker"]}],
-        runtime: {...current.runtime, distribution: {...current.runtime.distribution, slug: "vllm-cuda"}, entrypoint: ["python", "-m", "vllm.entrypoints.openai.api_server"]},
-        interfaces: [{adapter: "openai", port: 8000, model_aliases: ["model-name"], health_path: "/health", path: "/v1"}],
-        validation: {checks: ["health-check", "chat-completion-smoke-test"], benchmark_count: 0},
-      };
-      return {
-        ...current,
-        identity: {...current.identity, slug: "custom-diffusers-image"},
-        metadata: {title: "Diffusers image service", description: "An HTTP image-generation service powered by Diffusers.", tags: ["image-generation", "diffusers"]},
-        execution: {...current.execution, harness: {...current.execution.harness, slug: "diffusers-service"}},
-        build: {...current.build, download_bytes: 32 * GIB, temporary_bytes: 12 * GIB, memory_bytes: 48 * GIB},
-        artifacts: [{id: "model-weights", kind: "model", repository: "owner/model-name", revision: "immutable-revision", download_bytes: 32 * GIB, installed_bytes: 32 * GIB, roles: ["leader"]}],
-        runtime: {...current.runtime, distribution: {...current.runtime.distribution, slug: "diffusers-cuda"}, entrypoint: ["python", "-m", "service"]},
-        interfaces: [{adapter: "http", port: 8000, model_aliases: [], health_path: "/health", path: "/generate"}],
-        validation: {checks: ["health-check", "image-generation-smoke-test"], benchmark_count: 0},
-      };
-    });
-    const nextSlug = preset === "custom" ? "custom-service" : preset === "vllm" ? "custom-vllm-chat" : "custom-diffusers-image";
-    setSlug(nextSlug);
+    const next = createCanonicalRecipeDocument(preset);
+    update(() => next);
+    setSlug(next.identity.slug);
   }
 
   function goNext() {
@@ -260,7 +309,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
 
   async function createRecipe() {
     const allErrors = errorsFor(document, slug);
-    const parsed = parseVisualRecipeDocument(documentText);
+    const parsed = parseCanonicalRecipeDocument(documentText);
     if (!parsed.ok) allErrors.push({field: "advanced-json", message: parsed.error, step: 5});
     setErrors(allErrors);
     if (allErrors.length > 0 || !parsed.ok) return;
@@ -280,8 +329,34 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
   }
 
   const error = (field: string) => errors.find(item => item.field === field)?.message;
-  const updateArtifact = (index: number, changes: Partial<VisualRecipeDocument["artifacts"][number]>) => update(current => ({...current, artifacts: current.artifacts.map((item, itemIndex) => itemIndex === index ? {...item, ...changes} : item)}));
-  const updateInterface = (index: number, changes: Partial<VisualRecipeDocument["interfaces"][number]>) => update(current => ({...current, interfaces: current.interfaces.map((item, itemIndex) => itemIndex === index ? {...item, ...changes} : item)}));
+  const updateArtifact = (index: number, changes: Partial<CanonicalArtifact>) => update(current => {
+    const previous = current.artifacts[index];
+    const next = {...previous, ...changes};
+    const roles = current.topology.roles.map(role => {
+      const withoutPrevious = role.artifacts.filter(id => id !== previous.id && id !== next.id);
+      return {...role, artifacts: next.roles.includes(role.name) ? [...withoutPrevious, next.id] : withoutPrevious};
+    });
+    return {...current, artifacts: current.artifacts.map((item, itemIndex) => itemIndex === index ? next : item), topology: {...current.topology, roles}};
+  });
+  const removeArtifact = (index: number) => update(current => {
+    const removed = current.artifacts[index];
+    return {...current, artifacts: current.artifacts.filter((_, itemIndex) => itemIndex !== index), topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: role.artifacts.filter(id => id !== removed.id)}))}};
+  });
+  const addArtifact = () => update(current => {
+    const id = `artifact-${current.artifacts.length + 1}`;
+    const roleNames = current.topology.roles.map(role => role.name);
+    const artifact: CanonicalArtifact = {id, kind: "huggingface.snapshot", repository: "", revision: "", download_bytes: 1, installed_bytes: 1, mount: {target: `/models/${id}`, read_only: true}, roles: roleNames};
+    return {...current, artifacts: [...current.artifacts, artifact], topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: [...role.artifacts, id]}))}};
+  });
+  const replaceInterface = (index: number, adapter: InterfaceAdapter) => update(current => {
+    const oldAdapter = current.interfaces[index].adapter;
+    return {...current, interfaces: current.interfaces.map((item, itemIndex) => itemIndex === index ? interfaceDefaults(adapter) : item), validation: {...current.validation, validators: current.validation.validators.map(validator => validator.interface === oldAdapter ? {...validator, interface: adapter} : validator)}};
+  });
+  const updateInterface = (index: number, changes: Partial<CanonicalInterface>) => update(current => ({...current, interfaces: current.interfaces.map((item, itemIndex) => itemIndex === index ? {...item, ...changes} : item)}));
+  const removeInterface = (index: number) => update(current => {
+    const adapter = current.interfaces[index].adapter;
+    return {...current, interfaces: current.interfaces.filter((_, itemIndex) => itemIndex !== index), validation: {...current.validation, validators: current.validation.validators.filter(validator => validator.interface !== adapter)}};
+  });
 
   return <div className="recipe-builder-page">
     <header className="builder-hero">
@@ -301,7 +376,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
       <fieldset className="builder-form-lock" disabled={busy}>
 
       {step === 0 && <div className="builder-step-fields">
-        <fieldset className="builder-preset"><legend>Start from a useful shape</legend><p>Presets fill common runtime, artifact, resource, and endpoint values. Exact component digests remain yours to verify.</p><div><select aria-label="Recipe starting point" value={preset} onChange={event => setPreset(event.target.value as Preset)}><option value="custom">Custom model service</option><option value="vllm">vLLM chat service</option><option value="diffusers">Diffusers image service</option></select><button type="button" className="button secondary" onClick={applyPreset}>Apply starting point</button></div></fieldset>
+        <fieldset className="builder-preset"><legend>Start from a useful shape</legend><p>Presets supply clearly labeled, schema-valid defaults for the artifact, security, topology, endpoint, and validation contracts. Replace every starter digest and revision with exact authority before saving.</p><div><select aria-label="Recipe starting point" value={preset} onChange={event => setPreset(event.target.value as PresetName)}><option value="custom">Custom model service</option><option value="vllm">vLLM chat service</option><option value="diffusers">Diffusers image service</option></select><button type="button" className="button secondary" onClick={applyPreset}>Apply starting point</button></div></fieldset>
         <fieldset className="custom-recipe-section"><legend>Recipe identity</legend><div className="custom-recipe-fields custom-recipe-fields-two">
           <TextField id="recipe-publisher" label="Publisher" value={document.identity.publisher} onChange={value => update(current => ({...current, identity: {...current.identity, publisher: value}}))} error={error("recipe-publisher")}/>
           <TextField id="recipe-slug" label="Recipe slug" value={slug} onChange={changeSlug} error={error("recipe-slug")} helper="Stable URL-safe name used by the local catalog."/>
@@ -332,12 +407,12 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
         <fieldset className="custom-recipe-section"><legend>Process command</legend><div className="custom-recipe-fields custom-recipe-fields-two"><TextField id="runtime-entrypoint" label="Entrypoint arguments" value={joinList(document.runtime.entrypoint)} onChange={value => update(current => ({...current, runtime: {...current.runtime, entrypoint: splitList(value)}}))} error={error("runtime-entrypoint")} helper="Comma-separated arguments, in execution order."/></div></fieldset>
         <fieldset className="custom-recipe-section"><legend>Build contract</legend><div className="custom-recipe-fields custom-recipe-fields-three">
           <TextField id="build-dockerfile" label="Dockerfile path" value={document.build.dockerfile} onChange={value => update(current => ({...current, build: {...current.build, dockerfile: value}}))} error={error("build-dockerfile")}/>
-          <TextField id="build-platform" label="Target platform" value={document.build.platform} onChange={value => update(current => ({...current, build: {...current.build, platform: value}}))} error={error("build-platform")}/>
-          <TextField id="build-network-mode" label="Build network mode" value={document.build.network_mode} onChange={value => update(current => ({...current, build: {...current.build, network_mode: value}}))} error={error("build-network-mode")}/>
-          <TextField id="context-media-type" label="Build context media type" value={document.build.context.media_type} onChange={value => update(current => ({...current, build: {...current.build, context: {...current.build.context, media_type: value}}}))} error={error("context-media-type")}/>
-          <TextField id="network-hosts" label="Allowed network hosts" value={joinList(document.build.network_hosts)} onChange={value => update(current => ({...current, build: {...current.build, network_hosts: splitList(value)}}))} helper="Comma-separated. Leave empty for no allowlisted hosts."/>
+          <TextField id="build-platform" label="Target platform" value={document.build.platform} onChange={() => undefined} readOnly error={error("build-platform")} helper="Recipe v1 currently requires linux/arm64."/>
+          <label htmlFor="build-network-mode">Build network mode<select id="build-network-mode" value={document.build.network.mode} onChange={event => update(current => ({...current, build: {...current.build, network: {...current.build.network, mode: event.target.value as "none" | "public"}}}))}><option value="none">No build network</option><option value="public">Public allowlist</option></select></label>
+          <TextField id="context-media-type" label="Build context media type" value={document.build.context.media_type} onChange={() => undefined} readOnly error={error("context-media-type")} helper="Canonical Vonk Forge source bundle."/>
+          <TextField id="network-hosts" label="Allowed network hosts" value={joinList(document.build.network.hosts)} onChange={value => update(current => ({...current, build: {...current.build, network: {...current.build.network, hosts: splitList(value)}}}))} helper="Comma-separated. Used only with the public allowlist."/>
           <div className="custom-recipe-wide"><DigestField id="context-digest" label="Exact build context digest" value={document.build.context.sha256} onChange={value => update(current => ({...current, build: {...current.build, context: {...current.build.context, sha256: value}}}))} error={error("context-digest")}/></div>
-        </div></fieldset>
+        </div><p className="custom-recipe-section-help">Build arguments and an optional target remain available in Advanced JSON.</p></fieldset>
         <label className="custom-recipe-checkbox"><input type="checkbox" checked={document.execution.patch_bundle !== null} onChange={event => update(current => ({...current, execution: {...current.execution, patch_bundle: event.target.checked ? {kind: "patch-bundle", publisher: "local", slug: "patch", content_sha256: "4".repeat(64)} : null}}))}/> Add an immutable patch bundle</label>
         {document.execution.patch_bundle && <fieldset className="custom-recipe-section"><legend>Patch bundle</legend><div className="custom-recipe-fields custom-recipe-fields-three">
           <TextField id="patch-publisher" label="Publisher" value={document.execution.patch_bundle.publisher} onChange={value => update(current => ({...current, execution: {...current.execution, patch_bundle: current.execution.patch_bundle ? {...current.execution.patch_bundle, publisher: value} : null}}))} error={error("patch-publisher")}/>
@@ -347,54 +422,67 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
       </div>}
 
       {step === 2 && <div className="builder-step-fields">
-        <div className="builder-step-callout"><div><strong>{document.artifacts.length}</strong><span>{document.artifacts.length === 1 ? "artifact" : "artifacts"}</span></div><p>Artifacts are optional. Add every immutable model, tokenizer, adapter, or supporting bundle the recipe downloads.</p></div>
+        <div className="builder-step-callout"><div><strong>{document.artifacts.length}</strong><span>{document.artifacts.length === 1 ? "artifact" : "artifacts"}</span></div><p>At least one immutable artifact is required. Record its exact origin, mount, and every topology role that receives it.</p></div>
         <div className="custom-recipe-repeat-list">
-          {document.artifacts.map((artifact, index) => <fieldset className="custom-recipe-section" key={`${artifact.id}-${index}`}><legend>Artifact {index + 1}</legend><div className="custom-recipe-card-heading"><p className="custom-recipe-section-help">Use a readable name and an immutable repository revision.</p><button type="button" className="button secondary" onClick={() => update(current => ({...current, artifacts: current.artifacts.filter((_, itemIndex) => itemIndex !== index)}))}>Remove artifact {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
+          {document.artifacts.map((artifact, index) => <fieldset className="custom-recipe-section" key={`${artifact.id}-${index}`}><legend>Artifact {index + 1}</legend><div className="custom-recipe-card-heading"><p className="custom-recipe-section-help">Preset values are starters; verify the repository and immutable revision before saving.</p><button type="button" className="button secondary" onClick={() => removeArtifact(index)}>Remove artifact {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
             <TextField id={`artifact-${index}-id`} label="Artifact name" value={artifact.id} onChange={value => updateArtifact(index, {id: value})} error={error(`artifact-${index}-id`)}/>
-            <TextField id={`artifact-${index}-kind`} label="Kind" value={artifact.kind} onChange={value => updateArtifact(index, {kind: value})} error={error(`artifact-${index}-kind`)} helper="For example model, tokenizer, or adapter."/>
+            <label htmlFor={`artifact-${index}-kind`}>Source type<select id={`artifact-${index}-kind`} value={artifact.kind} onChange={event => updateArtifact(index, {kind: event.target.value as CanonicalArtifact["kind"]})}><option value="huggingface.snapshot">Hugging Face snapshot</option><option value="http.file">HTTP file</option><option value="oci.artifact">OCI artifact</option></select></label>
             <TextField id={`artifact-${index}-repository`} label="Original repository" value={artifact.repository} onChange={value => updateArtifact(index, {repository: value})} error={error(`artifact-${index}-repository`)}/>
             <TextField id={`artifact-${index}-revision`} label="Immutable revision" value={artifact.revision} onChange={value => updateArtifact(index, {revision: value})} error={error(`artifact-${index}-revision`)}/>
             <HumanBytesField id={`artifact-${index}-download`} label="Download size" value={artifact.download_bytes} onChange={value => updateArtifact(index, {download_bytes: value})} error={error(`artifact-${index}-download`)}/>
             <HumanBytesField id={`artifact-${index}-installed`} label="Installed size" value={artifact.installed_bytes} onChange={value => updateArtifact(index, {installed_bytes: value})} error={error(`artifact-${index}-installed`)}/>
-            <TextField id={`artifact-${index}-roles`} label="Node roles" value={joinList(artifact.roles)} onChange={value => updateArtifact(index, {roles: splitList(value)})} helper="Comma-separated, for example leader, worker."/>
+            <TextField id={`artifact-${index}-mount`} label="Container mount" value={artifact.mount.target} onChange={value => updateArtifact(index, {mount: {...artifact.mount, target: value}})} error={error(`artifact-${index}-mount`)}/>
+            <label className="custom-recipe-checkbox"><input type="checkbox" checked={artifact.mount.read_only} onChange={event => updateArtifact(index, {mount: {...artifact.mount, read_only: event.target.checked}})}/> Mount read-only</label>
+            <TextField id={`artifact-${index}-roles`} label="Topology roles" value={joinList(artifact.roles)} onChange={value => updateArtifact(index, {roles: splitList(value)})} error={error(`artifact-${index}-roles`)} helper={`Comma-separated. Current roles: ${document.topology.roles.map(role => role.name).join(", ") || "none"}.`}/>
           </div></fieldset>)}
-          <button type="button" className="button secondary custom-recipe-add" onClick={() => update(current => ({...current, artifacts: [...current.artifacts, {id: `artifact-${current.artifacts.length + 1}`, kind: "model", repository: "", revision: "", download_bytes: 0, installed_bytes: 0, roles: []}]}))}>Add artifact</button>
+          <button id="add-artifact" type="button" className="button secondary custom-recipe-add" onClick={addArtifact}>Add artifact</button>
         </div>
       </div>}
 
       {step === 3 && <div className="builder-step-fields">
-        <div className="builder-resource-summary" aria-label="Resource envelope"><div><span>Context</span><strong>{formatBytes(document.build.context.expected_bytes)}</strong></div><div><span>Download</span><strong>{formatBytes(document.build.download_bytes + document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</strong></div><div><span>Temporary</span><strong>{formatBytes(document.build.temporary_bytes)}</strong></div><div><span>Build memory</span><strong>{formatBytes(document.build.memory_bytes)}</strong></div></div>
+        <div className="builder-resource-summary" aria-label="Resource envelope"><div><span>Context</span><strong>{formatBytes(document.build.context.expected_bytes)}</strong></div><div><span>Download</span><strong>{formatBytes(document.build.resources.download_bytes + document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</strong></div><div><span>Temporary</span><strong>{formatBytes(document.build.resources.temporary_bytes)}</strong></div><div><span>Build memory</span><strong>{formatBytes(document.build.resources.memory_bytes)}</strong></div></div>
         <fieldset className="custom-recipe-section"><legend>Resource envelope</legend><p className="custom-recipe-section-help">Enter normal human units; the recipe is saved using exact bytes.</p><div className="builder-unit-grid">
           <HumanBytesField id="context-size" label="Build context" value={document.build.context.expected_bytes} onChange={value => update(current => ({...current, build: {...current.build, context: {...current.build.context, expected_bytes: value}}}))} error={error("context-size")}/>
-          <HumanBytesField id="download-size" label="Additional downloads" value={document.build.download_bytes} onChange={value => update(current => ({...current, build: {...current.build, download_bytes: value}}))} error={error("download-size")}/>
-          <HumanBytesField id="temporary-size" label="Temporary storage" value={document.build.temporary_bytes} onChange={value => update(current => ({...current, build: {...current.build, temporary_bytes: value}}))} error={error("temporary-size")}/>
-          <HumanBytesField id="memory-size" label="Build memory" value={document.build.memory_bytes} onChange={value => update(current => ({...current, build: {...current.build, memory_bytes: value}}))} error={error("memory-size")}/>
+          <HumanBytesField id="download-size" label="Additional downloads" value={document.build.resources.download_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, download_bytes: value}}}))} error={error("download-size")}/>
+          <HumanBytesField id="temporary-size" label="Temporary storage" value={document.build.resources.temporary_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, temporary_bytes: value}}}))} error={error("temporary-size")}/>
+          <HumanBytesField id="memory-size" label="Build memory" value={document.build.resources.memory_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, memory_bytes: value}}}))} error={error("memory-size")}/>
         </div><div className="custom-recipe-fields custom-recipe-fields-three">
-          <TextField id="build-timeout" label="Build timeout (seconds)" type="number" min={1} value={document.build.timeout_seconds} onChange={value => update(current => ({...current, build: {...current.build, timeout_seconds: Number(value)}}))} error={error("build-timeout")}/>
-          <TextField id="pre-start-count" label="Pre-start phases" type="number" min={0} value={document.runtime.lifecycle_pre_start_count} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle_pre_start_count: Number(value)}}))} error={error("pre-start-count")}/>
-          <TextField id="post-stop-count" label="Post-stop phases" type="number" min={0} value={document.runtime.lifecycle_post_stop_count} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle_post_stop_count: Number(value)}}))} error={error("post-stop-count")}/>
-          <TextField id="stop-timeout" label="Stop timeout (seconds)" type="number" min={1} value={document.runtime.stop_timeout_seconds} onChange={value => update(current => ({...current, runtime: {...current.runtime, stop_timeout_seconds: Number(value)}}))} error={error("stop-timeout")}/>
+          <TextField id="build-timeout" label="Build timeout (seconds)" type="number" min={1} value={document.build.resources.timeout_seconds} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, timeout_seconds: Number(value)}}}))} error={error("build-timeout")}/>
+          <TextField id="pre-start-count" label="Pre-start commands" type="number" min={0} value={document.runtime.lifecycle.pre_start.length} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, pre_start: resizeCommands(current.runtime.lifecycle.pre_start, Number(value), "pre-start")}}}))} error={error("pre-start-count")}/>
+          <TextField id="post-stop-count" label="Post-stop commands" type="number" min={0} value={document.runtime.lifecycle.post_stop.length} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, post_stop: resizeCommands(current.runtime.lifecycle.post_stop, Number(value), "post-stop")}}}))} error={error("post-stop-count")}/>
+          <TextField id="stop-timeout" label="Stop timeout (seconds)" type="number" min={1} value={document.runtime.lifecycle.stop_timeout_seconds} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, stop_timeout_seconds: Number(value)}}}))} error={error("stop-timeout")}/>
         </div></fieldset>
-        <div className="builder-topology-preview" aria-label="Service topology preview"><div><span>Model</span><strong>{document.model.publisher}/{document.model.slug}</strong></div><span aria-hidden="true">→</span><div><span>Runtime</span><strong>{document.runtime.distribution.slug}</strong></div><span aria-hidden="true">→</span><div><span>Endpoints</span><strong>{document.interfaces.length || "None"}</strong></div></div>
+        <fieldset className="custom-recipe-section"><legend>Topology</legend><p className="custom-recipe-section-help">Changing the Spark count creates an explicit endpoint-owner role and, for multi-Spark recipes, a worker role. Verify preset role resources below or edit the complete contract in Advanced JSON.</p><div className="custom-recipe-fields custom-recipe-fields-three">
+          <TextField id="topology-name" label="Topology name" value={document.topology.name} onChange={value => update(current => ({...current, topology: {...current.topology, name: value}}))} error={error("topology-name")}/>
+          <TextField id="topology-nodes" label="Sparks" type="number" min={1} value={document.topology.node_count} onChange={value => update(current => topologyWithNodeCount(current, Number(value)))} error={error("topology-nodes")}/>
+          <label htmlFor="topology-mode">Execution mode<select id="topology-mode" value={document.topology.mode} onChange={event => update(current => ({...current, topology: {...current.topology, mode: event.target.value as TopologyMode}}))}>{["single", "distributed", "tensor_parallel", "pipeline_parallel", "data_parallel", "hybrid", "ray", "mpi"].map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+          <TextField id="topology-backend" label="Parallel backend" value={document.topology.parallelism.backend} onChange={value => update(current => ({...current, topology: {...current.topology, parallelism: {...current.topology.parallelism, backend: value}}}))}/>
+          <TextField id="topology-bandwidth" label="Minimum fabric bandwidth (Mbps)" type="number" min={0} value={document.topology.fabric.minimum_bandwidth_mbps} onChange={value => update(current => ({...current, topology: {...current.topology, fabric: {...current.topology.fabric, minimum_bandwidth_mbps: Number(value)}}}))}/>
+        </div><div id="topology-role" className="custom-recipe-repeat-list">{document.topology.roles.map(role => <div className="custom-recipe-card" key={role.name}><strong>{role.name}</strong><span>{role.count} {role.count === 1 ? "Spark" : "Sparks"}{role.endpoint_owner ? " · endpoint owner" : ""}</span><small>{formatBytes(role.resources.memory.startup_peak_bytes)} startup memory · {formatBytes(role.resources.disk.image_bytes + role.resources.disk.artifact_bytes + role.resources.disk.staging_bytes + role.resources.disk.cache_bytes + role.resources.disk.rollback_bytes + role.resources.disk.safety_margin_bytes)} disk envelope</small></div>)}</div>{error("topology-role") && <span className="builder-field-error">{error("topology-role")}</span>}</fieldset>
+        <div className="builder-topology-preview" aria-label="Service topology preview"><div><span>Model</span><strong>{document.model.publisher}/{document.model.slug}</strong></div><span aria-hidden="true">→</span><div><span>Topology</span><strong>{document.topology.node_count} {document.topology.node_count === 1 ? "Spark" : "Sparks"}</strong></div><span aria-hidden="true">→</span><div><span>Endpoints</span><strong>{document.interfaces.length || "None"}</strong></div></div>
         <fieldset className="custom-recipe-section"><legend>Exposed interfaces</legend><p className="custom-recipe-section-help">These endpoints describe how operators and clients reach the running topology.</p><div className="custom-recipe-repeat-list">
-          {document.interfaces.map((item, index) => <div className="custom-recipe-card" key={`${item.adapter}-${index}`}><div className="custom-recipe-card-heading"><h4>Interface {index + 1}</h4><button type="button" className="button secondary" onClick={() => update(current => ({...current, interfaces: current.interfaces.filter((_, itemIndex) => itemIndex !== index)}))}>Remove interface {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-three">
-            <TextField id={`interface-${index}-adapter`} label="Adapter" value={item.adapter} onChange={value => updateInterface(index, {adapter: value})} error={error(`interface-${index}-adapter`)}/>
-            <TextField id={`interface-${index}-port`} label="Port" type="number" min={1} max={65535} value={item.port ?? ""} onChange={value => updateInterface(index, {port: value ? Number(value) : null})} error={error(`interface-${index}-port`)}/>
-            <TextField id={`interface-${index}-health`} label="Health path" value={item.health_path ?? ""} onChange={value => updateInterface(index, {health_path: value || null})}/>
-            <TextField id={`interface-${index}-path`} label="Job or API path" value={item.path ?? ""} onChange={value => updateInterface(index, {path: value || null})}/>
-            <TextField id={`interface-${index}-aliases`} label="Model aliases" value={joinList(item.model_aliases ?? [])} onChange={value => updateInterface(index, {model_aliases: splitList(value)})}/>
+          {document.interfaces.map((item, index) => <div className="custom-recipe-card" key={`${item.adapter}-${index}`}><div className="custom-recipe-card-heading"><h4>Interface {index + 1}</h4><button type="button" className="button secondary" onClick={() => removeInterface(index)}>Remove interface {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-three">
+            <label htmlFor={`interface-${index}-adapter`}>Adapter<select id={`interface-${index}-adapter`} value={item.adapter} onChange={event => replaceInterface(index, event.target.value as InterfaceAdapter)} aria-invalid={error(`interface-${index}-adapter`) ? true : undefined}><option value="openai">OpenAI API</option><option value="image-job">Image job</option><option value="audio-job">Audio job</option><option value="video-job">Video job</option><option value="mesh-job">Mesh job</option><option value="artifact-job">Artifact job</option></select>{error(`interface-${index}-adapter`) && <span className="builder-field-error">{error(`interface-${index}-adapter`)}</span>}</label>
+            {item.adapter === "openai" ? <>
+              <TextField id={`interface-${index}-port`} label="Port" type="number" min={1024} max={65535} value={item.port ?? ""} onChange={value => updateInterface(index, {port: value ? Number(value) : undefined})} error={error(`interface-${index}-port`)}/>
+              <TextField id={`interface-${index}-health`} label="Health path" value={item.health_path ?? ""} onChange={value => updateInterface(index, {health_path: value || undefined})} error={error(`interface-${index}-health`)}/>
+              <TextField id={`interface-${index}-aliases`} label="Model aliases" value={joinList(item.model_aliases ?? [])} onChange={value => updateInterface(index, {model_aliases: splitList(value)})} error={error(`interface-${index}-aliases`)}/>
+            </> : <TextField id={`interface-${index}-path`} label="Job path" value={item.path ?? ""} onChange={value => updateInterface(index, {path: value || undefined})} error={error(`interface-${index}-path`)}/>}
           </div></div>)}
-          <button type="button" className="button secondary custom-recipe-add" onClick={() => update(current => ({...current, interfaces: [...current.interfaces, {adapter: "http", port: 8000, model_aliases: [], health_path: "/health", path: "/v1"}]}))}>Add interface</button>
+          <button id="add-interface" type="button" className="button secondary custom-recipe-add" onClick={() => update(current => ({...current, interfaces: [...current.interfaces, interfaceDefaults((["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"] as InterfaceAdapter[]).find(adapter => !current.interfaces.some(item => item.adapter === adapter)) ?? "openai")]}))}>Add interface</button>
         </div></fieldset>
       </div>}
 
       {step === 4 && <div className="builder-step-fields">
-        <fieldset className="custom-recipe-section"><legend>Validation evidence</legend><p className="custom-recipe-section-help">Name the checks this recipe has passed. Counts are evidence, not approval.</p><div className="custom-recipe-fields custom-recipe-fields-two">
-          <TextField id="validation-checks" label="Validation checks" value={joinList(document.validation.checks)} onChange={value => update(current => ({...current, validation: {...current.validation, checks: splitList(value)}}))} helper="Comma-separated, for example health-check, smoke-test."/>
-          <TextField id="benchmark-count" label="Recorded benchmarks" type="number" min={0} value={document.validation.benchmark_count} onChange={value => update(current => ({...current, validation: {...current.validation, benchmark_count: Number(value)}}))} error={error("benchmark-count")}/>
-        </div></fieldset>
+        <fieldset className="custom-recipe-section"><legend>Validation evidence</legend><p className="custom-recipe-section-help">Every recipe needs at least one validator bound to a declared interface. These are checks to run, not proof that they already passed.</p><div className="custom-recipe-repeat-list">
+          {document.validation.validators.map((validator, index) => <div className="custom-recipe-card" key={`${validator.interface}-${index}`}><div className="custom-recipe-card-heading"><h4>Validator {index + 1}</h4><button type="button" className="button secondary" onClick={() => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.filter((_, itemIndex) => itemIndex !== index)}}))}>Remove validator {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
+            <label htmlFor={`validator-${index}-interface`}>Declared interface<select id={`validator-${index}-interface`} value={validator.interface} onChange={event => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, interface: event.target.value as InterfaceAdapter} : item)}}))} aria-invalid={error(`validator-${index}-interface`) ? true : undefined}>{document.interfaces.map(item => <option key={item.adapter} value={item.adapter}>{item.adapter}</option>)}</select>{error(`validator-${index}-interface`) && <span className="builder-field-error">{error(`validator-${index}-interface`)}</span>}</label>
+            <TextField id={`validator-${index}-checks`} label="Checks" value={joinList(validator.checks)} onChange={value => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, checks: splitList(value)} : item)}}))} error={error(`validator-${index}-checks`)} helper="Comma-separated, for example endpoint.healthy, chat.completion."/>
+          </div></div>)}
+          <button id="validation-checks" type="button" className="button secondary custom-recipe-add" disabled={document.interfaces.length === 0} onClick={() => update(current => ({...current, validation: {...current.validation, validators: [...current.validation.validators, {interface: current.interfaces[0].adapter, checks: ["endpoint.healthy"]}]}}))}>Add validator</button>
+        </div><div className="custom-recipe-fields custom-recipe-fields-two"><TextField id="benchmark-count" label="Benchmark definitions" type="number" min={0} value={document.validation.benchmarks.length} onChange={value => update(current => { const count = Math.max(0, Math.trunc(Number(value))); const benchmarks = current.validation.benchmarks.slice(0, count); while (benchmarks.length < count) benchmarks.push({name: `benchmark-${benchmarks.length + 1}`, framework: "custom", configuration: {}}); return {...current, validation: {...current.validation, benchmarks}}; })} helper="Creates clearly labeled starter benchmark definitions; edit their complete configuration in Advanced JSON."/></div></fieldset>
         <fieldset className="custom-recipe-section"><legend>Provenance</legend><p className="custom-recipe-section-help">Record the origin in operator-friendly terms; immutable technical identities stay available in the review.</p><div className="custom-recipe-fields custom-recipe-fields-two">
-          <label htmlFor="source-kind">Source kind<select id="source-kind" value={document.provenance.source_kind} onChange={event => update(current => ({...current, provenance: {...current.provenance, source_kind: event.target.value as VisualRecipeDocument["provenance"]["source_kind"]}}))}><option value="local">Created locally</option><option value="workload_run">Derived from a workload run</option><option value="global">Imported from a public source</option><option value="fork">Forked from another recipe</option></select></label>
+          <label htmlFor="source-kind">Source kind<select id="source-kind" value={document.provenance.source_kind} onChange={event => update(current => ({...current, provenance: {...current.provenance, source_kind: event.target.value as CanonicalRecipeDocument["provenance"]["source_kind"]}}))}><option value="local">Created locally</option><option value="workload_run">Derived from a workload run</option><option value="global">Imported from a public source</option><option value="fork">Forked from another recipe</option></select></label>
           <TextField id="source-reference" label="Original source or repository" value={document.provenance.source_reference ?? ""} onChange={value => update(current => ({...current, provenance: {...current.provenance, source_reference: value || null}}))} helper="URL, recipe reference, or workload run name."/>
           <div className="custom-recipe-wide"><TextField id="source-attribution" label="Creator and attribution" value={joinList(document.provenance.attribution)} onChange={value => update(current => ({...current, provenance: {...current.provenance, attribution: splitList(value)}}))} helper="Comma-separated names or organizations."/></div>
         </div></fieldset>
@@ -402,14 +490,14 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
 
       {step === 5 && <section className="builder-review" aria-label="Recipe builder review">
         <section><header><div><span>1</span><h4>Identity & model</h4></div><button type="button" className="button secondary" aria-label="Change identity and model" onClick={() => goTo(0)}>Change</button></header><dl><ReviewRow term="Recipe">{document.metadata.title}</ReviewRow><ReviewRow term="Catalog name">{document.identity.publisher}/{slug}</ReviewRow><ReviewRow term="Model">{document.model.publisher}/{document.model.slug}</ReviewRow><ReviewRow term="Description">{document.metadata.description}</ReviewRow></dl></section>
-        <section><header><div><span>2</span><h4>Runtime</h4></div><button type="button" className="button secondary" aria-label="Change runtime" onClick={() => goTo(1)}>Change</button></header><dl><ReviewRow term="Execution harness">{document.execution.harness.publisher}/{document.execution.harness.slug}</ReviewRow><ReviewRow term="Runtime">{document.runtime.distribution.publisher}/{document.runtime.distribution.slug}</ReviewRow><ReviewRow term="Entrypoint"><code>{document.runtime.entrypoint.join(" ")}</code></ReviewRow><ReviewRow term="Build">{document.build.platform} · {document.build.dockerfile} · network {document.build.network_mode}</ReviewRow></dl></section>
+        <section><header><div><span>2</span><h4>Runtime</h4></div><button type="button" className="button secondary" aria-label="Change runtime" onClick={() => goTo(1)}>Change</button></header><dl><ReviewRow term="Execution harness">{document.execution.harness.publisher}/{document.execution.harness.slug}</ReviewRow><ReviewRow term="Runtime">{document.runtime.distribution.publisher}/{document.runtime.distribution.slug}</ReviewRow><ReviewRow term="Entrypoint"><code>{document.runtime.entrypoint.join(" ")}</code></ReviewRow><ReviewRow term="Build">{document.build.platform} · {document.build.dockerfile} · network {document.build.network.mode}</ReviewRow></dl></section>
         <section><header><div><span>3</span><h4>Artifacts</h4></div><button type="button" className="button secondary" aria-label="Change artifacts" onClick={() => goTo(2)}>Change</button></header><dl><ReviewRow term="Artifacts">{document.artifacts.length}</ReviewRow><ReviewRow term="Total download">{formatBytes(document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</ReviewRow><ReviewRow term="Repositories">{document.artifacts.length ? document.artifacts.map(item => item.repository).join(", ") : "None"}</ReviewRow></dl></section>
-        <section><header><div><span>4</span><h4>Resources & topology</h4></div><button type="button" className="button secondary" aria-label="Change resources and topology" onClick={() => goTo(3)}>Change</button></header><dl><ReviewRow term="Build memory">{formatBytes(document.build.memory_bytes)}</ReviewRow><ReviewRow term="Temporary storage">{formatBytes(document.build.temporary_bytes)}</ReviewRow><ReviewRow term="Endpoints">{document.interfaces.length ? document.interfaces.map(item => `${item.adapter}${item.port ? ` :${item.port}` : ""}`).join(", ") : "None"}</ReviewRow><ReviewRow term="Lifecycle">{document.runtime.lifecycle_pre_start_count} pre-start · {document.runtime.lifecycle_post_stop_count} post-stop</ReviewRow></dl></section>
-        <section><header><div><span>5</span><h4>Validation & provenance</h4></div><button type="button" className="button secondary" aria-label="Change validation and provenance" onClick={() => goTo(4)}>Change</button></header><dl><ReviewRow term="Checks">{document.validation.checks.join(", ") || "None recorded"}</ReviewRow><ReviewRow term="Benchmarks">{document.validation.benchmark_count}</ReviewRow><ReviewRow term="Origin">{document.provenance.source_kind.replaceAll("_", " ")}</ReviewRow><ReviewRow term="Attribution">{document.provenance.attribution.join(", ") || "None recorded"}</ReviewRow></dl></section>
+        <section><header><div><span>4</span><h4>Resources & topology</h4></div><button type="button" className="button secondary" aria-label="Change resources and topology" onClick={() => goTo(3)}>Change</button></header><dl><ReviewRow term="Build memory">{formatBytes(document.build.resources.memory_bytes)}</ReviewRow><ReviewRow term="Temporary storage">{formatBytes(document.build.resources.temporary_bytes)}</ReviewRow><ReviewRow term="Topology">{document.topology.name} · {document.topology.node_count} {document.topology.node_count === 1 ? "Spark" : "Sparks"} · {document.topology.roles.map(role => role.name).join(", ")}</ReviewRow><ReviewRow term="Endpoints">{document.interfaces.length ? document.interfaces.map(item => `${item.adapter}${item.port ? ` :${item.port}` : item.path ? ` ${item.path}` : ""}`).join(", ") : "None"}</ReviewRow><ReviewRow term="Lifecycle">{document.runtime.lifecycle.pre_start.length} pre-start · {document.runtime.lifecycle.post_stop.length} post-stop</ReviewRow></dl></section>
+        <section><header><div><span>5</span><h4>Validation & provenance</h4></div><button type="button" className="button secondary" aria-label="Change validation and provenance" onClick={() => goTo(4)}>Change</button></header><dl><ReviewRow term="Checks">{document.validation.validators.flatMap(item => item.checks).join(", ") || "None recorded"}</ReviewRow><ReviewRow term="Benchmarks">{document.validation.benchmarks.length}</ReviewRow><ReviewRow term="Origin">{document.provenance.source_kind.replaceAll("_", " ")}</ReviewRow><ReviewRow term="Attribution">{document.provenance.attribution.join(", ") || "None recorded"}</ReviewRow></dl></section>
         <details className="builder-technical-review"><summary>Technical identities and digests</summary><dl><ReviewRow term="Model digest"><code>{document.model.content_sha256}</code></ReviewRow><ReviewRow term="Harness digest"><code>{document.execution.harness.content_sha256}</code></ReviewRow><ReviewRow term="Runtime digest"><code>{document.runtime.distribution.content_sha256}</code></ReviewRow><ReviewRow term="Build context digest"><code>{document.build.context.sha256}</code></ReviewRow></dl></details>
       </section>}
 
-      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste the complete canonical document. Valid JSON immediately updates every step; invalid JSON is kept here for correction.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDocumentText(value); const parsed = parseVisualRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
+      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste every field of the canonical recipe-v1 document, including parameters, arguments, environment, security, lifecycle commands, role resources, and benchmark configuration. Structurally valid JSON immediately updates the guided steps; final backend contract checks still apply when saved.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDocumentText(value); const parsed = parseCanonicalRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
       </fieldset>
 
       <footer className="builder-actions">
