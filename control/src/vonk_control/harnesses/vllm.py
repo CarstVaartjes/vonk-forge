@@ -73,12 +73,15 @@ _ARGUMENTS = {
         "--mamba-ssm-cache-dtype",
         validate=one_of("auto", "bfloat16", "float16", "float32"),
     ),
+    "mamba-cache-mode": ArgumentSpec("--mamba-cache-mode", validate=one_of("align")),
     "enable-flashinfer-autotune": ArgumentSpec(
         "--enable-flashinfer-autotune", takes_value=False
     ),
     "speculative-config": ArgumentSpec("--speculative-config"),
     "tokenizer-mode": ArgumentSpec("--tokenizer-mode", validate=one_of("deepseek_v4")),
-    "moe-backend": ArgumentSpec("--moe-backend", validate=one_of("flashinfer_b12x")),
+    "moe-backend": ArgumentSpec(
+        "--moe-backend", validate=one_of("flashinfer_b12x", "marlin")
+    ),
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
         validate=one_of("deepseek_v4", "glm45", "nemotron_v3", "poolside_v1", "qwen3"),

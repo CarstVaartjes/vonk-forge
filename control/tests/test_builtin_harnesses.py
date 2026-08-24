@@ -449,6 +449,38 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
+def test_vllm_accepts_bounded_nemotron_dspark_options() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "moe-backend", "value": "marlin"},
+            {"name": "mamba-cache-mode", "value": "align"},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--moe-backend") + 1] == (
+        "marlin"
+    )
+    assert (
+        projection.command[projection.command.index("--mamba-cache-mode") + 1]
+        == "align"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("moe-backend", "triton"), ("mamba-cache-mode", "all")],
+)
+def test_vllm_rejects_unreviewed_nemotron_dspark_options(name: str, value: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append({"name": name, "value": value})
+
+    with pytest.raises(HarnessCompileError, match="value is invalid"):
+        _compile("vllm", recipe=recipe)
+
+
 def test_vllm_accepts_text_only_multimodal_mode() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append(
