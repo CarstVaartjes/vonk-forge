@@ -5,6 +5,7 @@ import {formatBytes} from "../lib/fleet";
 import {actionName} from "./library-action-types";
 import type {LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryReasons} from "./library-reasons";
+import {friendlyNodeName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
 type Placement = LibraryRecipeDetail["placement"][number];
 type Group = Placement["recommendations"][number];
@@ -28,11 +29,30 @@ function groupKey(topologyName: string, group: Group): string {
   return `${topologyName}:${group.node_ids.join(":")}`;
 }
 
+function groupName(group: Group): string {
+  return group.node_ids.map(friendlyNodeName).join(" and ");
+}
+
+function CapacityBar({after, label, required, reserved}: {after: number; label: string; required: number; reserved: number}) {
+  const parts = [Math.max(0, required), Math.max(0, reserved), Math.max(0, after)];
+  const total = Math.max(1, parts.reduce((sum, value) => sum + value, 0));
+  return <div className="placement-capacity" role="img" aria-label={`${label}: ${formatBytes(required)} required, ${formatBytes(reserved)} already reserved, ${formatBytes(after)} free after`}>
+    <div className="placement-capacity-heading"><strong>{label}</strong><span>{formatBytes(after)} free after</span></div>
+    <div className="placement-capacity-track" aria-hidden="true">
+      <span className="placement-capacity-required" style={{width: `${parts[0] / total * 100}%`}}/>
+      <span className="placement-capacity-reserved" style={{width: `${parts[1] / total * 100}%`}}/>
+      <span className="placement-capacity-after" style={{width: `${parts[2] / total * 100}%`}}/>
+    </div>
+    <div className="placement-capacity-legend" aria-hidden="true"><span>Required {formatBytes(required)}</span><span>Reserved {formatBytes(reserved)}</span><span>After {formatBytes(after)}</span></div>
+  </div>;
+}
+
 function GroupEvidence({group, policy, selected}: {group: Group; policy: FreshnessPolicy; selected: boolean}) {
   return <div className={`placement-evidence${selected ? " is-selected" : ""}`}>
     <p className="placement-state">Complete group · {title(group.install_state === "complete" ? "installed" : group.install_state)} · {title(group.load_state === "not_loaded" ? "not loaded" : group.load_state)}</p>
     <ol className="placement-nodes">{group.nodes.map(node => <li key={`${node.node_id}:${node.rank}`}>
-      <div className="placement-node-heading"><strong>{node.node_id}</strong><span>Rank {node.rank} · {node.role}</span></div>
+      <div className="placement-node-heading"><strong>{friendlyNodeName(node.node_id)}</strong><span>Rank {node.rank} · {humanizeIdentifier(node.role)}</span></div>
+      <TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}, {label: "Fabric address", value: node.fabric_address ?? ""}]}/>
       <dl>
         <div><dt>Admission inventory</dt><dd>Inventory {inventoryFreshness(node.inventory_age_seconds, policy)} · {node.inventory_age_seconds}s</dd></div>
         <div><dt>Live telemetry</dt><dd>Telemetry {telemetryFreshness(node.telemetry_age_seconds, policy)} · {node.telemetry_age_seconds}s</dd></div>
@@ -41,6 +61,10 @@ function GroupEvidence({group, policy, selected}: {group: Group; policy: Freshne
         <div><dt>Exact artifact reuse</dt><dd>{formatBytes(node.artifact_reuse_bytes)}</dd></div>
         <div><dt>Fabric</dt><dd>{node.fabric_address ?? "Not reported"}{node.fabric_bandwidth_mbps == null ? "" : ` · ${node.fabric_bandwidth_mbps.toLocaleString()} Mbps`}</dd></div>
       </dl>
+      <div className="placement-capacity-bars">
+        <CapacityBar label="Disk capacity" required={node.disk_required_bytes} reserved={node.disk_reserved_bytes} after={node.disk_free_after_bytes}/>
+        <CapacityBar label={`${title(node.memory_kind)} memory`} required={node.memory_required_bytes} reserved={node.memory_reserved_bytes} after={node.memory_free_after_bytes}/>
+      </div>
     </li>)}</ol>
     <LibraryReasons reasons={group.reasons}/>
   </div>;
@@ -48,7 +72,7 @@ function GroupEvidence({group, policy, selected}: {group: Group; policy: Freshne
 
 function RejectedEvidence({group, policy}: {group: Group; policy: FreshnessPolicy}) {
   return <article className="placement-rejected">
-    <h6>{group.node_ids.join(" + ")}</h6>
+    <h6>{group.node_ids.map(friendlyNodeName).join(" + ")}</h6>
     <GroupEvidence group={group} policy={policy} selected={false}/>
   </article>;
 }
@@ -64,7 +88,7 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
   return <section className="library-section placement-section" aria-label="Complete placement groups">
     <div className="section-heading"><div><p className="fleet-kicker">One atomic group</p><h4>Complete placement groups</h4></div><small>Select all ranks together</small></div>
     {detail.placement.map(topology => <section key={topology.topology_name} className="placement-profile" aria-label={`${topology.topology_name} placement`}>
-      <div className="placement-profile-heading"><h5>{topology.topology_name}</h5><span>{topology.node_count} nodes · {topology.recommendations.length} available</span></div>
+      <div className="placement-profile-heading"><h5>{humanizeIdentifier(topology.topology_name)}</h5><span>{topology.node_count} Sparks · {topology.recommendations.length} available</span></div>
       {!topology.search_complete && <div className="bounded-search-notice" role="note">
         <strong>Bounded search is incomplete</strong>
         <p>{topology.reasons.find(reason => reason.code.includes("truncated"))?.detail ?? `The bounded search evaluated ${topology.evaluated_group_count} complete groups.`} This is bounded advisory evidence, not a globally optimal placement.</p>
@@ -74,8 +98,8 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
         const key = groupKey(topology.topology_name, group);
         const selected = selectedGroup === key;
         return <article key={key} className={`placement-group${selected ? " is-selected" : ""}`}>
-          <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${group.node_ids.join(" and ")}`}>
-            <span>{group.node_ids.join(" + ")}</span><small>{group.nodes.length} ranks · eligible complete group</small>
+          <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${groupName(group)}`}>
+            <span>{group.node_ids.map(friendlyNodeName).join(" + ")}</span><small>{group.nodes.length} ranks · eligible complete group</small>
           </button>
           {selected && group.preview_targets.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">
             {group.preview_targets.map((target, index) => <button
@@ -94,7 +118,7 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
         <summary>Unavailable placement evidence</summary>
         {topology.recommendations.filter(group => !group.eligible).map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>) }
         {topology.rejected_groups.map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>) }
-        {topology.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{node.node_id}</strong><LibraryReasons reasons={node.reasons}/></div>)}
+        {topology.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{friendlyNodeName(node.node_id)}</strong><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/><LibraryReasons reasons={node.reasons}/></div>)}
         {topology.rejected_evidence_truncated && <p className="bounded-copy">Rejected evidence is also truncated at the published server limit.</p>}
       </details>}
     </section>)}</section>;

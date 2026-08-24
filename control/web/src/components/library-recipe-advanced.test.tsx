@@ -8,10 +8,17 @@ function renderAuthority() {
   render(<LibraryRecipeAuthority api={{} as LibraryApi} detail={fullLibraryDetail} onRefresh={async () => undefined} policy={librarySnapshot.freshness_policy}/>);
 }
 
-test("previews exact catalog identities without prototype runtime adapters", async () => {
+test("previews friendly runtime names with exact identities available on demand", async () => {
   renderAuthority();
   const user = userEvent.setup();
   const runtime = screen.getByRole("region", {name: "Recipe identity"});
+  expect(runtime).toHaveTextContent("Qwen 3");
+  expect(runtime).toHaveTextContent("vLLM OpenAI");
+  expect(runtime).toHaveTextContent("Python 312 CUDA");
+  const technicalDetails = within(runtime).getAllByText("Technical details");
+  await user.click(technicalDetails[0]);
+  await user.click(technicalDetails[1]);
+  await user.click(technicalDetails[2]);
   expect(runtime).toHaveTextContent(`qwen/qwen3@${"e".repeat(64)}`);
   expect(runtime).toHaveTextContent(`vonk-forge/vllm-openai@${"f".repeat(64)}`);
   expect(runtime).toHaveTextContent(`vonk-forge/python-312-cuda@${"1".repeat(64)}`);
@@ -22,7 +29,7 @@ test("previews exact catalog identities without prototype runtime adapters", asy
   const editor = within(advanced).getByRole("textbox", {name: "Recipe JSON"});
   const changed = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen3-preview"}};
   fireEvent.change(editor, {target: {value: JSON.stringify(changed)}});
-  expect(runtime).toHaveTextContent("qwen/qwen3-preview@");
+  expect(runtime).toHaveTextContent("Qwen 3 Preview");
 });
 
 test("keeps the last valid local preview when a strict visual identity is invalid", async () => {
@@ -35,5 +42,5 @@ test("keeps the last valid local preview when a strict visual identity is invali
   fireEvent.change(editor, {target: {value: JSON.stringify(changed)}});
   fireEvent.change(editor, {target: {value: JSON.stringify({...changed, model: {...changed.model, content_sha256: "not-a-digest"}})}});
   expect(within(advanced).getByRole("alert")).toHaveTextContent("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
-  expect(screen.getByRole("region", {name: "Recipe identity"})).toHaveTextContent("vonk-forge/python-preview@");
+  expect(screen.getByRole("region", {name: "Recipe identity"})).toHaveTextContent("Python Preview");
 });

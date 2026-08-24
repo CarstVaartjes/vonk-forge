@@ -243,7 +243,7 @@ export function LibraryPage({api, path, onNavigate}: {
     </header>
     {snapshot && <>
       <section className="library-overview" aria-label="Library summary">
-        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Model versions</span><strong>{modelCount}</strong><small>Exact immutable identities</small></div>
+        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Models</span><strong>{modelCount}</strong><small>Exact versions available</small></div>
         <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
         <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
         <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
@@ -260,7 +260,15 @@ export function LibraryPage({api, path, onNavigate}: {
     </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
-    {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Recipes will appear here after they are added to the local library authority.</p></section>}
+    {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty library-empty" aria-label="Empty Library">
+      <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
+      <h3>Bring your first recipe into the Library</h3>
+      <p>Start with a reviewed public recipe, or create a custom runtime when your model needs a bespoke setup.</p>
+      <div className="button-row">
+        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Browse public recipes</a>
+        <button type="button" className="button secondary" onClick={() => { const next = defaultDocument(); setCustomDocument(next); setDocumentText(JSON.stringify(next, null, 2)); setSlug(next.identity.slug); setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
+      </div>
+    </section>}
     {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryBrowser
       api={api}
       detail={detail}

@@ -79,6 +79,78 @@
   margin-top: 0.8rem;
 }
 
+.lifecycle-track {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.lifecycle-stage {
+  align-items: start;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  padding-right: 0.5rem;
+  position: relative;
+}
+
+.lifecycle-stage:not(:last-child)::after {
+  background: var(--border-strong);
+  content: "";
+  height: 2px;
+  left: 1.15rem;
+  position: absolute;
+  right: -0.35rem;
+  top: 0.55rem;
+  z-index: 0;
+}
+
+.lifecycle-marker {
+  background: #14231f;
+  border: 2px solid var(--text-subtle);
+  border-radius: 50%;
+  height: 0.85rem;
+  position: relative;
+  width: 0.85rem;
+  z-index: 1;
+}
+
+.lifecycle-stage-healthy .lifecycle-marker {
+  background: var(--mint);
+  border-color: #17362d;
+  box-shadow: 0 0 0 3px #68e5b329;
+}
+
+.lifecycle-stage-warning .lifecycle-marker {
+  background: var(--warning);
+  border-color: #46381d;
+}
+
+.lifecycle-stage-danger .lifecycle-marker {
+  background: var(--danger);
+  border-color: #4b2424;
+}
+
+.lifecycle-stage > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.lifecycle-stage > div > span {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.lifecycle-stage small {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
 .library-operation,
 .bounded-search-notice,
 .topology-card,
@@ -214,6 +286,56 @@
   margin: 0.15rem 0 0;
 }
 
+.placement-capacity-bars {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+}
+
+.placement-capacity {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.placement-capacity-heading,
+.placement-capacity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  justify-content: space-between;
+}
+
+.placement-capacity-heading {
+  font-size: 0.75rem;
+}
+
+.placement-capacity-heading span,
+.placement-capacity-legend {
+  color: var(--text-muted);
+}
+
+.placement-capacity-track {
+  background: #07110e;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: flex;
+  height: 0.65rem;
+  overflow: hidden;
+}
+
+.placement-capacity-track > span {
+  display: block;
+  min-width: 2px;
+}
+
+.placement-capacity-required { background: var(--mint); }
+.placement-capacity-reserved { background: var(--warning); }
+.placement-capacity-after { background: #29443b; }
+
+.placement-capacity-legend {
+  font-size: 0.65rem;
+}
+
 .placement-rejections {
   margin-top: 0.8rem;
 }
@@ -266,8 +388,7 @@
 
 .recipe-identity-card strong {
   color: var(--mint-strong);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.78rem;
+  font-size: 0.92rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -306,6 +427,81 @@
   display: grid;
   gap: 0.55rem;
   padding-left: 1.25rem;
+}
+
+.topology-diagram {
+  background: #07110e8c;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  margin: 0.9rem 0 0;
+  padding: 0.8rem;
+}
+
+.topology-diagram figcaption {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.topology-fabric-badge {
+  background: #17362d;
+  border: 1px solid #68e5b366;
+  border-radius: 999px;
+  color: var(--mint-strong);
+  font-weight: 800;
+  padding: 0.28rem 0.5rem;
+}
+
+.topology-card .topology-rank-diagram {
+  display: flex;
+  gap: 1rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  overflow-x: auto;
+  padding: 0.3rem 0 0.55rem;
+}
+
+.topology-rank-diagram li {
+  align-items: center;
+  display: flex;
+  flex: 1 0 12rem;
+  gap: 0.65rem;
+  min-width: 0;
+  position: relative;
+}
+
+.topology-rank-diagram li:not(:last-child)::after {
+  background: linear-gradient(90deg, var(--mint), var(--border-strong));
+  content: "";
+  height: 2px;
+  position: absolute;
+  right: -1rem;
+  top: 1.15rem;
+  width: 1rem;
+}
+
+.topology-rank-node {
+  align-items: center;
+  background: #17362d;
+  border: 2px solid var(--mint);
+  border-radius: 50%;
+  color: var(--mint-strong);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 850;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.topology-rank-diagram li > div {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .topology-card li {
@@ -440,5 +636,14 @@
 
   .recipe-authority-statuses {
     align-items: flex-start;
+  }
+
+  .lifecycle-track {
+    gap: 0.65rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lifecycle-stage:nth-child(2)::after {
+    display: none;
   }
 }

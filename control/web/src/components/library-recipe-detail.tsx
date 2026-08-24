@@ -10,6 +10,7 @@ import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, Librar
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
+import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import "./library-recipe-detail.css";
 
 type Topology = NonNullable<LibraryRecipeDetail["topology"]>;
@@ -37,6 +38,18 @@ function operationTone(state: string) {
 
 function operationLabel(kind: string, state: string): string {
   return `${kind} ${state}`.replace(/^./, letter => letter.toUpperCase());
+}
+
+function lifecycleStage(label: string, items: Array<{state: string}>, completeStates: readonly string[], reachedLabel = "Complete") {
+  const states = [...new Set(items.map(item => item.state))];
+  if (states.length === 0) return {label, state: "Not started", detail: "No authority record", tone: "idle"};
+  if (states.some(state => ["failed", "lost", "partial", "stale"].includes(state))) {
+    return {label, state: "Attention", detail: states.map(humanizeIdentifier).join(" · "), tone: "danger"};
+  }
+  if (states.every(state => completeStates.includes(state))) {
+    return {label, state: reachedLabel, detail: states.map(humanizeIdentifier).join(" · "), tone: "healthy"};
+  }
+  return {label, state: "In progress", detail: states.map(humanizeIdentifier).join(" · "), tone: "warning"};
 }
 
 export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
@@ -79,13 +92,25 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     setOperation(next);
   }, []);
   const actionBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
+  const lifecycleStages = [
+    lifecycleStage("Build", detail.operational_state.builds, ["succeeded"]),
+    lifecycleStage("Map", detail.operational_state.mappings, ["ready"]),
+    lifecycleStage("Install", detail.operational_state.installations, ["installed"]),
+    lifecycleStage("Run", detail.operational_state.runs, ["running", "published"], "Active"),
+  ];
   return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
     <header className="recipe-authority-hero">
       <div>
-        <p className="fleet-kicker">{visual ? `${visual.identity.publisher}/${visual.identity.slug}` : `${detail.recipe.source_kind} recipe`}</p>
+        <p className="fleet-kicker">{visual ? humanizeIdentifier(visual.identity.publisher) : humanizeIdentifier(detail.recipe.source_kind)} recipe</p>
         <strong className="recipe-authority-title">{visual?.metadata.title ?? detail.recipe.title}</strong>
         <p>{visual?.metadata.description ?? detail.recipe.description}</p>
         {visual && <p className="recipe-metadata-tags">{visual.metadata.tags.length > 0 ? visual.metadata.tags.join(" · ") : "No tags declared"}</p>}
+        <TechnicalDetails compact items={[
+          {label: "Recipe ID", value: detail.recipe.recipe_id},
+          {label: "Recipe slug", value: detail.recipe.slug},
+          {label: "Revision ID", value: revision?.id ?? ""},
+          {label: "Content digest", value: revision?.content_sha256 ?? ""},
+        ]}/>
       </div>
       <div className="recipe-authority-statuses">
         {localPreview && <StatusPill tone="warning">Local preview · not saved</StatusPill>}
@@ -94,16 +119,21 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     </header>
     <section className="library-section library-primary-control" aria-label="Lifecycle overview">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
-      <div className="operation-summary">
-        {detail.operational_state.builds.map(build => <StatusPill key={build.recipe_build_id} tone={operationTone(build.state)}>{operationLabel("build", build.state)}</StatusPill>)}
-        {detail.operational_state.mappings.map(mapping => <StatusPill key={mapping.mapping_id} tone={operationTone(mapping.state)}>{operationLabel("mapping", mapping.state)}</StatusPill>)}
-        {detail.operational_state.installations.map(installation => <div className="operation-item" key={installation.installation_id}>
-          <StatusPill tone={operationTone(installation.state)}>{operationLabel("installation", installation.state)}</StatusPill>
-          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review Remove installation {installation.installation_id}</button>}
+      <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">
+        {lifecycleStages.map(stage => <li className={`lifecycle-stage lifecycle-stage-${stage.tone}`} key={stage.label} aria-label={`${stage.label}: ${stage.state}. ${stage.detail}`}>
+          <span className="lifecycle-marker" aria-hidden="true"/><div><strong>{stage.label}</strong><span>{stage.state}</span><small>{stage.detail}</small></div>
+        </li>)}
+      </ol>
+      <div className="operation-summary" aria-label="Available lifecycle actions">
+        {detail.operational_state.installations.map((installation, index) => <div className="operation-item" key={installation.installation_id}>
+          <StatusPill tone={operationTone(installation.state)}>{operationLabel(`installation ${index + 1}`, installation.state)}</StatusPill>
+          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review removal of installation {index + 1}</button>}
+          <TechnicalDetails compact items={[{label: "Installation ID", value: installation.installation_id}]}/>
         </div>)}
-        {detail.operational_state.runs.map(run => <div className="operation-item" key={run.run_id}>
-          <StatusPill tone={operationTone(run.state)}>{operationLabel("run", run.state)}</StatusPill>
-          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review Stop run {run.run_id}</button>}
+        {detail.operational_state.runs.map((run, index) => <div className="operation-item" key={run.run_id}>
+          <StatusPill tone={operationTone(run.state)}>{operationLabel(`run ${index + 1}`, run.state)}</StatusPill>
+          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review stop of run {index + 1}</button>}
+          <TechnicalDetails compact items={[{label: "Run ID", value: run.run_id}, {label: "Installation ID", value: run.installation_id}]}/>
         </div>)}
         {Object.values(detail.operational_state).every(items => items.length === 0) && <p>No operation history for this revision.</p>}
       </div>
@@ -115,11 +145,15 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       <section className="library-section" aria-label="Topology and resources">
         <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Topology and ranks</h4></div></div>
         {detail.topology && <article className="topology-card">
-          <h5>{detail.topology.name}</h5><p>{detail.topology.node_count} nodes · {detail.topology.mode}</p>
+          <h5>{humanizeIdentifier(detail.topology.name)}</h5><p>{detail.topology.node_count} Sparks · {humanizeIdentifier(detail.topology.mode)}</p>
           <div className="resource-totals"><strong>{formatBytes(topologyMemory(detail.topology))} startup memory total</strong><strong>{formatBytes(topologyDisk(detail.topology))} disk envelope total</strong></div>
-          <ol>{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}><strong>Rank {role.rank} · {role.name}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></li>)}</ol>
-          <p className="topology-fabric">{detail.topology.fabric.connectivity} fabric · {detail.topology.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {detail.topology.parallelism.backend}</p>
-          <p className="topology-fabric">Start: {detail.topology.start_order.join(" → ")} · Stop: {detail.topology.stop_order.join(" → ")}</p>
+          <figure className="topology-diagram" aria-label={`${detail.topology.node_count}-Spark ${humanizeIdentifier(detail.topology.mode)} topology over ${humanizeIdentifier(detail.topology.fabric.connectivity)} fabric`}>
+            <figcaption><span className="topology-fabric-badge">{humanizeIdentifier(detail.topology.fabric.connectivity)} fabric</span><span>{detail.topology.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {humanizeIdentifier(detail.topology.parallelism.backend)}</span></figcaption>
+            <ol className="topology-rank-diagram" aria-label="Topology ranks">{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}>
+              <span className="topology-rank-node" aria-hidden="true">{role.rank}</span><div><strong>Rank {role.rank} · {humanizeIdentifier(role.name)}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></div>
+            </li>)}</ol>
+          </figure>
+          <p className="topology-fabric">Start: {detail.topology.start_order.map(humanizeIdentifier).join(" → ")} · Stop: {detail.topology.stop_order.map(humanizeIdentifier).join(" → ")}</p>
         </article>}
       </section>
     </>}

@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
-import {fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
@@ -8,6 +8,7 @@ const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
 const qwenModel = `qwen/3@${"e".repeat(64)}`;
 const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
+const qwenModelName = "Qwen 3";
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
@@ -138,6 +139,10 @@ async function installLocalFleetFixture(page: Page) {
     }
     return route.fulfill({json: fullLibraryDetail});
   });
+  await page.route("**/api/v1/library/recipes/recipe-code", route => route.fulfill({json: {
+    ...fullLibraryDetail,
+    recipe: {...fullLibraryDetail.recipe, recipe_id: codeRecipe.recipe_id, slug: codeRecipe.slug, title: codeRecipe.title, description: codeRecipe.description},
+  }}));
   await page.route("**/api/v1/library/recipes/recipe-unlinked", route => route.fulfill({json: {
     ...minimalLibraryDetail,
     recipe: {
@@ -314,24 +319,24 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(recipes).toBeHidden();
   await expect(detail).toBeHidden();
 
-  await models.getByRole("link", {name: new RegExp(qwenModel)}).focus();
+  await models.getByRole("link", {name: new RegExp(qwenModelName)}).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeHidden();
 
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
   await expect(detail).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/library$/);
   await expect(models).toBeVisible();
@@ -348,10 +353,10 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(unlinked).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: new RegExp(qwenModel)}).click();
+  await models.getByRole("link", {name: new RegExp(qwenModelName)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
@@ -368,7 +373,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(detail).toBeVisible();
   await page.setViewportSize({width: 900, height: 900});
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
@@ -391,7 +396,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
     }
   });
   await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
   await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
   await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
 
@@ -400,12 +405,57 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await page.screenshot({path: testInfo.outputPath("library-mobile.png")});
 });
 
+test("Library view modes persist and compare friendly recipes without document overflow", async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library");
+
+  const models = page.getByRole("region", {name: "Models"});
+  const modelLink = models.getByRole("link", {name: /Qwen 3/});
+  await expect(modelLink).not.toContainText(/qwen\/3@/);
+  const modelRow = modelLink.locator("xpath=ancestor::article");
+  await modelRow.getByText("Technical details").click();
+  await expect(modelRow).toContainText("e".repeat(64));
+  await expect(modelRow.getByRole("button", {name: "Copy Model digest"})).toBeVisible();
+
+  await page.getByRole("button", {name: "Compact"}).click();
+  await expect(page.getByRole("region", {name: "Compact recipe list"})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("vonk-forge.library.view-mode"))).toBe("compact");
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", {name: "Compare"}).click();
+  const picker = page.getByRole("region", {name: "Choose recipes to compare"});
+  await picker.getByRole("checkbox", {name: /Qwen Chat/}).check();
+  await picker.getByRole("checkbox", {name: /Qwen Code/}).check();
+  const comparison = page.getByRole("region", {name: "Recipe comparison"});
+  await expect(comparison.getByLabel("Startup memory: 144.0 GiB")).toHaveCount(2);
+  await expect(comparison.getByText("2 Sparks")).toHaveCount(2);
+  await expect(comparison.getByText("Ready")).toHaveCount(2);
+
+  for (const width of [320, 360, 768, 1280]) {
+    await page.setViewportSize({width, height: width < 768 ? 800 : 900});
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
+
+  await page.setViewportSize({width: 360, height: 800});
+  await page.goto("/library");
+  const kpiLayout = await page.locator(".library-overview").evaluate(element => ({
+    horizontallyScrollable: element.scrollWidth > element.clientWidth,
+    rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
+  }));
+  expect(kpiLayout).toEqual({horizontallyScrollable: true, rows: 1});
+});
+
 test("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/recipes/recipe-chat");
 
   const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModel}`});
+  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
   await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
   await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
@@ -413,7 +463,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await expect(authority).toContainText("Immutable revision 3");
   await expect(authority).toContainText("Bounded search is incomplete");
   await expect(authority).toContainText("Inventory fresh · 10s");
-  await expect(authority).toContainText("node-alpha + node-beta");
+  await expect(authority).toContainText("Node Alpha + Node Beta");
   const authorityContrast = await authority.evaluate(element => {
     const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
     const luminance = (value: string) => {
@@ -430,7 +480,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   });
   expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
 
-  const selector = authority.getByRole("button", {name: "Select complete group node-alpha and node-beta"});
+  const selector = authority.getByRole("button", {name: "Select complete group Node Alpha and Node Beta"});
   await selector.focus();
   await page.keyboard.press("Space");
   await expect(selector).toHaveAttribute("aria-pressed", "true");
@@ -460,12 +510,12 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
   const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
   await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
   const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
   await editor.fill(JSON.stringify(invalid, null, 2));
   await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
   await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-e2e@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
 
   const upload = advanced.getByLabel("Upload recipe JSON");
   const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
@@ -473,7 +523,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
   await expect(advanced.getByRole("alert")).toHaveCount(0);
   await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("qwen/qwen-uploaded@");
+  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen Uploaded");
   await expect(page.getByRole("link", {name: "Source and build"})).toHaveCount(0);
   await expect(page.getByRole("link", {name: "Cluster mapping"})).toHaveCount(0);
   await expect(page.getByRole("link", {name: "Raw editor"})).toHaveCount(0);
@@ -491,7 +541,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: new RegExp(qwenModel)}).click();
+  await page.getByRole("link", {name: new RegExp(qwenModelName)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();
@@ -499,6 +549,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
 
   state.empty = true;
   await page.goto("/library");
-  await expect(page.getByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
+  await expect(page.getByRole("region", {name: "Empty Library"}).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
   await expect(page.getByRole("link", {name: /advanced/i})).toHaveCount(0);
 });
