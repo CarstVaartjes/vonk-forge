@@ -3,6 +3,7 @@ import type {MouseEvent} from "react";
 import type {ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
+import {nodeDisplayName} from "../lib/fleet";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
@@ -140,7 +141,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     const controller = new AbortController();
     void fleetApi.visualFleet(controller.signal)
       .then(value => {
-        if (!controller.signal.aborted) setNodeDisplayNames(Object.fromEntries(value.nodes.map(node => [node.id, node.display_name])));
+        if (!controller.signal.aborted) setNodeDisplayNames(Object.fromEntries(value.nodes.map(node => [node.id, nodeDisplayName(node)])));
       })
       .catch(() => {
         if (!controller.signal.aborted) setNodeDisplayNames({});

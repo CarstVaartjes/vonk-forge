@@ -206,7 +206,7 @@ test("shows visual recipe truth and selects only one complete placement group on
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: async () => fullLibraryDetail,
-    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha"}, {id: "node-beta", display_name: "MIA Beta"}]}),
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
   } as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
@@ -283,6 +283,24 @@ test("shows visual recipe truth and selects only one complete placement group on
   const actions = within(selected).getByRole("region", {name: "Selected group actions"});
   const evidence = selected.querySelector(".placement-evidence")!;
   expect(actions.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("uses the Fleet hostname policy when a node display name is its technical ID", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const technicalName = "spk_0123456789abcdef0123456789abcdef";
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => fullLibraryDetail,
+    visualFleet: async () => ({nodes: [
+      {id: "node-alpha", display_name: technicalName, hostname: "carst-spark-3.internal", labels: {}},
+      {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}},
+    ]}),
+  } as unknown as ControlApi;
+  render(<App api={api}/>);
+
+  const groups = await screen.findByRole("region", {name: "Complete placement groups"});
+  expect(await within(groups).findByRole("button", {name: "Select complete group Carst Spark 3 and MIA Beta"})).toBeVisible();
+  expect(within(groups).queryByText(technicalName)).not.toBeInTheDocument();
 });
 
 test("loads and merges cursor pages without splitting model or unlinked recipe groups", async () => {

@@ -82,7 +82,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: vi.fn(async () => detail),
-    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha"}, {id: "node-beta", display_name: "MIA Beta"}]}),
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
     previewLibraryLoad,
     applyLibraryLoad,
     libraryOperation,
