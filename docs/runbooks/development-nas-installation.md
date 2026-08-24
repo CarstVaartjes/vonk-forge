@@ -19,9 +19,15 @@ The wizard asks whether to enable Hermes. If it is not selected, Hermes remains
 the only disabled optional profile; no unused helper containers are created.
 
 To update a prepared project, rerun the same command from its parent directory.
-The installer preserves the local configuration, credentials, and PKI while
-updating the immutable release-controlled Compose file. Upload the refreshed
-directory and redeploy without deleting named volumes.
+Normal upgrades preserve the existing Hermes selection without prompting. To
+change it explicitly, append `--enable-hermes` or `--disable-hermes` after
+`sh -s --`; enabling Hermes for the first time prompts only for any missing
+Hermes values or secrets. The dedicated LiteLLM client key is generated only
+when Hermes is enabled, then preserved across normal upgrades and
+disable/re-enable cycles. The installer preserves the other local
+configuration, credentials, and PKI while updating the immutable
+release-controlled Compose file. Upload the refreshed directory and redeploy
+without deleting named volumes.
 
 See [NAS control-plane deployment](../../deploy/compose/README.md) for startup
 and verification.

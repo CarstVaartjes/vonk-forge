@@ -6,6 +6,7 @@ compose_root="$(cd -- "${script_dir}/.." && pwd)"
 runtime_root="$(mktemp -d /tmp/vonk-hermes-agent.XXXXXX)"
 project="vonk-hermes-runtime-${RANDOM}-$$"
 api_key_file="${runtime_root}/hermes-api-key"
+litellm_key_file="${runtime_root}/hermes-litellm-key"
 
 cleanup() {
     docker compose --project-name "${project}" --env-file "${compose_root}/tests/test.env" \
@@ -21,8 +22,10 @@ fail() {
 }
 
 printf '%s\n' 'runtime-test-key-0000000000000000' >"${api_key_file}"
-chmod 600 "${api_key_file}"
+printf '%s\n' 'sk-runtime-litellm-key-00000000000000000000000000000000' >"${litellm_key_file}"
+chmod 600 "${api_key_file}" "${litellm_key_file}"
 export HERMES_API_KEY_FILE="${api_key_file}"
+export HERMES_LITELLM_KEY_FILE="${litellm_key_file}"
 export HERMES_DASHBOARD_ORIGIN="https://hermes.runtime.invalid"
 docker build \
     --file "${compose_root}/hermes-agent/Dockerfile" \
@@ -38,6 +41,9 @@ compose=(
 
 docker run --rm --entrypoint chown \
     --mount "type=bind,source=${api_key_file},target=/run-key" \
+    local/hermes-agent:managed 0:0 /run-key
+docker run --rm --entrypoint chown \
+    --mount "type=bind,source=${litellm_key_file},target=/run-key" \
     local/hermes-agent:managed 0:0 /run-key
 "${compose[@]}" up -d --no-deps hermes-agent
 container_id="$("${compose[@]}" ps -q hermes-agent)"
@@ -115,7 +121,7 @@ jq -e '.ReadonlyRootfs == true and .Privileged == false and (.CapDrop == ["ALL"]
     <<<"${host_config}" >/dev/null || fail "Hermes container privilege contract failed"
 grep -Fq 'docker.sock' <<<"${host_config}" && fail "docker.sock is mounted"
 docker exec "${container_id}" sh -c \
-    'test -s /run/secrets/hermes-api-key && touch /workspace/runtime-persistent && touch /opt/data/runtime-persistent'
+    'test -s /run/secrets/hermes-api-key && test -s /run/secrets/hermes-litellm-key && touch /workspace/runtime-persistent && touch /opt/data/runtime-persistent'
 if docker exec "${container_id}" sh -c 'touch /etc/must-remain-read-only' 2>/dev/null; then
     fail "read-only root was writable"
 fi

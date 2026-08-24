@@ -279,7 +279,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
     );
     assert!(
         output.is_empty(),
-        "upgrade must not ask for site-local values"
+        "ordinary upgrades must preserve Hermes without prompting"
     );
     #[cfg(unix)]
     {
@@ -349,6 +349,203 @@ fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
             .expect("new release secret"),
         "generated-secret\n"
     );
+}
+
+fn hermes_toggle_payload() -> CanonicalTemplatePayload {
+    CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [
+            {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
+          ],
+          "secrets": [
+            {"file": "database-password", "prompt": "Database password", "generate_bytes": 16}
+          ],
+          "hermes": {
+            "env": "VONK_HERMES_ENABLED",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "true",
+            "disabled_value": "false",
+            "required_values": [
+              {"env": "HERMES_ENDPOINT", "prompt": "Hermes endpoint"}
+            ],
+            "secrets": [
+              {"file": "hermes-token", "prompt": "Hermes token"}
+            ]
+          }
+        }"#,
+    )
+    .expect("valid Hermes toggle payload")
+}
+
+#[test]
+fn upgrade_can_enable_hermes_in_an_existing_bundle() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let input = Cursor::new(b"https://hermes.example.test\nprivate-hermes-token\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &hermes_toggle_payload(),
+        SetupRequest::upgrade(temporary.path()).with_hermes_enabled(true),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("Hermes enabled during upgrade");
+
+    assert_eq!(result.hermes_enabled, Some(true));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
+        "VONK_PUBLIC_HOST=kept.example.test\n\
+VONK_HERMES_ENABLED=true\n\
+SITE_LOCAL=kept\n\
+HERMES_ENDPOINT=https://hermes.example.test\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
+        "private-hermes-token\n"
+    );
+}
+
+#[test]
+fn upgrade_can_disable_hermes_without_deleting_its_configuration() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join(".env"),
+        "VONK_PUBLIC_HOST=kept.example.test\n\
+VONK_HERMES_ENABLED=true\n\
+HERMES_ENDPOINT=https://hermes.example.test\n\
+SITE_LOCAL=kept\n",
+    )
+    .expect("enabled environment");
+    std::fs::write(bundle.join("secrets/hermes-token"), "kept-hermes-token\n")
+        .expect("Hermes token");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &hermes_toggle_payload(),
+        SetupRequest::upgrade(temporary.path()).with_hermes_enabled(false),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("Hermes disabled during upgrade");
+
+    assert_eq!(result.hermes_enabled, Some(false));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
+        "VONK_PUBLIC_HOST=kept.example.test\n\
+VONK_HERMES_ENABLED=false\n\
+HERMES_ENDPOINT=https://hermes.example.test\n\
+SITE_LOCAL=kept\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
+        "kept-hermes-token\n"
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
+fn ordinary_upgrade_preserves_enabled_hermes_without_prompting() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join(".env"),
+        "VONK_PUBLIC_HOST=kept.example.test\n\
+VONK_HERMES_ENABLED=true\n\
+HERMES_ENDPOINT=https://hermes.example.test\n\
+SITE_LOCAL=kept\n",
+    )
+    .expect("enabled environment");
+    std::fs::write(bundle.join("secrets/hermes-token"), "kept-hermes-token\n")
+        .expect("Hermes token");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &hermes_toggle_payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("enabled Hermes state preserved");
+
+    assert_eq!(result.hermes_enabled, Some(true));
+    assert!(
+        std::fs::read_to_string(bundle.join(".env"))
+            .expect("environment")
+            .contains("VONK_HERMES_ENABLED=true\n")
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
+fn ordinary_upgrade_adds_only_missing_inputs_for_enabled_hermes() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join(".env"),
+        "VONK_PUBLIC_HOST=kept.example.test\n\
+VONK_HERMES_ENABLED=true\n\
+SITE_LOCAL=kept\n",
+    )
+    .expect("enabled environment with missing Hermes input");
+    let input = Cursor::new(b"https://hermes.example.test\nprivate-hermes-token\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &hermes_toggle_payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("missing enabled Hermes state repaired");
+
+    assert_eq!(result.hermes_enabled, Some(true));
+    assert!(
+        std::fs::read_to_string(bundle.join(".env"))
+            .expect("environment")
+            .contains("HERMES_ENDPOINT=https://hermes.example.test\n")
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
+        "private-hermes-token\n"
+    );
+}
+
+#[test]
+fn ordinary_upgrade_does_not_add_missing_hermes_inputs_while_disabled() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &hermes_toggle_payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("disabled Hermes state preserved");
+
+    assert_eq!(result.hermes_enabled, Some(false));
+    assert!(!bundle.join("secrets/hermes-token").exists());
+    assert!(
+        !std::fs::read_to_string(bundle.join(".env"))
+            .expect("environment")
+            .contains("HERMES_ENDPOINT=")
+    );
+    assert!(output.is_empty());
 }
 
 #[cfg(unix)]
@@ -678,6 +875,51 @@ fn hermes_prompts_are_conditional_on_opt_in() {
         !String::from_utf8(output)
             .expect("UTF-8 prompts")
             .contains("private-hermes-token")
+    );
+}
+
+#[test]
+fn hermes_generated_client_key_uses_the_required_prefix() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [],
+          "secrets": [],
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": "",
+            "required_values": [],
+            "secrets": [
+              {
+                "file": "hermes-litellm-key",
+                "prompt": "Hermes LiteLLM key",
+                "generate_bytes": 16,
+                "prefix": "sk-"
+              }
+            ]
+          }
+        }"#,
+    )
+    .expect("valid prefixed secret payload");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(b"yes\n\n".to_vec()), &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("prefixed Hermes key generated");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join("secrets/hermes-litellm-key"))
+            .expect("Hermes LiteLLM key"),
+        "sk-generated-secret\n"
     );
 }
 

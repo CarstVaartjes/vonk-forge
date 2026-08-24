@@ -210,6 +210,7 @@ struct SecretPrompt {
     file: String,
     prompt: String,
     generate_bytes: Option<usize>,
+    prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -471,6 +472,18 @@ fn validate_prompts<'a>(
                 secret.file
             )));
         }
+        if secret.prefix.as_deref().is_some_and(|prefix| {
+            prefix.is_empty()
+                || prefix.len() > 32
+                || !prefix.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || "_.~-".contains(character)
+                })
+        }) {
+            return Err(SetupError::InvalidPayload(format!(
+                "generation prefix for {} is invalid",
+                secret.file
+            )));
+        }
         if !secrets.insert(&secret.file) {
             return Err(SetupError::InvalidPayload(format!(
                 "duplicate secret file {}",
@@ -714,10 +727,24 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
                     }
                 })?;
             if !value.is_empty() {
+                if prompt.prefix.as_deref().is_some_and(|prefix| {
+                    !value.starts_with(prefix)
+                        || !value.chars().all(|character| {
+                            character.is_ascii_alphanumeric() || "_.~-".contains(character)
+                        })
+                }) {
+                    writeln!(self.writer, "The value is invalid.")?;
+                    continue;
+                }
                 return Ok(value);
             }
             if let Some(bytes) = prompt.generate_bytes {
-                return generator.generate(bytes).map_err(SetupError::from);
+                let generated = generator.generate(bytes).map_err(SetupError::from)?;
+                return Ok(format!(
+                    "{}{}",
+                    prompt.prefix.as_deref().unwrap_or_default(),
+                    generated
+                ));
             }
             writeln!(self.writer, "A value is required.")?;
         }
@@ -855,6 +882,7 @@ pub enum SetupMode {
 pub struct SetupRequest {
     output_root: PathBuf,
     mode: SetupMode,
+    hermes_enabled: Option<bool>,
 }
 
 impl SetupRequest {
@@ -862,6 +890,7 @@ impl SetupRequest {
         Self {
             output_root: output_root.as_ref().to_path_buf(),
             mode: SetupMode::Install,
+            hermes_enabled: None,
         }
     }
 
@@ -869,7 +898,13 @@ impl SetupRequest {
         Self {
             output_root: output_root.as_ref().to_path_buf(),
             mode: SetupMode::Upgrade,
+            hermes_enabled: None,
         }
+    }
+
+    pub fn with_hermes_enabled(mut self, enabled: bool) -> Self {
+        self.hermes_enabled = Some(enabled);
+        self
     }
 }
 
@@ -888,14 +923,15 @@ pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     let output_root = ensure_safe_output_root(&request.output_root)?;
     let bundle = output_root.join("vonk-forge");
     match request.mode {
-        SetupMode::Install => install(payload, &bundle, prompt, generator),
-        SetupMode::Upgrade => upgrade(payload, &bundle, prompt, generator),
+        SetupMode::Install => install(payload, &bundle, request.hermes_enabled, prompt, generator),
+        SetupMode::Upgrade => upgrade(payload, &bundle, request.hermes_enabled, prompt, generator),
     }
 }
 
 fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     bundle: &Path,
+    requested_hermes_enabled: Option<bool>,
     prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
@@ -940,7 +976,10 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         }
 
         let hermes_enabled = if let Some(hermes) = &payload.hermes {
-            let enabled = prompt.confirm(&hermes.prompt)?;
+            let enabled = match requested_hermes_enabled {
+                Some(enabled) => enabled,
+                None => prompt.confirm(&hermes.prompt)?,
+            };
             environment.push((
                 hermes.env.clone(),
                 if enabled {
@@ -1634,6 +1673,7 @@ fn renew_controller_leaf(
 fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     payload: &CanonicalTemplatePayload,
     bundle: &Path,
+    requested_hermes_enabled: Option<bool>,
     prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
@@ -1704,7 +1744,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     }
 
     let hermes_enabled = if let Some(hermes) = &payload.hermes {
-        let enabled = match environment_value(&environment, &hermes.env) {
+        let current = match environment_value(&environment, &hermes.env) {
             Some(value) if value == hermes.enabled_value => true,
             Some(value) if value == hermes.disabled_value => false,
             Some(_) => {
@@ -1713,19 +1753,21 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                     hermes.env
                 )));
             }
-            None => {
-                let enabled = prompt.confirm(&hermes.prompt)?;
-                environment.push((
-                    hermes.env.clone(),
-                    if enabled {
-                        hermes.enabled_value.clone()
-                    } else {
-                        hermes.disabled_value.clone()
-                    },
-                ));
-                enabled
-            }
+            None => match requested_hermes_enabled {
+                Some(enabled) => enabled,
+                None => prompt.confirm(&hermes.prompt)?,
+            },
         };
+        let enabled = requested_hermes_enabled.unwrap_or(current);
+        set_environment_value(
+            &mut environment,
+            &hermes.env,
+            if enabled {
+                hermes.enabled_value.clone()
+            } else {
+                hermes.disabled_value.clone()
+            },
+        );
         if enabled {
             for required in &hermes.required_values {
                 if environment_value(&environment, &required.env).is_none() {

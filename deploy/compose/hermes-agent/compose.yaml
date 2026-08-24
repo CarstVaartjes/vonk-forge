@@ -34,12 +34,47 @@ x-hermes-service: &hermes-service
     OPENAI_BASE_URL: http://caddy:8081/v1
   secrets:
     - hermes-api-key
+    - hermes-litellm-key
   volumes: &hermes-volumes
     - hermes-data:/opt/data
     - hermes-workspaces:/workspace
     - hermes-cache:/opt/data/home/.cache
 
 services:
+  hermes-litellm-key-provisioner:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
+    profiles: [hermes]
+    restart: "no"
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+    read_only: true
+    # Local Compose secrets retain the installer file's owner-only mode. Run as
+    # UID 0 with every capability dropped so this one-shot can read only its two
+    # mounted secret files without gaining host or filesystem authority.
+    user: "0:0"
+    entrypoint: [python, /usr/local/bin/provision-hermes-litellm-key]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HERMES_LITELLM_KEY_FILE: /run/secrets/hermes-litellm-key
+      LITELLM_MASTER_KEY_FILE: /run/secrets/litellm-master-key
+    secrets:
+      - hermes-litellm-key
+      - litellm-master-key
+    volumes:
+      - ./provision-litellm-key.py:/usr/local/bin/provision-hermes-litellm-key:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    networks:
+      - litellm-edge
+    depends_on:
+      litellm:
+        condition: service_healthy
+        restart: true
+
   hermes-agent:
     <<: *hermes-service
     profiles: [hermes]
@@ -49,6 +84,8 @@ services:
       - tailnet-hermes-edge
       - hermes-inference
     depends_on:
+      hermes-litellm-key-provisioner:
+        condition: service_completed_successfully
       caddy:
         condition: service_healthy
         restart: true
@@ -71,6 +108,8 @@ services:
 secrets:
   hermes-api-key:
     file: ${HERMES_API_KEY_FILE:-/dev/null}
+  hermes-litellm-key:
+    file: ${HERMES_LITELLM_KEY_FILE:-/dev/null}
 
 networks:
   tailnet-hermes-edge:

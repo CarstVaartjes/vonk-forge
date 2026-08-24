@@ -82,6 +82,9 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     assert "tailscale-gateway" in document["services"]
     assert "hermes-agent" in document["services"]
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
+    assert document["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
+        "hermes"
+    ]
     assert document["services"]["control-api"]["image"] == API_IMAGE
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
@@ -152,6 +155,9 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
         },
         "tailscale-configurator": {
             "/usr/local/bin/configure-tailscale": "0555",
+        },
+        "hermes-litellm-key-provisioner": {
+            "/usr/local/bin/provision-hermes-litellm-key": "0444",
         },
         "postgres": {
             "/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh": "0555",

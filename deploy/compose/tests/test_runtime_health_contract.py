@@ -136,6 +136,8 @@ def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurat
     """Catches render warnings and disabled-profile dependencies in either graph."""
     for hermes in (False, True):
         services = _rendered(hermes=hermes)["services"]
-        assert set(services) == DEFAULT_SERVICES | ({"hermes-agent"} if hermes else set())
+        assert set(services) == DEFAULT_SERVICES | (
+            {"hermes-agent", "hermes-litellm-key-provisioner"} if hermes else set()
+        )
         configurator = services["tailscale-configurator"]
         assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
