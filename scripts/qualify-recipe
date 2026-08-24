@@ -55,6 +55,7 @@ SUPPORTED_CHECKS = frozenset(
         "artifact.mime.audio-wav",
         "artifact.mime.video-mp4",
         "artifact.mime.model-gltf-binary",
+        "artifact.mime.application-octet-stream",
     }
 )
 

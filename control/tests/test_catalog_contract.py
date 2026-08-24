@@ -197,6 +197,40 @@ def test_runtime_distribution_accepts_verified_vllm_ray_mechanism() -> None:
     validate_catalog_document(document)
 
 
+def test_runtime_distribution_accepts_exact_distributed_sglang_authority() -> None:
+    path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["implements_harness"]["slug"] = "sglang"
+    capability = document["capabilities"].pop("distributed_vllm")
+    capability["mechanism"] = "sglang-native"
+    document["capabilities"]["distributed_sglang"] = capability
+
+    validate_catalog_document(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("world_size", 3),
+        ("fabric", "ethernet"),
+        ("mechanism", "vllm-mp"),
+    ],
+)
+def test_runtime_distribution_rejects_inexact_distributed_sglang_authority(
+    field: str, value: object
+) -> None:
+    path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["implements_harness"]["slug"] = "sglang"
+    capability = document["capabilities"].pop("distributed_vllm")
+    capability["mechanism"] = "sglang-native"
+    capability[field] = value
+    document["capabilities"]["distributed_sglang"] = capability
+
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)
+
+
 def test_model_version_accepts_complete_strict_74_file_inventory() -> None:
     model = {
         "kind": "model",

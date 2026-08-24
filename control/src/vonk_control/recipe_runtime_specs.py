@@ -124,11 +124,15 @@ def compile_runtime_spec(
             if isinstance(distribution_document, Mapping)
             else None
         )
-        implementation = (
-            capabilities.get("distributed_vllm")
-            if isinstance(capabilities, Mapping)
-            else None
-        )
+        implementation = None
+        if isinstance(capabilities, Mapping):
+            implementations = tuple(
+                capabilities.get(name)
+                for name in ("distributed_vllm", "distributed_sglang")
+                if isinstance(capabilities.get(name), Mapping)
+            )
+            if len(implementations) == 1:
+                implementation = implementations[0]
         launch = (
             implementation.get("launch")
             if isinstance(implementation, Mapping)

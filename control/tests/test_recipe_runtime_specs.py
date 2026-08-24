@@ -16,6 +16,7 @@ from vonk_control.recipe_runtime_specs import (
 ROOT = Path(__file__).resolve().parents[2]
 BASE_RECIPE = ROOT / "control/tests/fixtures/global/recipe-v1-minimal.json"
 VLLM_HARNESS = ROOT / "config/execution-harnesses/vllm.json"
+SGLANG_HARNESS = ROOT / "config/execution-harnesses/sglang.json"
 
 
 def _exact_builtin_inputs():
@@ -85,6 +86,134 @@ def _exact_builtin_inputs():
         ),
         "patch_bundle": None,
     }
+    return document, resolved_entities
+
+
+def _distributed_sglang_runtime_inputs():
+    document, resolved_entities = _exact_builtin_inputs()
+    harness = json.loads(SGLANG_HARNESS.read_text(encoding="utf-8"))
+    harness_digest = catalog_content_sha256(harness)
+    distribution = copy.deepcopy(resolved_entities["runtime_distribution"].document)
+    distribution["identity"]["slug"] = "sglang-arm64"
+    distribution["implements_harness"].update(
+        {"slug": "sglang", "content_sha256": harness_digest}
+    )
+    rank_environment = {
+        "GLOO_SOCKET_IFNAME": "enP7s7",
+        "NCCL_IB_GID_INDEX": "3",
+        "NCCL_IB_HCA": "=rocep1s0f0:1,rocep1s0f1:1",
+        "NCCL_SOCKET_IFNAME": "=enP7s7",
+        "TP_SOCKET_IFNAME": "enP7s7",
+    }
+    distribution["capabilities"] = {
+        "distributed_sglang": {
+            "verified": True,
+            "mechanism": "sglang-native",
+            "topology_mode": "distributed",
+            "node_count": 2,
+            "world_size": 2,
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "data_parallel_size": 1,
+            "fabric": "nccl-roce",
+            "endpoint_role": "entrypoint",
+            "worker_role": "worker",
+            "rank_loss_withdraws_endpoint": True,
+            "launch": {
+                "rendezvous": {
+                    "local_address_environment": "VONK_LOCAL_ADDR",
+                    "master_address_environment": "VONK_MASTER_ADDR",
+                    "master_port_environment": "VONK_MASTER_PORT",
+                    "master_role": "entrypoint",
+                },
+                "rank_profiles": [
+                    {
+                        "rank": 0,
+                        "role": "entrypoint",
+                        "environment": rank_environment,
+                    },
+                    {"rank": 1, "role": "worker", "environment": rank_environment},
+                ],
+            },
+        }
+    }
+    distribution_digest = catalog_content_sha256(distribution)
+    document["execution"]["harness"].update(
+        {"slug": "sglang", "content_sha256": harness_digest}
+    )
+    document["runtime"]["distribution"].update(
+        {"slug": "sglang-arm64", "content_sha256": distribution_digest}
+    )
+    document["runtime"]["entrypoint"] = ["/opt/vonk/bin/sglang-serve"]
+    document["runtime"]["arguments"] = [
+        {"name": "model-path", "value": "/models"},
+        {"name": "context-length", "value": 32768},
+        {"name": "tensor-parallel-size", "value": 2},
+    ]
+    document["runtime"]["security"]["host_network"] = True
+    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+    endpoint_role = copy.deepcopy(document["topology"]["roles"][0])
+    worker_role = copy.deepcopy(endpoint_role)
+    worker_role.update({"name": "worker", "endpoint_owner": False})
+    document["topology"].update(
+        {
+            "name": "dual-sglang",
+            "mode": "distributed",
+            "node_count": 2,
+            "roles": [endpoint_role, worker_role],
+            "parallelism": {
+                "world_size": 2,
+                "tensor": 2,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "native",
+            },
+            "fabric": {
+                "connectivity": "connected",
+                "minimum_bandwidth_mbps": 200_000,
+            },
+            "start_order": ["entrypoint", "worker"],
+            "stop_order": ["entrypoint", "worker"],
+        }
+    )
+    patch = {
+        "schema_version": 1,
+        "kind": "patch-bundle",
+        "identity": {
+            "publisher": "vonk-forge",
+            "slug": "sglang-distributed-safety",
+        },
+        "metadata": {
+            "title": "SGLang distributed safety",
+            "description": "Binds placement rendezvous to native SGLang launch flags.",
+            "tags": ["sglang", "distributed"],
+        },
+        "applies_to": {
+            "kind": "runtime-distribution",
+            "publisher": "vonk-forge",
+            "slug": "sglang-arm64",
+            "content_sha256": distribution_digest,
+        },
+        "sha256": "e" * 64,
+    }
+    patch_digest = catalog_content_sha256(patch)
+    document["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "sglang-distributed-safety",
+        "content_sha256": patch_digest,
+    }
+    resolved_entities.update(
+        {
+            "harness": SimpleNamespace(document=harness, content_sha256=harness_digest),
+            "runtime_distribution": SimpleNamespace(
+                document=distribution, content_sha256=distribution_digest
+            ),
+            "patch_bundle": SimpleNamespace(
+                document=patch, content_sha256=patch_digest
+            ),
+        }
+    )
     return document, resolved_entities
 
 
@@ -187,6 +316,41 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "post_stop": [],
         "stop_timeout_seconds": 30,
     }
+
+
+def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
+    document, resolved_entities = _distributed_sglang_runtime_inputs()
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters={},
+        role="worker",
+        rank=1,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["runtime"]["placement_environment"] == {
+        "local_address": "VONK_LOCAL_ADDR",
+        "master_address": "VONK_MASTER_ADDR",
+        "master_port": "VONK_MASTER_PORT",
+    }
+    command = spec["runtime"]["entrypoint"]
+    assert command[command.index("--node-rank") + 1] == "1"
+    assert command[command.index("--dist-init-addr") + 1] == (
+        "VONK_MASTER_ADDR:VONK_MASTER_PORT"
+    )
+    assert spec["topology"] == {
+        "name": "dual-sglang",
+        "node_count": 2,
+        "rank": 1,
+        "role": "worker",
+    }
+    assert (
+        spec["identity"]["patch_bundle_sha256"]
+        == resolved_entities["patch_bundle"].content_sha256
+    )
 
 
 def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
