@@ -17,6 +17,9 @@ import "./custom-recipe-builder.css";
 
 type BuilderStep = 0 | 1 | 2 | 3 | 4 | 5;
 type FieldError = {field: string; message: string; step: BuilderStep};
+type BuilderDraft = {document: CanonicalRecipeDocument; documentText: string; highestStep: BuilderStep; slug: string; step: BuilderStep};
+
+export const CUSTOM_RECIPE_DRAFT_STORAGE_KEY = "vonk-forge:custom-recipe-draft:v1";
 
 const GIB = 1024 ** 3;
 const MIB = 1024 ** 2;
@@ -34,6 +37,32 @@ const steps = [
 ] as const;
 
 const defaultDocument = () => createCanonicalRecipeDocument("custom");
+
+function storedBuilderDraft(): BuilderDraft | undefined {
+  try {
+    const raw = sessionStorage.getItem(CUSTOM_RECIPE_DRAFT_STORAGE_KEY);
+    if (!raw || raw.length > 1_000_000) return undefined;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (value.version !== 1 || typeof value.document !== "object" || value.document === null) return undefined;
+    const parsed = parseCanonicalRecipeDocument(JSON.stringify(value.document));
+    if (!parsed.ok) return undefined;
+    const step = typeof value.step === "number" && Number.isInteger(value.step) && value.step >= 0 && value.step <= 5 ? value.step as BuilderStep : 0;
+    const highestStep = typeof value.highestStep === "number" && Number.isInteger(value.highestStep) && value.highestStep >= step && value.highestStep <= 5 ? value.highestStep as BuilderStep : step;
+    return {
+      document: parsed.document,
+      documentText: typeof value.documentText === "string" && value.documentText.length <= 900_000 ? value.documentText : JSON.stringify(parsed.document, null, 2),
+      highestStep,
+      slug: typeof value.slug === "string" ? value.slug.slice(0, 63) : parsed.document.identity.slug,
+      step,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function discardStoredCustomRecipeDraft() {
+  try { sessionStorage.removeItem(CUSTOM_RECIPE_DRAFT_STORAGE_KEY); } catch { /* Draft recovery is optional when storage is unavailable. */ }
+}
 
 function splitList(value: string): string[] {
   return value.split(/[,\n]/).map(item => item.trim()).filter(Boolean);
@@ -246,29 +275,48 @@ function ReviewRow({term, children}: {term: string; children: React.ReactNode}) 
   return <div><dt>{term}</dt><dd>{children}</dd></div>;
 }
 
-export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
+export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyChange}: {
   api: CatalogApi;
   onNavigate(nextUrl: string): void;
   onBusyChange?(busy: boolean): void;
+  onDirtyChange?(dirty: boolean): void;
 }) {
-  const initial = useMemo(defaultDocument, []);
+  const restored = useMemo(storedBuilderDraft, []);
+  const initial = useMemo(() => restored?.document ?? defaultDocument(), [restored]);
   const [document, setDocument] = useState(initial);
-  const [slug, setSlug] = useState(initial.identity.slug);
-  const [documentText, setDocumentText] = useState(() => JSON.stringify(initial, null, 2));
-  const [step, setStep] = useState<BuilderStep>(0);
-  const [highestStep, setHighestStep] = useState<BuilderStep>(0);
+  const [slug, setSlug] = useState(restored?.slug ?? initial.identity.slug);
+  const [documentText, setDocumentText] = useState(() => restored?.documentText ?? JSON.stringify(initial, null, 2));
+  const [step, setStep] = useState<BuilderStep>(restored?.step ?? 0);
+  const [highestStep, setHighestStep] = useState<BuilderStep>(restored?.highestStep ?? 0);
   const [errors, setErrors] = useState<FieldError[]>([]);
-  const [jsonError, setJsonError] = useState("");
+  const [jsonError, setJsonError] = useState(() => {
+    if (!restored) return "";
+    const parsed = parseCanonicalRecipeDocument(restored.documentText);
+    return parsed.ok ? "" : parsed.error;
+  });
   const [preset, setPreset] = useState<PresetName>("custom");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [createdRecipeId, setCreatedRecipeId] = useState("");
+  const [dirty, setDirty] = useState(Boolean(restored));
+  const [confirmPreset, setConfirmPreset] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const keepDraft = useRef<HTMLButtonElement>(null);
 
   useEffect(() => { heading.current?.focus(); }, []);
-  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => { onBusyChange?.(false); onDirtyChange?.(false); }, [onBusyChange, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty || createdRecipeId) {
+      discardStoredCustomRecipeDraft();
+      return;
+    }
+    try { sessionStorage.setItem(CUSTOM_RECIPE_DRAFT_STORAGE_KEY, JSON.stringify({version: 1, document, documentText, highestStep, slug, step})); } catch { /* The navigation guard still protects drafts when storage is unavailable. */ }
+  }, [createdRecipeId, dirty, document, documentText, highestStep, slug, step]);
+  useEffect(() => { if (confirmPreset) keepDraft.current?.focus(); }, [confirmPreset]);
 
   function update(updater: (current: CanonicalRecipeDocument) => CanonicalRecipeDocument) {
+    setDirty(true);
     setDocument(current => {
       const next = updater(current);
       setDocumentText(JSON.stringify(next, null, 2));
@@ -284,10 +332,19 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
     update(current => ({...current, identity: {...current.identity, slug: value}}));
   }
 
-  function applyPreset() {
+  function replaceWithPreset() {
     const next = createCanonicalRecipeDocument(preset);
     update(() => next);
     setSlug(next.identity.slug);
+    setConfirmPreset(false);
+  }
+
+  function applyPreset() {
+    if (dirty) {
+      setConfirmPreset(true);
+      return;
+    }
+    replaceWithPreset();
   }
 
   function goNext() {
@@ -320,6 +377,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
       const created = await api.createCatalogRecipe({slug, document: parsed.document});
       setCreatedRecipeId(created.recipe_id);
       setStatus("Recipe saved");
+      setDirty(false);
     } catch (value) {
       setStatus(value instanceof Error ? value.message.slice(0, 256) : "Unable to save recipe");
     } finally {
@@ -360,9 +418,10 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
 
   return <div className="recipe-builder-page">
     <header className="builder-hero">
-      <div><p className="fleet-kicker">Local recipe builder</p><h2 ref={heading} tabIndex={-1}>Create custom recipe</h2><p>Build a reviewable recipe one decision at a time. Nothing is saved until the final step.</p></div>
+      <div><p className="fleet-kicker">Local recipe builder</p><h1 ref={heading} tabIndex={-1}>Create custom recipe</h1><p>Build a reviewable recipe one decision at a time. Nothing is saved until the final step.</p></div>
       <button type="button" className="button secondary" disabled={busy} onClick={() => onNavigate("/library")}>Back to Library</button>
     </header>
+    {restored && !createdRecipeId && <p className="builder-draft-restored" role="status"><strong>Unsaved draft restored.</strong> Continue where this browser session left off.</p>}
 
     <nav className="builder-progress" aria-label="Recipe builder progress">
       <ol>{steps.map((item, index) => <li key={item.name} className={index === step ? "current" : index < step ? "complete" : ""}>
@@ -376,7 +435,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
       <fieldset className="builder-form-lock" disabled={busy}>
 
       {step === 0 && <div className="builder-step-fields">
-        <fieldset className="builder-preset"><legend>Start from a useful shape</legend><p>Presets supply clearly labeled, schema-valid defaults for the artifact, security, topology, endpoint, and validation contracts. Replace every starter digest and revision with exact authority before saving.</p><div><select aria-label="Recipe starting point" value={preset} onChange={event => setPreset(event.target.value as PresetName)}><option value="custom">Custom model service</option><option value="vllm">vLLM chat service</option><option value="diffusers">Diffusers image service</option></select><button type="button" className="button secondary" onClick={applyPreset}>Apply starting point</button></div></fieldset>
+        <fieldset className="builder-preset"><legend>Start from a useful shape</legend><p>Presets supply clearly labeled, schema-valid defaults for the artifact, security, topology, endpoint, and validation contracts. Replace every starter digest and revision with exact authority before saving.</p><div><select aria-label="Recipe starting point" value={preset} onChange={event => setPreset(event.target.value as PresetName)}><option value="custom">Custom model service</option><option value="vllm">vLLM chat service</option><option value="diffusers">Diffusers image service</option></select><button type="button" className="button secondary" onClick={applyPreset}>Apply starting point</button></div>{confirmPreset && <section className="builder-preset-confirmation" role="alert" aria-labelledby="replace-draft-title"><div><strong id="replace-draft-title">Replace the current draft?</strong><p>Applying this starting point replaces every unsaved answer in the builder.</p></div><div><button ref={keepDraft} type="button" className="button secondary" onClick={() => setConfirmPreset(false)}>Keep current draft</button><button type="button" className="button danger" onClick={replaceWithPreset}>Replace draft</button></div></section>}</fieldset>
         <fieldset className="custom-recipe-section"><legend>Recipe identity</legend><div className="custom-recipe-fields custom-recipe-fields-two">
           <TextField id="recipe-publisher" label="Publisher" value={document.identity.publisher} onChange={value => update(current => ({...current, identity: {...current.identity, publisher: value}}))} error={error("recipe-publisher")}/>
           <TextField id="recipe-slug" label="Recipe slug" value={slug} onChange={changeSlug} error={error("recipe-slug")} helper="Stable URL-safe name used by the local catalog."/>
@@ -497,7 +556,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange}: {
         <details className="builder-technical-review"><summary>Technical identities and digests</summary><dl><ReviewRow term="Model digest"><code>{document.model.content_sha256}</code></ReviewRow><ReviewRow term="Harness digest"><code>{document.execution.harness.content_sha256}</code></ReviewRow><ReviewRow term="Runtime digest"><code>{document.runtime.distribution.content_sha256}</code></ReviewRow><ReviewRow term="Build context digest"><code>{document.build.context.sha256}</code></ReviewRow></dl></details>
       </section>}
 
-      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste every field of the canonical recipe-v1 document, including parameters, arguments, environment, security, lifecycle commands, role resources, and benchmark configuration. Structurally valid JSON immediately updates the guided steps; final backend contract checks still apply when saved.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDocumentText(value); const parsed = parseCanonicalRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
+      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste every field of the canonical recipe-v1 document, including parameters, arguments, environment, security, lifecycle commands, role resources, and benchmark configuration. Structurally valid JSON immediately updates the guided steps; final backend contract checks still apply when saved.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDirty(true); setDocumentText(value); const parsed = parseCanonicalRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
       </fieldset>
 
       <footer className="builder-actions">

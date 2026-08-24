@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect, useRef, useState} from "react";
 
 type LoginFailure = {status?: unknown};
 
@@ -15,6 +15,8 @@ export function LoginPage({onLogin}: {onLogin(subject: "admin", password: string
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const passwordField = useRef<HTMLInputElement>(null);
+  useEffect(() => { passwordField.current?.focus(); }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,6 +27,7 @@ export function LoginPage({onLogin}: {onLogin(subject: "admin", password: string
       await onLogin("admin", password);
     } catch (value) {
       setError(loginMessage(value));
+      queueMicrotask(() => passwordField.current?.focus());
     } finally {
       setPassword("");
       setSubmitting(false);
@@ -41,7 +44,7 @@ export function LoginPage({onLogin}: {onLogin(subject: "admin", password: string
           <input name="username" value="admin" readOnly autoComplete="username"/>
         </label>
         <label>Password
-          <input name="password" type="password" value={password} autoComplete="current-password" onChange={event => setPassword(event.target.value)} required/>
+          <input ref={passwordField} name="password" type="password" value={password} autoComplete="current-password" onChange={event => setPassword(event.target.value)} required/>
         </label>
         {error && <p role="alert">{error}</p>}
         <button type="submit" disabled={!password || submitting}>{submitting ? "Signing in…" : "Sign in"}</button>

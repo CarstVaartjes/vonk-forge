@@ -251,7 +251,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     <header className="fleet-hero">
       <div>
         <p className="fleet-kicker">Model control</p>
-        <h2 ref={heading} tabIndex={-1}>Library</h2>
+        <h1 ref={heading} tabIndex={-1}>Library</h1>
       <div className="library-toolbar-actions">
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
         <a href="/library/import" className="button secondary" onClick={event => onNavigate(event, "/library/import")}>Import public recipe</a>

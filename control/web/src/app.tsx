@@ -3,13 +3,25 @@ import {useOptionalAuth} from "./auth";
 import type {CatalogApi, ControlApi} from "./api/types";
 import {AppShell} from "./components/app-shell";
 import type {AppRoute} from "./components/app-shell";
-import {CustomRecipeBuilderPage} from "./pages/custom-recipe-builder";
+import {NavigationConfirmation} from "./components/navigation-confirmation";
+import {CustomRecipeBuilderPage, discardStoredCustomRecipeDraft} from "./pages/custom-recipe-builder";
 import {ActivityPage} from "./pages/activity";
 import {FleetPage} from "./pages/fleet";
 import {LibraryPage} from "./pages/library";
 import {PublicRecipeImportPage} from "./pages/public-recipe-import";
 
 const pages: AppRoute[] = ["fleet", "library", "activity"];
+type PendingNavigation = {destination: string; perform(): void; restoreFocus?: HTMLElement | null};
+
+function pageTitle(pathname: string): string {
+  if (pathname === "/library/import") return "Import public recipe · Vonk Forge";
+  if (pathname === "/library/create") return "Create custom recipe · Vonk Forge";
+  if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
+  if (/^\/library(?:\/|$)/.test(pathname)) return "Library · Vonk Forge";
+  if (pathname === "/activity") return "Activity · Vonk Forge";
+  if (pathname === "/" || pathname === "/fleet") return "Fleet · Vonk Forge";
+  return "Page not found · Vonk Forge";
+}
 
 function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
@@ -24,12 +36,16 @@ export function App({api}: {api: ControlApi}) {
   const activeUrl = useRef(url);
   const [navigationLocked, setNavigationLockedState] = useState(false);
   const navigationLockedRef = useRef(false);
+  const draftDirtyRef = useRef(false);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>();
   const setNavigationLocked = useCallback((locked: boolean) => {
     navigationLockedRef.current = locked;
     setNavigationLockedState(locked);
   }, []);
+  const setDraftDirty = useCallback((dirty: boolean) => { draftDirtyRef.current = dirty; }, []);
   const pathname = new URL(url, location.origin).pathname;
   const page = currentPage(pathname);
+  useEffect(() => { document.title = pageTitle(pathname); }, [pathname]);
   useEffect(() => {
     const listener = () => {
       if (navigationLockedRef.current) {
@@ -37,12 +53,18 @@ export function App({api}: {api: ControlApi}) {
         setUrl(activeUrl.current);
         return;
       }
+      if (draftDirtyRef.current) {
+        history.pushState(null, "", activeUrl.current);
+        setUrl(activeUrl.current);
+        setPendingNavigation({destination: "leave the recipe builder", perform: () => history.back()});
+        return;
+      }
       const nextUrl = `${location.pathname}${location.search}`;
       activeUrl.current = nextUrl;
       setUrl(nextUrl);
     };
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!navigationLockedRef.current) return;
+      if (!navigationLockedRef.current && !draftDirtyRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -58,49 +80,88 @@ export function App({api}: {api: ControlApi}) {
     setNavigationLocked(busy);
   }, [setNavigationLocked]);
 
+  function requestNavigation(destination: string, perform: () => void): boolean {
+    if (navigationLockedRef.current) return false;
+    if (draftDirtyRef.current) {
+      setPendingNavigation({
+        destination,
+        perform,
+        restoreFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      });
+      return false;
+    }
+    perform();
+    return true;
+  }
+
+  function cancelPendingNavigation() {
+    const trigger = pendingNavigation?.restoreFocus;
+    setPendingNavigation(undefined);
+    queueMicrotask(() => trigger?.focus());
+  }
+
+  function discardAndContinue() {
+    const pending = pendingNavigation;
+    if (!pending) return;
+    draftDirtyRef.current = false;
+    discardStoredCustomRecipeDraft();
+    setPendingNavigation(undefined);
+    pending.perform();
+  }
+
   function navigate(event: React.MouseEvent<HTMLAnchorElement>, target: AppRoute) {
     event.preventDefault();
-    if (navigationLockedRef.current) return;
     const nextPath = `/${target}`;
-    history.pushState(null, "", nextPath);
-    activeUrl.current = nextPath;
-    setUrl(nextPath);
+    return requestNavigation(`go to ${target.charAt(0).toUpperCase()}${target.slice(1)}`, () => {
+      history.pushState(null, "", nextPath);
+      activeUrl.current = nextPath;
+      setUrl(nextPath);
+    });
   }
 
   function navigatePath(event: React.MouseEvent<HTMLAnchorElement>, nextPath: string) {
     event.preventDefault();
-    if (navigationLockedRef.current) return;
-    history.pushState(null, "", nextPath);
-    activeUrl.current = nextPath;
-    setUrl(nextPath);
+    requestNavigation("open another Library page", () => {
+      history.pushState(null, "", nextPath);
+      activeUrl.current = nextPath;
+      setUrl(nextPath);
+    });
   }
 
   function navigateUrl(nextUrl: string, replace = false) {
-    replace ? history.replaceState(null, "", nextUrl) : history.pushState(null, "", nextUrl);
-    activeUrl.current = nextUrl;
-    setUrl(nextUrl);
+    requestNavigation(nextUrl.startsWith("/library") ? "return to the Library" : "leave the recipe builder", () => {
+      replace ? history.replaceState(null, "", nextUrl) : history.pushState(null, "", nextUrl);
+      activeUrl.current = nextUrl;
+      setUrl(nextUrl);
+    });
   }
   const content = page ? {
     fleet: <FleetPage api={api} onBusyChange={setNavigationLocked}/>,
     library: pathname === "/library/import"
       ? <PublicRecipeImportPage api={api as ControlApi & CatalogApi} url={url} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
       : pathname === "/library/create"
-        ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
+        ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy} onDirtyChange={setDraftDirty}/>
       : <LibraryPage api={api} path={pathname} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
     activity: <ActivityPage api={api}/>,
-  }[page] : null;
+  }[page] : <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
+    <p className="fleet-kicker">Unknown workspace</p>
+    <h1 id="not-found-heading" ref={element => { if (element) queueMicrotask(() => element.focus()); }} tabIndex={-1}>Page not found</h1>
+    <p>This address does not match a Vonk Forge workspace. Choose a safe destination below.</p>
+    <div className="button-row"><a className="button" href="/fleet" onClick={event => navigate(event, "fleet")}>Go to Fleet</a><a className="button secondary" href="/library" onClick={event => navigate(event, "library")}>Go to Library</a></div>
+  </section>;
 
-  return <AppShell
+  return <><AppShell
     activeRoute={page}
+    navigationKey={pathname}
     navigationLocked={navigationLocked}
     onNavigate={navigate}
     operator={auth ? {
       environment: "Development",
       logoutError: auth.logoutError,
       loggingOut: auth.loggingOut,
-      onLogout: () => { if (!navigationLockedRef.current) void auth.logout(); },
+      onLogout: () => requestNavigation("sign out", () => { void auth.logout(); }),
       role: "Administrator",
       subject: auth.session.subject,
     } : undefined}
-  >{content}</AppShell>;
+  >{content}</AppShell>{pendingNavigation && <NavigationConfirmation destination={pendingNavigation.destination} onCancel={cancelPendingNavigation} onDiscard={discardAndContinue}/>}</>;
 }

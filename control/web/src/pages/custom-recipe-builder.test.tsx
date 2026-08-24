@@ -18,6 +18,7 @@ function replaceFieldValue(field: HTMLElement, value: string) {
 
 afterEach(() => {
   history.replaceState(null, "", "/");
+  sessionStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -86,6 +87,7 @@ test("guides a preset through six steps and submits the complete canonical docum
   }));
   expect(await screen.findByText("Recipe saved")).toBeVisible();
   expect(screen.getByRole("button", {name: "View saved recipe"})).toBeVisible();
+  expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).toBeNull();
 });
 
 test("requires starter component digests to be replaced before continuing", async () => {
@@ -216,6 +218,51 @@ test("keeps deeply malformed advanced JSON out of guided state", async () => {
   expect(screen.getByText("$.identity.publisher must be a string.")).toBeVisible();
   expect(screen.getByRole("textbox", {name: "Publisher"})).toHaveValue("local");
   expect(screen.getByRole("textbox", {name: "Recipe slug"})).toHaveValue("custom-service");
+});
+
+test("restores an unsaved session draft and confirms before replacing it with a preset", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  const first = render(<App api={{} as unknown as ControlApi}/>);
+
+  const title = await screen.findByRole("textbox", {name: "Display name"});
+  fireEvent.change(title, {target: {value: "My carefully tuned recipe"}});
+  await waitFor(() => expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).not.toBeNull());
+
+  await user.selectOptions(screen.getByRole("combobox", {name: "Recipe starting point"}), "vllm");
+  await user.click(screen.getByRole("button", {name: "Apply starting point"}));
+  const replacement = screen.getByRole("alert");
+  expect(replacement).toHaveTextContent("Replace the current draft?");
+  expect(within(replacement).getByRole("button", {name: "Keep current draft"})).toHaveFocus();
+  expect(title).toHaveValue("My carefully tuned recipe");
+  await user.click(within(replacement).getByRole("button", {name: "Keep current draft"}));
+  expect(title).toHaveValue("My carefully tuned recipe");
+
+  first.unmount();
+  history.replaceState(null, "", "/library/create");
+  render(<App api={{} as unknown as ControlApi}/>);
+  expect(await screen.findByText("Unsaved draft restored.")).toBeVisible();
+  expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("My carefully tuned recipe");
+});
+
+test("restores malformed advanced JSON with its validation state and last valid guided values", async () => {
+  history.replaceState(null, "", "/library/create");
+  const first = render(<App api={{} as unknown as ControlApi}/>);
+
+  fireEvent.change(await screen.findByRole("textbox", {name: "Display name"}), {target: {value: "Last valid guided value"}});
+  await waitFor(() => expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).not.toBeNull());
+  const stored = JSON.parse(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")!) as Record<string, unknown>;
+  sessionStorage.setItem("vonk-forge:custom-recipe-draft:v1", JSON.stringify({...stored, documentText: "{"}));
+
+  first.unmount();
+  history.replaceState(null, "", "/library/create");
+  render(<App api={{} as unknown as ControlApi}/>);
+  await userEvent.setup().click(await screen.findByText("Advanced JSON"));
+
+  expect(screen.getByRole("textbox", {name: "Recipe document"})).toHaveValue("{");
+  expect(screen.getByRole("textbox", {name: "Recipe document"})).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByText(/Invalid JSON at line 1/)).toBeVisible();
+  expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("Last valid guided value");
 });
 
 test("locks navigation and form controls during save and surfaces an API rejection", async () => {

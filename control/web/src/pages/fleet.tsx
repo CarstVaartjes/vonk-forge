@@ -265,7 +265,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     <header className="fleet-hero">
       <div>
         <p className="fleet-kicker">Reactive control plane</p>
-        <h2>Fleet</h2>
+        <h1>Fleet</h1>
         <p className="fleet-introduction">A live view of PostgreSQL-registered nodes, their capacity, and what is actually installed and running.</p>
       </div>
       <div className="fleet-hero-actions">

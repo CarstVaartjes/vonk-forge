@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import type {MouseEvent, ReactNode} from "react";
+import type {KeyboardEvent, MouseEvent, ReactNode} from "react";
 import {AdminMenu} from "./admin-menu";
 import {ActivityIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
 
@@ -17,27 +17,66 @@ type Operator = {
 type AppShellProps = {
   activeRoute?: AppRoute;
   children: ReactNode;
+  navigationKey?: string;
   navigationLocked?: boolean;
-  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): void;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
   operator?: Operator;
 };
 
-export function AppShell({activeRoute, children, navigationLocked = false, onNavigate, operator}: AppShellProps) {
+export function AppShell({activeRoute, children, navigationKey = activeRoute, navigationLocked = false, onNavigate, operator}: AppShellProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const mainContent = useRef<HTMLElement>(null);
-  const previousRoute = useRef(activeRoute);
+  const navigation = useRef<HTMLDivElement>(null);
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const previousNavigationKey = useRef(navigationKey);
   useEffect(() => {
-    if (previousRoute.current === activeRoute) return;
-    previousRoute.current = activeRoute;
+    if (previousNavigationKey.current === navigationKey) return;
+    previousNavigationKey.current = navigationKey;
+    setNavigationOpen(false);
     mainContent.current?.focus();
-  }, [activeRoute]);
+  }, [navigationKey]);
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const firstLink = navigation.current?.querySelector<HTMLElement>("a[href]:not([aria-disabled='true'])");
+    firstLink?.focus();
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || navigation.current?.contains(target) || navigationToggle.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[role='dialog'], [role='alertdialog']")) return;
+      setNavigationOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [navigationOpen]);
+
+  function handleNavigationKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!navigationOpen) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setNavigationOpen(false);
+      queueMicrotask(() => navigationToggle.current?.focus());
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...(navigation.current?.querySelectorAll<HTMLElement>("a[href]:not([aria-disabled='true']), button:not([disabled]), summary") ?? [])];
+    if (focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
   function navigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute) {
     if (navigationLocked) {
       event.preventDefault();
       return;
     }
-    setNavigationOpen(false);
-    onNavigate(event, route);
+    const navigationAccepted = onNavigate(event, route);
+    if (navigationAccepted !== false) setNavigationOpen(false);
   }
   const disabledLinkProps = navigationLocked ? {"aria-disabled": true as const, tabIndex: -1} : {};
   return <div className="shell">
@@ -47,10 +86,10 @@ export function AppShell({activeRoute, children, navigationLocked = false, onNav
         <span className="mark" aria-hidden="true">VF</span>
         <div><strong>Vonk Forge</strong><small>Cluster control</small></div>
       </div>
-      <button type="button" className="navigation-toggle" aria-controls="shell-navigation" aria-expanded={navigationOpen} aria-label={`${navigationOpen ? "Close" : "Open"} system navigation`} onClick={() => setNavigationOpen(open => !open)}>
+      <button ref={navigationToggle} type="button" className="navigation-toggle" aria-controls="shell-navigation" aria-expanded={navigationOpen} aria-label={`${navigationOpen ? "Close" : "Open"} system navigation`} onClick={() => setNavigationOpen(open => !open)}>
         {navigationOpen ? <CloseIcon/> : <MenuIcon/>}
       </button>
-      <div id="shell-navigation" className={`shell-navigation${navigationOpen ? " is-open" : ""}`}>
+      <div ref={navigation} id="shell-navigation" className={`shell-navigation${navigationOpen ? " is-open" : ""}`} onKeyDown={handleNavigationKeyDown}>
         <nav aria-label="Primary">
           <p className="nav-label">Workspace</p>
           <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>

@@ -28,6 +28,7 @@ const importRecipe: PublicRecipe = {
 afterEach(() => {
   history.replaceState(null, "", "/");
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 test("provides browser-equivalent local storage semantics", () => {
@@ -102,9 +103,7 @@ test("keeps the focused workspace routes in primary navigation while preserving 
   }
 });
 
-test("does not render a replacement page for unsupported URLs", async () => {
-  // Break caught: an unsupported route silently falls back to Fleet or
-  // Library, preserving compatibility behavior instead of disappearing.
+test("renders a focused recovery page for unsupported URLs", async () => {
   render(<App api={apiFixture}/>);
   const user = userEvent.setup();
 
@@ -118,14 +117,19 @@ test("does not render a replacement page for unsupported URLs", async () => {
     history.pushState(null, "", "/unsupported-route");
     dispatchEvent(new PopStateEvent("popstate"));
   });
-  await waitFor(() => {
-    expect(screen.queryByRole("heading", {name: "Fleet"})).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", {name: "Library"})).not.toBeInTheDocument();
-  });
+  const notFound = await screen.findByRole("heading", {name: "Page not found"});
+  await waitFor(() => expect(notFound).toHaveFocus());
+  expect(screen.getByRole("link", {name: "Go to Fleet"})).toHaveAttribute("href", "/fleet");
+  expect(screen.getByRole("link", {name: "Go to Library"})).toHaveAttribute("href", "/library");
+  expect(document.title).toBe("Page not found · Vonk Forge");
   expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", {name: "Library"})).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", {name: "Activity"})).not.toHaveAttribute("aria-current");
   expect(location.pathname).toBe("/unsupported-route");
+
+  await user.click(screen.getByRole("link", {name: "Go to Fleet"}));
+  expect(await screen.findByRole("heading", {name: "Fleet"})).toBeVisible();
+  expect(document.title).toBe("Fleet · Vonk Forge");
 });
 
 test("navigates to Activity as a first-class route", async () => {
@@ -154,6 +158,110 @@ test("moves focus to main content after mobile route activation", async () => {
   const heading = await screen.findByRole("heading", {name: "Library"});
   await waitFor(() => expect(heading).toHaveFocus());
   expect(screen.getByRole("button", {name: "Open system navigation"})).toHaveAttribute("aria-expanded", "false");
+});
+
+test("protects an edited custom recipe across shell navigation and clears it only after explicit discard", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={apiFixture}/>);
+
+  const title = await screen.findByRole("textbox", {name: "Display name"});
+  await user.clear(title);
+  await user.type(title, "Protected draft");
+  await waitFor(() => expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).not.toBeNull());
+
+  const backToLibrary = screen.getByRole("button", {name: "Back to Library"});
+  await user.click(backToLibrary);
+  const backConfirmation = screen.getByRole("alertdialog", {name: "Discard this draft?"});
+  expect(backConfirmation).toHaveTextContent("return to the Library");
+  await user.click(within(backConfirmation).getByRole("button", {name: "Keep editing"}));
+  expect(backToLibrary).toHaveFocus();
+  expect(location.pathname).toBe("/library/create");
+
+  const fleetLink = screen.getByRole("link", {name: "Fleet"});
+  await user.click(fleetLink);
+  const confirmation = screen.getByRole("alertdialog", {name: "Discard this draft?"});
+  expect(location.pathname).toBe("/library/create");
+  expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("Protected draft");
+  expect(within(confirmation).getByRole("button", {name: "Keep editing"})).toHaveFocus();
+
+  await user.click(within(confirmation).getByRole("button", {name: "Keep editing"}));
+  expect(fleetLink).toHaveFocus();
+  expect(location.pathname).toBe("/library/create");
+
+  const unload = new Event("beforeunload", {cancelable: true});
+  expect(dispatchEvent(unload)).toBe(false);
+  expect(unload.defaultPrevented).toBe(true);
+
+  await user.click(fleetLink);
+  await user.click(within(screen.getByRole("alertdialog", {name: "Discard this draft?"})).getByRole("button", {name: "Discard draft"}));
+  expect(await screen.findByRole("heading", {name: "Fleet"})).toBeVisible();
+  expect(location.pathname).toBe("/fleet");
+  expect(sessionStorage.getItem("vonk-forge:custom-recipe-draft:v1")).toBeNull();
+});
+
+test("protects a custom recipe draft from browser history navigation", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={apiFixture}/>);
+
+  const title = await screen.findByRole("textbox", {name: "Display name"});
+  await user.clear(title);
+  await user.type(title, "History-safe draft");
+
+  act(() => {
+    history.pushState(null, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  const firstConfirmation = await screen.findByRole("alertdialog", {name: "Discard this draft?"});
+  expect(location.pathname).toBe("/library/create");
+  await user.click(within(firstConfirmation).getByRole("button", {name: "Keep editing"}));
+  expect(screen.getByRole("textbox", {name: "Display name"})).toHaveValue("History-safe draft");
+
+  act(() => {
+    history.pushState(null, "", "/library");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await user.click(within(await screen.findByRole("alertdialog", {name: "Discard this draft?"})).getByRole("button", {name: "Discard draft"}));
+  expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
+  expect(location.pathname).toBe("/library");
+});
+
+test("lets an untouched custom recipe leave without a discard prompt", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={apiFixture}/>);
+
+  await screen.findByRole("heading", {name: "Create custom recipe"});
+  await user.click(screen.getByRole("link", {name: "Fleet"}));
+
+  expect(screen.queryByRole("alertdialog", {name: "Discard this draft?"})).not.toBeInTheDocument();
+  expect(await screen.findByRole("heading", {name: "Fleet"})).toBeVisible();
+});
+
+test("focuses Library after leaving the builder within the same primary route", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={apiFixture}/>);
+
+  await screen.findByRole("heading", {name: "Create custom recipe"});
+  await user.click(screen.getByRole("button", {name: "Back to Library"}));
+
+  const libraryHeading = await screen.findByRole("heading", {name: "Library"});
+  await waitFor(() => expect(libraryHeading).toHaveFocus());
+});
+
+test("focuses Library after explicitly discarding an edited builder draft", async () => {
+  history.replaceState(null, "", "/library/create");
+  const user = userEvent.setup();
+  render(<App api={apiFixture}/>);
+
+  await user.type(await screen.findByRole("textbox", {name: "Display name"}), " edited");
+  await user.click(screen.getByRole("button", {name: "Back to Library"}));
+  await user.click(within(screen.getByRole("alertdialog", {name: "Discard this draft?"})).getByRole("button", {name: "Discard draft"}));
+
+  const libraryHeading = await screen.findByRole("heading", {name: "Library"});
+  await waitFor(() => expect(libraryHeading).toHaveFocus());
 });
 
 test("renders reusable status and capacity components with native semantics", () => {
