@@ -115,6 +115,7 @@ _ARGUMENTS = {
             "deepseek_v4",
             "gemma4",
             "glm45",
+            "muse_glimmer",
             "nano_v3",
             "nemotron_v3",
             "poolside_v1",
@@ -132,7 +133,24 @@ _ARGUMENTS = {
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
-    "generation-config": ArgumentSpec("--generation-config", validate=one_of("vllm")),
+    "generation-config": ArgumentSpec(
+        "--generation-config", validate=one_of("auto", "vllm")
+    ),
+    "allowed-local-media-path": ArgumentSpec(
+        "--allowed-local-media-path", validate=one_of("/inputs")
+    ),
+    "limit-mm-per-prompt": ArgumentSpec(
+        "--limit-mm-per-prompt", validate=lambda value: _limited_mm_per_prompt(value)
+    ),
+    "chat-template-content-format": ArgumentSpec(
+        "--chat-template-content-format", validate=one_of("openai")
+    ),
+    "mm-processor-cache-gb": ArgumentSpec(
+        "--mm-processor-cache-gb", validate=integer(0, 128)
+    ),
+    "no-enable-prefix-caching": ArgumentSpec(
+        "--no-enable-prefix-caching", takes_value=False
+    ),
     "trust-remote-code": ArgumentSpec("--trust-remote-code", takes_value=False),
     "host": ArgumentSpec("--host", emit=False, validate=one_of("0.0.0.0")),
     "port": ArgumentSpec("--port", emit=False, validate=integer(1024, 65_535)),
@@ -162,6 +180,22 @@ class VllmHarnessCompiler:
         _require_role_artifacts(recipe, role, artifact_mounts)
         require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", primary_mount))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
+        if parsed.get("--allowed-local-media-path") is not None:
+            interfaces = recipe.get("interfaces")
+            input_contract = (
+                interfaces[0].get("input")
+                if type(interfaces) is list
+                and len(interfaces) == 1
+                and isinstance(interfaces[0], Mapping)
+                else None
+            )
+            if (
+                not isinstance(input_contract, Mapping)
+                or input_contract.get("path") != "/inputs"
+            ):
+                raise HarnessCompileError(
+                    "vLLM local media path requires the declared /inputs contract"
+                )
         _validate_reasoning_plugin(parsed, primary_mount=primary_mount)
         _validate_speculative_config(
             parsed.get("--speculative-config"),
@@ -507,6 +541,23 @@ def _json_object(value: str) -> bool:
     except (json.JSONDecodeError, ValueError):
         return False
     return isinstance(parsed, Mapping)
+
+
+def _limited_mm_per_prompt(value: str) -> bool:
+    try:
+        parsed = json.loads(
+            value,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return (
+        isinstance(parsed, Mapping)
+        and bool(parsed)
+        and set(parsed) <= {"image", "video"}
+        and all(type(limit) is int and 0 <= limit <= 16 for limit in parsed.values())
+    )
 
 
 def _reject_json_constant(value: str) -> object:

@@ -554,17 +554,22 @@ def projection(
     ):
         raise HarnessCompileError("runtime distribution security is invalid")
     distribution_capabilities = distribution.get("capabilities")
-    distributed_vllm = (
-        distribution_capabilities.get("distributed_vllm")
-        if isinstance(distribution_capabilities, Mapping)
-        else None
-    )
+    distributed_runtime = None
+    if isinstance(distribution_capabilities, Mapping):
+        distributed_runtime = next(
+            (
+                distribution_capabilities.get(name)
+                for name in ("distributed_vllm", "distributed_sglang")
+                if isinstance(distribution_capabilities.get(name), Mapping)
+            ),
+            None,
+        )
     topology = recipe.get("topology")
     _require_recipe_mounts(
         recipe,
         str(security["user"]),
-        allow_host_network=isinstance(distributed_vllm, Mapping)
-        and distributed_vllm.get("verified") is True
+        allow_host_network=isinstance(distributed_runtime, Mapping)
+        and distributed_runtime.get("verified") is True
         and isinstance(topology, Mapping)
         and topology.get("mode") == "distributed",
     )

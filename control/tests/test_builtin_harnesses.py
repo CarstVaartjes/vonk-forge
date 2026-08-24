@@ -16,6 +16,7 @@ from vonk_control.catalog_contract import (
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
 from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.sglang import SglangHarnessCompiler
 from vonk_control.harnesses.vllm import VllmHarnessCompiler
 from vonk_control.models import Base
 
@@ -364,6 +365,107 @@ def _multi_artifact_vllm_recipe(speculative_config: str) -> dict[str, object]:
         {"name": "speculative-config", "value": speculative_config}
     )
     return recipe
+
+
+def _distributed_sglang_inputs() -> tuple[dict[str, object], dict[str, object]]:
+    recipe = _recipe("sglang")
+    recipe["artifacts"][0].update({"id": "weights", "roles": ["entrypoint", "worker"]})
+    endpoint_role = copy.deepcopy(recipe["topology"]["roles"][0])
+    endpoint_role["artifacts"] = ["weights"]
+    worker_role = copy.deepcopy(endpoint_role)
+    worker_role.update({"name": "worker", "count": 1, "endpoint_owner": False})
+    recipe["topology"].update(
+        {
+            "name": "dual-sglang",
+            "mode": "distributed",
+            "node_count": 2,
+            "roles": [endpoint_role, worker_role],
+            "parallelism": {
+                "world_size": 2,
+                "tensor": 2,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "native",
+            },
+            "fabric": {
+                "connectivity": "connected",
+                "minimum_bandwidth_mbps": 200_000,
+            },
+            "start_order": ["entrypoint", "worker"],
+            "stop_order": ["entrypoint", "worker"],
+        }
+    )
+    tensor = next(
+        item
+        for item in recipe["runtime"]["arguments"]
+        if item["name"] == "tensor-parallel-size"
+    )
+    tensor["value"] = 2
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "trust-remote-code", "value": True},
+            {"name": "quantization", "value": "modelopt_fp4"},
+            {"name": "attention-backend", "value": "triton"},
+            {"name": "page-size", "value": 128},
+            {"name": "fp4-gemm-backend", "value": "marlin"},
+            {"name": "moe-runner-backend", "value": "marlin"},
+            {"name": "mamba-radix-cache-strategy", "value": "extra_buffer"},
+            {"name": "mem-fraction-static", "value": "0.85"},
+            {"name": "swa-full-tokens-ratio", "value": "0.1"},
+            {"name": "mamba-full-memory-ratio", "value": "0.1"},
+            {"name": "enable-multimodal", "value": True},
+            {"name": "disable-prefill-cuda-graph", "value": True},
+            {"name": "reasoning-parser", "value": "inkling"},
+            {"name": "tool-call-parser", "value": "inkling"},
+            {"name": "served-model-name", "value": "inkling-small"},
+        ]
+    )
+    recipe["runtime"]["environment"] = [
+        {"name": "SGLANG_ENABLE_UNIFIED_RADIX_TREE", "value": "1"}
+    ]
+    recipe["runtime"]["security"]["host_network"] = True
+    rank_environment = {
+        "GLOO_SOCKET_IFNAME": "enP7s7",
+        "NCCL_IB_GID_INDEX": "3",
+        "NCCL_IB_HCA": "=rocep1s0f0:1,rocep1s0f1:1",
+        "NCCL_SOCKET_IFNAME": "=enP7s7",
+        "TP_SOCKET_IFNAME": "enP7s7",
+    }
+    harness = _harness_document("sglang")
+    distribution = _distribution("sglang", harness)
+    distribution["capabilities"] = {
+        "distributed_sglang": {
+            "verified": True,
+            "mechanism": "sglang-native",
+            "topology_mode": "distributed",
+            "node_count": 2,
+            "world_size": 2,
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "data_parallel_size": 1,
+            "fabric": "nccl-roce",
+            "endpoint_role": "entrypoint",
+            "worker_role": "worker",
+            "rank_loss_withdraws_endpoint": True,
+            "launch": {
+                "rendezvous": {
+                    "local_address_environment": "VONK_LOCAL_ADDR",
+                    "master_address_environment": "VONK_MASTER_ADDR",
+                    "master_port_environment": "VONK_MASTER_PORT",
+                    "master_role": "entrypoint",
+                },
+                "rank_profiles": [
+                    {
+                        "rank": 0,
+                        "role": "entrypoint",
+                        "environment": rank_environment,
+                    },
+                    {"rank": 1, "role": "worker", "environment": rank_environment},
+                ],
+            },
+        }
+    }
+    return recipe, distribution
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
@@ -734,6 +836,70 @@ def test_vllm_accepts_text_only_multimodal_mode() -> None:
     assert "--language-model-only" in projection.command
 
 
+def test_vllm_accepts_bounded_offline_multimodal_recipe_arguments() -> None:
+    recipe = _recipe("vllm")
+    recipe["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": False,
+        "media_types": ["image/png", "video/mp4"],
+        "max_bytes": 100_000_000,
+    }
+    recipe["runtime"]["security"]["mounts"].append(
+        {"source": "inputs", "target": "/inputs", "read_only": True}
+    )
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "allowed-local-media-path", "value": "/inputs"},
+            {"name": "limit-mm-per-prompt", "value": '{"image":4,"video":1}'},
+            {"name": "chat-template-content-format", "value": "openai"},
+            {"name": "generation-config", "value": "auto"},
+            {"name": "mm-processor-cache-gb", "value": 0},
+            {"name": "no-enable-prefix-caching", "value": True},
+            {"name": "reasoning-parser", "value": "muse_glimmer"},
+            {"name": "tool-call-parser", "value": "muse_glimmer"},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.input_mount is not None
+    assert projection.input_mount.target == "/inputs"
+    assert "--no-enable-prefix-caching" in projection.command
+    assert projection.command[projection.command.index("--generation-config") + 1] == (
+        "auto"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "{}",
+        '{"audio":1}',
+        '{"image":17}',
+        '{"image":true}',
+        '{"image":1,"image":2}',
+    ],
+)
+def test_vllm_rejects_unbounded_or_ambiguous_multimodal_limits(value: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "limit-mm-per-prompt", "value": value}
+    )
+
+    with pytest.raises(HarnessCompileError, match="argument value"):
+        _compile("vllm", recipe=recipe)
+
+
+def test_vllm_local_media_path_requires_declared_input_mount() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "allowed-local-media-path", "value": "/inputs"}
+    )
+
+    with pytest.raises(HarnessCompileError, match="declared /inputs"):
+        _compile("vllm", recipe=recipe)
+
+
 def test_vllm_accepts_poolside_reasoning_parser() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append(
@@ -923,6 +1089,60 @@ def test_vllm_projects_a_verified_ray_adapter_contract() -> None:
     backend = projection.command.index("--distributed-executor-backend")
     assert projection.command[backend + 1] == "ray"
     assert "--headless" in projection.command
+
+
+def test_sglang_projects_verified_native_distributed_inkling_contract() -> None:
+    recipe, distribution = _distributed_sglang_inputs()
+
+    projection = SglangHarnessCompiler().compile(
+        recipe,
+        distribution,
+        {},
+        {},
+        recipe["topology"],
+        "worker",
+        1,
+    )
+
+    assert projection.command[projection.command.index("--nnodes") + 1] == "2"
+    assert projection.command[projection.command.index("--node-rank") + 1] == "1"
+    assert projection.command[projection.command.index("--dist-init-addr") + 1] == (
+        "VONK_MASTER_ADDR:VONK_MASTER_PORT"
+    )
+    assert projection.command[projection.command.index("--served-model-name") + 1] == (
+        "inkling-small"
+    )
+    assert "--disable-prefill-cuda-graph" in projection.command
+    assert "--enable-multimodal" in projection.command
+    assert ("SGLANG_ENABLE_UNIFIED_RADIX_TREE", "1") in projection.environment
+    assert ("NCCL_IB_GID_INDEX", "3") in projection.environment
+
+
+@pytest.mark.parametrize("missing", ["patch", "capability", "profile"])
+def test_sglang_distributed_launch_fails_closed_without_exact_authority(
+    missing: str,
+) -> None:
+    recipe, distribution = _distributed_sglang_inputs()
+    patch: dict[str, object] | None = {}
+    if missing == "patch":
+        patch = None
+    elif missing == "capability":
+        distribution.pop("capabilities")
+    else:
+        distribution["capabilities"]["distributed_sglang"]["launch"][
+            "rank_profiles"
+        ].pop()
+
+    with pytest.raises(HarnessCompileError, match="distributed SGLang|launch contract"):
+        SglangHarnessCompiler().compile(
+            recipe,
+            distribution,
+            patch,
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
 
 
 def test_vllm_accepts_gemma4_chat_protocol() -> None:
@@ -1136,7 +1356,8 @@ def test_builtin_harness_rejects_unsupported_topology_modes(
 def test_distributed_engine_modes_are_neither_advertised_nor_compiled(
     slug: str, mode: str
 ) -> None:
-    assert _harness_document(slug)["topology_modes"] == ["single"]
+    expected_modes = ["single", "distributed"] if slug == "sglang" else ["single"]
+    assert _harness_document(slug)["topology_modes"] == expected_modes
     recipe = _recipe(slug)
     recipe["topology"]["mode"] = mode
 

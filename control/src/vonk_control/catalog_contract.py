@@ -210,13 +210,27 @@ def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
                 "image manifest digest must match the pinned image",
             )
     capabilities = document.get("capabilities")
-    distributed = (
-        capabilities.get("distributed_vllm")
+    distributed_capabilities = (
+        tuple(
+            (name, capabilities.get(name))
+            for name in ("distributed_vllm", "distributed_sglang")
+            if isinstance(capabilities.get(name), Mapping)
+        )
         if isinstance(capabilities, Mapping)
-        else None
+        else ()
     )
-    if distributed is None:
+    if not distributed_capabilities:
         return
+    if len(distributed_capabilities) != 1:
+        raise CatalogContractError(
+            "catalog.distributed_runtime",
+            "capabilities",
+            "runtime distribution must bind exactly one distributed harness capability",
+        )
+    capability_name, distributed = distributed_capabilities[0]
+    assert isinstance(distributed, Mapping)
+    harness_slug = "vllm" if capability_name == "distributed_vllm" else "sglang"
+    label = "vLLM" if capability_name == "distributed_vllm" else "SGLang"
     harness = document.get("implements_harness")
     dimensions = tuple(
         distributed.get(name)
@@ -228,16 +242,16 @@ def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
     )
     if (
         not isinstance(harness, Mapping)
-        or harness.get("slug") != "vllm"
+        or harness.get("slug") != harness_slug
         or any(type(value) is not int for value in dimensions)
         or dimensions[0] * dimensions[1] * dimensions[2]
         != distributed.get("world_size")
         or distributed.get("world_size") != distributed.get("node_count")
     ):
         raise CatalogContractError(
-            "catalog.distributed_vllm",
-            "capabilities.distributed_vllm",
-            "distributed vLLM capability must bind vLLM and an exact rank topology",
+            f"catalog.{capability_name}",
+            f"capabilities.{capability_name}",
+            f"distributed {label} capability must bind {label} and an exact rank topology",
         )
     launch = distributed.get("launch")
     rendezvous = launch.get("rendezvous") if isinstance(launch, Mapping) else None
@@ -257,9 +271,9 @@ def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
         or any(profile.get("role") != worker_role for profile in profiles[1:])
     ):
         raise CatalogContractError(
-            "catalog.distributed_vllm_launch",
-            "capabilities.distributed_vllm.launch",
-            "distributed vLLM launch profiles must bind every exact rank and rendezvous role",
+            f"catalog.{capability_name}_launch",
+            f"capabilities.{capability_name}.launch",
+            f"distributed {label} launch profiles must bind every exact rank and rendezvous role",
         )
 
 
