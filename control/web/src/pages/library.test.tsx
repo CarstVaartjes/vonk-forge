@@ -109,6 +109,74 @@ test("uses a friendly model name and keeps its immutable identity in copyable Te
   expect(within(modelRow).getByRole("button", {name: "Copy Model digest"})).toBeVisible();
 });
 
+test("shows catalog releases across view modes and counts updates outside the loaded window", async () => {
+  history.replaceState(null, "", "/library");
+  const update = publicRecipe({
+    slug: "qwen-chat",
+    title: "Qwen Chat catalog recipe",
+    release_version: "1.2.0",
+    local: {status: "update-available", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "a".repeat(64), release_version: "1.0.0"},
+  });
+  const sameSlugWrongIdentity = publicRecipe({
+    slug: "qwen-code",
+    title: "Different Qwen Code recipe",
+    uri: `vonk://catalog/vonk-forge/qwen-code@sha256:${"c".repeat(64)}`,
+    content_sha256: "c".repeat(64),
+    release_version: "3.0.0",
+    local: {status: "update-available", recipe_id: "another-local-recipe", revision_number: 1, content_sha256: "d".repeat(64), release_version: "2.0.0"},
+  });
+  const listPublicRecipes = vi.fn(async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "e".repeat(40), recipes: [update, sameSlugWrongIdentity]}));
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe: async () => fullLibraryDetail, listPublicRecipes} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByRole("group", {name: "2 catalog updates available"})).toBeVisible();
+  expect(screen.getByRole("complementary", {name: "Available catalog updates"})).toHaveTextContent("2 catalog updates available");
+  expect(screen.getByRole("complementary", {name: "Available catalog updates"})).toHaveTextContent("including recipes outside this loaded window");
+  await user.click(screen.getByRole("link", {name: /Qwen 3/}));
+  const recipes = screen.getByRole("region", {name: /Recipes for/});
+  const chatRow = within(recipes).getByRole("link", {name: /^Qwen ChatQwen Chat description/}).closest("article")!;
+  expect(within(chatRow).getByText("Update available · v1.0.0 → v1.2.0")).toBeVisible();
+  const review = within(chatRow).getByRole("link", {name: /Review update.*Qwen Chat/});
+  expect(review).toHaveAttribute("href", `/library/import?recipe=${encodeURIComponent(update.uri)}`);
+
+  await user.click(screen.getByRole("button", {name: "Compact"}));
+  const codeRow = screen.getByRole("link", {name: "Qwen Code"}).closest("article")!;
+  expect(within(codeRow).getByText("No catalog release link")).toBeVisible();
+  await user.click(screen.getByRole("checkbox", {name: /Compare.*Qwen Chat/}));
+  await user.click(screen.getByRole("button", {name: /Compare \(1\)/}));
+  const comparison = screen.getByRole("region", {name: "Recipe comparison"});
+  const catalogReleaseRow = within(comparison).getByRole("row", {name: /Catalog release/});
+  expect(within(catalogReleaseRow).getByText("Update available")).toBeVisible();
+  expect(within(catalogReleaseRow).getByText("v1.0.0 → v1.2.0")).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Browse"}));
+  await user.click(within(screen.getByRole("region", {name: /Recipes for/})).getByRole("link", {name: /^Qwen ChatQwen Chat description/}));
+  const releaseStatus = await screen.findByRole("region", {name: "Catalog release status"});
+  expect(within(releaseStatus).getByText("Update available · v1.0.0 → v1.2.0")).toBeVisible();
+  expect(within(releaseStatus).getByRole("link", {name: "Review changelog and update"})).toHaveAttribute("href", `/library/import?recipe=${encodeURIComponent(update.uri)}`);
+  expect(listPublicRecipes).toHaveBeenCalledWith(expect.any(AbortSignal));
+});
+
+test("keeps the local Library usable when the catalog version check fails and retries", async () => {
+  history.replaceState(null, "", "/library");
+  const listPublicRecipes = vi.fn()
+    .mockRejectedValueOnce(new Error("catalog temporarily unavailable"))
+    .mockResolvedValue({repository: "CarstVaartjes/vonk-forge-recipes", commit: "f".repeat(40), recipes: []});
+  const api = {librarySnapshot: async () => librarySnapshot, listPublicRecipes} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByRole("link", {name: /Qwen 3/})).toBeVisible();
+  const error = await screen.findByRole("alert");
+  expect(error).toHaveTextContent("Catalog update check failed: catalog temporarily unavailable");
+  expect(screen.getByRole("group", {name: "Catalog update check unavailable"})).toBeVisible();
+  await user.click(within(error).getByRole("button", {name: "Retry update check"}));
+  await waitFor(() => expect(listPublicRecipes).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole("group", {name: "0 catalog updates available"})).toBeVisible();
+  expect(screen.queryByText(/Catalog update check failed/)).not.toBeInTheDocument();
+});
+
 test("persists the selected Library view mode across remounts", async () => {
   history.replaceState(null, "", "/library");
   const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;

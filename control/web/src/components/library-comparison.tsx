@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from "react";
-import type {LibraryApi, LibraryRecipeDetail, LibraryRecipeSummary} from "../api/types";
+import type {LibraryApi, LibraryRecipeDetail, LibraryRecipeSummary, PublicRecipe} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
@@ -21,6 +21,18 @@ function status(recipe: LibraryRecipeSummary): {label: string; tone: string} {
   return {label: "Needs review", tone: "warning"};
 }
 
+function catalogRelease(recipe: PublicRecipe | undefined): {label: string; detail: string; tone: string} {
+  if (!recipe) return {label: "No catalog release match", detail: "Not linked in this catalog snapshot", tone: "neutral"};
+  const localVersion = recipe.local.release_version ? `v${recipe.local.release_version}` : "Unknown local version";
+  const catalogVersion = recipe.release_version ? `v${recipe.release_version}` : "Immutable catalog revision";
+  if (recipe.local.status === "update-available") return {label: "Update available", detail: `${localVersion} → ${catalogVersion}`, tone: "warning"};
+  if (recipe.local.status === "current") return {label: "Catalog current", detail: catalogVersion, tone: "healthy"};
+  if (recipe.local.status === "local-ahead") return {label: "Local is newer", detail: `${localVersion} · catalog ${catalogVersion}`, tone: "warning"};
+  if (recipe.local.status === "different-revision") return {label: "Revision differs", detail: "Review immutable history", tone: "warning"};
+  if (recipe.local.status === "conflict") return {label: "Identity conflict", detail: "Review immutable identity", tone: "warning"};
+  return {label: "Not imported", detail: catalogVersion, tone: "neutral"};
+}
+
 function ResourceBar({label, value, maximum}: {label: string; value?: number; maximum: number}) {
   const width = value === undefined || value === 0 || maximum === 0 ? 0 : Math.max(5, Math.round(value / maximum * 100));
   return <div className="comparison-resource" aria-label={`${label}: ${value === undefined ? "Not declared" : formatBytes(value)}`}>
@@ -40,8 +52,9 @@ function TopologyGraphic({detail, summary}: {detail?: LibraryRecipeDetail; summa
   </div>;
 }
 
-export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
+export function LibraryComparison({api, publicRecipes, recipes, selectedIds, onToggle}: {
   api: LibraryApi;
+  publicRecipes: PublicRecipe[];
   recipes: LibraryRecipeSummary[];
   selectedIds: string[];
   onToggle(recipeId: string): void;
@@ -53,6 +66,7 @@ export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
     const recipe = recipes.find(item => item.recipe_id === id);
     return recipe ? [recipe] : [];
   }), [recipes, selectedIds]);
+  const publicByLocalRecipe = useMemo(() => new Map(publicRecipes.flatMap(item => item.local.recipe_id ? [[item.local.recipe_id, item] as const] : [])), [publicRecipes]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,6 +122,7 @@ export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
         </th>)}</tr></thead>
         <tbody>
           <tr><th scope="row">Local status</th>{selected.map(recipe => { const current = status(recipe); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{recipe.installation_total_count} installed · {recipe.run_total_count} active</small></td>; })}</tr>
+          <tr><th scope="row">Catalog release</th>{selected.map(recipe => { const current = catalogRelease(publicByLocalRecipe.get(recipe.recipe_id)); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{current.detail}</small></td>; })}</tr>
           <tr><th scope="row">Spark topology</th>{selected.map(recipe => <td key={recipe.recipe_id}>{errors[recipe.recipe_id] ? <div className="comparison-load-error" role="alert"><span>{errors[recipe.recipe_id]}</span><button type="button" className="button secondary" onClick={() => setRetryAttempt(value => value + 1)}>Retry {recipe.title} details</button></div> : details[recipe.recipe_id] ? <TopologyGraphic detail={details[recipe.recipe_id]} summary={recipe}/> : <span role="status">Loading topology…</span>}</td>)}</tr>
           <tr><th scope="row">Startup memory</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Startup memory" value={topologyMemory(details[recipe.recipe_id])} maximum={memoryMaximum}/></td>)}</tr>
           <tr><th scope="row">Disk envelope</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Disk envelope" value={topologyDisk(details[recipe.recipe_id])} maximum={diskMaximum}/></td>)}</tr>
