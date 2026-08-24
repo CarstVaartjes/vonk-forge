@@ -63,6 +63,12 @@ test("loads bounded history ranges and renders accessible summaries", async () =
   expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toHaveAccessibleDescription("Mean 25%; latest mean 30%; reported range 20% to 30%; 2 reported samples.");
   expect(screen.getByRole("img", {name: "Spark One available memory history"})).toHaveAccessibleDescription(/75 B/);
   expect(screen.getByRole("img", {name: "Spark One temperature history"})).toHaveAccessibleDescription(/42 °C/);
+  expect(screen.getByText("GPU utilization")).toBeVisible();
+  expect(screen.getByText("Available memory")).toBeVisible();
+  expect(screen.getByText("Temperature")).toBeVisible();
+  expect(screen.getByText("Scale 0%–100%")).toBeVisible();
+  expect(screen.getByText("Scale 0 B–100 B")).toBeVisible();
+  expect(screen.getByText("Scale 0 °C–100 °C")).toBeVisible();
   expect(screen.getAllByText(/Mean 25%/).length).toBeGreaterThan(0);
   expect(calls[0]).toMatchObject({
     start: "2026-08-15T11:00:00.000Z",

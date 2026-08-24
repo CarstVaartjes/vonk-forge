@@ -76,7 +76,8 @@ test("desktop catalog is accessible, filterable and explains candidate qualifica
 test("compact preference, comparison and graphical requirements stay human-readable", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/import");
-  await expect(page.getByRole("button", {name: "Cards"})).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", {name: /Show filters/})).toBeHidden();
   await page.getByRole("button", {name: "Compact"}).click();
   await expect(page.locator(".public-import-recipe-list")).toHaveClass(/is-compact/);
   await page.reload();
@@ -100,7 +101,19 @@ test("compact preference, comparison and graphical requirements stay human-reada
 
 test("mobile uses Catalog → Review → Confirm and preserves usable targets", async ({page}, testInfo) => {
   await page.setViewportSize({width: 360, height: 800});
-  await page.goto("/library/import");
+  await page.goto("/library/import?q=DeepSeek&sparks=2");
+  const filterToggle = page.getByRole("button", {name: "Show filters 2 applied"});
+  await expect(filterToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("complementary", {name: "Recipe filters"})).toBeHidden();
+  await expect(page.getByRole("heading", {name: "DeepSeek V3.1 2×Spark"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "GLM 5.2 3×Spark"})).toHaveCount(0);
+  await filterToggle.click();
+  await expect(page.getByRole("button", {name: "Hide filters 2 applied"})).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("complementary", {name: "Recipe filters"})).toBeVisible();
+  await expect(page.getByRole("searchbox", {name: "Find a recipe"})).toHaveValue("DeepSeek");
+  await expect(page.getByLabel("Filter by required Sparks")).toHaveValue("2");
+  await page.getByRole("button", {name: "Hide filters 2 applied"}).click();
+  await expect(page).toHaveURL(/q=DeepSeek&sparks=2/);
   await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();
   await expect(page.getByRole("complementary", {name: "Selected recipe review"})).toBeVisible();
   await expect(page.getByRole("region", {name: "Choose a recipe"})).toBeHidden();
@@ -117,6 +130,13 @@ test("responsive breakpoints do not create document overflow", async ({page}) =>
   for (const width of [320, 360, 768, 895, 896, 1280, 1920]) {
     await page.setViewportSize({width, height: 900});
     await page.goto("/library/import");
+    if (width <= 896) {
+      await expect(page.getByRole("button", {name: "Show filters"})).toBeVisible();
+      await expect(page.getByRole("complementary", {name: "Recipe filters"})).toBeHidden();
+    } else {
+      await expect(page.getByRole("button", {name: "Show filters"})).toBeHidden();
+      await expect(page.getByRole("complementary", {name: "Recipe filters"})).toBeVisible();
+    }
     await expect.poll(() => page.evaluate(() => ({body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth}))).toEqual({body: width, root: width, viewport: width});
   }
 });

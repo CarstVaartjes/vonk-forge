@@ -1,6 +1,7 @@
 import {useMemo, useState} from "react";
 import type {MouseEvent} from "react";
 import type {LibraryApi, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe} from "../api/types";
+import {formatBytes} from "../lib/fleet";
 import type {LibraryRoute} from "../lib/library-route";
 import {modelLibraryPath, modelVersionKey, recipeLibraryPath, unlinkedLibraryPath} from "../lib/library-route";
 import {LibraryComparison} from "./library-comparison";
@@ -55,6 +56,15 @@ function releaseContextLabel(recipe: PublicRecipe): string {
   return "Not linked to this local recipe";
 }
 
+function qualificationLabel(recipe: PublicRecipe): string {
+  return recipe.qualification === "candidate" ? "Candidate" : "Accepted";
+}
+
+function QualificationBadge({recipe}: {recipe: PublicRecipe}) {
+  const label = qualificationLabel(recipe);
+  return <span className={`library-qualification qualification-${recipe.qualification}`} title={recipe.qualification_detail}>{label}<span className="visually-hidden"> catalog qualification</span></span>;
+}
+
 function releaseReviewPath(recipe: PublicRecipe): string {
   const search = new URLSearchParams({recipe: recipe.uri});
   return `/library/import?${search.toString()}`;
@@ -92,7 +102,7 @@ function RecipeEntry({active, catalogRecipe, onNavigate, onToggle, recipe, selec
       <strong>{recipe.title}</strong>
       <span>{recipe.description}</span>
       <small>{recipe.topology_name ? `${humanizeIdentifier(recipe.topology_name)} topology` : "No valid topology"} · {recipeStatus(recipe)}</small>
-      {catalogRecipe && <small className={`library-release-label status-${catalogRecipe.local.status}`}>{releaseContextLabel(catalogRecipe)}</small>}
+      {catalogRecipe && <small className="library-catalog-scan"><QualificationBadge recipe={catalogRecipe}/><span className={`library-release-label status-${catalogRecipe.local.status}`}>{releaseContextLabel(catalogRecipe)}</span></small>}
     </a>
     <div className="library-row-tools">
       {catalogRecipe?.local.status === "update-available" && <a aria-label={`Review update for ${recipe.title}`} className="library-release-link" href={releaseReviewPath(catalogRecipe)} onClick={event => onNavigate(event, releaseReviewPath(catalogRecipe))}>Review update</a>}
@@ -111,7 +121,8 @@ function RecipeReleaseContext({onNavigate, recipe}: {onNavigate: Navigate; recip
   const update = recipe.local.status === "update-available";
   const needsReview = ["different-revision", "local-ahead", "conflict"].includes(recipe.local.status);
   return <section className={`library-release-context status-${recipe.local.status}`} aria-label="Catalog release status">
-    <div><span>Catalog release</span><strong>{releaseContextLabel(recipe)}</strong></div>
+    <div className="library-release-summary"><div><span>Catalog release</span><strong>{releaseContextLabel(recipe)}</strong></div><QualificationBadge recipe={recipe}/></div>
+    <p className="library-qualification-detail"><strong>{qualificationLabel(recipe)} qualification.</strong> {recipe.qualification_detail}</p>
     {update && <p>The catalog has a newer immutable revision. Review every release note and required runtime action before replacing the local revision.</p>}
     {needsReview && <p>The local and catalog histories do not form a straightforward update. Review their immutable identities before taking action.</p>}
     {recipe.local.status === "current" && <p>This local digest matches the current catalog release.</p>}
@@ -167,7 +178,7 @@ function flattenedRecipes(snapshot: LibrarySnapshot): RecipeWithModel[] {
   ];
 }
 
-export function LibraryBrowser({api, catalogError, catalogLoading, detail, detailError, detailLoading, onBusyChange, onNavigate, onRefresh, onRetryCatalog, onRetryDetail, publicRecipes, query, route, snapshot, windowed}: {
+export function LibraryBrowser({api, catalogError, catalogLoading, detail, detailError, detailLoading, onBusyChange, onClearSearch, onNavigate, onRefresh, onRetryCatalog, onRetryDetail, publicRecipes, query, route, snapshot, windowed}: {
   api: LibraryApi;
   catalogError: string;
   catalogLoading: boolean;
@@ -175,6 +186,7 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
   detailError: string;
   detailLoading: boolean;
   onBusyChange?(busy: boolean): void;
+  onClearSearch(): void;
   onNavigate: Navigate;
   onRefresh(signal: AbortSignal): Promise<void>;
   onRetryCatalog(): void;
@@ -200,6 +212,8 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
   const selectionFull = compareIds.length >= 3;
   const publicByLocalRecipe = useMemo(() => new Map(publicRecipes.flatMap(item => item.local.recipe_id ? [[item.local.recipe_id, item] as const] : [])), [publicRecipes]);
   const catalogUpdateCount = new Set(publicRecipes.flatMap(item => item.local.status === "update-available" && item.local.recipe_id ? [item.local.recipe_id] : [])).size;
+  const hasSearch = query.trim().length > 0;
+  const hasVisibleResults = visibleSnapshot.models.length > 0 || visibleSnapshot.unlinked_recipes.length > 0;
 
   function selectViewMode(mode: LibraryViewMode) {
     setViewMode(mode);
@@ -225,7 +239,14 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
     {catalogError && <div className="library-catalog-state is-error" role="alert"><span>Catalog update check failed: {catalogError}</span><button type="button" className="button secondary" onClick={onRetryCatalog}>Retry update check</button></div>}
     {!catalogLoading && !catalogError && catalogUpdateCount > 0 && <aside className="library-update-summary" aria-label="Available catalog updates"><div><strong>{catalogUpdateCount} catalog update{catalogUpdateCount === 1 ? "" : "s"} available</strong><span>Across all local catalog links, including recipes outside this loaded window.</span></div><a className="button secondary" href="/library/import?local=update-available" onClick={event => onNavigate(event, "/library/import?local=update-available")}>Review all updates</a></aside>}
 
-    {viewMode === "browse" && <div className={`library-browser route-${route.kind}`}>
+    {viewMode === "browse" && hasSearch && !hasVisibleResults && <section className="library-filter-empty" aria-label="No Library search results">
+      <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
+      <h3>No matching models or recipes</h3>
+      <p>Nothing in the loaded Library window matches “{query.trim()}”. Clear the search to browse every available local recipe.</p>
+      <button type="button" className="button secondary" onClick={onClearSearch}>Clear Library search</button>
+    </section>}
+
+    {viewMode === "browse" && (!hasSearch || hasVisibleResults) && <div className={`library-browser route-${route.kind}`}>
       <section className="library-pane library-models" aria-label="Models">
         <div className="library-pane-heading"><div><p className="library-step">1</p><h3>Models</h3></div><small>Derived from recipes</small></div>
         <div className="library-list">
@@ -273,17 +294,20 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
     {viewMode === "compact" && <section className="library-compact" aria-label="Compact recipe list">
       <div className="library-compact-heading"><div><p className="fleet-kicker">Loaded window</p><h3>All recipes</h3></div><span>{visibleFlatRecipes.length} shown</span></div>
       <div className="library-compact-list">
-        {visibleFlatRecipes.map(({model: itemModel, recipe: item}) => <article className="library-compact-row" key={item.recipe_id}>
-          <div className="library-compact-primary"><a href={recipeLibraryPath(item.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(item.recipe_id))}><strong>{item.title}</strong></a><span>{itemModel ? modelLabel(itemModel) : "Unlinked model"}</span></div>
-          <div className="library-compact-facts"><span>{item.topology_name ? humanizeIdentifier(item.topology_name) : "No topology"}</span><span>{recipeStatus(item)}</span><span>{publicByLocalRecipe.get(item.recipe_id) ? releaseContextLabel(publicByLocalRecipe.get(item.recipe_id)!) : "No catalog release link"}</span><span>{item.capabilities.length ? item.capabilities.map(humanizeIdentifier).join(", ") : "No capabilities"}</span></div>
-          <CompareControl disabled={selectionFull} recipe={item} selected={compareIds.includes(item.recipe_id)} onToggle={toggleCompare}/>
-          <TechnicalDetails compact items={[
-            {label: "Recipe ID", value: item.recipe_id},
-            {label: "Recipe slug", value: item.slug},
-            {label: "Revision ID", value: item.selected_revision?.id ?? ""},
-            {label: "Content digest", value: item.selected_revision?.content_sha256 ?? ""},
-          ]}/>
-        </article>)}
+        {visibleFlatRecipes.map(({model: itemModel, recipe: item}) => {
+          const catalogRecipe = publicByLocalRecipe.get(item.recipe_id);
+          return <article className="library-compact-row" key={item.recipe_id}>
+            <div className="library-compact-primary"><a href={recipeLibraryPath(item.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(item.recipe_id))}><strong>{item.title}</strong></a><span>{itemModel ? modelLabel(itemModel) : "Unlinked model"}</span></div>
+            <div className="library-compact-facts"><span>{item.topology_name ? humanizeIdentifier(item.topology_name) : "No topology"}</span><span>{recipeStatus(item)}</span>{catalogRecipe ? <><QualificationBadge recipe={catalogRecipe}/><span>{releaseContextLabel(catalogRecipe)}</span><span>{catalogRecipe.node_count} {catalogRecipe.node_count === 1 ? "Spark" : "Sparks"}</span><span>{formatBytes(catalogRecipe.expected_download_bytes)} download</span><span>{formatBytes(catalogRecipe.maximum_runtime_memory_bytes_per_node)} memory / Spark</span></> : <span>No catalog release link</span>}<span>{item.capabilities.length ? item.capabilities.map(humanizeIdentifier).join(", ") : "No capabilities"}</span></div>
+            <CompareControl disabled={selectionFull} recipe={item} selected={compareIds.includes(item.recipe_id)} onToggle={toggleCompare}/>
+            <TechnicalDetails compact items={[
+              {label: "Recipe ID", value: item.recipe_id},
+              {label: "Recipe slug", value: item.slug},
+              {label: "Revision ID", value: item.selected_revision?.id ?? ""},
+              {label: "Content digest", value: item.selected_revision?.content_sha256 ?? ""},
+            ]}/>
+          </article>;
+        })}
         {visibleFlatRecipes.length === 0 && <p className="library-placeholder">No recipes match this search.</p>}
       </div>
     </section>}
@@ -291,10 +315,13 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
     {viewMode === "compare" && <>
       <section className="library-compare-picker" aria-label="Choose recipes to compare">
         <div className="library-compact-heading"><div><p className="fleet-kicker">Select up to three</p><h3>Comparison set</h3></div><span>{compareIds.length} selected</span></div>
-        <div className="library-compare-picker-list">{visibleFlatRecipes.map(({model: itemModel, recipe: item}) => <label key={item.recipe_id} className="library-compare-option">
-          <input type="checkbox" checked={compareIds.includes(item.recipe_id)} disabled={selectionFull && !compareIds.includes(item.recipe_id)} onChange={() => toggleCompare(item.recipe_id)}/>
-          <span><strong>{item.title}</strong><small>{itemModel ? modelLabel(itemModel) : "Unlinked model"} · {item.topology_name ? humanizeIdentifier(item.topology_name) : "No topology"}</small></span>
-        </label>)}</div>
+        <div className="library-compare-picker-list">{visibleFlatRecipes.map(({model: itemModel, recipe: item}) => {
+          const catalogRecipe = publicByLocalRecipe.get(item.recipe_id);
+          return <label key={item.recipe_id} className="library-compare-option">
+            <input type="checkbox" checked={compareIds.includes(item.recipe_id)} disabled={selectionFull && !compareIds.includes(item.recipe_id)} onChange={() => toggleCompare(item.recipe_id)}/>
+            <span><strong>{item.title}</strong><small>{itemModel ? modelLabel(itemModel) : "Unlinked model"} · {item.topology_name ? humanizeIdentifier(item.topology_name) : "No topology"}</small>{catalogRecipe && <QualificationBadge recipe={catalogRecipe}/>}</span>
+          </label>;
+        })}</div>
       </section>
       <LibraryComparison api={api} publicRecipes={publicRecipes} recipes={compareRecipeSummaries} selectedIds={compareIds} onToggle={toggleCompare}/>
     </>}

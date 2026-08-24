@@ -127,7 +127,7 @@
   text-transform: uppercase;
 }
 
-.builder-workspace > header h3 {
+.builder-workspace > header h2 {
   font-size: clamp(1.45rem, 3vw, 2rem);
   margin: 0.25rem 0 0.35rem;
 }
@@ -151,6 +151,35 @@
 
 .builder-form-lock:disabled {
   opacity: 0.72;
+}
+
+.builder-guided-lock {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.builder-guided-lock:disabled {
+  opacity: 0.58;
+}
+
+.builder-json-warning {
+  background: #332916;
+  border: 1px solid #8a6a2c;
+  border-radius: 0.85rem;
+  color: #f8d88f;
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.builder-json-warning strong {
+  color: #ffe7ae;
+}
+
+.builder-json-warning p {
+  line-height: 1.5;
+  margin: 0.3rem 0 0;
 }
 
 .builder-preset {
@@ -375,6 +404,54 @@
   padding: 1rem;
 }
 
+.builder-review > .builder-preflight {
+  background: linear-gradient(145deg, #173329, #0b1713);
+  border-color: #68e5b34d;
+}
+
+.builder-preflight > p {
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0.75rem 0;
+}
+
+.builder-preflight ul {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.builder-preflight li {
+  align-items: baseline;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 0.2rem 0.75rem;
+  grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);
+  padding-top: 0.55rem;
+}
+
+.builder-preflight li > span {
+  color: var(--text-muted);
+  grid-row: 1 / span 2;
+}
+
+.builder-preflight li > strong,
+.builder-preflight li > code,
+.builder-preflight li > small {
+  overflow-wrap: anywhere;
+}
+
+.builder-preflight li > code,
+.builder-preflight li > small {
+  color: var(--text-subtle);
+}
+
+.builder-preflight .builder-preflight-pending strong {
+  color: #f8d88f;
+}
+
 .builder-review section > header {
   align-items: center;
   display: flex;
@@ -472,6 +549,14 @@
   color: #ffb3bc;
 }
 
+.builder-save-draft-help {
+  color: var(--text-subtle);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0.65rem 0 0;
+  text-align: right;
+}
+
 @media (max-width: 760px) {
   .builder-hero,
   .builder-preset > div,
@@ -507,6 +592,10 @@
   .builder-actions > div .button {
     width: 100%;
   }
+
+  .builder-save-draft-help {
+    text-align: left;
+  }
 }
 
 @media (max-width: 520px) {
@@ -535,7 +624,12 @@
   }
 
   .builder-review dl > div,
-  .builder-technical-review dl > div {
+  .builder-technical-review dl > div,
+  .builder-preflight li {
     grid-template-columns: 1fr;
+  }
+
+  .builder-preflight li > span {
+    grid-row: auto;
   }
 }

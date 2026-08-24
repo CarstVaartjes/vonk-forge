@@ -525,9 +525,7 @@ def _public_recipe_metadata(
 
     metadata = document.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
-    raw_tags = metadata.get("tags", [])
-    raw_tags = raw_tags if isinstance(raw_tags, list) else []
-    tags = {value.lower() for value in raw_tags if isinstance(value, str)}
+    tags = _public_recipe_tags(document)
     raw_interfaces = document.get("interfaces", [])
     raw_interfaces = raw_interfaces if isinstance(raw_interfaces, list) else []
     adapters = {
@@ -668,7 +666,7 @@ def _public_recipe_execution_readiness(
     """Keep runtime completeness independent from review qualification."""
 
     executable = "executable" in tags
-    non_executable = "non-executable" in tags
+    non_executable = bool(tags.intersection({"non-executable", "metadata-only"}))
     integration_required = "integration-required" in tags
     declarations = sum((executable, non_executable, integration_required))
     if declarations > 1:
@@ -687,7 +685,7 @@ def _public_recipe_execution_readiness(
         return (
             "not-executable",
             "explicit-non-executable-metadata",
-            "This recipe explicitly does not provide an executable runtime contract.",
+            "This recipe explicitly declares metadata-only or non-executable content.",
         )
     if integration_required:
         return (
@@ -700,6 +698,21 @@ def _public_recipe_execution_readiness(
         "missing-readiness-metadata",
         "The immutable recipe does not explicitly declare execution readiness.",
     )
+
+
+def _public_recipe_tags(document: Mapping[str, object]) -> set[str]:
+    metadata = document.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    raw_tags = metadata.get("tags", [])
+    raw_tags = raw_tags if isinstance(raw_tags, list) else []
+    return {value.lower() for value in raw_tags if isinstance(value, str)}
+
+
+def _public_recipe_is_executable(document: Mapping[str, object]) -> bool:
+    readiness, _basis, _detail = _public_recipe_execution_readiness(
+        _public_recipe_tags(document)
+    )
+    return readiness == "executable"
 
 
 def _public_recipe_source(
@@ -1523,8 +1536,13 @@ def install_catalog_routes(
             )
         try:
             snapshot = recipe_library.list()
+            executable_items = tuple(
+                item
+                for item in snapshot.items
+                if _public_recipe_is_executable(item.document)
+            )
             local_revisions = catalog().recipe_catalog_local_revisions(
-                [item.slug for item in snapshot.items]
+                [item.slug for item in executable_items]
             )
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
@@ -1551,7 +1569,7 @@ def install_catalog_routes(
                         local=local_revisions.get(item.slug),
                     )[0],
                 }
-                for item in snapshot.items
+                for item in executable_items
             ],
         }
 
@@ -1595,6 +1613,15 @@ def install_catalog_routes(
                     CatalogConflict(
                         "public.preview_changed",
                         "public recipe changed since preview; review it again",
+                    ),
+                )
+            if preview["execution_readiness"] != "executable":
+                return _problem(
+                    request,
+                    CatalogValidationError(
+                        "public.recipe_not_executable",
+                        "public recipe cannot be imported because it does not "
+                        "explicitly declare a complete executable runtime contract",
                     ),
                 )
             if source == "recipe_library":

@@ -33,6 +33,13 @@ function catalogRelease(recipe: PublicRecipe | undefined): {label: string; detai
   return {label: "Not imported", detail: catalogVersion, tone: "neutral"};
 }
 
+function catalogQualification(recipe: PublicRecipe | undefined): {label: string; detail: string; tone: string} {
+  if (!recipe) return {label: "Not linked", detail: "No exact catalog match in this snapshot", tone: "neutral"};
+  return recipe.qualification === "candidate"
+    ? {label: "Candidate", detail: recipe.qualification_detail, tone: "warning"}
+    : {label: "Accepted", detail: recipe.qualification_detail, tone: "healthy"};
+}
+
 function ResourceBar({label, value, maximum}: {label: string; value?: number; maximum: number}) {
   const width = value === undefined || value === 0 || maximum === 0 ? 0 : Math.max(5, Math.round(value / maximum * 100));
   return <div className="comparison-resource" aria-label={`${label}: ${value === undefined ? "Not declared" : formatBytes(value)}`}>
@@ -123,6 +130,7 @@ export function LibraryComparison({api, publicRecipes, recipes, selectedIds, onT
         <tbody>
           <tr><th scope="row">Local status</th>{selected.map(recipe => { const current = status(recipe); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{recipe.installation_total_count} installed · {recipe.run_total_count} active</small></td>; })}</tr>
           <tr><th scope="row">Catalog release</th>{selected.map(recipe => { const current = catalogRelease(publicByLocalRecipe.get(recipe.recipe_id)); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{current.detail}</small></td>; })}</tr>
+          <tr><th scope="row">Catalog qualification</th>{selected.map(recipe => { const current = catalogQualification(publicByLocalRecipe.get(recipe.recipe_id)); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{current.detail}</small></td>; })}</tr>
           <tr><th scope="row">Spark topology</th>{selected.map(recipe => <td key={recipe.recipe_id}>{errors[recipe.recipe_id] ? <div className="comparison-load-error" role="alert"><span>{errors[recipe.recipe_id]}</span><button type="button" className="button secondary" onClick={() => setRetryAttempt(value => value + 1)}>Retry {recipe.title} details</button></div> : details[recipe.recipe_id] ? <TopologyGraphic detail={details[recipe.recipe_id]} summary={recipe}/> : <span role="status">Loading topology…</span>}</td>)}</tr>
           <tr><th scope="row">Startup memory</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Startup memory" value={topologyMemory(details[recipe.recipe_id])} maximum={memoryMaximum}/></td>)}</tr>
           <tr><th scope="row">Disk envelope</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Disk envelope" value={topologyDisk(details[recipe.recipe_id])} maximum={diskMaximum}/></td>)}</tr>

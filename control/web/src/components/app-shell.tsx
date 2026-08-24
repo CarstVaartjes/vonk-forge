@@ -6,7 +6,6 @@ import {ActivityIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons
 export type AppRoute = "fleet" | "library" | "activity";
 
 type Operator = {
-  environment: string;
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;
@@ -30,6 +29,15 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const previousNavigationKey = useRef(navigationKey);
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const desktop = window.matchMedia("(min-width: 865px)");
+    const closeOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setNavigationOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
+  useEffect(() => {
     if (previousNavigationKey.current === navigationKey) return;
     previousNavigationKey.current = navigationKey;
     setNavigationOpen(false);
@@ -37,6 +45,7 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
   }, [navigationKey]);
   useEffect(() => {
     if (!navigationOpen) return;
+    document.body.classList.add("shell-navigation-open");
     const firstLink = navigation.current?.querySelector<HTMLElement>("a[href]:not([aria-disabled='true'])");
     firstLink?.focus();
     const closeOutside = (event: PointerEvent) => {
@@ -44,17 +53,25 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
       if (!(target instanceof Node) || navigation.current?.contains(target) || navigationToggle.current?.contains(target)) return;
       if (target instanceof Element && target.closest("[role='dialog'], [role='alertdialog']")) return;
       setNavigationOpen(false);
+      queueMicrotask(() => navigationToggle.current?.focus());
     };
     document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
+    return () => {
+      document.body.classList.remove("shell-navigation-open");
+      document.removeEventListener("pointerdown", closeOutside);
+    };
   }, [navigationOpen]);
+
+  function closeNavigation(restoreFocus = true) {
+    setNavigationOpen(false);
+    if (restoreFocus) queueMicrotask(() => navigationToggle.current?.focus());
+  }
 
   function handleNavigationKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!navigationOpen) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      setNavigationOpen(false);
-      queueMicrotask(() => navigationToggle.current?.focus());
+      closeNavigation();
       return;
     }
     if (event.key !== "Tab") return;
@@ -86,10 +103,23 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
         <span className="mark" aria-hidden="true">VF</span>
         <div><strong>Vonk Forge</strong><small>Cluster control</small></div>
       </div>
-      <button ref={navigationToggle} type="button" className="navigation-toggle" aria-controls="shell-navigation" aria-expanded={navigationOpen} aria-label={`${navigationOpen ? "Close" : "Open"} system navigation`} onClick={() => setNavigationOpen(open => !open)}>
+      <button ref={navigationToggle} type="button" className="navigation-toggle" aria-controls="shell-navigation" aria-expanded={navigationOpen} aria-label={`${navigationOpen ? "Close" : "Open"} system navigation`} aria-hidden={navigationOpen || undefined} tabIndex={navigationOpen ? -1 : undefined} onClick={() => navigationOpen ? closeNavigation() : setNavigationOpen(true)}>
         {navigationOpen ? <CloseIcon/> : <MenuIcon/>}
       </button>
-      <div ref={navigation} id="shell-navigation" className={`shell-navigation${navigationOpen ? " is-open" : ""}`} onKeyDown={handleNavigationKeyDown}>
+      {navigationOpen && <div className="shell-navigation-scrim" aria-hidden="true"/>}
+      <div
+        ref={navigation}
+        id="shell-navigation"
+        className={`shell-navigation${navigationOpen ? " is-open" : ""}`}
+        role={navigationOpen ? "dialog" : undefined}
+        aria-modal={navigationOpen || undefined}
+        aria-labelledby={navigationOpen ? "shell-navigation-title" : undefined}
+        onKeyDown={handleNavigationKeyDown}
+      >
+        {navigationOpen && <header className="shell-navigation-header">
+          <strong id="shell-navigation-title">Navigation</strong>
+          <button type="button" className="shell-navigation-close" aria-label="Close system navigation" onClick={() => closeNavigation()}><CloseIcon/></button>
+        </header>}
         <nav aria-label="Primary">
           <p className="nav-label">Workspace</p>
           <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
@@ -102,6 +132,6 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
         </div>
       </div>
     </aside>
-    <main ref={mainContent} id="main-content" tabIndex={-1}><div className="content-frame">{children}</div></main>
+    <main ref={mainContent} id="main-content" tabIndex={-1} inert={navigationOpen || undefined} aria-hidden={navigationOpen || undefined}><div className="content-frame">{children}</div></main>
   </div>;
 }

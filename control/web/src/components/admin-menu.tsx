@@ -2,7 +2,6 @@ import {useEffect, useId, useRef, useState} from "react";
 import type {KeyboardEvent, MouseEvent as ReactMouseEvent} from "react";
 
 type AdminMenuProps = {
-  environment: string;
   logoutError: string;
   loggingOut: boolean;
   navigationLocked?: boolean;
@@ -13,7 +12,6 @@ type AdminMenuProps = {
 };
 
 export function AdminMenu({
-  environment,
   logoutError,
   loggingOut,
   navigationLocked = false,
@@ -29,7 +27,7 @@ export function AdminMenu({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const firstItem = menu.current?.querySelector<HTMLElement>("[role='menuitem']:not([aria-disabled='true'])");
+    const firstItem = menu.current?.querySelector<HTMLElement>("a[href]:not([aria-disabled='true']), button:not([disabled])");
     firstItem?.focus();
     function closeOnOutsidePointer(event: PointerEvent): void {
       if (!menu.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setMenuOpen(false);
@@ -45,12 +43,13 @@ export function AdminMenu({
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       setMenuOpen(false);
       trigger.current?.focus();
       return;
     }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...(menu.current?.querySelectorAll<HTMLElement>("[role='menuitem']:not([aria-disabled='true'])") ?? [])];
+    const items = [...(menu.current?.querySelectorAll<HTMLElement>("a[href]:not([aria-disabled='true']), button:not([disabled])") ?? [])];
     if (items.length === 0) return;
     event.preventDefault();
     const current = items.indexOf(document.activeElement as HTMLElement);
@@ -65,7 +64,6 @@ export function AdminMenu({
       className="operator-summary"
       aria-controls={menuId}
       aria-expanded={menuOpen}
-      aria-haspopup="menu"
       disabled={navigationLocked}
       title={navigationLocked ? "Operator actions are unavailable while a change is applying" : undefined}
       onClick={() => setMenuOpen(open => !open)}
@@ -75,10 +73,10 @@ export function AdminMenu({
         <strong>{subject}</strong>
         <span>{role}</span>
       </div>
-      <span className="environment-badge">{environment}</span>
+      <span className="operator-disclosure-indicator" aria-hidden="true">⌄</span>
     </button>
-    {menuOpen && <div ref={menu} id={menuId} role="menu" aria-label="Operator menu" className="admin-menu-panel" onKeyDown={handleMenuKeyDown}>
-      <a href="/activity" role="menuitem" className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
+    {menuOpen && <div ref={menu} id={menuId} role="group" aria-label="Operator actions" className="admin-menu-panel" onKeyDown={handleMenuKeyDown}>
+      <a href="/activity" className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
         if (navigationLocked) {
           event.preventDefault();
           return;
@@ -86,7 +84,7 @@ export function AdminMenu({
         setMenuOpen(false);
         onNavigateToActivity(event);
       }}>Open Activity</a>
-      <button type="button" role="menuitem" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
+      <button type="button" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
       {logoutError && <p role="alert">{logoutError}</p>}
     </div>}
   </section>;

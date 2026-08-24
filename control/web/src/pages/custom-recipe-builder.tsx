@@ -230,16 +230,16 @@ function errorsFor(document: CanonicalRecipeDocument, slug: string, selectedStep
   return errors;
 }
 
-function TextField({id, label, value, onChange, error, helper, type = "text", min, max, readOnly = false}: {
+function TextField({id, label, value, onChange, error, helper, type = "text", min, max, readOnly = false, required = false}: {
   id: string; label: string; value: string | number; onChange(value: string): void; error?: string; helper?: string;
-  type?: "text" | "number" | "url"; min?: number; max?: number; readOnly?: boolean;
+  type?: "text" | "number" | "url"; min?: number; max?: number; readOnly?: boolean; required?: boolean;
 }) {
   const describedBy = [helper ? `${id}-help` : "", error ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined;
-  return <label htmlFor={id}><span id={`${id}-label`}>{label}</span><input id={id} type={type} min={min} max={max} value={value} readOnly={readOnly} onChange={event => onChange(event.target.value)} aria-labelledby={`${id}-label`} aria-invalid={error ? true : undefined} aria-describedby={describedBy}/>{helper && <small id={`${id}-help`} className="builder-field-help">{helper}</small>}{error && <span id={`${id}-error`} className="builder-field-error">{error}</span>}</label>;
+  return <label htmlFor={id}><span id={`${id}-label`}>{label}</span><input id={id} type={type} min={min} max={max} value={value} readOnly={readOnly} required={required} onChange={event => onChange(event.target.value)} aria-labelledby={`${id}-label`} aria-invalid={error ? true : undefined} aria-describedby={describedBy}/>{helper && <small id={`${id}-help`} className="builder-field-help">{helper}</small>}{error && <span id={`${id}-error`} className="builder-field-error">{error}</span>}</label>;
 }
 
 function DigestField(props: Omit<Parameters<typeof TextField>[0], "helper">) {
-  return <TextField {...props} helper="SHA-256 without the sha256: prefix. The repeated-digit starter value cannot be saved."/>;
+  return <TextField {...props} required helper="SHA-256 without the sha256: prefix. The repeated-digit starter value cannot be saved."/>;
 }
 
 const byteUnits = [
@@ -251,12 +251,12 @@ function preferredUnit(value: number): number {
   return 0;
 }
 
-function HumanBytesField({id, label, value, onChange, error}: {id: string; label: string; value: number; onChange(value: number): void; error?: string}) {
+function HumanBytesField({id, label, value, onChange, error, required = false}: {id: string; label: string; value: number; onChange(value: number): void; error?: string; required?: boolean}) {
   const [unitIndex, setUnitIndex] = useState(() => preferredUnit(value));
   const unit = byteUnits[unitIndex];
   return <fieldset className="builder-unit-field" aria-describedby={error ? `${id}-error` : undefined}>
     <legend>{label}</legend>
-    <div><input id={id} aria-label={`${label} amount`} type="number" min="0" step="any" value={value / unit.factor} aria-invalid={error ? true : undefined} onChange={event => onChange(Math.round(Number(event.target.value) * unit.factor))}/><select aria-label={`${label} unit`} value={unitIndex} onChange={event => setUnitIndex(Number(event.target.value))}>{byteUnits.map((item, index) => <option key={item.label} value={index}>{item.label}</option>)}</select></div>
+    <div><input id={id} aria-label={`${label} amount`} type="number" min="0" step="any" value={value / unit.factor} required={required} aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-error` : undefined} onChange={event => onChange(Math.round(Number(event.target.value) * unit.factor))}/><select aria-label={`${label} unit`} value={unitIndex} onChange={event => setUnitIndex(Number(event.target.value))}>{byteUnits.map((item, index) => <option key={item.label} value={index}>{item.label}</option>)}</select></div>
     {error && <span id={`${id}-error`} className="builder-field-error">{error}</span>}
   </fieldset>;
 }
@@ -300,10 +300,13 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
   const [createdRecipeId, setCreatedRecipeId] = useState("");
   const [dirty, setDirty] = useState(Boolean(restored));
   const [confirmPreset, setConfirmPreset] = useState(false);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const pageHeading = useRef<HTMLHeadingElement>(null);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
   const keepDraft = useRef<HTMLButtonElement>(null);
+  const nextArtifactKey = useRef(initial.artifacts.length);
+  const artifactKeys = useRef(initial.artifacts.map((_, index) => `artifact-${index}`));
 
-  useEffect(() => { heading.current?.focus(); }, []);
+  useEffect(() => { pageHeading.current?.focus(); }, []);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => { onBusyChange?.(false); onDirtyChange?.(false); }, [onBusyChange, onDirtyChange]);
   useEffect(() => {
@@ -354,14 +357,14 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
     const nextStep = Math.min(5, step + 1) as BuilderStep;
     setStep(nextStep);
     setHighestStep(current => Math.max(current, nextStep) as BuilderStep);
-    queueMicrotask(() => heading.current?.focus());
+    queueMicrotask(() => stepHeading.current?.focus());
   }
 
   function goTo(nextStep: BuilderStep) {
     if (nextStep > highestStep) return;
     setStep(nextStep);
     setErrors([]);
-    queueMicrotask(() => heading.current?.focus());
+    queueMicrotask(() => stepHeading.current?.focus());
   }
 
   async function createRecipe() {
@@ -376,10 +379,10 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
     try {
       const created = await api.createCatalogRecipe({slug, document: parsed.document});
       setCreatedRecipeId(created.recipe_id);
-      setStatus("Recipe saved");
+      setStatus("Recipe draft saved");
       setDirty(false);
     } catch (value) {
-      setStatus(value instanceof Error ? value.message.slice(0, 256) : "Unable to save recipe");
+      setStatus(value instanceof Error ? value.message.slice(0, 256) : "Unable to save recipe draft");
     } finally {
       setBusy(false);
       onBusyChange?.(false);
@@ -387,6 +390,13 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
   }
 
   const error = (field: string) => errors.find(item => item.field === field)?.message;
+  const artifactKey = (index: number) => {
+    while (artifactKeys.current.length <= index) {
+      artifactKeys.current.push(`artifact-${nextArtifactKey.current}`);
+      nextArtifactKey.current += 1;
+    }
+    return artifactKeys.current[index];
+  };
   const updateArtifact = (index: number, changes: Partial<CanonicalArtifact>) => update(current => {
     const previous = current.artifacts[index];
     const next = {...previous, ...changes};
@@ -396,16 +406,23 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
     });
     return {...current, artifacts: current.artifacts.map((item, itemIndex) => itemIndex === index ? next : item), topology: {...current.topology, roles}};
   });
-  const removeArtifact = (index: number) => update(current => {
-    const removed = current.artifacts[index];
-    return {...current, artifacts: current.artifacts.filter((_, itemIndex) => itemIndex !== index), topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: role.artifacts.filter(id => id !== removed.id)}))}};
-  });
-  const addArtifact = () => update(current => {
-    const id = `artifact-${current.artifacts.length + 1}`;
-    const roleNames = current.topology.roles.map(role => role.name);
-    const artifact: CanonicalArtifact = {id, kind: "huggingface.snapshot", repository: "", revision: "", download_bytes: 1, installed_bytes: 1, mount: {target: `/models/${id}`, read_only: true}, roles: roleNames};
-    return {...current, artifacts: [...current.artifacts, artifact], topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: [...role.artifacts, id]}))}};
-  });
+  const removeArtifact = (index: number) => {
+    artifactKeys.current.splice(index, 1);
+    update(current => {
+      const removed = current.artifacts[index];
+      return {...current, artifacts: current.artifacts.filter((_, itemIndex) => itemIndex !== index), topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: role.artifacts.filter(id => id !== removed.id)}))}};
+    });
+  };
+  const addArtifact = () => {
+    artifactKeys.current.push(`artifact-${nextArtifactKey.current}`);
+    nextArtifactKey.current += 1;
+    update(current => {
+      const id = `artifact-${current.artifacts.length + 1}`;
+      const roleNames = current.topology.roles.map(role => role.name);
+      const artifact: CanonicalArtifact = {id, kind: "huggingface.snapshot", repository: "", revision: "", download_bytes: 1, installed_bytes: 1, mount: {target: `/models/${id}`, read_only: true}, roles: roleNames};
+      return {...current, artifacts: [...current.artifacts, artifact], topology: {...current.topology, roles: current.topology.roles.map(role => ({...role, artifacts: [...role.artifacts, id]}))}};
+    });
+  };
   const replaceInterface = (index: number, adapter: InterfaceAdapter) => update(current => {
     const oldAdapter = current.interfaces[index].adapter;
     return {...current, interfaces: current.interfaces.map((item, itemIndex) => itemIndex === index ? interfaceDefaults(adapter) : item), validation: {...current.validation, validators: current.validation.validators.map(validator => validator.interface === oldAdapter ? {...validator, interface: adapter} : validator)}};
@@ -418,7 +435,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
 
   return <div className="recipe-builder-page">
     <header className="builder-hero">
-      <div><p className="fleet-kicker">Local recipe builder</p><h1 ref={heading} tabIndex={-1}>Create custom recipe</h1><p>Build a reviewable recipe one decision at a time. Nothing is saved until the final step.</p></div>
+      <div><p className="fleet-kicker">Local recipe builder</p><h1 ref={pageHeading} tabIndex={-1}>Create custom recipe</h1><p>Build a reviewable recipe one decision at a time. Nothing is saved until the final step.</p></div>
       <button type="button" className="button secondary" disabled={busy} onClick={() => onNavigate("/library")}>Back to Library</button>
     </header>
     {restored && !createdRecipeId && <p className="builder-draft-restored" role="status"><strong>Unsaved draft restored.</strong> Continue where this browser session left off.</p>}
@@ -430,22 +447,26 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
     </nav>
 
     <section className="builder-workspace" aria-labelledby="builder-step-heading">
-      <header><div><span>Step {step + 1} of {steps.length}</span><h3 id="builder-step-heading">{steps[step].name}</h3><p>{steps[step].description}</p></div><span className="library-panel-badge">Draft</span></header>
+      <header><div><span>Step {step + 1} of {steps.length}</span><h2 id="builder-step-heading" ref={stepHeading} tabIndex={-1}>{steps[step].name}</h2><p>{steps[step].description}</p></div><span className="library-panel-badge">Draft</span></header>
       <ErrorSummary errors={errors} onSelect={selected => { setStep(selected.step); setHighestStep(current => Math.max(current, selected.step) as BuilderStep); }}/>
       <fieldset className="builder-form-lock" disabled={busy}>
+
+      {jsonError && <section id="guided-editing-paused" className="builder-json-warning" role="alert"><strong>Guided editing is paused</strong><p>Advanced JSON is invalid. Correct it there before changing guided fields so none of your raw JSON work is discarded.</p></section>}
+      <fieldset className="builder-guided-lock" disabled={Boolean(jsonError)} aria-describedby={jsonError ? "guided-editing-paused" : undefined}>
+      <legend className="visually-hidden">Guided recipe fields</legend>
 
       {step === 0 && <div className="builder-step-fields">
         <fieldset className="builder-preset"><legend>Start from a useful shape</legend><p>Presets supply clearly labeled, schema-valid defaults for the artifact, security, topology, endpoint, and validation contracts. Replace every starter digest and revision with exact authority before saving.</p><div><select aria-label="Recipe starting point" value={preset} onChange={event => setPreset(event.target.value as PresetName)}><option value="custom">Custom model service</option><option value="vllm">vLLM chat service</option><option value="diffusers">Diffusers image service</option></select><button type="button" className="button secondary" onClick={applyPreset}>Apply starting point</button></div>{confirmPreset && <section className="builder-preset-confirmation" role="alert" aria-labelledby="replace-draft-title"><div><strong id="replace-draft-title">Replace the current draft?</strong><p>Applying this starting point replaces every unsaved answer in the builder.</p></div><div><button ref={keepDraft} type="button" className="button secondary" onClick={() => setConfirmPreset(false)}>Keep current draft</button><button type="button" className="button danger" onClick={replaceWithPreset}>Replace draft</button></div></section>}</fieldset>
         <fieldset className="custom-recipe-section"><legend>Recipe identity</legend><div className="custom-recipe-fields custom-recipe-fields-two">
-          <TextField id="recipe-publisher" label="Publisher" value={document.identity.publisher} onChange={value => update(current => ({...current, identity: {...current.identity, publisher: value}}))} error={error("recipe-publisher")}/>
-          <TextField id="recipe-slug" label="Recipe slug" value={slug} onChange={changeSlug} error={error("recipe-slug")} helper="Stable URL-safe name used by the local catalog."/>
-          <TextField id="recipe-title" label="Display name" value={document.metadata.title} onChange={value => update(current => ({...current, metadata: {...current.metadata, title: value}}))} error={error("recipe-title")}/>
+          <TextField id="recipe-publisher" label="Publisher" value={document.identity.publisher} required onChange={value => update(current => ({...current, identity: {...current.identity, publisher: value}}))} error={error("recipe-publisher")}/>
+          <TextField id="recipe-slug" label="Recipe slug" value={slug} required onChange={changeSlug} error={error("recipe-slug")} helper="Stable URL-safe name used by the local catalog."/>
+          <TextField id="recipe-title" label="Display name" value={document.metadata.title} required onChange={value => update(current => ({...current, metadata: {...current.metadata, title: value}}))} error={error("recipe-title")}/>
           <TextField id="recipe-tags" label="Capabilities and tags" value={joinList(document.metadata.tags)} onChange={value => update(current => ({...current, metadata: {...current.metadata, tags: splitList(value)}}))} helper="Comma-separated, for example chat, vision, reasoning."/>
-          <label className="custom-recipe-wide" htmlFor="recipe-description">Description<textarea id="recipe-description" rows={3} value={document.metadata.description} aria-invalid={error("recipe-description") ? true : undefined} aria-describedby={error("recipe-description") ? "recipe-description-error" : undefined} onChange={event => update(current => ({...current, metadata: {...current.metadata, description: event.target.value}}))}/>{error("recipe-description") && <span id="recipe-description-error" className="builder-field-error">{error("recipe-description")}</span>}</label>
+          <label className="custom-recipe-wide" htmlFor="recipe-description">Description<textarea id="recipe-description" rows={3} value={document.metadata.description} required aria-invalid={error("recipe-description") ? true : undefined} aria-describedby={error("recipe-description") ? "recipe-description-error" : undefined} onChange={event => update(current => ({...current, metadata: {...current.metadata, description: event.target.value}}))}/>{error("recipe-description") && <span id="recipe-description-error" className="builder-field-error">{error("recipe-description")}</span>}</label>
         </div></fieldset>
         <fieldset className="custom-recipe-section"><legend>Exact model version</legend><p className="custom-recipe-section-help">Use a friendly publisher and model name here; the digest keeps the version immutable.</p><div className="custom-recipe-fields custom-recipe-fields-two">
-          <TextField id="model-publisher" label="Model creator or publisher" value={document.model.publisher} onChange={value => update(current => ({...current, model: {...current.model, publisher: value}}))} error={error("model-publisher")}/>
-          <TextField id="model-slug" label="Model name" value={document.model.slug} onChange={value => update(current => ({...current, model: {...current.model, slug: value}}))} error={error("model-slug")}/>
+          <TextField id="model-publisher" label="Model creator or publisher" value={document.model.publisher} required onChange={value => update(current => ({...current, model: {...current.model, publisher: value}}))} error={error("model-publisher")}/>
+          <TextField id="model-slug" label="Model name" value={document.model.slug} required onChange={value => update(current => ({...current, model: {...current.model, slug: value}}))} error={error("model-slug")}/>
           <div className="custom-recipe-wide"><DigestField id="model-digest" label="Exact model digest" value={document.model.content_sha256} onChange={value => update(current => ({...current, model: {...current.model, content_sha256: value}}))} error={error("model-digest")}/></div>
         </div></fieldset>
       </div>}
@@ -453,22 +474,22 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
       {step === 1 && <div className="builder-step-fields">
         <div className="custom-recipe-card-grid">
           <fieldset className="custom-recipe-section"><legend>Execution harness</legend><div className="custom-recipe-fields">
-            <TextField id="harness-publisher" label="Publisher" value={document.execution.harness.publisher} onChange={value => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, publisher: value}}}))} error={error("harness-publisher")}/>
-            <TextField id="harness-slug" label="Harness name" value={document.execution.harness.slug} onChange={value => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, slug: value}}}))} error={error("harness-slug")}/>
+            <TextField id="harness-publisher" label="Publisher" value={document.execution.harness.publisher} required onChange={value => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, publisher: value}}}))} error={error("harness-publisher")}/>
+            <TextField id="harness-slug" label="Harness name" value={document.execution.harness.slug} required onChange={value => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, slug: value}}}))} error={error("harness-slug")}/>
             <div className="custom-recipe-wide"><DigestField id="harness-digest" label="Exact harness digest" value={document.execution.harness.content_sha256} onChange={value => update(current => ({...current, execution: {...current.execution, harness: {...current.execution.harness, content_sha256: value}}}))} error={error("harness-digest")}/></div>
           </div></fieldset>
           <fieldset className="custom-recipe-section"><legend>Runtime distribution</legend><div className="custom-recipe-fields">
-            <TextField id="runtime-publisher" label="Publisher" value={document.runtime.distribution.publisher} onChange={value => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, publisher: value}}}))} error={error("runtime-publisher")}/>
-            <TextField id="runtime-slug" label="Runtime name" value={document.runtime.distribution.slug} onChange={value => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, slug: value}}}))} error={error("runtime-slug")}/>
+            <TextField id="runtime-publisher" label="Publisher" value={document.runtime.distribution.publisher} required onChange={value => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, publisher: value}}}))} error={error("runtime-publisher")}/>
+            <TextField id="runtime-slug" label="Runtime name" value={document.runtime.distribution.slug} required onChange={value => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, slug: value}}}))} error={error("runtime-slug")}/>
             <div className="custom-recipe-wide"><DigestField id="runtime-digest" label="Exact runtime digest" value={document.runtime.distribution.content_sha256} onChange={value => update(current => ({...current, runtime: {...current.runtime, distribution: {...current.runtime.distribution, content_sha256: value}}}))} error={error("runtime-digest")}/></div>
           </div></fieldset>
         </div>
-        <fieldset className="custom-recipe-section"><legend>Process command</legend><div className="custom-recipe-fields custom-recipe-fields-two"><TextField id="runtime-entrypoint" label="Entrypoint arguments" value={joinList(document.runtime.entrypoint)} onChange={value => update(current => ({...current, runtime: {...current.runtime, entrypoint: splitList(value)}}))} error={error("runtime-entrypoint")} helper="Comma-separated arguments, in execution order."/></div></fieldset>
+        <fieldset className="custom-recipe-section"><legend>Process command</legend><div className="custom-recipe-fields custom-recipe-fields-two"><TextField id="runtime-entrypoint" label="Entrypoint arguments" value={joinList(document.runtime.entrypoint)} required onChange={value => update(current => ({...current, runtime: {...current.runtime, entrypoint: splitList(value)}}))} error={error("runtime-entrypoint")} helper="Comma-separated arguments, in execution order."/></div></fieldset>
         <fieldset className="custom-recipe-section"><legend>Build contract</legend><div className="custom-recipe-fields custom-recipe-fields-three">
-          <TextField id="build-dockerfile" label="Dockerfile path" value={document.build.dockerfile} onChange={value => update(current => ({...current, build: {...current.build, dockerfile: value}}))} error={error("build-dockerfile")}/>
-          <TextField id="build-platform" label="Target platform" value={document.build.platform} onChange={() => undefined} readOnly error={error("build-platform")} helper="Recipe v1 currently requires linux/arm64."/>
-          <label htmlFor="build-network-mode">Build network mode<select id="build-network-mode" value={document.build.network.mode} onChange={event => update(current => ({...current, build: {...current.build, network: {...current.build.network, mode: event.target.value as "none" | "public"}}}))}><option value="none">No build network</option><option value="public">Public allowlist</option></select></label>
-          <TextField id="context-media-type" label="Build context media type" value={document.build.context.media_type} onChange={() => undefined} readOnly error={error("context-media-type")} helper="Canonical Vonk Forge source bundle."/>
+          <TextField id="build-dockerfile" label="Dockerfile path" value={document.build.dockerfile} required onChange={value => update(current => ({...current, build: {...current.build, dockerfile: value}}))} error={error("build-dockerfile")}/>
+          <TextField id="build-platform" label="Target platform" value={document.build.platform} onChange={() => undefined} readOnly required error={error("build-platform")} helper="Recipe v1 currently requires linux/arm64."/>
+          <label htmlFor="build-network-mode">Build network mode<select id="build-network-mode" required value={document.build.network.mode} onChange={event => update(current => ({...current, build: {...current.build, network: {...current.build.network, mode: event.target.value as "none" | "public"}}}))}><option value="none">No build network</option><option value="public">Public allowlist</option></select></label>
+          <TextField id="context-media-type" label="Build context media type" value={document.build.context.media_type} onChange={() => undefined} readOnly required error={error("context-media-type")} helper="Canonical Vonk Forge source bundle."/>
           <TextField id="network-hosts" label="Allowed network hosts" value={joinList(document.build.network.hosts)} onChange={value => update(current => ({...current, build: {...current.build, network: {...current.build.network, hosts: splitList(value)}}}))} helper="Comma-separated. Used only with the public allowlist."/>
           <div className="custom-recipe-wide"><DigestField id="context-digest" label="Exact build context digest" value={document.build.context.sha256} onChange={value => update(current => ({...current, build: {...current.build, context: {...current.build.context, sha256: value}}}))} error={error("context-digest")}/></div>
         </div><p className="custom-recipe-section-help">Build arguments and an optional target remain available in Advanced JSON.</p></fieldset>
@@ -483,16 +504,16 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
       {step === 2 && <div className="builder-step-fields">
         <div className="builder-step-callout"><div><strong>{document.artifacts.length}</strong><span>{document.artifacts.length === 1 ? "artifact" : "artifacts"}</span></div><p>At least one immutable artifact is required. Record its exact origin, mount, and every topology role that receives it.</p></div>
         <div className="custom-recipe-repeat-list">
-          {document.artifacts.map((artifact, index) => <fieldset className="custom-recipe-section" key={`${artifact.id}-${index}`}><legend>Artifact {index + 1}</legend><div className="custom-recipe-card-heading"><p className="custom-recipe-section-help">Preset values are starters; verify the repository and immutable revision before saving.</p><button type="button" className="button secondary" onClick={() => removeArtifact(index)}>Remove artifact {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
-            <TextField id={`artifact-${index}-id`} label="Artifact name" value={artifact.id} onChange={value => updateArtifact(index, {id: value})} error={error(`artifact-${index}-id`)}/>
-            <label htmlFor={`artifact-${index}-kind`}>Source type<select id={`artifact-${index}-kind`} value={artifact.kind} onChange={event => updateArtifact(index, {kind: event.target.value as CanonicalArtifact["kind"]})}><option value="huggingface.snapshot">Hugging Face snapshot</option><option value="http.file">HTTP file</option><option value="oci.artifact">OCI artifact</option></select></label>
-            <TextField id={`artifact-${index}-repository`} label="Original repository" value={artifact.repository} onChange={value => updateArtifact(index, {repository: value})} error={error(`artifact-${index}-repository`)}/>
-            <TextField id={`artifact-${index}-revision`} label="Immutable revision" value={artifact.revision} onChange={value => updateArtifact(index, {revision: value})} error={error(`artifact-${index}-revision`)}/>
-            <HumanBytesField id={`artifact-${index}-download`} label="Download size" value={artifact.download_bytes} onChange={value => updateArtifact(index, {download_bytes: value})} error={error(`artifact-${index}-download`)}/>
-            <HumanBytesField id={`artifact-${index}-installed`} label="Installed size" value={artifact.installed_bytes} onChange={value => updateArtifact(index, {installed_bytes: value})} error={error(`artifact-${index}-installed`)}/>
-            <TextField id={`artifact-${index}-mount`} label="Container mount" value={artifact.mount.target} onChange={value => updateArtifact(index, {mount: {...artifact.mount, target: value}})} error={error(`artifact-${index}-mount`)}/>
+          {document.artifacts.map((artifact, index) => <fieldset className="custom-recipe-section" key={artifactKey(index)}><legend>Artifact {index + 1}</legend><div className="custom-recipe-card-heading"><p className="custom-recipe-section-help">Preset values are starters; verify the repository and immutable revision before saving.</p><button type="button" className="button secondary" onClick={() => removeArtifact(index)}>Remove artifact {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
+            <TextField id={`artifact-${index}-id`} label="Artifact name" value={artifact.id} required onChange={value => updateArtifact(index, {id: value})} error={error(`artifact-${index}-id`)}/>
+            <label htmlFor={`artifact-${index}-kind`}>Source type<select id={`artifact-${index}-kind`} required value={artifact.kind} onChange={event => updateArtifact(index, {kind: event.target.value as CanonicalArtifact["kind"]})}><option value="huggingface.snapshot">Hugging Face snapshot</option><option value="http.file">HTTP file</option><option value="oci.artifact">OCI artifact</option></select></label>
+            <TextField id={`artifact-${index}-repository`} label="Original repository" value={artifact.repository} required onChange={value => updateArtifact(index, {repository: value})} error={error(`artifact-${index}-repository`)}/>
+            <TextField id={`artifact-${index}-revision`} label="Immutable revision" value={artifact.revision} required onChange={value => updateArtifact(index, {revision: value})} error={error(`artifact-${index}-revision`)}/>
+            <HumanBytesField id={`artifact-${index}-download`} label="Download size" value={artifact.download_bytes} required onChange={value => updateArtifact(index, {download_bytes: value})} error={error(`artifact-${index}-download`)}/>
+            <HumanBytesField id={`artifact-${index}-installed`} label="Installed size" value={artifact.installed_bytes} required onChange={value => updateArtifact(index, {installed_bytes: value})} error={error(`artifact-${index}-installed`)}/>
+            <TextField id={`artifact-${index}-mount`} label="Container mount" value={artifact.mount.target} required onChange={value => updateArtifact(index, {mount: {...artifact.mount, target: value}})} error={error(`artifact-${index}-mount`)}/>
             <label className="custom-recipe-checkbox"><input type="checkbox" checked={artifact.mount.read_only} onChange={event => updateArtifact(index, {mount: {...artifact.mount, read_only: event.target.checked}})}/> Mount read-only</label>
-            <TextField id={`artifact-${index}-roles`} label="Topology roles" value={joinList(artifact.roles)} onChange={value => updateArtifact(index, {roles: splitList(value)})} error={error(`artifact-${index}-roles`)} helper={`Comma-separated. Current roles: ${document.topology.roles.map(role => role.name).join(", ") || "none"}.`}/>
+            <TextField id={`artifact-${index}-roles`} label="Topology roles" value={joinList(artifact.roles)} required onChange={value => updateArtifact(index, {roles: splitList(value)})} error={error(`artifact-${index}-roles`)} helper={`Comma-separated. Current roles: ${document.topology.roles.map(role => role.name).join(", ") || "none"}.`}/>
           </div></fieldset>)}
           <button id="add-artifact" type="button" className="button secondary custom-recipe-add" onClick={addArtifact}>Add artifact</button>
         </div>
@@ -521,7 +542,7 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
         <div className="builder-topology-preview" aria-label="Service topology preview"><div><span>Model</span><strong>{document.model.publisher}/{document.model.slug}</strong></div><span aria-hidden="true">→</span><div><span>Topology</span><strong>{document.topology.node_count} {document.topology.node_count === 1 ? "Spark" : "Sparks"}</strong></div><span aria-hidden="true">→</span><div><span>Endpoints</span><strong>{document.interfaces.length || "None"}</strong></div></div>
         <fieldset className="custom-recipe-section"><legend>Exposed interfaces</legend><p className="custom-recipe-section-help">These endpoints describe how operators and clients reach the running topology.</p><div className="custom-recipe-repeat-list">
           {document.interfaces.map((item, index) => <div className="custom-recipe-card" key={`${item.adapter}-${index}`}><div className="custom-recipe-card-heading"><h4>Interface {index + 1}</h4><button type="button" className="button secondary" onClick={() => removeInterface(index)}>Remove interface {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-three">
-            <label htmlFor={`interface-${index}-adapter`}>Adapter<select id={`interface-${index}-adapter`} value={item.adapter} onChange={event => replaceInterface(index, event.target.value as InterfaceAdapter)} aria-invalid={error(`interface-${index}-adapter`) ? true : undefined}><option value="openai">OpenAI API</option><option value="image-job">Image job</option><option value="audio-job">Audio job</option><option value="video-job">Video job</option><option value="mesh-job">Mesh job</option><option value="artifact-job">Artifact job</option></select>{error(`interface-${index}-adapter`) && <span className="builder-field-error">{error(`interface-${index}-adapter`)}</span>}</label>
+            <label htmlFor={`interface-${index}-adapter`}>Adapter<select id={`interface-${index}-adapter`} required value={item.adapter} onChange={event => replaceInterface(index, event.target.value as InterfaceAdapter)} aria-invalid={error(`interface-${index}-adapter`) ? true : undefined} aria-describedby={error(`interface-${index}-adapter`) ? `interface-${index}-adapter-error` : undefined}><option value="openai">OpenAI API</option><option value="image-job">Image job</option><option value="audio-job">Audio job</option><option value="video-job">Video job</option><option value="mesh-job">Mesh job</option><option value="artifact-job">Artifact job</option></select>{error(`interface-${index}-adapter`) && <span id={`interface-${index}-adapter-error`} className="builder-field-error">{error(`interface-${index}-adapter`)}</span>}</label>
             {item.adapter === "openai" ? <>
               <TextField id={`interface-${index}-port`} label="Port" type="number" min={1024} max={65535} value={item.port ?? ""} onChange={value => updateInterface(index, {port: value ? Number(value) : undefined})} error={error(`interface-${index}-port`)}/>
               <TextField id={`interface-${index}-health`} label="Health path" value={item.health_path ?? ""} onChange={value => updateInterface(index, {health_path: value || undefined})} error={error(`interface-${index}-health`)}/>
@@ -535,8 +556,8 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
       {step === 4 && <div className="builder-step-fields">
         <fieldset className="custom-recipe-section"><legend>Validation evidence</legend><p className="custom-recipe-section-help">Every recipe needs at least one validator bound to a declared interface. These are checks to run, not proof that they already passed.</p><div className="custom-recipe-repeat-list">
           {document.validation.validators.map((validator, index) => <div className="custom-recipe-card" key={`${validator.interface}-${index}`}><div className="custom-recipe-card-heading"><h4>Validator {index + 1}</h4><button type="button" className="button secondary" onClick={() => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.filter((_, itemIndex) => itemIndex !== index)}}))}>Remove validator {index + 1}</button></div><div className="custom-recipe-fields custom-recipe-fields-two">
-            <label htmlFor={`validator-${index}-interface`}>Declared interface<select id={`validator-${index}-interface`} value={validator.interface} onChange={event => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, interface: event.target.value as InterfaceAdapter} : item)}}))} aria-invalid={error(`validator-${index}-interface`) ? true : undefined}>{document.interfaces.map(item => <option key={item.adapter} value={item.adapter}>{item.adapter}</option>)}</select>{error(`validator-${index}-interface`) && <span className="builder-field-error">{error(`validator-${index}-interface`)}</span>}</label>
-            <TextField id={`validator-${index}-checks`} label="Checks" value={joinList(validator.checks)} onChange={value => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, checks: splitList(value)} : item)}}))} error={error(`validator-${index}-checks`)} helper="Comma-separated, for example endpoint.healthy, chat.completion."/>
+            <label htmlFor={`validator-${index}-interface`}>Declared interface<select id={`validator-${index}-interface`} required value={validator.interface} onChange={event => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, interface: event.target.value as InterfaceAdapter} : item)}}))} aria-invalid={error(`validator-${index}-interface`) ? true : undefined} aria-describedby={error(`validator-${index}-interface`) ? `validator-${index}-interface-error` : undefined}>{document.interfaces.map(item => <option key={item.adapter} value={item.adapter}>{item.adapter}</option>)}</select>{error(`validator-${index}-interface`) && <span id={`validator-${index}-interface-error`} className="builder-field-error">{error(`validator-${index}-interface`)}</span>}</label>
+            <TextField id={`validator-${index}-checks`} label="Checks" value={joinList(validator.checks)} required onChange={value => update(current => ({...current, validation: {...current.validation, validators: current.validation.validators.map((item, itemIndex) => itemIndex === index ? {...item, checks: splitList(value)} : item)}}))} error={error(`validator-${index}-checks`)} helper="Comma-separated, for example endpoint.healthy, chat.completion."/>
           </div></div>)}
           <button id="validation-checks" type="button" className="button secondary custom-recipe-add" disabled={document.interfaces.length === 0} onClick={() => update(current => ({...current, validation: {...current.validation, validators: [...current.validation.validators, {interface: current.interfaces[0].adapter, checks: ["endpoint.healthy"]}]}}))}>Add validator</button>
         </div><div className="custom-recipe-fields custom-recipe-fields-two"><TextField id="benchmark-count" label="Benchmark definitions" type="number" min={0} value={document.validation.benchmarks.length} onChange={value => update(current => { const count = Math.max(0, Math.trunc(Number(value))); const benchmarks = current.validation.benchmarks.slice(0, count); while (benchmarks.length < count) benchmarks.push({name: `benchmark-${benchmarks.length + 1}`, framework: "custom", configuration: {}}); return {...current, validation: {...current.validation, benchmarks}}; })} helper="Creates clearly labeled starter benchmark definitions; edit their complete configuration in Advanced JSON."/></div></fieldset>
@@ -548,6 +569,17 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
       </div>}
 
       {step === 5 && <section className="builder-review" aria-label="Recipe builder review">
+        <section className="builder-preflight" aria-labelledby="builder-preflight-heading">
+          <header><div><span aria-hidden="true">✓</span><h3 id="builder-preflight-heading">Draft preflight</h3></div></header>
+          <p>This review checks that the draft declares the inputs needed for later source upload and policy validation. It does not upload or execute source code.</p>
+          <ul>
+            <li><span>Build context digest</span><strong>Declared</strong><code>{document.build.context.sha256}</code></li>
+            <li><span>Immutable artifacts</span><strong>{document.artifacts.length} declared</strong><small>{document.artifacts.length ? document.artifacts.map(item => item.id).join(", ") : "None"}</small></li>
+            <li><span>Topology</span><strong>{document.topology.node_count} {document.topology.node_count === 1 ? "Spark" : "Sparks"}</strong><small>{document.topology.roles.map(role => role.name).join(", ") || "No roles"}</small></li>
+            <li><span>Validators</span><strong>{document.validation.validators.length} declared</strong><small>{document.validation.validators.flatMap(item => item.checks).join(", ") || "No checks"}</small></li>
+            <li className="builder-preflight-pending"><span>Source bundle</span><strong>Not uploaded by this builder</strong><small>Upload the bundle matching the declared digest and pass policy checks before build or resolve.</small></li>
+          </ul>
+        </section>
         <section><header><div><span>1</span><h4>Identity & model</h4></div><button type="button" className="button secondary" aria-label="Change identity and model" onClick={() => goTo(0)}>Change</button></header><dl><ReviewRow term="Recipe">{document.metadata.title}</ReviewRow><ReviewRow term="Catalog name">{document.identity.publisher}/{slug}</ReviewRow><ReviewRow term="Model">{document.model.publisher}/{document.model.slug}</ReviewRow><ReviewRow term="Description">{document.metadata.description}</ReviewRow></dl></section>
         <section><header><div><span>2</span><h4>Runtime</h4></div><button type="button" className="button secondary" aria-label="Change runtime" onClick={() => goTo(1)}>Change</button></header><dl><ReviewRow term="Execution harness">{document.execution.harness.publisher}/{document.execution.harness.slug}</ReviewRow><ReviewRow term="Runtime">{document.runtime.distribution.publisher}/{document.runtime.distribution.slug}</ReviewRow><ReviewRow term="Entrypoint"><code>{document.runtime.entrypoint.join(" ")}</code></ReviewRow><ReviewRow term="Build">{document.build.platform} · {document.build.dockerfile} · network {document.build.network.mode}</ReviewRow></dl></section>
         <section><header><div><span>3</span><h4>Artifacts</h4></div><button type="button" className="button secondary" aria-label="Change artifacts" onClick={() => goTo(2)}>Change</button></header><dl><ReviewRow term="Artifacts">{document.artifacts.length}</ReviewRow><ReviewRow term="Total download">{formatBytes(document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</ReviewRow><ReviewRow term="Repositories">{document.artifacts.length ? document.artifacts.map(item => item.repository).join(", ") : "None"}</ReviewRow></dl></section>
@@ -556,14 +588,16 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
         <details className="builder-technical-review"><summary>Technical identities and digests</summary><dl><ReviewRow term="Model digest"><code>{document.model.content_sha256}</code></ReviewRow><ReviewRow term="Harness digest"><code>{document.execution.harness.content_sha256}</code></ReviewRow><ReviewRow term="Runtime digest"><code>{document.runtime.distribution.content_sha256}</code></ReviewRow><ReviewRow term="Build context digest"><code>{document.build.context.sha256}</code></ReviewRow></dl></details>
       </section>}
 
-      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste every field of the canonical recipe-v1 document, including parameters, arguments, environment, security, lifecycle commands, role resources, and benchmark configuration. Structurally valid JSON immediately updates the guided steps; final backend contract checks still apply when saved.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDirty(true); setDocumentText(value); const parsed = parseCanonicalRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
+      </fieldset>
+      <details className="library-json-fallback"><summary>Advanced JSON</summary><div className="library-json-fallback-content"><p>Edit or paste every field of the canonical recipe-v1 document, including parameters, arguments, environment, security, lifecycle commands, role resources, and benchmark configuration. Structurally valid JSON immediately updates the guided steps; final backend contract checks still apply when saved.</p><label htmlFor="advanced-json">Recipe document<textarea id="advanced-json" aria-label="Recipe document" rows={12} spellCheck={false} required value={documentText} aria-invalid={jsonError ? true : undefined} aria-describedby={jsonError ? "advanced-json-error" : undefined} onChange={event => { const value = event.target.value; setDirty(true); setDocumentText(value); const parsed = parseCanonicalRecipeDocument(value); if (parsed.ok) { setDocument(parsed.document); setSlug(parsed.document.identity.slug); setJsonError(""); setErrors([]); } else setJsonError(parsed.error); }}/>{jsonError && <span id="advanced-json-error" className="builder-field-error">{jsonError}</span>}</label></div></details>
       </fieldset>
 
       <footer className="builder-actions">
         <button type="button" className="button secondary" disabled={step === 0 || busy} onClick={() => goTo((step - 1) as BuilderStep)}>Previous</button>
         <span aria-live="polite">{status && <strong role={createdRecipeId ? "status" : "alert"} className={createdRecipeId ? "builder-success" : "builder-save-error"}>{status}</strong>}</span>
-        <div>{createdRecipeId && <button type="button" className="button secondary" onClick={() => onNavigate(`/library/recipes/${encodeURIComponent(createdRecipeId)}`)}>View saved recipe</button>}{step < 5 ? <button type="button" className="button" onClick={goNext}>Continue</button> : <button type="button" className="button" disabled={busy || Boolean(createdRecipeId)} onClick={() => void createRecipe()}>{busy ? "Creating recipe…" : "Create recipe"}</button>}</div>
+        <div>{createdRecipeId && <button type="button" className="button secondary" onClick={() => onNavigate(`/library/recipes/${encodeURIComponent(createdRecipeId)}`)}>View saved draft</button>}{step < 5 ? <button type="button" className="button" onClick={goNext}>Continue</button> : <button type="button" className="button" disabled={busy || Boolean(createdRecipeId) || Boolean(jsonError)} aria-describedby="builder-save-draft-help" onClick={() => void createRecipe()}>{busy ? "Saving draft…" : "Save recipe draft"}</button>}</div>
       </footer>
+      {step === 5 && <p id="builder-save-draft-help" className="builder-save-draft-help">Saves this canonical document as a local draft. Source bundle upload and policy checks remain required before build or resolve.</p>}
     </section>
   </div>;
 }

@@ -25,9 +25,9 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   qualification: "candidate",
   qualification_basis: "explicit-candidate-metadata",
   qualification_detail: "This immutable recipe explicitly declares candidate qualification.",
-  execution_readiness: "not-declared",
-  execution_readiness_basis: "missing-readiness-metadata",
-  execution_readiness_detail: "Execution readiness is not declared.",
+  execution_readiness: "executable",
+  execution_readiness_basis: "explicit-executable-metadata",
+  execution_readiness_detail: "This immutable recipe declares a complete executable contract.",
   precision: "BF16",
   execution_harness: "vllm-openai",
   runtime_distribution: "vllm-0-27-1",
@@ -89,6 +89,26 @@ test("summarizes the loaded Library window and filters recipes without changing 
   expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
   expect(history.state).toBeNull();
   expect(location.pathname).toBe(qwenModelPath);
+});
+
+test("shows a useful zero-search state in Browse and clears it without changing the route", async () => {
+  history.replaceState(null, "", "/library");
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.type(screen.getByRole("searchbox", {name: "Search Library"}), "nothing matches this");
+
+  const empty = screen.getByRole("region", {name: "No Library search results"});
+  expect(within(empty).getByRole("heading", {name: "No matching models or recipes"})).toBeVisible();
+  expect(within(empty).getByText(/Nothing in the loaded Library window matches/)).toBeVisible();
+  expect(screen.queryByRole("region", {name: "Models"})).not.toBeInTheDocument();
+
+  await user.click(within(empty).getByRole("button", {name: "Clear Library search"}));
+  expect(screen.getByRole("region", {name: "Models"})).toBeVisible();
+  expect(screen.getByRole("searchbox", {name: "Search Library"})).toHaveValue("");
+  expect(location.pathname).toBe("/library");
 });
 
 test("uses a friendly model name and keeps its immutable identity in copyable Technical details", async () => {
@@ -156,6 +176,58 @@ test("shows catalog releases across view modes and counts updates outside the lo
   expect(within(releaseStatus).getByText("Update available · v1.0.0 → v1.2.0")).toBeVisible();
   expect(within(releaseStatus).getByRole("link", {name: "Review changelog and update"})).toHaveAttribute("href", `/library/import?recipe=${encodeURIComponent(update.uri)}`);
   expect(listPublicRecipes).toHaveBeenCalledWith(expect.any(AbortSignal));
+});
+
+test("distinguishes Candidate and Accepted catalog qualification while scanning local recipes", async () => {
+  history.replaceState(null, "", "/library");
+  const accepted = publicRecipe({
+    slug: "qwen-chat",
+    title: "Qwen Chat catalog recipe",
+    qualification: "cataloged",
+    qualification_basis: "explicit-accepted-metadata",
+    qualification_detail: "Accepted after the catalog review gate.",
+    local: {status: "current", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "b".repeat(64), release_version: "1.0.0"},
+  });
+  const candidate = publicRecipe({
+    slug: "custom-runtime",
+    title: "Custom Runtime catalog recipe",
+    qualification_detail: "Candidate pending physical validation.",
+    local: {status: "current", recipe_id: "recipe-unlinked", revision_number: 1, content_sha256: "c".repeat(64), release_version: "1.0.0"},
+  });
+  const listPublicRecipes = vi.fn(async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "e".repeat(40), recipes: [accepted, candidate]}));
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe: async () => fullLibraryDetail, listPublicRecipes} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await user.click(await screen.findByRole("link", {name: /Qwen 3/}));
+  const chatRow = within(screen.getByRole("region", {name: /Recipes for/})).getByRole("link", {name: /^Qwen ChatQwen Chat description/}).closest("article")!;
+  expect(within(chatRow).getByText("Accepted")).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Compact"}));
+  const compactChat = screen.getByRole("link", {name: "Qwen Chat"}).closest("article")!;
+  expect(within(compactChat).getByText("Accepted")).toBeVisible();
+  expect(within(compactChat).getByText("1 Spark")).toBeVisible();
+  expect(within(compactChat).getByText("80.0 GiB download")).toBeVisible();
+  expect(within(compactChat).getByText("72.0 GiB memory / Spark")).toBeVisible();
+  const compactCandidate = screen.getByRole("link", {name: "Custom Runtime"}).closest("article")!;
+  expect(within(compactCandidate).getByText("Candidate")).toBeVisible();
+
+  await user.click(screen.getByRole("checkbox", {name: /Compare Qwen Chat/}));
+  await user.click(screen.getByRole("checkbox", {name: /Compare Custom Runtime/}));
+  await user.click(screen.getByRole("button", {name: /Compare \(2\)/}));
+  const comparison = screen.getByRole("region", {name: "Recipe comparison"});
+  const qualification = within(comparison).getByRole("row", {name: /Catalog qualification/});
+  expect(within(qualification).getByText("Accepted")).toBeVisible();
+  expect(within(qualification).getByText("Candidate")).toBeVisible();
+  expect(within(qualification).getByText("Accepted after the catalog review gate.")).toBeVisible();
+  expect(within(qualification).getByText("Candidate pending physical validation.")).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Browse"}));
+  await user.click(within(screen.getByRole("region", {name: /Recipes for/})).getByRole("link", {name: /^Qwen ChatQwen Chat description/}));
+  const release = await screen.findByRole("region", {name: "Catalog release status"});
+  expect(within(release).getByText("Accepted")).toBeVisible();
+  expect(within(release).getByText(/Accepted qualification/)).toBeVisible();
+  expect(within(release).getByText(/Accepted after the catalog review gate/)).toBeVisible();
 });
 
 test("keeps the local Library usable when the catalog version check fails and retries", async () => {
@@ -768,7 +840,7 @@ test("loads the current default catalog recipes when public import opens", async
   const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
-  expect(listPublicRecipes).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(listPublicRecipes).toHaveBeenCalledTimes(1));
   expect(await screen.findAllByRole("heading", {name: /Qwen 3\.5/, level: 3})).toHaveLength(2);
   const catalogCommit = screen.getByText("c".repeat(40));
   expect(catalogCommit).not.toBeVisible();

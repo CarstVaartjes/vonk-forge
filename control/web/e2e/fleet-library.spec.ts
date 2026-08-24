@@ -224,7 +224,7 @@ test.afterEach(async ({page}) => {
   expect(browserProblems.get(page)).toEqual([]);
 });
 
-test("Fleet cards and bounded history are keyboard-accessible with local evidence", async ({page}) => {
+test("Fleet Detailed view and bounded history are keyboard-accessible with local evidence", async ({page}) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/fleet");
 
@@ -249,6 +249,24 @@ test("Fleet cards and bounded history are keyboard-accessible with local evidenc
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Fleet discovery searches friendly names and combines actionable health filters", async ({page}) => {
+  await page.goto("/fleet");
+  await expect(page.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
+
+  const search = page.getByRole("searchbox", {name: "Find a Spark"});
+  await search.fill("Borealis");
+  await expect(page.getByRole("article", {name: "Borealis — Offline"})).toBeVisible();
+  await expect(page.getByRole("article", {name: /Aurora —/})).toHaveCount(0);
+  await expect(page.getByRole("status").filter({hasText: "Showing 1 of 2 Sparks"})).toBeVisible();
+  await page.getByRole("button", {name: "Clear filters"}).click();
+
+  await page.getByRole("button", {name: "Show offline nodes"}).click();
+  await expect(page.getByRole("checkbox", {name: "Offline 1"})).toBeChecked();
+  await page.getByRole("checkbox", {name: /Live 1/}).check();
+  await expect(page.getByRole("status").filter({hasText: "Showing 2 of 2 Sparks"})).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test("Node history chooses honest rollups on desktop and mobile", async ({page}) => {

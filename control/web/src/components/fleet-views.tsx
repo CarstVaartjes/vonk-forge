@@ -68,7 +68,7 @@ export function FleetCompactView({nodes, now, onSelect, selectedNodeId}: FleetVi
             <td data-label="Latest update">{timestamp
               ? <time dateTime={timestamp.dateTime} title={timestamp.exact} aria-label={`${timestamp.relative}; exact time ${timestamp.exact}`}>{timestamp.relative.replace(/^Updated /, "")}</time>
               : <span>Not reported</span>}</td>
-            <td data-label="Action"><button type="button" className="secondary-button compact-detail-button" aria-expanded={selectedNodeId === node.id} onClick={() => onSelect(node.id)}>View details<span className="sr-only"> for {name}</span></button></td>
+            <td data-label="Action"><button type="button" className="secondary-button compact-detail-button" aria-label={`View ${name} details`} aria-expanded={selectedNodeId === node.id} onClick={() => onSelect(node.id)}>View details</button></td>
           </tr>;
         })}</tbody>
       </table>

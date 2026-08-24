@@ -307,7 +307,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
           <input type="search" aria-label="Search Library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, slugs, capabilities…" />
         </label>
         <div className="library-search-meta" aria-live="polite">
-          {query.trim() ? <><span>Filtering the loaded window</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>Browse exact versions and their accepted recipes</span>}
+          {query.trim() ? <><span>Filtering the loaded window</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>Browse exact model versions and available local recipes</span>}
         </div>
       </div>
     </>}
@@ -329,6 +329,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         detailLoading={detailLoading}
         catalogError={catalogError}
         catalogLoading={catalogLoading}
+        onClearSearch={() => setQuery("")}
         onNavigate={onNavigate}
         onBusyChange={onBusyChange}
         onRefresh={refreshDetail}

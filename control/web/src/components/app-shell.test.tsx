@@ -1,4 +1,4 @@
-import {act, render, screen, waitFor, within} from "@testing-library/react";
+import {act, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import {App} from "../app";
@@ -20,7 +20,7 @@ const importRecipe: PublicRecipe = {
   uri: `vonk://catalog/vonk-forge/locked-import@sha256:${"1".repeat(64)}`, content_sha256: "1".repeat(64),
   model_publisher: "models", model_slug: "locked", model_title: "Locked model", source_owner: "Vonk Forge", source_repository: "https://example.test/vonk-forge",
   capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata", qualification_detail: "Explicit candidate test evidence.", precision: "BF16",
-  execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata", execution_readiness_detail: "Execution readiness is not declared.",
+  execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Execution is declared for this shell navigation test.",
   execution_harness: "vllm-openai", runtime_distribution: "vllm-test", source_bundle_sha256: "2".repeat(64), artifact_count: 1,
   topology_name: "single-spark", topology_mode: "single", node_count: 1, expected_download_bytes: 1, maximum_installed_bytes_per_node: 1, maximum_runtime_memory_bytes_per_node: 1,
   topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
@@ -86,7 +86,12 @@ test("keeps the focused workspace routes in primary navigation while preserving 
   expect(navigationToggle).toBeVisible();
   expect(navigationToggle).toHaveAttribute("aria-expanded", "false");
   await user.click(navigationToggle);
-  expect(screen.getByRole("button", {name: "Close system navigation"})).toHaveAttribute("aria-expanded", "true");
+  const dialog = screen.getByRole("dialog", {name: "Navigation"});
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByRole("button", {name: "Close system navigation"})).toBeVisible();
+  expect(document.querySelector("main")).toHaveAttribute("inert");
+  expect(document.querySelector("main")).toHaveAttribute("aria-hidden", "true");
+  expect(document.body).toHaveClass("shell-navigation-open");
 
   const primary = screen.getByRole("navigation", {name: "Primary"});
   const routes = new Map([
@@ -103,6 +108,59 @@ test("keeps the focused workspace routes in primary navigation while preserving 
   for (const icon of container.querySelectorAll("svg")) {
     expect(icon).toHaveAttribute("aria-hidden", "true");
   }
+});
+
+test("closes the mobile navigation on its scrim and restores focus to the opener", async () => {
+  render(<AppShell activeRoute="fleet" onNavigate={() => undefined}><p>Workspace content</p></AppShell>);
+  const user = userEvent.setup();
+  const opener = screen.getByRole("button", {name: "Open system navigation"});
+
+  await user.click(opener);
+  expect(screen.getByRole("dialog", {name: "Navigation"})).toBeVisible();
+  const scrim = document.querySelector<HTMLElement>(".shell-navigation-scrim");
+  expect(scrim).not.toBeNull();
+  fireEvent.pointerDown(scrim!);
+
+  await waitFor(() => expect(screen.queryByRole("dialog", {name: "Navigation"})).not.toBeInTheDocument());
+  expect(opener).toHaveFocus();
+  expect(document.querySelector("main")).not.toHaveAttribute("inert");
+  expect(document.querySelector("main")).not.toHaveAttribute("aria-hidden");
+  expect(document.body).not.toHaveClass("shell-navigation-open");
+});
+
+test("keeps focus inside the mobile sheet and closes it on Escape", async () => {
+  render(<AppShell activeRoute="fleet" onNavigate={() => undefined}>{null}</AppShell>);
+  const user = userEvent.setup();
+  const opener = screen.getByRole("button", {name: "Open system navigation"});
+  await user.click(opener);
+
+  const close = screen.getByRole("button", {name: "Close system navigation"});
+  close.focus();
+  await user.keyboard("{Shift>}{Tab}{/Shift}");
+  expect(screen.getByRole("link", {name: "Activity"})).toHaveFocus();
+  await user.keyboard("{Escape}");
+
+  expect(screen.queryByRole("dialog", {name: "Navigation"})).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+});
+
+test("closes the operator disclosure before closing its containing mobile sheet", async () => {
+  render(<AppShell
+    activeRoute="fleet"
+    onNavigate={() => undefined}
+    operator={{logoutError: "", loggingOut: false, onLogout: () => undefined, role: "Administrator", subject: "admin"}}
+  >{null}</AppShell>);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", {name: "Open system navigation"}));
+  const operator = screen.getByRole("button", {name: /admin/i});
+  await user.click(operator);
+  expect(screen.getByRole("group", {name: "Operator actions"})).toBeVisible();
+
+  await user.keyboard("{Escape}");
+
+  expect(screen.queryByRole("group", {name: "Operator actions"})).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", {name: "Navigation"})).toBeVisible();
+  expect(operator).toHaveFocus();
 });
 
 test("renders a focused recovery page for unsupported URLs", async () => {

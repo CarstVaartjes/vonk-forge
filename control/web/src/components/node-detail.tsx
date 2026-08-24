@@ -3,7 +3,7 @@ import type {ControlApi, TelemetryHistory, TelemetryHistoryPoint, TelemetryResol
 import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
 import {CopyButton} from "./copy-button";
 import {Meter} from "./meter";
-import {Sparkline, type SparklineSeriesPoint} from "./sparkline";
+import {Sparkline, type SparklineDomain, type SparklineSeriesPoint} from "./sparkline";
 import {StatusPill} from "./status-pill";
 
 type HistoryRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
@@ -35,6 +35,23 @@ function metricSeries(points: readonly TelemetryHistoryPoint[], name: RawMetricN
       ? {count: 1, minimum: value, mean: value, maximum: value}
       : null;
   });
+}
+
+function availableMemoryDomain(points: readonly TelemetryHistoryPoint[], node: VisualFleetNode): SparklineDomain | undefined {
+  const totals = points.flatMap(point => {
+    if (isRollupPoint(point)) {
+      const metric = point.metrics.memory_total_bytes;
+      return metric && Number.isFinite(metric.maximum) && metric.maximum > 0 ? [metric.maximum] : [];
+    }
+    return typeof point.memory_total_bytes === "number"
+      && Number.isFinite(point.memory_total_bytes)
+      && point.memory_total_bytes > 0
+      ? [point.memory_total_bytes]
+      : [];
+  });
+  const currentTotal = node.telemetry?.sample.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
+  if (typeof currentTotal === "number" && Number.isFinite(currentTotal) && currentTotal > 0) totals.push(currentTotal);
+  return totals.length > 0 ? [0, Math.max(...totals)] : undefined;
 }
 
 function boundedError(value: unknown): string {
@@ -107,6 +124,7 @@ export function NodeDetail({
   const name = nodeDisplayName(node);
   const secondaryName = nodeSecondaryName(node);
   const memory = nodeUnifiedMemory(node);
+  const memoryHistoryDomain = availableMemoryDomain(points, node);
 
   return <aside className="node-detail" role="complementary" aria-labelledby={headingId}>
     <header className="node-detail-heading">
@@ -154,9 +172,9 @@ export function NodeDetail({
       {historyError && <div className="history-error"><p role="alert">{historyError}</p><button type="button" onClick={() => setRetryRevision(value => value + 1)}>Retry history</button></div>}
       {history && points.length === 0 && <p role="status">No telemetry samples are available in this window.</p>}
       {history && points.length > 0 && <div className="history-grid">
-        <Sparkline label={`${name} GPU utilization history`} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
-        <Sparkline label={`${name} available memory history`} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
-        <Sparkline label={`${name} temperature history`} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
+        <Sparkline metricName="GPU utilization" label={`${name} GPU utilization history`} domain={[0, 100]} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
+        <Sparkline metricName="Available memory" label={`${name} available memory history`} domain={memoryHistoryDomain} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
+        <Sparkline metricName="Temperature" label={`${name} temperature history`} domain={[0, 100]} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
       </div>}
     </section>
 

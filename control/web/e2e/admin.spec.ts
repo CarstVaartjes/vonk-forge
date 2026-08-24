@@ -42,9 +42,15 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
     const toggle = page.getByRole("button", {name: "Open system navigation"});
     if (width <= 864) {
       await expect(toggle).toBeVisible();
+      await expect(page.locator(".app-sidebar")).toHaveCSS("position", "sticky");
       await toggle.click();
+      const navigationDialog = page.getByRole("dialog", {name: "Navigation"});
+      await expect(navigationDialog).toHaveAttribute("aria-modal", "true");
+      await expect(page.locator("main")).toHaveAttribute("inert", "");
       await expect(primaryLinks.first()).toBeFocused();
       await primaryLinks.first().press("Shift+Tab");
+      await expect(page.getByRole("button", {name: "Close system navigation"})).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
       await expect(page.getByRole("button", {name: /admin/i})).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("button", {name: "Open system navigation"})).toBeFocused();
@@ -80,7 +86,7 @@ test("Activity combines friendly audit history and current operations", async ({
   await expect(page.getByRole("heading", {name: "Recipe Install · Running"})).toBeVisible();
   await expect(page.getByText(requestId)).toBeHidden();
   await page.getByRole("button", {name: /admin/i}).click();
-  await expect(page.getByRole("menu", {name: "Operator menu"})).toBeVisible();
+  await expect(page.getByRole("group", {name: "Operator actions"})).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expectNoSeriousAccessibilityViolations(page);
   for (const width of [320, 360, 768, 1280]) {
@@ -128,7 +134,7 @@ test("the custom recipe builder guides a complete, responsive, accessible creati
   await expect(mobileDiscard).toBeVisible();
   await mobileDiscard.getByRole("button", {name: "Keep editing"}).click();
   await expect(page.getByRole("link", {name: "Fleet"})).toBeFocused();
-  await expect(page.getByRole("button", {name: "Close system navigation"})).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("dialog", {name: "Navigation"})).toHaveAttribute("aria-modal", "true");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", {name: "Open system navigation"})).toBeFocused();
 
@@ -147,10 +153,12 @@ test("the custom recipe builder guides a complete, responsive, accessible creati
 
   await page.setViewportSize({width: 1280, height: 900});
   await expect(page.getByRole("region", {name: "Recipe builder review"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Draft preflight"})).toBeVisible();
+  await expect(page.getByText("Not uploaded by this builder")).toBeVisible();
   await expectNoDocumentOverflow(page);
   await expectNoSeriousAccessibilityViolations(page);
   await attachScreenshot(page, testInfo, "custom-recipe-review-desktop.png");
-  await page.getByRole("button", {name: "Create recipe"}).click();
-  await expect(page.getByText("Recipe saved")).toBeVisible();
-  await expect(page.getByRole("button", {name: "View saved recipe"})).toBeVisible();
+  await page.getByRole("button", {name: "Save recipe draft"}).click();
+  await expect(page.getByText("Recipe draft saved")).toBeVisible();
+  await expect(page.getByRole("button", {name: "View saved draft"})).toBeVisible();
 });
