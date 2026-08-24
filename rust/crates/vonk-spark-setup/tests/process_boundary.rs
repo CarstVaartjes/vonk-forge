@@ -10,9 +10,10 @@ use std::{
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_spark_setup::{
-    CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, ReleaseAuthority,
-    SetupRequest, SystemCommandRunner, TtyPrompt, apply_setup_from_with_authority, handoff_to_root,
-    handoff_to_root_with_authority, prepare_setup_with_authority,
+    CallerIdentity, Command, CommandOutput, CommandRunner, CommandStderr, InstallPaths, Prompt,
+    ReleaseAuthority, SetupRequest, SystemCommandRunner, TtyPrompt,
+    apply_setup_from_with_authority, handoff_to_root, handoff_to_root_with_authority,
+    prepare_setup_with_authority,
 };
 
 const HELPER_ROOT: &str = "VONK_SPARK_PROCESS_HELPER_ROOT";
@@ -462,6 +463,7 @@ fn real_system_runner_clears_environment_and_forwards_stdin() {
         args: Vec::new(),
         env: BTreeMap::from([("VONK_ALLOWED".to_owned(), "yes".to_owned())]),
         stdin: b"stdin-secret\n".to_vec(),
+        stderr: CommandStderr::Inherit,
     };
 
     let output = SystemCommandRunner.run(command).unwrap();

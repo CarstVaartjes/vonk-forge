@@ -48,6 +48,13 @@ pub struct Command {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub stdin: Vec<u8>,
+    pub stderr: CommandStderr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandStderr {
+    Inherit,
+    Suppress,
 }
 
 impl Command {
@@ -60,6 +67,7 @@ impl Command {
             args: args.into_iter().map(Into::into).collect(),
             env: BTreeMap::new(),
             stdin: Vec::new(),
+            stderr: CommandStderr::Inherit,
         }
     }
 
@@ -70,6 +78,11 @@ impl Command {
 
     pub fn with_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn suppress_stderr(mut self) -> Self {
+        self.stderr = CommandStderr::Suppress;
         self
     }
 }
@@ -1636,7 +1649,8 @@ fn verify_sustained_readiness(
                             "--max-age-seconds",
                             "90",
                         ],
-                    ),
+                    )
+                    .suppress_stderr(),
                 );
                 if ready.is_ok() {
                     healthy += 1;
@@ -2507,8 +2521,11 @@ impl CommandRunner for SystemCommandRunner {
             .env("LC_ALL", "C.UTF-8")
             .envs(command.env)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stdout(Stdio::piped());
+        process.stderr(match command.stderr {
+            CommandStderr::Inherit => Stdio::inherit(),
+            CommandStderr::Suppress => Stdio::null(),
+        });
         let mut child = process
             .spawn()
             .map_err(|_| command.program.display().to_string())?;
