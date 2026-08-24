@@ -1,7 +1,8 @@
 import {useEffect, useRef, useState} from "react";
 import type {JobDetail, LibraryApi, LibraryOperation} from "../api/types";
 import type {LibraryActionName} from "./library-action-types";
-import {friendlyNodeName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {useLibraryNodeName} from "./library-node-names";
+import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
 const COMPLETE_STATES = new Set(["succeeded", "complete", "completed"]);
 const INCOMPLETE_STATES = new Set(["partial", "failed", "cancelled", "canceled", "lost"]);
@@ -26,6 +27,7 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
   onRefresh(signal: AbortSignal): Promise<void>;
   operation: LibraryOperation;
 }) {
+  const nodeName = useLibraryNodeName();
   const [job, setJob] = useState<JobDetail>();
   const [error, setError] = useState("");
   const [pollAttempt, setPollAttempt] = useState(0);
@@ -106,7 +108,7 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
       <strong>{complete ? "Operation complete" : incomplete ? "Operation incomplete" : "Operation in progress"}</strong>
       <span>{humanizeIdentifier(operation.kind)} · {humanizeIdentifier(operation.state)}</span>
     </div>
-    <p>{operation.nodes.map(friendlyNodeName).join(" + ")}</p>
+    <p>{operation.nodes.map(nodeName).join(" + ")}</p>
     <TechnicalDetails compact items={[{label: "Operation ID", value: operation.id}, ...operation.nodes.map((node, index) => ({label: `Node ${index + 1} ID`, value: node}))]}/>
     {job && <p>{job.progress.completed} of {job.progress.total} ranks completed · {job.progress.failed} failed</p>}
     {error && <div role="alert"><p>{error}</p>{!incomplete && <button type="button" onClick={() => setPollAttempt(value => value + 1)}>Retry status</button>}</div>}

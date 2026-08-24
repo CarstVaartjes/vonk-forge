@@ -10,7 +10,8 @@ import {formatBytes} from "../lib/fleet";
 import {LibraryPlanReasons} from "./library-plan-reasons";
 import {LibraryReasons} from "./library-reasons";
 import type {LibraryPlacementGroup} from "./library-action-types";
-import {friendlyNodeName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {useLibraryNodeName} from "./library-node-names";
+import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
 export type LibraryActionPlan = LibraryMappingPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
 
@@ -45,12 +46,13 @@ export function MappingPreview({evidence, plan, policy}: {
   plan: LibraryMappingPlan;
   policy: LibrarySnapshot["freshness_policy"];
 }) {
+  const nodeName = useLibraryNodeName();
   return <div className="action-preview">
     <p><strong>{plan.topology_name}</strong> · generation {plan.generation}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => {
       const authority = evidence?.nodes.find(candidate => candidate.node_id === node.node_id && candidate.rank === node.rank);
       return <li key={node.node_id}>
-        <strong>Rank {node.rank} · {humanizeIdentifier(node.role)}{node.endpoint_owner ? " · endpoint owner" : ""} · {friendlyNodeName(node.node_id)}</strong>
+        <strong>Rank {node.rank} · {humanizeIdentifier(node.role)}{node.endpoint_owner ? " · endpoint owner" : ""} · {nodeName(node.node_id)}</strong>
         <TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
         {authority ? <>
           <span>{formatBytes(authority.disk_required_bytes)} disk required · {formatBytes(authority.disk_reserved_bytes)} reserved · {formatBytes(authority.disk_free_after_bytes)} after</span>
@@ -68,12 +70,13 @@ export function InstallPreview({plan, policy, previewReceivedAt}: {
   policy: LibrarySnapshot["freshness_policy"];
   previewReceivedAt: number;
 }) {
+  const nodeName = useLibraryNodeName();
   const reasons = reasonSets(plan.nodes);
   return <div className="action-preview">
     <p>Selected mapping · generation {plan.mapping_generation}</p>
     <TechnicalDetails compact items={[{label: "Mapping ID", value: plan.mapping_id}]}/>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
-      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {friendlyNodeName(node.node_id)}</strong>
+      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {nodeName(node.node_id)}</strong>
       <TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
       <span>{formatBytes(node.required_bytes)} disk required · {formatBytes(node.required_download_bytes)} download · {formatBytes(node.reused_bytes)} reused</span>
       <span>{formatBytes(node.active_reserved_bytes)} reserved · {node.free_bytes == null ? "Disk inventory unavailable" : `${formatBytes(node.free_bytes)} free`}{node.free_after_bytes == null ? "" : ` · ${formatBytes(node.free_after_bytes)} after`}</span>
@@ -86,6 +89,7 @@ export function InstallPreview({plan, policy, previewReceivedAt}: {
 }
 
 export function LoadPreview({plan}: {plan: LibraryLoadPlan}) {
+  const nodeName = useLibraryNodeName();
   const reasons = reasonSets(plan.nodes);
   const coexistence = reasons.warnings.filter(reason => reason.code.toLowerCase().includes("coexist"));
   return <div className="action-preview">
@@ -94,7 +98,7 @@ export function LoadPreview({plan}: {plan: LibraryLoadPlan}) {
     <p>Selected installation · mapping generation {plan.mapping_generation}</p>
     <TechnicalDetails compact items={[{label: "Installation ID", value: plan.installation_id}, {label: "Mapping ID", value: plan.mapping_id}]}/>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
-      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)}{node.endpoint_owner ? " · endpoint owner" : ""} · {friendlyNodeName(node.node_id)}</strong>
+      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)}{node.endpoint_owner ? " · endpoint owner" : ""} · {nodeName(node.node_id)}</strong>
       <TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
       <span>{formatBytes(node.required_memory_bytes)} required · {node.available_memory_bytes == null ? "Memory inventory unavailable" : `${formatBytes(node.available_memory_bytes)} available`}{node.free_after_bytes == null ? "" : ` · ${formatBytes(node.free_after_bytes)} after`}</span>
       <span>{formatBytes(node.active_reserved_bytes)} already reserved · {node.memory_kind} memory · port {node.port}</span>
@@ -106,10 +110,11 @@ export function LoadPreview({plan}: {plan: LibraryLoadPlan}) {
 }
 
 export function StopPreview({plan}: {plan: LibraryStopPlan}) {
+  const nodeName = useLibraryNodeName();
   return <div className="action-preview">
     <p>{plan.route_withdrawal ? "Published route will be withdrawn." : `Route remains ${plan.route_state}.`}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
-      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {friendlyNodeName(node.node_id)}</strong><span>{formatBytes(node.active_memory_reservation_bytes)} active reservation</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
+      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {nodeName(node.node_id)}</strong><span>{formatBytes(node.active_memory_reservation_bytes)} active reservation</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
     </li>)}</ol>
     <p>{formatBytes(plan.total_active_memory_reservation_bytes)} is actively reserved now.</p>
     <p className="authority-copy">Capacity remains reserved unless every rank stops successfully.</p>
@@ -119,10 +124,11 @@ export function StopPreview({plan}: {plan: LibraryStopPlan}) {
 }
 
 export function UninstallPreview({plan}: {plan: LibraryUninstallPlan}) {
+  const nodeName = useLibraryNodeName();
   return <div className="action-preview">
     <p>{plan.bytes_removed == null ? "Exact removable bytes are unknown." : `${formatBytes(plan.bytes_removed)} will be removed.`}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
-      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {friendlyNodeName(node.node_id)}</strong><span>{node.installed_bytes == null ? "Installed bytes unknown" : `${formatBytes(node.installed_bytes)} installed`}</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
+      <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {nodeName(node.node_id)}</strong><span>{node.installed_bytes == null ? "Installed bytes unknown" : `${formatBytes(node.installed_bytes)} installed`}</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
     </li>)}</ol>
     {plan.active_runs.length > 0 && <section aria-label="Active runs"><h4>{plan.active_run_count} active run{plan.active_run_count === 1 ? "" : "s"}</h4><ul>{plan.active_runs.map((run, index) => <li key={run.run_id}><span>Run {index + 1} · {humanizeIdentifier(run.state)} · route {humanizeIdentifier(run.route_state)}</span><TechnicalDetails compact items={[{label: "Run ID", value: run.run_id}]}/></li>)}</ul></section>}
     {!plan.consequences.automatic_stop && <p className="authority-copy">Forge will not stop active runs automatically.</p>}

@@ -1286,6 +1286,15 @@
   display: grid;
 }
 
+.comparison-load-error {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.comparison-load-error .button {
+  justify-self: start;
+}
+
 .comparison-sparks {
   align-items: center;
   display: flex;

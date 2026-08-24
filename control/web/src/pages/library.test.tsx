@@ -174,6 +174,30 @@ test("aborts comparison detail requests when selection changes and on unmount", 
   expect(activeSignal.aborted).toBe(true);
 });
 
+test("recovers a failed comparison detail through its visible retry action", async () => {
+  history.replaceState(null, "", "/library");
+  const libraryRecipe = vi.fn()
+    .mockRejectedValueOnce(new Error("Topology authority is temporarily unavailable"))
+    .mockResolvedValueOnce(fullLibraryDetail);
+  const api = {librarySnapshot: async () => librarySnapshot, libraryRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Models"});
+  await user.click(screen.getByRole("button", {name: "Compare"}));
+  const picker = screen.getByRole("region", {name: "Choose recipes to compare"});
+  await user.click(within(picker).getByRole("checkbox", {name: /Qwen Chat/}));
+
+  const comparison = screen.getByRole("region", {name: "Recipe comparison"});
+  const error = await within(comparison).findByRole("alert");
+  expect(error).toHaveTextContent("Topology authority is temporarily unavailable");
+  await user.click(within(error).getByRole("button", {name: "Retry Qwen Chat details"}));
+
+  expect(await within(comparison).findByText("2 Sparks")).toBeVisible();
+  expect(within(comparison).queryByText("Topology authority is temporarily unavailable")).not.toBeInTheDocument();
+  expect(libraryRecipe).toHaveBeenCalledTimes(2);
+});
+
 test("shows visual recipe truth and selects only one complete placement group on activation", async () => {
   // Break caught: the UI reduces placement to node checkboxes, hides stale or
   // reservation evidence, calls a bounded search optimal, or omits typed
@@ -182,6 +206,7 @@ test("shows visual recipe truth and selects only one complete placement group on
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: async () => fullLibraryDetail,
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha"}, {id: "node-beta", display_name: "MIA Beta"}]}),
   } as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
@@ -217,7 +242,11 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(within(detail).queryByRole("link", {name: "Raw editor"})).not.toBeInTheDocument();
 
   const groups = within(detail).getByRole("region", {name: "Complete placement groups"});
-  const select = within(groups).getByRole("button", {name: "Select complete group Node Alpha and Node Beta"});
+  const select = await within(groups).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
+  expect(within(groups).getByText("MIA Alpha")).toBeVisible();
+  expect(within(groups).queryByText("node-alpha")).not.toBeInTheDocument();
+  await user.click(within(select.closest("article")!).getAllByText("Technical details")[0]);
+  expect(within(select.closest("article")!).getByText("node-alpha")).toBeVisible();
   expect(select).toHaveAttribute("aria-pressed", "false");
   select.focus();
   expect(select).toHaveFocus();

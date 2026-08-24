@@ -25,12 +25,6 @@ export function friendlyModelName(model: {publisher: string; slug: string}): str
   return slug.toLocaleLowerCase().startsWith(publisher.toLocaleLowerCase()) ? slug : `${publisher} ${slug}`;
 }
 
-export function friendlyNodeName(nodeId: string): string {
-  const name = humanizeIdentifier(nodeId);
-  if (/^Spark\s+[a-f0-9]{12,}$/i.test(name)) return `Spark ${nodeId.slice(-6).toUpperCase()}`;
-  return name || "Spark";
-}
-
 export function exactIdentity(value: {publisher: string; slug: string; content_sha256: string}): string {
   return `${value.publisher}/${value.slug}@${value.content_sha256}`;
 }

@@ -463,7 +463,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await expect(authority).toContainText("Immutable revision 3");
   await expect(authority).toContainText("Bounded search is incomplete");
   await expect(authority).toContainText("Inventory fresh · 10s");
-  await expect(authority).toContainText("Node Alpha + Node Beta");
+  await expect(authority).toContainText("Spark node + Spark node");
   const authorityContrast = await authority.evaluate(element => {
     const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
     const luminance = (value: string) => {
@@ -480,7 +480,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   });
   expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
 
-  const selector = authority.getByRole("button", {name: "Select complete group Node Alpha and Node Beta"});
+  const selector = authority.getByRole("button", {name: "Select complete group Spark node and Spark node"});
   await selector.focus();
   await page.keyboard.press("Space");
   await expect(selector).toHaveAttribute("aria-pressed", "true");

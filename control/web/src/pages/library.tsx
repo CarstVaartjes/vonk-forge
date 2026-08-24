@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
+import {LibraryNodeNamesProvider} from "../components/library-node-names";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
@@ -127,10 +128,25 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
+  const [nodeDisplayNames, setNodeDisplayNames] = useState<Record<string, string>>({});
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
   const route = libraryRoute(path);
+
+  useEffect(() => {
+    const fleetApi = api as LibraryApi & Partial<Pick<ControlApi, "visualFleet">>;
+    if (!fleetApi.visualFleet) return;
+    const controller = new AbortController();
+    void fleetApi.visualFleet(controller.signal)
+      .then(value => {
+        if (!controller.signal.aborted) setNodeDisplayNames(Object.fromEntries(value.nodes.map(node => [node.id, node.display_name])));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setNodeDisplayNames({});
+      });
+    return () => controller.abort();
+  }, [api]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -244,7 +260,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     </header>
     {snapshot && <>
       <section className="library-overview" aria-label="Library summary">
-        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Models</span><strong>{modelCount}</strong><small>Exact versions available</small></div>
+        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Model versions</span><strong>{modelCount}</strong><small>Exact immutable identities</small></div>
         <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
         <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
         <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
@@ -270,20 +286,20 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
       </div>
     </section>}
-    {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryBrowser
-      api={api}
-      detail={detail}
-      detailError={detailError}
-      detailLoading={detailLoading}
-      onNavigate={onNavigate}
-      onBusyChange={onBusyChange}
-      onRefresh={refreshDetail}
-      onRetryDetail={() => setDetailAttempt(value => value + 1)}
-      query={query}
-      route={route}
-      snapshot={browserSnapshot}
-      windowed={paginationWindowed}
-    />}
+    {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
+        api={api}
+        detail={detail}
+        detailError={detailError}
+        detailLoading={detailLoading}
+        onNavigate={onNavigate}
+        onBusyChange={onBusyChange}
+        onRefresh={refreshDetail}
+        onRetryDetail={() => setDetailAttempt(value => value + 1)}
+        query={query}
+        route={route}
+        snapshot={browserSnapshot}
+        windowed={paginationWindowed}
+      /></LibraryNodeNamesProvider>}
     {snapshot && (snapshot.next_cursor || paginationWindowed) && <div className="library-pagination">
       {paginationWindowed && <p role="status" aria-label="Bounded Library window">Showing up to {LIBRARY_RECIPE_WINDOW} recipes per list and {LIBRARY_MODEL_WINDOW} models. Earlier loaded rows leave this bounded window; selected context stays pinned. {snapshot.next_cursor ? "More server pages remain." : "No more server pages remain."}</p>}
       {snapshot.next_cursor && <button type="button" className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading more recipes…" : "Load more Library recipes"}</button>}

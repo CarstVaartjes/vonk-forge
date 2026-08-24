@@ -48,6 +48,7 @@ export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
 }) {
   const [details, setDetails] = useState<Record<string, LibraryRecipeDetail>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const selected = useMemo(() => selectedIds.flatMap(id => {
     const recipe = recipes.find(item => item.recipe_id === id);
     return recipe ? [recipe] : [];
@@ -57,16 +58,35 @@ export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
     const controller = new AbortController();
     for (const recipe of selected) {
       if (details[recipe.recipe_id]) continue;
+      setErrors(current => {
+        if (!(recipe.recipe_id in current)) return current;
+        const next = {...current};
+        delete next[recipe.recipe_id];
+        return next;
+      });
       void api.libraryRecipe(recipe.recipe_id, controller.signal)
         .then(detail => {
-          if (!controller.signal.aborted) setDetails(current => ({...current, [recipe.recipe_id]: detail}));
+          if (!controller.signal.aborted) {
+            setDetails(current => ({...current, [recipe.recipe_id]: detail}));
+            setErrors(current => {
+              if (!(recipe.recipe_id in current)) return current;
+              const next = {...current};
+              delete next[recipe.recipe_id];
+              return next;
+            });
+          }
         })
         .catch(value => {
           if (!controller.signal.aborted) setErrors(current => ({...current, [recipe.recipe_id]: value instanceof Error ? value.message.slice(0, 160) : "Unable to load comparison detail"}));
         });
     }
     return () => controller.abort();
-  }, [api, selected]);
+  }, [api, retryAttempt, selected]);
+
+  useEffect(() => {
+    const selectedSet = new Set(selectedIds);
+    setErrors(current => Object.fromEntries(Object.entries(current).filter(([recipeId]) => selectedSet.has(recipeId))));
+  }, [selectedIds]);
 
   if (selected.length === 0) return <section className="library-compare-empty" aria-label="Recipe comparison">
     <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
@@ -88,7 +108,7 @@ export function LibraryComparison({api, recipes, selectedIds, onToggle}: {
         </th>)}</tr></thead>
         <tbody>
           <tr><th scope="row">Local status</th>{selected.map(recipe => { const current = status(recipe); return <td key={recipe.recipe_id}><span className={`comparison-status comparison-status-${current.tone}`}>{current.label}</span><small>{recipe.installation_total_count} installed · {recipe.run_total_count} active</small></td>; })}</tr>
-          <tr><th scope="row">Spark topology</th>{selected.map(recipe => <td key={recipe.recipe_id}>{errors[recipe.recipe_id] ? <span role="alert">{errors[recipe.recipe_id]}</span> : details[recipe.recipe_id] ? <TopologyGraphic detail={details[recipe.recipe_id]} summary={recipe}/> : <span role="status">Loading topology…</span>}</td>)}</tr>
+          <tr><th scope="row">Spark topology</th>{selected.map(recipe => <td key={recipe.recipe_id}>{errors[recipe.recipe_id] ? <div className="comparison-load-error" role="alert"><span>{errors[recipe.recipe_id]}</span><button type="button" className="button secondary" onClick={() => setRetryAttempt(value => value + 1)}>Retry {recipe.title} details</button></div> : details[recipe.recipe_id] ? <TopologyGraphic detail={details[recipe.recipe_id]} summary={recipe}/> : <span role="status">Loading topology…</span>}</td>)}</tr>
           <tr><th scope="row">Startup memory</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Startup memory" value={topologyMemory(details[recipe.recipe_id])} maximum={memoryMaximum}/></td>)}</tr>
           <tr><th scope="row">Disk envelope</th>{selected.map(recipe => <td key={recipe.recipe_id}><ResourceBar label="Disk envelope" value={topologyDisk(details[recipe.recipe_id])} maximum={diskMaximum}/></td>)}</tr>
           <tr><th scope="row">Capabilities</th>{selected.map(recipe => <td key={recipe.recipe_id}><div className="comparison-capabilities">{recipe.capabilities.length ? recipe.capabilities.map(capability => <span key={capability}>{humanizeIdentifier(capability)}</span>) : <span>Not declared</span>}</div></td>)}</tr>

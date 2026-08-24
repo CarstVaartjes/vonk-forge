@@ -82,6 +82,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   const api = {
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: vi.fn(async () => detail),
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha"}, {id: "node-beta", display_name: "MIA Beta"}]}),
     previewLibraryLoad,
     applyLibraryLoad,
     libraryOperation,
@@ -92,7 +93,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   render(<App api={api}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
-  const selector = within(placement).getByRole("button", {name: "Select complete group Node Alpha and Node Beta"});
+  const selector = await within(placement).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
   await user.click(selector);
   const review = within(selector.closest("article")!).getByRole("button", {name: "Review Load"});
   await user.click(review);
@@ -102,7 +103,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   expect(within(dialog).getByText("Endpoint alias qwen-chat")).toBeVisible();
   expect(within(dialog).getByText("Existing recipes remain loaded. Forge will not unload anything automatically.")).toBeVisible();
   expect(within(dialog).getByText("Authoritative capacity evidence permits Qwen Code to coexist.")).toBeVisible();
-  expect(within(dialog).getByText("Rank 0 · Leader · endpoint owner · Node Alpha")).toBeVisible();
+  expect(within(dialog).getByText("Rank 0 · Leader · endpoint owner · MIA Alpha")).toBeVisible();
   expect(within(dialog).getAllByText("60.0 GiB required · 100.0 GiB available · 36.0 GiB after")).toHaveLength(2);
 
   await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
@@ -110,7 +111,10 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   const progress = await screen.findByRole("region", {name: "Load operation progress"});
   expect(within(progress).getByText("Operation incomplete")).toBeVisible();
   expect(within(progress).getByText("1 of 2 ranks completed · 1 failed")).toBeVisible();
-  expect(within(progress).getByText("Node Alpha + Node Beta")).toBeVisible();
+  expect(within(progress).getByText("MIA Alpha + MIA Beta")).toBeVisible();
+  expect(within(progress).queryByText("node-alpha")).not.toBeInTheDocument();
+  await user.click(within(progress).getByText("Technical details"));
+  expect(within(progress).getByText("node-alpha")).toBeVisible();
   expect(selector).toHaveAttribute("aria-pressed", "true");
   expect(within(selector.closest("article")!).getByRole("button", {name: "Review Load"})).toBeDisabled();
 
@@ -234,7 +238,7 @@ test("applies Mapping and Install only from their distinct authoritative preview
 
   await user.click(within(group).getByRole("button", {name: "Review Mapping"}));
   const mapping = await screen.findByRole("dialog", {name: "Review Mapping"});
-  expect(within(mapping).getByText("Rank 0 · Leader · endpoint owner · Node Alpha")).toBeVisible();
+  expect(within(mapping).getByText("Rank 0 · Leader · endpoint owner · Spark node")).toBeVisible();
   expect(within(mapping).getAllByText("60.0 GiB disk required · 5.0 GiB reserved · 135.0 GiB after")).toHaveLength(2);
   expect(within(mapping).getAllByText("20.0 GiB exact artifacts reused")).toHaveLength(2);
   expect(within(mapping).getByText("Inventory fresh · 10s")).toBeVisible();
@@ -572,8 +576,8 @@ test("previews Stop and Remove consequences without implying released capacity o
   await user.click(stopTrigger);
   const stop = await screen.findByRole("dialog", {name: "Review Stop"});
   expect(within(stop).getByText("Published route will be withdrawn.")).toBeVisible();
-  expect(within(stop).getByText("Rank 0 · Leader · Running · Node Alpha")).toBeVisible();
-  expect(within(stop).getByText("Rank 1 · Worker · Running · Node Beta")).toBeVisible();
+  expect(within(stop).getByText("Rank 0 · Leader · Running · Spark node")).toBeVisible();
+  expect(within(stop).getByText("Rank 1 · Worker · Running · Spark node")).toBeVisible();
   expect(within(stop).getByText("Capacity remains reserved unless every rank stops successfully.")).toBeVisible();
   await user.click(within(stop).getByRole("button", {name: "Stop selected run"}));
   expect(applyLibraryStop).toHaveBeenCalledWith("run-chat", {plan_digest: "stop-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
