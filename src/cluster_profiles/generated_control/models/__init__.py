@@ -123,8 +123,12 @@ from .proposal_request import ProposalRequest
 from .public_import_request import PublicImportRequest
 from .public_recipe_change import PublicRecipeChange
 from .public_recipe_change_kind import PublicRecipeChangeKind
+from .public_recipe_fabric import PublicRecipeFabric
+from .public_recipe_fabric_connectivity import PublicRecipeFabricConnectivity
 from .public_recipe_list_item import PublicRecipeListItem
 from .public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
+from .public_recipe_list_item_execution_readiness import PublicRecipeListItemExecutionReadiness
+from .public_recipe_list_item_execution_readiness_basis import PublicRecipeListItemExecutionReadinessBasis
 from .public_recipe_list_item_qualification import PublicRecipeListItemQualification
 from .public_recipe_list_item_qualification_basis import PublicRecipeListItemQualificationBasis
 from .public_recipe_list_response import PublicRecipeListResponse
@@ -132,11 +136,14 @@ from .public_recipe_local_state import PublicRecipeLocalState
 from .public_recipe_local_state_status import PublicRecipeLocalStateStatus
 from .public_recipe_preview_response import PublicRecipePreviewResponse
 from .public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
+from .public_recipe_preview_response_execution_readiness import PublicRecipePreviewResponseExecutionReadiness
+from .public_recipe_preview_response_execution_readiness_basis import PublicRecipePreviewResponseExecutionReadinessBasis
 from .public_recipe_preview_response_qualification import PublicRecipePreviewResponseQualification
 from .public_recipe_preview_response_qualification_basis import PublicRecipePreviewResponseQualificationBasis
 from .public_recipe_preview_response_source import PublicRecipePreviewResponseSource
 from .public_recipe_release import PublicRecipeRelease
 from .public_recipe_release_upgrade_effect import PublicRecipeReleaseUpgradeEffect
+from .public_recipe_topology_role import PublicRecipeTopologyRole
 from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
@@ -356,8 +363,12 @@ __all__ = (
     "PublicImportRequest",
     "PublicRecipeChange",
     "PublicRecipeChangeKind",
+    "PublicRecipeFabric",
+    "PublicRecipeFabricConnectivity",
     "PublicRecipeListItem",
     "PublicRecipeListItemCapabilitiesItem",
+    "PublicRecipeListItemExecutionReadiness",
+    "PublicRecipeListItemExecutionReadinessBasis",
     "PublicRecipeListItemQualification",
     "PublicRecipeListItemQualificationBasis",
     "PublicRecipeListResponse",
@@ -365,11 +376,14 @@ __all__ = (
     "PublicRecipeLocalStateStatus",
     "PublicRecipePreviewResponse",
     "PublicRecipePreviewResponseCapabilitiesItem",
+    "PublicRecipePreviewResponseExecutionReadiness",
+    "PublicRecipePreviewResponseExecutionReadinessBasis",
     "PublicRecipePreviewResponseQualification",
     "PublicRecipePreviewResponseQualificationBasis",
     "PublicRecipePreviewResponseSource",
     "PublicRecipeRelease",
     "PublicRecipeReleaseUpgradeEffect",
+    "PublicRecipeTopologyRole",
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",

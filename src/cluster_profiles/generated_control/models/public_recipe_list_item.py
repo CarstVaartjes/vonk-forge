@@ -8,6 +8,10 @@ from ..types import UNSET, Unset
 
 from ..models.public_recipe_list_item_capabilities_item import check_public_recipe_list_item_capabilities_item
 from ..models.public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
+from ..models.public_recipe_list_item_execution_readiness import check_public_recipe_list_item_execution_readiness
+from ..models.public_recipe_list_item_execution_readiness import PublicRecipeListItemExecutionReadiness
+from ..models.public_recipe_list_item_execution_readiness_basis import check_public_recipe_list_item_execution_readiness_basis
+from ..models.public_recipe_list_item_execution_readiness_basis import PublicRecipeListItemExecutionReadinessBasis
 from ..models.public_recipe_list_item_qualification import check_public_recipe_list_item_qualification
 from ..models.public_recipe_list_item_qualification import PublicRecipeListItemQualification
 from ..models.public_recipe_list_item_qualification_basis import check_public_recipe_list_item_qualification_basis
@@ -18,6 +22,8 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
+  from ..models.public_recipe_fabric import PublicRecipeFabric
   from ..models.public_recipe_local_state import PublicRecipeLocalState
 
 
@@ -37,7 +43,11 @@ class PublicRecipeListItem:
             content_sha256 (str):
             description (str):
             execution_harness (str):
+            execution_readiness (PublicRecipeListItemExecutionReadiness):
+            execution_readiness_basis (PublicRecipeListItemExecutionReadinessBasis):
+            execution_readiness_detail (str):
             expected_download_bytes (int):
+            fabric (PublicRecipeFabric):
             local (PublicRecipeLocalState):
             maximum_installed_bytes_per_node (int):
             maximum_runtime_memory_bytes_per_node (int):
@@ -56,6 +66,7 @@ class PublicRecipeListItem:
             title (str):
             topology_mode (str):
             topology_name (str):
+            topology_roles (list['PublicRecipeTopologyRole']):
             uri (str):
             precision (Union[None, Unset, str]):
             release_released_at (Union[None, Unset, str]):
@@ -69,7 +80,11 @@ class PublicRecipeListItem:
     content_sha256: str
     description: str
     execution_harness: str
+    execution_readiness: PublicRecipeListItemExecutionReadiness
+    execution_readiness_basis: PublicRecipeListItemExecutionReadinessBasis
+    execution_readiness_detail: str
     expected_download_bytes: int
+    fabric: 'PublicRecipeFabric'
     local: 'PublicRecipeLocalState'
     maximum_installed_bytes_per_node: int
     maximum_runtime_memory_bytes_per_node: int
@@ -88,6 +103,7 @@ class PublicRecipeListItem:
     title: str
     topology_mode: str
     topology_name: str
+    topology_roles: list['PublicRecipeTopologyRole']
     uri: str
     precision: Union[None, Unset, str] = UNSET
     release_released_at: Union[None, Unset, str] = UNSET
@@ -100,6 +116,8 @@ class PublicRecipeListItem:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
+        from ..models.public_recipe_fabric import PublicRecipeFabric
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         artifact_count = self.artifact_count
 
@@ -116,7 +134,15 @@ class PublicRecipeListItem:
 
         execution_harness = self.execution_harness
 
+        execution_readiness: str = self.execution_readiness
+
+        execution_readiness_basis: str = self.execution_readiness_basis
+
+        execution_readiness_detail = self.execution_readiness_detail
+
         expected_download_bytes = self.expected_download_bytes
+
+        fabric = self.fabric.to_dict()
 
         local = self.local.to_dict()
 
@@ -155,6 +181,13 @@ class PublicRecipeListItem:
         topology_mode = self.topology_mode
 
         topology_name = self.topology_name
+
+        topology_roles = []
+        for topology_roles_item_data in self.topology_roles:
+            topology_roles_item = topology_roles_item_data.to_dict()
+            topology_roles.append(topology_roles_item)
+
+
 
         uri = self.uri
 
@@ -197,7 +230,11 @@ class PublicRecipeListItem:
             "content_sha256": content_sha256,
             "description": description,
             "execution_harness": execution_harness,
+            "execution_readiness": execution_readiness,
+            "execution_readiness_basis": execution_readiness_basis,
+            "execution_readiness_detail": execution_readiness_detail,
             "expected_download_bytes": expected_download_bytes,
+            "fabric": fabric,
             "local": local,
             "maximum_installed_bytes_per_node": maximum_installed_bytes_per_node,
             "maximum_runtime_memory_bytes_per_node": maximum_runtime_memory_bytes_per_node,
@@ -216,6 +253,7 @@ class PublicRecipeListItem:
             "title": title,
             "topology_mode": topology_mode,
             "topology_name": topology_name,
+            "topology_roles": topology_roles,
             "uri": uri,
         })
         if precision is not UNSET:
@@ -235,6 +273,8 @@ class PublicRecipeListItem:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
+        from ..models.public_recipe_fabric import PublicRecipeFabric
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         d = dict(src_dict)
         artifact_count = d.pop("artifact_count")
@@ -255,7 +295,24 @@ class PublicRecipeListItem:
 
         execution_harness = d.pop("execution_harness")
 
+        execution_readiness = check_public_recipe_list_item_execution_readiness(d.pop("execution_readiness"))
+
+
+
+
+        execution_readiness_basis = check_public_recipe_list_item_execution_readiness_basis(d.pop("execution_readiness_basis"))
+
+
+
+
+        execution_readiness_detail = d.pop("execution_readiness_detail")
+
         expected_download_bytes = d.pop("expected_download_bytes")
+
+        fabric = PublicRecipeFabric.from_dict(d.pop("fabric"))
+
+
+
 
         local = PublicRecipeLocalState.from_dict(d.pop("local"))
 
@@ -302,6 +359,16 @@ class PublicRecipeListItem:
         topology_mode = d.pop("topology_mode")
 
         topology_name = d.pop("topology_name")
+
+        topology_roles = []
+        _topology_roles = d.pop("topology_roles")
+        for topology_roles_item_data in (_topology_roles):
+            topology_roles_item = PublicRecipeTopologyRole.from_dict(topology_roles_item_data)
+
+
+
+            topology_roles.append(topology_roles_item)
+
 
         uri = d.pop("uri")
 
@@ -361,7 +428,11 @@ class PublicRecipeListItem:
             content_sha256=content_sha256,
             description=description,
             execution_harness=execution_harness,
+            execution_readiness=execution_readiness,
+            execution_readiness_basis=execution_readiness_basis,
+            execution_readiness_detail=execution_readiness_detail,
             expected_download_bytes=expected_download_bytes,
+            fabric=fabric,
             local=local,
             maximum_installed_bytes_per_node=maximum_installed_bytes_per_node,
             maximum_runtime_memory_bytes_per_node=maximum_runtime_memory_bytes_per_node,
@@ -380,6 +451,7 @@ class PublicRecipeListItem:
             title=title,
             topology_mode=topology_mode,
             topology_name=topology_name,
+            topology_roles=topology_roles,
             uri=uri,
             precision=precision,
             release_released_at=release_released_at,

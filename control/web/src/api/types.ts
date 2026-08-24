@@ -57,6 +57,8 @@ export type GlobalRecipeRevision = {
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
 export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d";
+export type PublicRecipeExecutionReadiness = "executable" | "not-executable" | "integration-required" | "not-declared";
+export type PublicRecipeExecutionReadinessBasis = "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
 export type PublicRecipeQualificationBasis = "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
 export type PublicRecipeChange = {kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata"; summary: string; details: string | null; references: string[]};
 export type PublicRecipeRelease = {version: string; released_at: string; content_sha256: string; upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild"; changes: PublicRecipeChange[]};
@@ -68,8 +70,11 @@ export type PublicRecipe = {
   source_owner: string | null; source_repository: string | null;
   capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged";
   qualification_basis: PublicRecipeQualificationBasis; qualification_detail: string; precision: string | null;
+  execution_readiness: PublicRecipeExecutionReadiness; execution_readiness_basis: PublicRecipeExecutionReadinessBasis; execution_readiness_detail: string;
   execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
   topology_name: string; topology_mode: string; node_count: number;
+  topology_roles: Array<{name: string; count: number; endpoint_owner: boolean}>;
+  fabric: {connectivity: "none" | "connected" | "full_mesh" | "switch"; minimum_bandwidth_mbps: number};
   expected_download_bytes: number; maximum_installed_bytes_per_node: number; maximum_runtime_memory_bytes_per_node: number;
   release_version: string | null; release_released_at: string | null; local: PublicRecipeLocalState;
 };

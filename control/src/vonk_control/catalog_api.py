@@ -39,6 +39,7 @@ from .recipe_library import (
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
+_NAME = r"^[a-z][a-z0-9_-]{0,63}$"
 _SEMVER = (
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
@@ -66,6 +67,16 @@ PublicRecipeCapability = Literal[
     "3d",
 ]
 PublicRecipeQualification = Literal["candidate", "cataloged"]
+PublicRecipeExecutionReadiness = Literal[
+    "executable", "not-executable", "integration-required", "not-declared"
+]
+PublicRecipeExecutionReadinessBasis = Literal[
+    "explicit-executable-metadata",
+    "explicit-non-executable-metadata",
+    "explicit-integration-required-metadata",
+    "missing-readiness-metadata",
+    "conflicting-readiness-metadata",
+]
 PublicRecipeQualificationBasis = Literal[
     "explicit-accepted-metadata",
     "explicit-candidate-metadata",
@@ -252,6 +263,17 @@ class PublicRecipeLocalState(StrictModel):
     release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
 
 
+class PublicRecipeTopologyRole(StrictModel):
+    name: str = Field(pattern=_NAME)
+    count: int = Field(ge=1)
+    endpoint_owner: bool
+
+
+class PublicRecipeFabric(StrictModel):
+    connectivity: Literal["none", "connected", "full_mesh", "switch"]
+    minimum_bandwidth_mbps: int = Field(ge=0)
+
+
 class PublicRecipeListItem(StrictModel):
     publisher: str = Field(pattern=_SLUG)
     slug: str = Field(pattern=_SLUG)
@@ -269,6 +291,9 @@ class PublicRecipeListItem(StrictModel):
     qualification: PublicRecipeQualification
     qualification_basis: PublicRecipeQualificationBasis
     qualification_detail: str = Field(min_length=1, max_length=256)
+    execution_readiness: PublicRecipeExecutionReadiness
+    execution_readiness_basis: PublicRecipeExecutionReadinessBasis
+    execution_readiness_detail: str = Field(min_length=1, max_length=256)
     precision: str | None = Field(default=None, min_length=2, max_length=24)
     execution_harness: str = Field(pattern=_SLUG)
     runtime_distribution: str = Field(pattern=_SLUG)
@@ -277,6 +302,8 @@ class PublicRecipeListItem(StrictModel):
     topology_name: str = Field(min_length=1, max_length=64)
     topology_mode: str = Field(min_length=1, max_length=32)
     node_count: int = Field(ge=1)
+    topology_roles: list[PublicRecipeTopologyRole] = Field(min_length=1, max_length=32)
+    fabric: PublicRecipeFabric
     expected_download_bytes: int = Field(ge=1)
     maximum_installed_bytes_per_node: int = Field(ge=1)
     maximum_runtime_memory_bytes_per_node: int = Field(ge=1)
@@ -543,6 +570,24 @@ def _public_recipe_metadata(
     qualification, qualification_basis, qualification_detail = (
         _public_recipe_qualification(tags)
     )
+    execution_readiness, execution_readiness_basis, execution_readiness_detail = (
+        _public_recipe_execution_readiness(tags)
+    )
+    topology = document.get("topology")
+    topology = topology if isinstance(topology, Mapping) else {}
+    raw_roles = topology.get("roles")
+    raw_roles = raw_roles if isinstance(raw_roles, list) else []
+    topology_roles = [
+        {
+            "name": str(role.get("name", "")),
+            "count": int(role.get("count", 0)),
+            "endpoint_owner": bool(role.get("endpoint_owner", False)),
+        }
+        for role in raw_roles
+        if isinstance(role, Mapping)
+    ]
+    raw_fabric = topology.get("fabric")
+    raw_fabric = raw_fabric if isinstance(raw_fabric, Mapping) else {}
     return {
         "model_publisher": model_publisher,
         "model_slug": model_slug,
@@ -557,7 +602,17 @@ def _public_recipe_metadata(
         "qualification": qualification,
         "qualification_basis": qualification_basis,
         "qualification_detail": qualification_detail,
+        "execution_readiness": execution_readiness,
+        "execution_readiness_basis": execution_readiness_basis,
+        "execution_readiness_detail": execution_readiness_detail,
         "precision": precision,
+        "topology_roles": topology_roles,
+        "fabric": {
+            "connectivity": raw_fabric.get("connectivity", "none"),
+            "minimum_bandwidth_mbps": raw_fabric.get(
+                "minimum_bandwidth_mbps", 0
+            ),
+        },
         **_document_summary(document),
     }
 
@@ -600,6 +655,50 @@ def _public_recipe_qualification(
         "candidate",
         "missing-accepted-metadata",
         "No explicit accepted qualification is attached to this immutable recipe.",
+    )
+
+
+def _public_recipe_execution_readiness(
+    tags: set[str],
+) -> tuple[
+    PublicRecipeExecutionReadiness,
+    PublicRecipeExecutionReadinessBasis,
+    str,
+]:
+    """Keep runtime completeness independent from review qualification."""
+
+    executable = "executable" in tags
+    non_executable = "non-executable" in tags
+    integration_required = "integration-required" in tags
+    declarations = sum((executable, non_executable, integration_required))
+    if declarations > 1:
+        return (
+            "not-executable" if non_executable else "integration-required",
+            "conflicting-readiness-metadata",
+            "Conflicting execution-readiness declarations fail closed to the most restrictive state.",
+        )
+    if executable:
+        return (
+            "executable",
+            "explicit-executable-metadata",
+            "This recipe explicitly declares a complete executable runtime contract; fleet compatibility and operator review still apply.",
+        )
+    if non_executable:
+        return (
+            "not-executable",
+            "explicit-non-executable-metadata",
+            "This recipe explicitly does not provide an executable runtime contract.",
+        )
+    if integration_required:
+        return (
+            "integration-required",
+            "explicit-integration-required-metadata",
+            "This recipe requires runtime integration before it can be executed.",
+        )
+    return (
+        "not-declared",
+        "missing-readiness-metadata",
+        "The immutable recipe does not explicitly declare execution readiness.",
     )
 
 

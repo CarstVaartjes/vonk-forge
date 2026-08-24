@@ -16,7 +16,9 @@ from starlette.responses import JSONResponse
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog_api import (
+    PublicRecipeTopologyRole,
     _canonical_source_repository,
+    _public_recipe_execution_readiness,
     _public_recipe_qualification,
     install_catalog_routes,
 )
@@ -45,6 +47,19 @@ class Jobs:
 
     def list_page(self, **_kwargs):
         return [], None, 0
+
+
+@pytest.mark.parametrize(
+    ("name", "count"),
+    [("a", 1), ("model_worker", 33), ("a" * 64, 1_000)],
+)
+def test_public_recipe_topology_role_matches_canonical_recipe_name_and_count(
+    name: str, count: int
+) -> None:
+    role = PublicRecipeTopologyRole(name=name, count=count, endpoint_owner=False)
+
+    assert role.name == name
+    assert role.count == count
 
 
 def _catalog_app(
@@ -227,6 +242,28 @@ def test_public_recipe_qualification_requires_explicit_unambiguous_acceptance(
 
     assert actual_qualification == qualification
     assert actual_basis == basis
+    assert detail
+
+
+@pytest.mark.parametrize(
+    ("tags", "readiness"),
+    [
+        ({"accepted", "executable"}, "executable"),
+        ({"accepted", "chat"}, "not-declared"),
+        ({"candidate", "integration-required"}, "integration-required"),
+        ({"metadata-only", "non-executable"}, "not-executable"),
+        ({"integration-required", "non-executable"}, "not-executable"),
+        ({"executable", "integration-required"}, "integration-required"),
+        ({"metadata-only"}, "not-declared"),
+    ],
+)
+def test_public_recipe_readiness_is_independent_and_fails_closed(
+    tags: set[str], readiness: str
+) -> None:
+    actual, basis, detail = _public_recipe_execution_readiness(tags)
+
+    assert actual == readiness
+    assert basis
     assert detail
 
 
@@ -883,6 +920,7 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
         "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks/"
         "tree/0123456789abcdef0123456789abcdef01234567"
     )
+    document["metadata"]["tags"].append("executable")
     dependencies = tuple(
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted((fixture / "entities").glob("*.json"))
@@ -964,9 +1002,19 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed_recipe["qualification"] == "candidate"
     assert listed_recipe["qualification_basis"] == "missing-accepted-metadata"
     assert "No explicit accepted qualification" in listed_recipe["qualification_detail"]
+    assert listed_recipe["execution_readiness"] == "executable"
+    assert listed_recipe["execution_readiness_basis"] == "explicit-executable-metadata"
+    assert "fleet compatibility" in listed_recipe["execution_readiness_detail"]
     assert listed_recipe["runtime_distribution"] == "development-vllm-shim-arm64"
     assert listed_recipe["topology_mode"] == "single"
     assert listed_recipe["node_count"] == 1
+    assert listed_recipe["topology_roles"] == [
+        {"name": "entrypoint", "count": 1, "endpoint_owner": True}
+    ]
+    assert listed_recipe["fabric"] == {
+        "connectivity": "none",
+        "minimum_bandwidth_mbps": 0,
+    }
     assert listed_recipe["expected_download_bytes"] == 10
     assert listed_recipe["maximum_installed_bytes_per_node"] > 0
     assert listed_recipe["maximum_runtime_memory_bytes_per_node"] > 0
@@ -979,6 +1027,11 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert (
         preview_recipe["qualification_detail"] == listed_recipe["qualification_detail"]
     )
+    assert preview_recipe["execution_readiness"] == listed_recipe["execution_readiness"]
+    assert preview_recipe["execution_readiness_basis"] == listed_recipe["execution_readiness_basis"]
+    assert preview_recipe["execution_readiness_detail"] == listed_recipe["execution_readiness_detail"]
+    assert preview_recipe["topology_roles"] == listed_recipe["topology_roles"]
+    assert preview_recipe["fabric"] == listed_recipe["fabric"]
     assert imported.json()["origin"] == "recipe_library"
     assert len(service.entities.list_entities(limit=100)[0]) == 5
     assert service.read_source_bundle(bundle.sha256) == bundle.archive

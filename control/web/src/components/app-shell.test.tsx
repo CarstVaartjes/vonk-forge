@@ -20,8 +20,10 @@ const importRecipe: PublicRecipe = {
   uri: `vonk://catalog/vonk-forge/locked-import@sha256:${"1".repeat(64)}`, content_sha256: "1".repeat(64),
   model_publisher: "models", model_slug: "locked", model_title: "Locked model", source_owner: "Vonk Forge", source_repository: "https://example.test/vonk-forge",
   capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata", qualification_detail: "Explicit candidate test evidence.", precision: "BF16",
+  execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata", execution_readiness_detail: "Execution readiness is not declared.",
   execution_harness: "vllm-openai", runtime_distribution: "vllm-test", source_bundle_sha256: "2".repeat(64), artifact_count: 1,
   topology_name: "single-spark", topology_mode: "single", node_count: 1, expected_download_bytes: 1, maximum_installed_bytes_per_node: 1, maximum_runtime_memory_bytes_per_node: 1,
+  topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
   release_version: "1.0.0", release_released_at: "2026-08-24", local: {status: "not-imported", recipe_id: null, revision_number: null, content_sha256: null, release_version: null},
 };
 
