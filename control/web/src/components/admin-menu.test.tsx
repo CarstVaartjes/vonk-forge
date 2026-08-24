@@ -61,21 +61,35 @@ test("closes the menu before navigating to the top-level Activity page", async (
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-test("closes on outside interaction and disables Activity navigation during a locked operation", async () => {
+test("closes on outside interaction", async () => {
   const user = userEvent.setup();
   const onNavigateToActivity = vi.fn(event => event.preventDefault());
   render(<div>
     <button type="button">Outside</button>
-    <AdminMenu environment="Development" loggingOut={false} logoutError="" navigationLocked onLogout={() => undefined} onNavigateToActivity={onNavigateToActivity} role="Administrator" subject="admin"/>
+    <AdminMenu environment="Development" loggingOut={false} logoutError="" onLogout={() => undefined} onNavigateToActivity={onNavigateToActivity} role="Administrator" subject="admin"/>
   </div>);
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
-  const activity = screen.getByRole("menuitem", {name: "Open Activity"});
-  expect(activity).toHaveAttribute("aria-disabled", "true");
-  expect(activity).toHaveAttribute("tabindex", "-1");
-  await user.click(activity);
-  expect(onNavigateToActivity).not.toHaveBeenCalled();
-
   await user.click(screen.getByRole("button", {name: "Outside"}));
   await waitFor(() => expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument());
+});
+
+test("closes and disables all operator actions while global navigation is locked", async () => {
+  const user = userEvent.setup();
+  const onLogout = vi.fn();
+  const onNavigateToActivity = vi.fn(event => event.preventDefault());
+  const props = {environment: "Development", loggingOut: false, logoutError: "", onLogout, onNavigateToActivity, role: "Administrator", subject: "admin"};
+  const view = render(<AdminMenu {...props}/>);
+
+  const trigger = screen.getByRole("button", {name: /admin/i});
+  await user.click(trigger);
+  expect(screen.getByRole("menuitem", {name: "Logout"})).toBeEnabled();
+
+  view.rerender(<AdminMenu {...props} navigationLocked/>);
+  expect(screen.queryByRole("menu", {name: "Operator menu"})).not.toBeInTheDocument();
+  expect(trigger).toBeDisabled();
+  expect(trigger).toHaveAttribute("title", "Operator actions are unavailable while a change is applying");
+  await user.click(trigger);
+  expect(onLogout).not.toHaveBeenCalled();
+  expect(onNavigateToActivity).not.toHaveBeenCalled();
 });

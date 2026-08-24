@@ -136,11 +136,12 @@ function flattenedRecipes(snapshot: LibrarySnapshot): RecipeWithModel[] {
   ];
 }
 
-export function LibraryBrowser({api, detail, detailError, detailLoading, onNavigate, onRefresh, onRetryDetail, query, route, snapshot, windowed}: {
+export function LibraryBrowser({api, detail, detailError, detailLoading, onBusyChange, onNavigate, onRefresh, onRetryDetail, query, route, snapshot, windowed}: {
   api: LibraryApi;
   detail?: LibraryRecipeDetail;
   detailError: string;
   detailLoading: boolean;
+  onBusyChange?(busy: boolean): void;
   onNavigate: Navigate;
   onRefresh(signal: AbortSignal): Promise<void>;
   onRetryDetail(): void;
@@ -223,7 +224,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, onNavig
           <div className="library-pane-heading"><div><p className="library-step">3</p><h3>{detail?.recipe.title ?? recipe?.title ?? "Recipe"}</h3></div></div>
           {detailLoading && <p role="status">Loading exact recipe authority…</p>}
           {detailError && <div className="fleet-error" role="alert"><p>{detailError}</p><button type="button" onClick={onRetryDetail}>Retry recipe detail</button></div>}
-          {detail && <LibraryRecipeAuthority api={api} detail={detail} onRefresh={onRefresh} policy={snapshot.freshness_policy}/>}
+          {detail && <LibraryRecipeAuthority api={api} detail={detail} onBusyChange={onBusyChange} onRefresh={onRefresh} policy={snapshot.freshness_policy}/>}
         </>}
       </section>
     </div>}

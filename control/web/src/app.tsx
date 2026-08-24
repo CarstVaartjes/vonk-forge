@@ -63,6 +63,7 @@ export function App({api}: {api: ControlApi}) {
 
   function navigatePath(event: React.MouseEvent<HTMLAnchorElement>, nextPath: string) {
     event.preventDefault();
+    if (lockedUrl.current) return;
     history.pushState(null, "", nextPath);
     setUrl(nextPath);
   }
@@ -77,7 +78,7 @@ export function App({api}: {api: ControlApi}) {
       ? <PublicRecipeImportPage api={api as ControlApi & CatalogApi} url={url} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
       : pathname === "/library/create"
         ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
-      : <LibraryPage api={api} path={pathname} onNavigate={navigatePath}/>,
+      : <LibraryPage api={api} path={pathname} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
     activity: <ActivityPage api={api}/>,
   }[page] : null;
 
@@ -89,7 +90,7 @@ export function App({api}: {api: ControlApi}) {
       environment: "Development",
       logoutError: auth.logoutError,
       loggingOut: auth.loggingOut,
-      onLogout: () => void auth.logout(),
+      onLogout: () => { if (!lockedUrl.current) void auth.logout(); },
       role: "Administrator",
       subject: auth.session.subject,
     } : undefined}

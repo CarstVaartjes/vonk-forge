@@ -52,9 +52,10 @@ function lifecycleStage(label: string, items: Array<{state: string}>, completeSt
   return {label, state: "In progress", detail: states.map(humanizeIdentifier).join(" · "), tone: "warning"};
 }
 
-export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
+export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy}: {
   api: LibraryApi;
   detail: LibraryRecipeDetail;
+  onBusyChange?(busy: boolean): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
 }) {
@@ -163,6 +164,6 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
       resetToken={canonicalPreviewKey}
     />}
-    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
+    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onBusyChange={onBusyChange} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
   </div>;
 }

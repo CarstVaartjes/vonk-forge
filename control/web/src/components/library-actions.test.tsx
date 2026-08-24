@@ -118,6 +118,45 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   expect(retryLibraryOperation).toHaveBeenCalledWith("operation-load", expect.any(AbortSignal));
 });
 
+test("locks global navigation and browser departure for the full Library apply and refresh", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  let resolveApply!: (value: LibraryOperation) => void;
+  const pendingApply = new Promise<LibraryOperation>(resolve => { resolveApply = resolve; });
+  const applyLibraryLoad = vi.fn(() => pendingApply);
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: vi.fn(async () => fullLibraryDetail),
+    previewLibraryLoad: vi.fn(async () => loadPlan()),
+    applyLibraryLoad,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  const selector = within(placement).getByRole("button", {name: /Select complete group/});
+  await user.click(selector);
+  await user.click(within(selector.closest("article")!).getByRole("button", {name: "Review Load"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Load"});
+  await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
+  await waitFor(() => expect(applyLibraryLoad).toHaveBeenCalledOnce());
+
+  expect(screen.getByRole("link", {name: "Fleet"})).toHaveAttribute("aria-disabled", "true");
+  const unloadDuringApply = new Event("beforeunload", {cancelable: true});
+  expect(dispatchEvent(unloadDuringApply)).toBe(false);
+  act(() => {
+    history.pushState(null, "", "/fleet");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() => expect(location.pathname).toBe("/library/recipes/recipe-chat"));
+  expect(screen.getByRole("dialog", {name: "Review Load"})).toBeVisible();
+
+  await act(async () => { resolveApply(operation("queued", {job_id: "job-load"})); });
+  expect(await screen.findByRole("region", {name: "Load operation progress"})).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-disabled"));
+  const unloadAfterApply = new Event("beforeunload", {cancelable: true});
+  expect(dispatchEvent(unloadAfterApply)).toBe(true);
+});
+
 test("keeps a stale preview open and returns focus when a review sheet closes", async () => {
   // Break caught: stale authority closes the dialog, mutates optimistically, or
   // Escape loses keyboard focus instead of returning it to the invoking action.

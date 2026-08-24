@@ -38,6 +38,10 @@ export function AdminMenu({
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (navigationLocked) setMenuOpen(false);
+  }, [navigationLocked]);
+
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -62,6 +66,8 @@ export function AdminMenu({
       aria-controls={menuId}
       aria-expanded={menuOpen}
       aria-haspopup="menu"
+      disabled={navigationLocked}
+      title={navigationLocked ? "Operator actions are unavailable while a change is applying" : undefined}
       onClick={() => setMenuOpen(open => !open)}
     >
       <span className="operator-avatar" aria-hidden="true">{subject.slice(0, 1).toUpperCase()}</span>
@@ -80,7 +86,7 @@ export function AdminMenu({
         setMenuOpen(false);
         onNavigateToActivity(event);
       }}>Open Activity</a>
-      <button type="button" role="menuitem" className="logout" aria-disabled={loggingOut || undefined} disabled={loggingOut} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
+      <button type="button" role="menuitem" className="logout" aria-disabled={loggingOut || navigationLocked || undefined} disabled={loggingOut || navigationLocked} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
       {logoutError && <p role="alert">{logoutError}</p>}
     </div>}
   </section>;

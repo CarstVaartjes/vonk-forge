@@ -79,11 +79,12 @@ async function apply(api: LibraryApi, target: LibraryActionTarget, plan: Library
   return api.applyLibraryUninstall(target.installationId, {plan_digest: (plan as LibraryUninstallPlan).plan_digest, request_key: requestKey}, signal);
 }
 
-export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, onRefresh, policy, target}: {
+export function LibraryActionDialog({alias, api, evidence, onApplied, onBusyChange, onClose, onRefresh, policy, target}: {
   alias: string;
   api: LibraryApi;
   evidence?: LibraryPlacementGroup;
   onApplied(operation: LibraryOperation, name: LibraryActionName): void;
+  onBusyChange?(busy: boolean): void;
   onClose(): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
@@ -150,6 +151,9 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [applying]);
+
+  useEffect(() => { onBusyChange?.(applying); }, [applying, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {

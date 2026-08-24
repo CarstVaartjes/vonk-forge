@@ -7,6 +7,27 @@ import {ActivityPage, activityStatus} from "./activity";
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
 const TARGET_ID = `spk_${"1".repeat(32)}`;
+const TECHNICAL_TARGET_ID = `spk_${"2".repeat(32)}`;
+
+const visualFleet = {
+  schema_version: 1 as const,
+  generated_at: "2026-08-15T12:00:00Z",
+  authority_revision: "a".repeat(64),
+  event_cursor: 1,
+  nodes: [
+    {id: TARGET_ID, display_name: "Mia Lab Spark", hostname: "spark-a", lifecycle: "ready", labels: {}, connection: {}, installed: [], loaded: [], inventory: null, reservations: {}, telemetry: null, warnings: []},
+    {id: TECHNICAL_TARGET_ID, display_name: TECHNICAL_TARGET_ID, hostname: `${TECHNICAL_TARGET_ID}.local`, lifecycle: "ready", labels: {}, connection: {}, installed: [], loaded: [], inventory: null, reservations: {}, telemetry: null, warnings: []},
+  ],
+};
+
+const emptyLibrary = {
+  schema_version: 1 as const,
+  generated_at: "2026-08-15T12:00:00Z",
+  freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
+  models: [],
+  unlinked_recipes: [],
+  next_cursor: null,
+};
 
 function response() {
   return {events: [{
@@ -15,13 +36,13 @@ function response() {
     action: "recipe.start",
     authority_revision: "a".repeat(64),
     occurred_at: "2026-08-15T11:59:00Z",
-    targets: [TARGET_ID],
+    targets: [TARGET_ID, TECHNICAL_TARGET_ID],
   }, {
     request_id: "audit-rejected",
     actor: "operator@example.test",
     action: "agent.enrollment.submit.rejected",
     occurred_at: "2026-08-15T11:30:00Z",
-    targets: [],
+    targets: ["missing-object"],
   }, {
     request_id: "audit-review",
     actor: "admin",
@@ -37,8 +58,13 @@ function api(
     next_cursor: null,
     total: 1,
   }),
-): Pick<ControlApi, "audit" | "jobs"> {
-  return {audit: loadAudit, jobs: loadJobs};
+): Pick<ControlApi, "audit" | "jobs" | "librarySnapshot" | "visualFleet"> {
+  return {
+    audit: loadAudit,
+    jobs: loadJobs,
+    librarySnapshot: vi.fn().mockResolvedValue(emptyLibrary),
+    visualFleet: vi.fn().mockResolvedValue(visualFleet),
+  } as unknown as Pick<ControlApi, "audit" | "jobs" | "librarySnapshot" | "visualFleet">;
 }
 
 afterEach(() => {
@@ -69,9 +95,13 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   expect(timestamp).toHaveAttribute("datetime", "2026-08-15T11:59:00Z");
   expect(timestamp).toHaveAttribute("title");
   expect(screen.getByText("Time not recorded")).toBeVisible();
+  expect(screen.getByText(/Mia Lab Spark/)).toBeVisible();
+  expect(screen.getByText(/Unnamed Spark/)).toBeVisible();
+  expect(screen.getByText("Unavailable object")).toBeVisible();
 
   const hiddenId = screen.getByText(REQUEST_ID);
   expect(hiddenId).not.toBeVisible();
+  expect(screen.getByText(TECHNICAL_TARGET_ID)).not.toBeVisible();
   const firstEvent = screen.getByRole("heading", {name: "Started recipe"}).closest("article")!;
   await user.click(within(firstEvent).getByText("Technical details"));
   expect(hiddenId).toBeVisible();
@@ -134,6 +164,22 @@ test("shows loading and retryable error states without inventing activity", asyn
   expect(screen.getByText("Loading activity…")).toBeVisible();
   expect(await screen.findByRole("alert")).toHaveTextContent("audit authority unavailable");
   await user.click(screen.getByRole("button", {name: "Try again"}));
-  await waitFor(() => expect(screen.getByText("No activity yet")).toBeVisible());
+  await waitFor(() => expect(screen.getByText("No activity in the loaded window")).toBeVisible());
   expect(load).toHaveBeenCalledTimes(2);
+});
+
+test("discloses bounded API windows and loads older operations when a cursor is available", async () => {
+  const loadJobs = vi.fn()
+    .mockResolvedValueOnce({jobs: [{id: "operation-new", kind: "recipe-install", state: "running", created_at: "2026-08-15T11:58:00Z"}], next_cursor: "older-page", total: 2})
+    .mockResolvedValueOnce({jobs: [{id: "operation-old", kind: "recipe-stop", state: "succeeded", created_at: "2026-08-14T11:58:00Z"}], next_cursor: null, total: 2});
+  const user = userEvent.setup();
+  render(<ActivityPage api={api(vi.fn().mockResolvedValue({events: []}), loadJobs)} now={NOW}/>);
+
+  expect(await screen.findByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 0 audit records from the latest-100 API window and 1 of 2 operations");
+  await user.click(screen.getByRole("button", {name: "Load older operations"}));
+
+  expect(await screen.findByRole("heading", {name: "Recipe Stop · Completed"})).toBeVisible();
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("2 of 2 operations");
+  expect(loadJobs).toHaveBeenNthCalledWith(2, "older-page");
+  expect(screen.queryByRole("button", {name: "Load older operations"})).not.toBeInTheDocument();
 });

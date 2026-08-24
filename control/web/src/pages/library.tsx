@@ -110,9 +110,10 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
   };
 }
 
-export function LibraryPage({api, path, onNavigate}: {
+export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   api: LibraryApi;
   path: string;
+  onBusyChange?(busy: boolean): void;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>();
@@ -275,6 +276,7 @@ export function LibraryPage({api, path, onNavigate}: {
       detailError={detailError}
       detailLoading={detailLoading}
       onNavigate={onNavigate}
+      onBusyChange={onBusyChange}
       onRefresh={refreshDetail}
       onRetryDetail={() => setDetailAttempt(value => value + 1)}
       query={query}
