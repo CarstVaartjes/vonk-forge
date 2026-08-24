@@ -17,6 +17,21 @@ FIXTURE = Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json"
 DEVELOPMENT_FIXTURE = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
 
 
+def _contents_document_payload(document: dict[str, object]) -> dict[str, object]:
+    content = json.dumps(document).encode()
+    blob_sha = hashlib.sha1(
+        f"blob {len(content)}\0".encode() + content,
+        usedforsecurity=False,
+    ).hexdigest()
+    return {
+        "type": "file",
+        "sha": blob_sha,
+        "size": len(content),
+        "encoding": "base64",
+        "content": base64.b64encode(content).decode(),
+    }
+
+
 def test_recipe_library_lists_current_recipe_documents_and_exact_uris() -> None:
     document = json.loads(FIXTURE.read_text(encoding="utf-8"))
     digest = recipe_content_sha256(document)
@@ -77,8 +92,7 @@ def test_recipe_library_uses_one_digest_bound_index_and_caches_it() -> None:
         if request.url.path.endswith("/commits/main"):
             return httpx.Response(200, json={"sha": commit})
         if request.url.path.endswith("/contents/catalog-index.json"):
-            encoded = base64.b64encode(json.dumps(index).encode()).decode()
-            return httpx.Response(200, json={"encoding": "base64", "content": encoded})
+            return httpx.Response(200, json=_contents_document_payload(index))
         raise AssertionError(request.url)
 
     client = RecipeLibraryClient(transport=httpx.MockTransport(handler))
@@ -92,6 +106,221 @@ def test_recipe_library_uses_one_digest_bound_index_and_caches_it() -> None:
         "/repos/CarstVaartjes/vonk-forge-recipes/commits/main",
         "/repos/CarstVaartjes/vonk-forge-recipes/contents/catalog-index.json",
     ]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("wrong-type", "recipe_library.response_invalid"),
+        ("missing-sha", "recipe_library.response_invalid"),
+        ("wrong-size", "recipe_library.digest_mismatch"),
+        ("tampered-content", "recipe_library.digest_mismatch"),
+    ],
+)
+def test_recipe_library_rejects_invalid_inline_index_identity(
+    mutation: str,
+    expected_code: str,
+) -> None:
+    index = {
+        "schema_version": 1,
+        "repository": "CarstVaartjes/vonk-forge-recipes",
+        "recipes": [],
+    }
+    payload = _contents_document_payload(index)
+    if mutation == "wrong-type":
+        payload["type"] = "dir"
+    elif mutation == "missing-sha":
+        del payload["sha"]
+    elif mutation == "wrong-size":
+        payload["size"] = int(payload["size"]) + 1
+    else:
+        content = bytearray(base64.b64decode(str(payload["content"])))
+        content[-2] ^= 1
+        payload["content"] = base64.b64encode(content).decode()
+    commit = "f" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        return httpx.Response(200, json=payload)
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
+
+    assert exc_info.value.code == expected_code
+
+
+def test_recipe_library_fetches_large_index_by_immutable_git_blob() -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    index = {
+        "schema_version": 1,
+        "repository": "CarstVaartjes/vonk-forge-recipes",
+        "padding": "x" * (1024 * 1024),
+        "recipes": [
+            {
+                "source_path": "recipes/synthetic-tiny-openai.json",
+                "content_sha256": recipe_content_sha256(document),
+                "document": document,
+            }
+        ],
+    }
+    index_bytes = json.dumps(index).encode()
+    blob_sha = hashlib.sha1(
+        f"blob {len(index_bytes)}\0".encode() + index_bytes,
+        usedforsecurity=False,
+    ).hexdigest()
+    commit = "f" * 40
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        if request.url.path.endswith("/contents/catalog-index.json"):
+            assert request.headers["accept"] == "application/vnd.github.object+json"
+            return httpx.Response(
+                200,
+                json={
+                    "type": "file",
+                    "encoding": "none",
+                    "content": "",
+                    "sha": blob_sha,
+                    "size": len(index_bytes),
+                },
+            )
+        if request.url.path.endswith(f"/git/blobs/{blob_sha}"):
+            return httpx.Response(
+                200,
+                json={
+                    "sha": blob_sha,
+                    "size": len(index_bytes),
+                    "encoding": "base64",
+                    "content": base64.b64encode(index_bytes).decode(),
+                },
+            )
+        raise AssertionError(request.url)
+
+    snapshot = RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
+
+    assert [item.slug for item in snapshot.items] == ["synthetic-tiny-openai"]
+    assert calls == [
+        "/repos/CarstVaartjes/vonk-forge-recipes/commits/main",
+        "/repos/CarstVaartjes/vonk-forge-recipes/contents/catalog-index.json",
+        f"/repos/CarstVaartjes/vonk-forge-recipes/git/blobs/{blob_sha}",
+    ]
+
+
+@pytest.mark.parametrize("contents_encoding", ["", None, "utf-8"])
+def test_recipe_library_rejects_undocumented_empty_index_encoding(
+    contents_encoding: str | None,
+) -> None:
+    commit = "f" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        return httpx.Response(
+            200,
+            json={
+                "type": "file",
+                "encoding": contents_encoding,
+                "content": "",
+                "sha": "a" * 40,
+                "size": 1024 * 1024 + 1,
+            },
+        )
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
+
+    assert exc_info.value.code == "recipe_library.response_invalid"
+
+
+@pytest.mark.parametrize(
+    ("blob_sha_override", "blob_size_offset", "blob_content_suffix"),
+    [
+        ("0" * 40, 0, b""),
+        (None, 1, b""),
+        (None, 0, b"changed"),
+    ],
+)
+def test_recipe_library_rejects_large_index_blob_identity_mismatch(
+    blob_sha_override: str | None,
+    blob_size_offset: int,
+    blob_content_suffix: bytes,
+) -> None:
+    index = {
+        "schema_version": 1,
+        "repository": "CarstVaartjes/vonk-forge-recipes",
+        "recipes": [],
+    }
+    index_bytes = json.dumps(index).encode()
+    blob_sha = hashlib.sha1(
+        f"blob {len(index_bytes)}\0".encode() + index_bytes,
+        usedforsecurity=False,
+    ).hexdigest()
+    commit = "f" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        if request.url.path.endswith("/contents/catalog-index.json"):
+            return httpx.Response(
+                200,
+                json={
+                    "type": "file",
+                    "encoding": "none",
+                    "content": "",
+                    "sha": blob_sha,
+                    "size": len(index_bytes),
+                },
+            )
+        if request.url.path.endswith(f"/git/blobs/{blob_sha}"):
+            blob_content = index_bytes + blob_content_suffix
+            return httpx.Response(
+                200,
+                json={
+                    "sha": blob_sha_override or blob_sha,
+                    "size": len(index_bytes) + blob_size_offset,
+                    "encoding": "base64",
+                    "content": base64.b64encode(blob_content).decode(),
+                },
+            )
+        raise AssertionError(request.url)
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
+
+    assert exc_info.value.code == "recipe_library.digest_mismatch"
+
+
+def test_recipe_library_rejects_oversize_index_before_fetching_blob() -> None:
+    commit = "f" * 40
+    blob_sha = "a" * 40
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        if request.url.path.endswith("/contents/catalog-index.json"):
+            return httpx.Response(
+                200,
+                json={
+                    "type": "file",
+                    "encoding": "none",
+                    "content": "",
+                    "sha": blob_sha,
+                    "size": 12 * 1024 * 1024 + 1,
+                },
+            )
+        raise AssertionError(request.url)
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
+
+    assert exc_info.value.code == "recipe_library.response_too_large"
+    assert all("/git/blobs/" not in path for path in calls)
 
 
 def test_recipe_library_parses_bounded_release_history_without_changing_recipe_digest() -> (
@@ -197,8 +426,7 @@ def test_recipe_library_rejects_an_index_with_a_changed_digest() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/commits/main"):
             return httpx.Response(200, json={"sha": commit})
-        encoded = base64.b64encode(json.dumps(index).encode()).decode()
-        return httpx.Response(200, json={"encoding": "base64", "content": encoded})
+        return httpx.Response(200, json=_contents_document_payload(index))
 
     with pytest.raises(RecipeLibraryError, match="digest"):
         RecipeLibraryClient(transport=httpx.MockTransport(handler)).list()
@@ -286,13 +514,7 @@ def test_recipe_library_v2_index_resolves_dependencies_and_exact_source_bundle()
         if request.url.path.endswith("/commits/main"):
             return httpx.Response(200, json={"sha": commit})
         if request.url.path.endswith("/contents/catalog-index.json"):
-            return httpx.Response(
-                200,
-                json={
-                    "encoding": "base64",
-                    "content": base64.b64encode(json.dumps(index).encode()).decode(),
-                },
-            )
+            return httpx.Response(200, json=_contents_document_payload(index))
         blob_sha = request.url.path.rsplit("/", 1)[-1]
         if blob_sha in blobs:
             return httpx.Response(
