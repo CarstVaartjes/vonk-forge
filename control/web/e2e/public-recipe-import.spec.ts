@@ -11,8 +11,12 @@ function publicRecipe(slug: string, overrides: Record<string, unknown> = {}) {
     source_repository: `https://github.com/MiaLabs/${slug}`, capabilities: ["chat", "reasoning"],
     qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
     qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "FP8",
+    execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
+    execution_readiness_detail: "This recipe explicitly declares a complete executable runtime contract; fleet compatibility and operator review still apply.",
     execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64),
     artifact_count: 2, topology_name: "spark-pair", topology_mode: "tensor-parallel", node_count: 2,
+    topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "shard", count: 1, endpoint_owner: false}],
+    fabric: {connectivity: "switch", minimum_bandwidth_mbps: 200_000},
     expected_download_bytes: 180 * 1024 ** 3, maximum_installed_bytes_per_node: 220 * 1024 ** 3,
     maximum_runtime_memory_bytes_per_node: 96 * 1024 ** 3, release_version: "1.2.0", release_released_at: "2026-08-24",
     local: {status: "update-available", recipe_id: "local-recipe", revision_number: 1, content_sha256: "1".repeat(64), release_version: "1.0.0"},
@@ -22,8 +26,8 @@ function publicRecipe(slug: string, overrides: Record<string, unknown> = {}) {
 
 const recipes = [
   publicRecipe("DeepSeek V3.1 2×Spark"),
-  publicRecipe("GLM 5.2 3×Spark", {node_count: 3, capabilities: ["chat", "vision"]}),
-  publicRecipe("GLM 5.2 4×Spark", {node_count: 4, source_owner: "Z.ai", qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "The reviewed immutable recipe explicitly declares accepted qualification."}),
+  publicRecipe("GLM 5.2 3×Spark", {node_count: 3, capabilities: ["chat", "vision"], execution_readiness: "integration-required", execution_readiness_basis: "explicit-integration-required-metadata", execution_readiness_detail: "Runtime integration is required.", topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "shard", count: 2, endpoint_owner: false}]}),
+  publicRecipe("GLM 5.2 4×Spark", {node_count: 4, source_owner: "Z.ai", qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "The reviewed immutable recipe explicitly declares accepted qualification.", execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata", execution_readiness_detail: "Execution readiness is not declared.", topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "shard", count: 3, endpoint_owner: false}]}),
 ];
 
 async function installFixtures(page: Page) {
@@ -53,6 +57,7 @@ test("desktop catalog is accessible, filterable and explains candidate qualifica
   await page.goto("/library/import");
   await expect(page.getByRole("heading", {name: "Import a public recipe"})).toBeFocused();
   await expect(page.getByRole("option", {name: /4\+ Sparks \(1\)/})).toBeEnabled();
+  await expect(page.getByRole("option", {name: /Executable contract \(1\)/})).toBeEnabled();
   await expect(page.getByRole("option", {name: /^4 Sparks/})).toHaveCount(0);
   await page.getByRole("checkbox", {name: /Chat/}).check();
   await page.getByRole("checkbox", {name: /Reasoning/}).check();
@@ -61,6 +66,7 @@ test("desktop catalog is accessible, filterable and explains candidate qualifica
   await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();
   await expect(page.getByRole("heading", {name: /DeepSeek V3.1 2×Spark production recipe/})).toBeFocused();
   await expect(page.getByText("This immutable recipe explicitly declares candidate qualification.")).toBeVisible();
+  await expect(page.getByText(/complete executable runtime contract/)).toBeVisible();
   await expect(page.getByLabel("Version summary")).toContainText("v1.0.0");
   await expect(page.getByLabel("Version summary")).toContainText("v1.2.0");
   await expectNoSeriousAccessibilityViolations(page);

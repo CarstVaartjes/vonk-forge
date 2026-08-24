@@ -475,6 +475,7 @@
   margin: 0.2rem 0 0;
 }
 
+.public-import-readiness,
 .public-import-qualification,
 .public-import-local {
   border: 1px solid var(--border);
@@ -483,6 +484,30 @@
   font-size: 0.75rem;
   font-weight: 750;
   padding: 0.28rem 0.48rem;
+}
+
+.public-import-readiness.readiness-executable {
+  background: #173d30;
+  border-color: #68e5b366;
+  color: var(--mint-strong);
+}
+
+.public-import-readiness.readiness-integration-required {
+  background: #3a281866;
+  border-color: #e9b36c66;
+  color: #ffd099;
+}
+
+.public-import-readiness.readiness-not-executable {
+  background: #49242a;
+  border-color: #ff919d66;
+  color: #ffb2ba;
+}
+
+.public-import-readiness.readiness-not-declared {
+  background: #1b3345;
+  border-color: #94cfff66;
+  color: #b5dcff;
 }
 
 .public-import-qualification.qualification-cataloged {
@@ -707,6 +732,14 @@
   margin: 0.3rem 0 0;
 }
 
+.public-import-preview-signals {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
 .public-import-trust,
 .public-import-confirmation-copy,
 .public-import-note,
@@ -723,10 +756,21 @@
 }
 
 .public-import-trust.qualification-candidate,
+.public-import-trust.readiness-integration-required,
+.public-import-trust.readiness-not-declared,
+.public-import-confirmation-copy.readiness-integration-required,
+.public-import-confirmation-copy.readiness-not-declared,
 .public-import-warning {
   background: #3a281866;
   border-left-color: #e9b36c;
   color: #ffd8a6;
+}
+
+.public-import-trust.readiness-not-executable,
+.public-import-confirmation-copy.readiness-not-executable {
+  background: #49242a99;
+  border-left-color: var(--danger);
+  color: #ffb2ba;
 }
 
 .public-import-version-summary {
@@ -797,6 +841,10 @@
   grid-template-columns: auto 1.2rem minmax(0, 1fr);
 }
 
+.public-import-topology-map:not(.has-endpoint) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .public-import-endpoint,
 .public-import-spark-nodes > div {
   background: #10201b;
@@ -839,12 +887,12 @@
   min-width: 0;
 }
 
-.public-import-spark-nodes > div.is-leader {
+.public-import-spark-nodes > div.is-endpoint-owner {
   background: #173d30;
   border-color: #68e5b366;
 }
 
-.public-import-spark-nodes > div.is-leader small {
+.public-import-spark-nodes > div.is-endpoint-owner small {
   color: #b4c5c0;
 }
 

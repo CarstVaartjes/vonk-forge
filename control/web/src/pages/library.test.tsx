@@ -25,6 +25,9 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   qualification: "candidate",
   qualification_basis: "explicit-candidate-metadata",
   qualification_detail: "This immutable recipe explicitly declares candidate qualification.",
+  execution_readiness: "not-declared",
+  execution_readiness_basis: "missing-readiness-metadata",
+  execution_readiness_detail: "Execution readiness is not declared.",
   precision: "BF16",
   execution_harness: "vllm-openai",
   runtime_distribution: "vllm-0-27-1",
@@ -33,6 +36,8 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   topology_name: "single-spark",
   topology_mode: "single",
   node_count: 1,
+  topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}],
+  fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
   expected_download_bytes: 80 * 1024 ** 3,
   maximum_installed_bytes_per_node: 100 * 1024 ** 3,
   maximum_runtime_memory_bytes_per_node: 72 * 1024 ** 3,
@@ -650,6 +655,8 @@ test("loads the current default catalog recipes when public import opens", async
         capabilities: ["chat", "vision"],
         node_count: 2,
         topology_mode: "tensor-parallel",
+        topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "shard", count: 1, endpoint_owner: false}],
+        fabric: {connectivity: "switch", minimum_bandwidth_mbps: 200_000},
         local: {status: "update-available", recipe_id: "00000000-0000-4000-8000-000000000001", revision_number: 1, content_sha256: "1".repeat(64), release_version: "0.9.0"},
       }),
       publicRecipe({
@@ -667,6 +674,8 @@ test("loads the current default catalog recipes when public import opens", async
         precision: "FP8",
         node_count: 4,
         topology_mode: "distributed",
+        topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "worker", count: 3, endpoint_owner: false}],
+        fabric: {connectivity: "connected", minimum_bandwidth_mbps: 100_000},
         local: {status: "current", recipe_id: "00000000-0000-4000-8000-000000000002", revision_number: 2, content_sha256: "e".repeat(64), release_version: "1.0.0"},
       }),
       publicRecipe({
@@ -681,6 +690,8 @@ test("loads the current default catalog recipes when public import opens", async
         runtime_distribution: "pytorch-2-13",
         node_count: 5,
         topology_mode: "distributed",
+        topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "worker", count: 4, endpoint_owner: false}],
+        fabric: {connectivity: "connected", minimum_bandwidth_mbps: 100_000},
         qualification: "cataloged",
         local: {status: "different-revision", recipe_id: "00000000-0000-4000-8000-000000000003", revision_number: 1, content_sha256: "2".repeat(64), release_version: null},
       }),
@@ -695,7 +706,7 @@ test("loads the current default catalog recipes when public import opens", async
   expect(catalogCommit).not.toBeVisible();
   await user.click(screen.getByText("Catalog snapshot"));
   expect(catalogCommit).toBeVisible();
-  expect(screen.getAllByText("By QwenLM")[0]).toBeVisible();
+  expect(screen.getAllByText("Source: QwenLM")[0]).toBeVisible();
 
   const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});
   expect(within(qualification).getByRole("option", {name: /^Accepted \(/})).toHaveValue("cataloged");
@@ -725,9 +736,9 @@ test("loads the current default catalog recipes when public import opens", async
   await user.click(screen.getByRole("button", {name: "Clear all"}));
   expect(localStatus).toHaveValue("");
 
-  const creator = screen.getByRole("combobox", {name: "Filter by creator"});
-  expect(within(creator).getByRole("option", {name: /^MiaAI-Lab \(/})).toBeVisible();
-  await user.selectOptions(creator, "MiaAI-Lab");
+  const sourceOwner = screen.getByRole("combobox", {name: "Filter by source owner"});
+  expect(within(sourceOwner).getByRole("option", {name: /^MiaAI-Lab \(/})).toBeVisible();
+  await user.selectOptions(sourceOwner, "MiaAI-Lab");
   expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Clear all"}));

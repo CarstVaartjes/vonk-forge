@@ -5,8 +5,8 @@ import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {PublicRecipeImportPage, parsePublicRecipeImportUrl, publicRecipeImportUrl, publicRecipeMatches, type PublicRecipeFilters} from "./public-recipe-import";
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", model: "", creator: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
-  qualification: "", local: "", sort: "catalog", capabilities: [],
+  query: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
+  qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
 function recipe(slug: string, overrides: Partial<PublicRecipe> = {}): PublicRecipe {
@@ -17,8 +17,12 @@ function recipe(slug: string, overrides: Partial<PublicRecipe> = {}): PublicReci
     model_title: slug, source_owner: "MiaLabs", source_repository: `https://github.com/MiaLabs/${slug}`,
     capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
     qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "BF16",
+    execution_readiness: "not-declared", execution_readiness_basis: "missing-readiness-metadata",
+    execution_readiness_detail: "The immutable recipe does not explicitly declare execution readiness.",
     execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64),
     artifact_count: 1, topology_name: "single-spark", topology_mode: "single", node_count: 1,
+    topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}],
+    fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
     expected_download_bytes: 1024, maximum_installed_bytes_per_node: 2048, maximum_runtime_memory_bytes_per_node: 1024,
     release_version: "1.1.0", release_released_at: "2026-08-24",
     local: {status: "not-imported", recipe_id: null, revision_number: null, content_sha256: null, release_version: null},
@@ -54,10 +58,11 @@ function deferred<T>() {
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
-it("round-trips validated URL state with repeated multi-select capabilities", () => {
-  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&sparks=4%2B&qualification=candidate&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sparks: "4+", qualification: "candidate", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&sparks=4%2B&qualification=candidate&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+it("round-trips validated URL state with readiness, source owner, and repeated capabilities", () => {
+  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?step=confirm").step).toBe("catalog");
 });
 
@@ -89,14 +94,17 @@ it("persists the compact catalog preference independently from URL state", async
 });
 
 it("shows friendly topology and honest requirement graphics while keeping immutable IDs collapsed", async () => {
-  const distributed = recipe("Distributed", {node_count: 3, topology_mode: "tensor_parallel"});
+  const distributed = recipe("Distributed", {node_count: 3, topology_mode: "tensor_parallel", topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "shard", count: 2, endpoint_owner: false}], fabric: {connectivity: "switch", minimum_bandwidth_mbps: 200_000}});
   render(<Harness api={apiFor([distributed])}/>);
   await userEvent.click(await screen.findByRole("button", {name: `Review ${distributed.title}`}));
 
   const topology = await screen.findByRole("region", {name: "3 Sparks · Tensor parallel"});
-  expect(within(topology).getByRole("img", {name: /One leader Spark serving the endpoint and 2 worker Sparks connected over shared fabric/})).toBeVisible();
-  expect(within(topology).getByText("Leader")).toBeVisible();
-  expect(within(topology).getAllByText("Worker")).toHaveLength(2);
+  expect(within(topology).getByRole("img", {name: /1 entrypoint Spark owning an endpoint, 2 shard Sparks.*Fabric switch · 200 Gbps minimum/})).toBeVisible();
+  expect(within(topology).getByText("entrypoint")).toBeVisible();
+  expect(within(topology).getByText("shard")).toBeVisible();
+  expect(within(topology).getByText("2× Spark")).toBeVisible();
+  expect(within(topology).queryByText("Leader")).not.toBeInTheDocument();
+  expect(within(topology).queryByText("Worker")).not.toBeInTheDocument();
   const requirements = screen.getByRole("region", {name: "Largest per-Spark envelope"});
   expect(within(requirements).getAllByRole("meter")).toHaveLength(3);
   expect(within(requirements).getByText(/do not claim a fit against your current fleet/)).toBeVisible();
@@ -105,6 +113,18 @@ it("shows friendly topology and honest requirement graphics while keeping immuta
   expect(digest).not.toBeVisible();
   await userEvent.click(screen.getByText("Technical details"));
   expect(digest).toBeVisible();
+});
+
+it("falls back to declared count and mode when projected topology details disagree", async () => {
+  const malformed = recipe("Fallback", {node_count: 3, topology_mode: "distributed", topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0}});
+  render(<Harness api={apiFor([malformed])}/>);
+  await userEvent.click(await screen.findByRole("button", {name: `Review ${malformed.title}`}));
+
+  const topology = await screen.findByRole("region", {name: "3 Sparks · Distributed"});
+  expect(within(topology).getByRole("img", {name: /Role and fabric details are unavailable/})).toBeVisible();
+  expect(within(topology).getByText("Topology details unavailable")).toBeVisible();
+  expect(within(topology).queryByText("Declared endpoint")).not.toBeInTheDocument();
+  expect(within(topology).queryByText(/Fabric:/)).not.toBeInTheDocument();
 });
 
 it("compares up to three recipes in an accessible human-readable table", async () => {
@@ -122,17 +142,33 @@ it("compares up to three recipes in an accessible human-readable table", async (
   expect(within(table).getByRole("row", {name: /Sparks 1 Spark 2 Sparks/})).toBeVisible();
 });
 
-it("hydrates creator and original-repository filters with conditional zero counts", async () => {
+it("hydrates legacy creator and original-repository filters under truthful source-owner naming", async () => {
   const alpha = recipe("Alpha", {source_owner: "MiaLabs", capabilities: ["chat"]});
   const beta = recipe("Beta", {source_owner: "MiaLabs", capabilities: ["vision"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Explicitly accepted."});
   render(<Harness api={apiFor([alpha, beta])} initialUrl={`/library/import?creator=MiaLabs&repository=${encodeURIComponent(alpha.source_repository!)}&more=1`}/>);
   expect(await screen.findByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "Beta", level: 3})).not.toBeInTheDocument();
-  expect(screen.getByRole("combobox", {name: "Filter by creator"})).toHaveValue("MiaLabs");
+  expect(screen.getByRole("combobox", {name: "Filter by source owner"})).toHaveValue("MiaLabs");
   expect(screen.getByRole("combobox", {name: "Filter by original repository"})).toHaveValue(alpha.source_repository);
   expect(screen.getByRole("checkbox", {name: /Vision0/})).toBeDisabled();
-  expect(screen.getByRole("button", {name: /Creator: MiaLabs/})).toBeVisible();
+  expect(screen.getByRole("button", {name: /Source owner: MiaLabs/})).toBeVisible();
   expect(screen.getByRole("button", {name: /Repository: MiaLabs\/Alpha/})).toBeVisible();
+});
+
+it("filters qualification and execution readiness independently and warns before metadata import", async () => {
+  const executableCandidate = recipe("Executable", {execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable contract declared."});
+  const blockedAccepted = recipe("Metadata", {qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted review evidence.", execution_readiness: "not-executable", execution_readiness_basis: "explicit-non-executable-metadata", execution_readiness_detail: "No executable runtime contract."});
+  render(<Harness api={apiFor([executableCandidate, blockedAccepted])} initialUrl="/library/import?qualification=cataloged&readiness=not-executable"/>);
+
+  expect(await screen.findByRole("heading", {name: "Metadata", level: 3})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: "Executable", level: 3})).not.toBeInTheDocument();
+  expect(screen.getByText("Not executable")).toBeVisible();
+  expect(screen.getByText("Accepted · v1.1.0")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", {name: `Review ${blockedAccepted.title}`}));
+  expect(await screen.findByText("No executable runtime contract.")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", {name: "Continue to confirm"}));
+  expect(await screen.findByText("Import this non-executable recipe metadata?")).toBeVisible();
+  expect(screen.getByText(/does not prove the recipe can run/)).toBeVisible();
 });
 
 it("aborts and ignores a stale preview when the user selects another recipe", async () => {
@@ -198,6 +234,8 @@ it("locks catalog navigation while an import is pending", async () => {
   expect(screen.getByRole("link", {name: "← Library"})).toHaveAttribute("aria-disabled", "true");
   importResult.resolve({recipe_id: "alpha-local", revision_number: 1, lifecycle: "draft", slug: "alpha"} as Awaited<ReturnType<CatalogApi["importPublicRecipe"]>>);
   expect(await screen.findByText("Import complete")).toBeVisible();
+  expect(screen.getByText(/saved in your local Library/)).toBeVisible();
+  expect(screen.queryByText(/revision is ready/)).not.toBeInTheDocument();
 });
 
 it("distinguishes an empty catalog, filtered zero state, and a retryable load error", async () => {

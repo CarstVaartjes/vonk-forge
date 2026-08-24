@@ -2404,6 +2404,16 @@ export interface components {
             /** Summary */
             summary: string;
         };
+        /** PublicRecipeFabric */
+        PublicRecipeFabric: {
+            /**
+             * Connectivity
+             * @enum {string}
+             */
+            connectivity: "none" | "connected" | "full_mesh" | "switch";
+            /** Minimum Bandwidth Mbps */
+            minimum_bandwidth_mbps: number;
+        };
         /** PublicRecipeListItem */
         PublicRecipeListItem: {
             /** Artifact Count */
@@ -2416,8 +2426,21 @@ export interface components {
             description: string;
             /** Execution Harness */
             execution_harness: string;
+            /**
+             * Execution Readiness
+             * @enum {string}
+             */
+            execution_readiness: "executable" | "not-executable" | "integration-required" | "not-declared";
+            /**
+             * Execution Readiness Basis
+             * @enum {string}
+             */
+            execution_readiness_basis: "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
+            /** Execution Readiness Detail */
+            execution_readiness_detail: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
+            fabric: components["schemas"]["PublicRecipeFabric"];
             local: components["schemas"]["PublicRecipeLocalState"];
             /** Maximum Installed Bytes Per Node */
             maximum_installed_bytes_per_node: number;
@@ -2469,6 +2492,8 @@ export interface components {
             topology_mode: string;
             /** Topology Name */
             topology_name: string;
+            /** Topology Roles */
+            topology_roles: components["schemas"]["PublicRecipeTopologyRole"][];
             /** Uri */
             uri: string;
         };
@@ -2511,8 +2536,21 @@ export interface components {
             description: string;
             /** Execution Harness */
             execution_harness: string;
+            /**
+             * Execution Readiness
+             * @enum {string}
+             */
+            execution_readiness: "executable" | "not-executable" | "integration-required" | "not-declared";
+            /**
+             * Execution Readiness Basis
+             * @enum {string}
+             */
+            execution_readiness_basis: "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
+            /** Execution Readiness Detail */
+            execution_readiness_detail: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
+            fabric: components["schemas"]["PublicRecipeFabric"];
             local: components["schemas"]["PublicRecipeLocalState"];
             /** Maximum Installed Bytes Per Node */
             maximum_installed_bytes_per_node: number;
@@ -2569,6 +2607,8 @@ export interface components {
             topology_mode: string;
             /** Topology Name */
             topology_name: string;
+            /** Topology Roles */
+            topology_roles: components["schemas"]["PublicRecipeTopologyRole"][];
             /** Uri */
             uri: string;
         };
@@ -2587,6 +2627,15 @@ export interface components {
             upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild";
             /** Version */
             version: string;
+        };
+        /** PublicRecipeTopologyRole */
+        PublicRecipeTopologyRole: {
+            /** Count */
+            count: number;
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Name */
+            name: string;
         };
         /** PublicationExportRequest */
         PublicationExportRequest: {

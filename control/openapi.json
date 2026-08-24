@@ -4127,6 +4127,32 @@
         "title": "PublicRecipeChange",
         "type": "object"
       },
+      "PublicRecipeFabric": {
+        "additionalProperties": false,
+        "properties": {
+          "connectivity": {
+            "enum": [
+              "none",
+              "connected",
+              "full_mesh",
+              "switch"
+            ],
+            "title": "Connectivity",
+            "type": "string"
+          },
+          "minimum_bandwidth_mbps": {
+            "minimum": 0.0,
+            "title": "Minimum Bandwidth Mbps",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connectivity",
+          "minimum_bandwidth_mbps"
+        ],
+        "title": "PublicRecipeFabric",
+        "type": "object"
+      },
       "PublicRecipeListItem": {
         "additionalProperties": false,
         "properties": {
@@ -4170,10 +4196,40 @@
             "title": "Execution Harness",
             "type": "string"
           },
+          "execution_readiness": {
+            "enum": [
+              "executable",
+              "not-executable",
+              "integration-required",
+              "not-declared"
+            ],
+            "title": "Execution Readiness",
+            "type": "string"
+          },
+          "execution_readiness_basis": {
+            "enum": [
+              "explicit-executable-metadata",
+              "explicit-non-executable-metadata",
+              "explicit-integration-required-metadata",
+              "missing-readiness-metadata",
+              "conflicting-readiness-metadata"
+            ],
+            "title": "Execution Readiness Basis",
+            "type": "string"
+          },
+          "execution_readiness_detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Execution Readiness Detail",
+            "type": "string"
+          },
           "expected_download_bytes": {
             "minimum": 1.0,
             "title": "Expected Download Bytes",
             "type": "integer"
+          },
+          "fabric": {
+            "$ref": "#/components/schemas/PublicRecipeFabric"
           },
           "local": {
             "$ref": "#/components/schemas/PublicRecipeLocalState"
@@ -4344,6 +4400,15 @@
             "title": "Topology Name",
             "type": "string"
           },
+          "topology_roles": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeTopologyRole"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Topology Roles",
+            "type": "array"
+          },
           "uri": {
             "maxLength": 256,
             "minLength": 100,
@@ -4366,6 +4431,9 @@
           "qualification",
           "qualification_basis",
           "qualification_detail",
+          "execution_readiness",
+          "execution_readiness_basis",
+          "execution_readiness_detail",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",
@@ -4373,6 +4441,8 @@
           "topology_name",
           "topology_mode",
           "node_count",
+          "topology_roles",
+          "fabric",
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
@@ -4534,10 +4604,40 @@
             "title": "Execution Harness",
             "type": "string"
           },
+          "execution_readiness": {
+            "enum": [
+              "executable",
+              "not-executable",
+              "integration-required",
+              "not-declared"
+            ],
+            "title": "Execution Readiness",
+            "type": "string"
+          },
+          "execution_readiness_basis": {
+            "enum": [
+              "explicit-executable-metadata",
+              "explicit-non-executable-metadata",
+              "explicit-integration-required-metadata",
+              "missing-readiness-metadata",
+              "conflicting-readiness-metadata"
+            ],
+            "title": "Execution Readiness Basis",
+            "type": "string"
+          },
+          "execution_readiness_detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Execution Readiness Detail",
+            "type": "string"
+          },
           "expected_download_bytes": {
             "minimum": 1.0,
             "title": "Expected Download Bytes",
             "type": "integer"
+          },
+          "fabric": {
+            "$ref": "#/components/schemas/PublicRecipeFabric"
           },
           "local": {
             "$ref": "#/components/schemas/PublicRecipeLocalState"
@@ -4716,6 +4816,15 @@
             "title": "Topology Name",
             "type": "string"
           },
+          "topology_roles": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeTopologyRole"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Topology Roles",
+            "type": "array"
+          },
           "uri": {
             "maxLength": 256,
             "minLength": 100,
@@ -4738,6 +4847,9 @@
           "qualification",
           "qualification_basis",
           "qualification_detail",
+          "execution_readiness",
+          "execution_readiness_basis",
+          "execution_readiness_detail",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",
@@ -4745,6 +4857,8 @@
           "topology_name",
           "topology_mode",
           "node_count",
+          "topology_roles",
+          "fabric",
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
@@ -4803,6 +4917,32 @@
           "changes"
         ],
         "title": "PublicRecipeRelease",
+        "type": "object"
+      },
+      "PublicRecipeTopologyRole": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "endpoint_owner"
+        ],
+        "title": "PublicRecipeTopologyRole",
         "type": "object"
       },
       "PublicationExportRequest": {
