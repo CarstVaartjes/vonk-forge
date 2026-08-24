@@ -623,6 +623,26 @@ def test_vllm_accepts_only_snapshot_owned_nemotron_parser_plugins(
     )
 
 
+def test_vllm_accepts_super_snapshot_parser_with_a_companion_model() -> None:
+    recipe = _multi_artifact_vllm_recipe(
+        '{"method":"mtp","model":"/models/draft"}'
+    )
+    plugin = "/models/target/super_v3_reasoning_parser.py"
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "reasoning-parser-plugin", "value": plugin},
+            {"name": "reasoning-parser", "value": "super_v3"},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert (
+        projection.command[projection.command.index("--reasoning-parser-plugin") + 1]
+        == plugin
+    )
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
