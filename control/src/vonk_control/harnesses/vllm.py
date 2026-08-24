@@ -127,6 +127,7 @@ _ARGUMENTS = {
         validate=one_of(
             "/models/nano_v3_reasoning_parser.py",
             "/models/super_v3_reasoning_parser.py",
+            "/models/target/super_v3_reasoning_parser.py",
         ),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
