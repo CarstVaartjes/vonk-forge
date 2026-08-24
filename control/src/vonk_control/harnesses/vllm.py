@@ -46,7 +46,8 @@ _ARGUMENTS = {
     ),
     "block-size": ArgumentSpec("--block-size", validate=integer(1, 1024)),
     "quantization": ArgumentSpec(
-        "--quantization", validate=one_of("awq", "gptq", "fp8", "bitsandbytes")
+        "--quantization",
+        validate=one_of("awq", "gptq", "fp8", "modelopt_fp4", "bitsandbytes"),
     ),
     "dtype": ArgumentSpec(
         "--dtype", validate=one_of("auto", "float16", "bfloat16", "float32")
@@ -87,7 +88,22 @@ _ARGUMENTS = {
     ),
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
-        validate=one_of("deepseek_v4", "glm45", "nemotron_v3", "poolside_v1", "qwen3"),
+        validate=one_of(
+            "deepseek_v4",
+            "glm45",
+            "nano_v3",
+            "nemotron_v3",
+            "poolside_v1",
+            "qwen3",
+            "super_v3",
+        ),
+    ),
+    "reasoning-parser-plugin": ArgumentSpec(
+        "--reasoning-parser-plugin",
+        validate=one_of(
+            "/models/nano_v3_reasoning_parser.py",
+            "/models/super_v3_reasoning_parser.py",
+        ),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
@@ -121,6 +137,7 @@ class VllmHarnessCompiler:
         _require_role_artifacts(recipe, role, artifact_mounts)
         require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", primary_mount))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
+        _validate_reasoning_plugin(parsed, primary_mount=primary_mount)
         _validate_speculative_config(
             parsed.get("--speculative-config"),
             primary_artifact_id=primary_artifact_id,
@@ -276,6 +293,7 @@ class VllmHarnessCompiler:
                     "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM",
                     "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M",
                     "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS",
+                    "VLLM_FLASHINFER_MOE_BACKEND",
                     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS",
                     "VLLM_NO_USAGE_STATS",
                     "VLLM_NVFP4_GEMM_BACKEND",
@@ -305,6 +323,26 @@ class VllmHarnessCompiler:
             recipe=recipe,
             distribution=distribution,
             environment=environment,
+        )
+
+
+def _validate_reasoning_plugin(
+    parsed: Mapping[str, str | bool], *, primary_mount: str
+) -> None:
+    parser = parsed.get("--reasoning-parser")
+    plugin = parsed.get("--reasoning-parser-plugin")
+    required = {
+        "nano_v3": f"{primary_mount}/nano_v3_reasoning_parser.py",
+        "super_v3": f"{primary_mount}/super_v3_reasoning_parser.py",
+    }
+    expected = required.get(parser) if isinstance(parser, str) else None
+    if expected is not None and plugin != expected:
+        raise HarnessCompileError(
+            f"{parser} reasoning parser requires its immutable model-snapshot plugin"
+        )
+    if expected is None and plugin is not None:
+        raise HarnessCompileError(
+            "reasoning parser plugin is only valid for a reviewed custom parser"
         )
 
 
