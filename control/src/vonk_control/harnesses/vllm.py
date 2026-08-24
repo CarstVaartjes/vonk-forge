@@ -90,6 +90,7 @@ _ARGUMENTS = {
         "--reasoning-parser",
         validate=one_of(
             "deepseek_v4",
+            "gemma4",
             "glm45",
             "nano_v3",
             "nemotron_v3",

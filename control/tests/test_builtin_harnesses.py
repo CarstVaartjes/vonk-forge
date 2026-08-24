@@ -749,6 +749,37 @@ def test_vllm_accepts_glm_reasoning_parser() -> None:
     assert "glm45" in projection.command
 
 
+def test_vllm_accepts_gemma4_chat_protocol() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "reasoning-parser", "value": "gemma4"},
+            {"name": "tool-call-parser", "value": "gemma4"},
+            {"name": "enable-auto-tool-choice", "value": True},
+            {
+                "name": "default-chat-template-kwargs",
+                "value": '{"enable_thinking":false}',
+            },
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--reasoning-parser") + 1] == (
+        "gemma4"
+    )
+    assert projection.command[projection.command.index("--tool-call-parser") + 1] == (
+        "gemma4"
+    )
+    assert "--enable-auto-tool-choice" in projection.command
+    assert (
+        projection.command[
+            projection.command.index("--default-chat-template-kwargs") + 1
+        ]
+        == '{"enable_thinking":false}'
+    )
+
+
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
