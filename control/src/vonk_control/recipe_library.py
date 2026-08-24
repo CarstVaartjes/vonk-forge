@@ -43,6 +43,10 @@ _URI = re.compile(
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+# GitHub's Contents API omits inline content for files larger than 1 MiB. Keep
+# the catalog index bounded independently of the smaller metadata response.
+# https://docs.github.com/rest/repos/contents#get-repository-content
+_MAX_INDEX_BYTES = 12 * 1024 * 1024
 # A 12 MiB Git blob expands beyond 16 MiB once GitHub base64-wraps it in JSON.
 _MAX_BLOB_RESPONSE_BYTES = 18 * 1024 * 1024
 _MAX_RECIPES = 256
@@ -51,6 +55,7 @@ _MAX_SOURCE_CONTEXTS = 128
 _MAX_SOURCE_FILES = 4096
 _MAX_RELEASES = 32
 _MAX_RELEASE_CHANGES = 16
+_CONTENTS_ACCEPT = "application/vnd.github.object+json"
 _SEMVER = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
@@ -283,9 +288,14 @@ class RecipeLibraryClient:
     def _indexed_items(self, commit: str) -> tuple[RecipeLibraryItem, ...]:
         encoded = self._get_json(
             f"/repos/{self._repository}/contents/{_INDEX_PATH}"
-            f"?ref={quote(commit, safe='')}"
+            f"?ref={quote(commit, safe='')}",
+            accept=_CONTENTS_ACCEPT,
         )
-        document = self._decode_document(encoded, "recipe library index")
+        document = self._decode_contents_document(
+            encoded,
+            "recipe library index",
+            max_content_bytes=_MAX_INDEX_BYTES,
+        )
         recipes = document.get("recipes")
         if (
             document.get("schema_version") not in {1, 2}
@@ -887,6 +897,119 @@ class RecipeLibraryClient:
     @staticmethod
     def _decode_document(encoded: dict[str, Any], label: str) -> dict[str, object]:
         decoded = RecipeLibraryClient._decode_base64(encoded, label)
+        return RecipeLibraryClient._parse_document(decoded, label)
+
+    def _decode_contents_document(
+        self,
+        encoded: dict[str, Any],
+        label: str,
+        *,
+        max_content_bytes: int,
+    ) -> dict[str, object]:
+        decoded = self._decode_contents_payload(
+            encoded,
+            label,
+            max_content_bytes=max_content_bytes,
+        )
+        return self._parse_document(decoded, label)
+
+    def _decode_contents_payload(
+        self,
+        encoded: dict[str, Any],
+        label: str,
+        *,
+        max_content_bytes: int,
+    ) -> bytes:
+        encoding = encoded.get("encoding")
+        if encoding == "base64":
+            content = self._decode_base64(encoded, label)
+            blob_sha, expected_size = self._contents_file_metadata(
+                encoded,
+                label,
+                max_content_bytes=max_content_bytes,
+            )
+            self._verify_blob_identity(content, blob_sha, expected_size, label)
+            return content
+
+        inline_content = encoded.get("content")
+        if encoding != "none" or inline_content not in (None, ""):
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                f"{label} content is invalid",
+            )
+        blob_sha, expected_size = self._contents_file_metadata(
+            encoded,
+            label,
+            max_content_bytes=max_content_bytes,
+        )
+
+        blob = self._get_json(
+            f"/repos/{self._repository}/git/blobs/{blob_sha}",
+            max_response_bytes=_MAX_BLOB_RESPONSE_BYTES,
+        )
+        returned_sha = blob.get("sha")
+        returned_size = blob.get("size")
+        if (
+            returned_sha != blob_sha
+            or not isinstance(returned_size, int)
+            or isinstance(returned_size, bool)
+            or returned_size != expected_size
+        ):
+            raise RecipeLibraryError(
+                "recipe_library.digest_mismatch",
+                f"{label} blob metadata does not match",
+            )
+        content = self._decode_base64(blob, f"{label} blob")
+        self._verify_blob_identity(content, blob_sha, expected_size, label)
+        return content
+
+    @staticmethod
+    def _contents_file_metadata(
+        encoded: dict[str, Any],
+        label: str,
+        *,
+        max_content_bytes: int,
+    ) -> tuple[str, int]:
+        blob_sha = encoded.get("sha")
+        expected_size = encoded.get("size")
+        if (
+            encoded.get("type") != "file"
+            or not isinstance(blob_sha, str)
+            or _SHA.fullmatch(blob_sha) is None
+            or not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 1
+        ):
+            raise RecipeLibraryError(
+                "recipe_library.response_invalid",
+                f"{label} metadata is invalid",
+            )
+        if expected_size > max_content_bytes:
+            raise RecipeLibraryError(
+                "recipe_library.response_too_large",
+                f"{label} content exceeds its size limit",
+            )
+        return blob_sha, expected_size
+
+    @staticmethod
+    def _verify_blob_identity(
+        content: bytes,
+        blob_sha: str,
+        expected_size: int,
+        label: str,
+    ) -> None:
+        git_identity = hashlib.sha1(
+            f"blob {len(content)}\0".encode() + content,
+            usedforsecurity=False,
+        ).hexdigest()
+        if len(content) != expected_size or git_identity != blob_sha:
+            raise RecipeLibraryError(
+                "recipe_library.digest_mismatch",
+                f"{label} blob digest does not match",
+            )
+
+    @staticmethod
+    def _parse_document(decoded: bytes, label: str) -> dict[str, object]:
         try:
             value = json.loads(decoded)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -987,10 +1110,15 @@ class RecipeLibraryClient:
         )
 
     def _get_json(
-        self, path: str, *, max_response_bytes: int = _MAX_RESPONSE_BYTES
+        self,
+        path: str,
+        *,
+        max_response_bytes: int = _MAX_RESPONSE_BYTES,
+        accept: str | None = None,
     ) -> dict[str, Any]:
         try:
-            with self._client.stream("GET", path) as response:
+            headers = {"Accept": accept} if accept is not None else None
+            with self._client.stream("GET", path, headers=headers) as response:
                 if 300 <= response.status_code < 400:
                     raise RecipeLibraryError(
                         "recipe_library.redirect_forbidden",
