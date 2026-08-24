@@ -25,7 +25,7 @@ from .models import (
 )
 
 EVENT_TYPES = frozenset(
-    {"node-telemetry", "recipe-state", "operation-state"}
+    {"node-telemetry", "node-profile", "recipe-state", "operation-state"}
 )
 MAX_EVENT_PAYLOAD_BYTES = 8 * 1024
 MAX_REPLAY_BATCH = 128

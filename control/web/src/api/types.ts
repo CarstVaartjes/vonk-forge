@@ -4,6 +4,8 @@ export type NodeSummary = components["schemas"]["NodeStatus"];
 export type AuthSession = components["schemas"]["AuthSession"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
+export type FleetNodeIdentity = components["schemas"]["FleetNodeIdentity"];
+export type NodeProfileUpdate = components["schemas"]["NodeProfileUpdateRequest"];
 export type FleetEvidenceResponse = components["schemas"]["FleetStatusResponse"];
 export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
@@ -132,6 +134,7 @@ export interface ControlApi extends LibraryApi {
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
+  updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity>;
   jobs(cursor?: string): Promise<JobsResponse>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;

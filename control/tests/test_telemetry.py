@@ -486,7 +486,7 @@ def test_conflicting_replay_is_rejected(telemetry) -> None:
 def test_history_rejects_invalid_or_unbounded_windows(telemetry) -> None:
     repository, _, _, _ = telemetry
     with pytest.raises(ValueError, match="maximum points"):
-        repository.history(NODE_A, START, NOW, 1_501, resolution="raw")
+        repository.history(NODE_A, START, NOW, 3_001, resolution="raw")
     with pytest.raises(ValueError, match="history window"):
         repository.history(NODE_A, NOW, START, 1_500, resolution="raw")
     with pytest.raises(ValueError, match="timezone-aware"):

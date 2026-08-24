@@ -853,6 +853,18 @@
               }
             ]
           },
+          "ip_address": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
           "labels": {
             "additionalProperties": {
               "maxLength": 256,
@@ -918,6 +930,46 @@
           "warnings"
         ],
         "title": "FleetNode",
+        "type": "object"
+      },
+      "FleetNodeIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "hostname": {
+            "maxLength": 255,
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "hostname"
+        ],
+        "title": "FleetNodeIdentity",
         "type": "object"
       },
       "FleetSnapshot": {
@@ -2850,6 +2902,23 @@
           "last_seen_age_seconds"
         ],
         "title": "NodeConnection",
+        "type": "object"
+      },
+      "NodeProfileUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "NodeProfileUpdateRequest",
         "type": "object"
       },
       "NodeStatus": {
@@ -6854,7 +6923,7 @@
             "type": "string"
           },
           "maximum_points": {
-            "maximum": 1500.0,
+            "maximum": 3000.0,
             "minimum": 1.0,
             "title": "Maximum Points",
             "type": "integer"
@@ -6875,7 +6944,7 @@
                 }
               ]
             },
-            "maxItems": 1500,
+            "maxItems": 3000,
             "title": "Points",
             "type": "array"
           },
@@ -11283,6 +11352,101 @@
         "summary": "Node Status View"
       }
     },
+    "/api/v1/nodes/{node_id}/profile": {
+      "patch": {
+        "operationId": "updateNodeProfile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeProfileUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetNodeIdentity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update Node Profile"
+      }
+    },
     "/api/v1/nodes/{node_id}/telemetry": {
       "get": {
         "operationId": "getNodeTelemetryHistory",
@@ -11337,7 +11501,7 @@
             "required": false,
             "schema": {
               "default": 1500,
-              "maximum": 1500,
+              "maximum": 3000,
               "minimum": 1,
               "title": "Maximum Points",
               "type": "integer"

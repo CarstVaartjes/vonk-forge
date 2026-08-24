@@ -163,7 +163,7 @@ def upgrade() -> None:
     sa.Column('payload', sa.JSON(), nullable=False),
     sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("event_type IN ('node-telemetry','recipe-state','operation-state')", name='ck_fleet_stream_events_event_type'),
+    sa.CheckConstraint("event_type IN ('node-telemetry','node-profile','recipe-state','operation-state')", name='ck_fleet_stream_events_event_type'),
     sa.CheckConstraint('expires_at > occurred_at', name='ck_fleet_stream_events_expiry'),
     sa.CheckConstraint('octet_length(CAST(payload AS TEXT)) BETWEEN 2 AND 8192', name='ck_fleet_stream_events_payload_size'),
     sa.PrimaryKeyConstraint('id')

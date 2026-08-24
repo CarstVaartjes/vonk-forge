@@ -1,11 +1,12 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {KeyboardEvent as ReactKeyboardEvent} from "react";
-import type {ControlApi, EnrollmentGrantResponse, VisualFleetNode} from "../api/types";
+import type {ControlApi, EnrollmentGrantResponse, TelemetryHistory, VisualFleetNode} from "../api/types";
 import {CopyButton} from "../components/copy-button";
 import {FleetCompactView, FleetTopologyView} from "../components/fleet-views";
 import {Meter} from "../components/meter";
 import {NodeCard} from "../components/node-card";
 import {NodeDetail} from "../components/node-detail";
+import {NodeProfileDialog} from "../components/node-profile-dialog";
 import {StatusPill} from "../components/status-pill";
 import {useFleetStream} from "../hooks/use-fleet-stream";
 import {usePoliteAnnouncement} from "../hooks/use-polite-announcement";
@@ -16,6 +17,15 @@ export const FLEET_VIEW_STORAGE_KEY = "vonk-forge:fleet-view";
 export type FleetViewMode = "detailed" | "compact" | "topology";
 type FleetHealthFilter = ReturnType<typeof nodeOperationalState>;
 type FleetSort = "attention" | "name";
+type CardHistory = {error: string; history?: TelemetryHistory; loading: boolean};
+type CardTrendRange = "1h" | "24h" | "7d" | "31d";
+
+const CARD_TREND_RANGES: Record<CardTrendRange, {hours: number; label: string; maximumPoints: number; resolution: "minute" | "fifteen-minute"}> = {
+  "1h": {hours: 1, label: "1h", maximumPoints: 60, resolution: "minute"},
+  "24h": {hours: 24, label: "24h", maximumPoints: 1_440, resolution: "minute"},
+  "7d": {hours: 24 * 7, label: "7d", maximumPoints: 672, resolution: "fifteen-minute"},
+  "31d": {hours: 24 * 31, label: "31d", maximumPoints: 2_976, resolution: "fifteen-minute"},
+};
 
 const HEALTH_STATES = ["live", "delayed", "stale", "offline"] as const satisfies readonly FleetHealthFilter[];
 const FLEET_VIEWS: readonly {label: string; value: FleetViewMode; icon: "detailed" | "compact" | "topology"}[] = [
@@ -244,36 +254,20 @@ function SparkOnboarding({api, onBusyChange, onClose}: {api: ControlApi; onBusyC
 export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(busy: boolean): void}) {
   const fleet = useFleetStream(api);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [editingNodeId, setEditingNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
   const [viewMode, setViewMode] = useState<FleetViewMode>(storedFleetView);
   const [query, setQuery] = useState("");
   const [healthFilters, setHealthFilters] = useState<FleetHealthFilter[]>([]);
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [sort, setSort] = useState<FleetSort>("attention");
-  const [gpuTrends, setGpuTrends] = useState<Record<string, number[]>>({});
+  const [cardTrendRange, setCardTrendRange] = useState<CardTrendRange>("24h");
+  const [cardHistories, setCardHistories] = useState<Record<string, CardHistory>>({});
   const detailTrigger = useRef<HTMLElement | null>(null);
   const discoverySearch = useRef<HTMLInputElement>(null);
   const onboardingTrigger = useRef<HTMLElement | null>(null);
-  const lastTrendSample = useRef(new Map<string, string>());
-
-  useEffect(() => {
-    const snapshot = fleet.snapshot;
-    if (!snapshot) return;
-    setGpuTrends(current => {
-      let changed = false;
-      const next = {...current};
-      for (const node of snapshot.nodes) {
-        const sample = node.telemetry?.sample;
-        if (!sample || lastTrendSample.current.get(node.id) === sample.id) continue;
-        lastTrendSample.current.set(node.id, sample.id);
-        const gpu = sample.gpu_utilization_percent;
-        if (typeof gpu !== "number" || !Number.isFinite(gpu)) continue;
-        next[node.id] = [...(current[node.id] ?? []), gpu].slice(-12);
-        changed = true;
-      }
-      return changed ? next : current;
-    });
-  }, [fleet.snapshot]);
+  const editTrigger = useRef<HTMLElement | null>(null);
+  const completedCardHistories = useRef(new Set<string>());
 
   const summary = useMemo(
     () => fleet.snapshot ? summarizeFleet(fleet.snapshot, fleet.now) : undefined,
@@ -288,8 +282,56 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     [fleet.now, fleet.snapshot?.nodes, healthFilters, query, sort, warningsOnly],
   );
   const selectedNode = visibleNodes.find(node => node.id === selectedNodeId);
+  const editingNode = fleet.snapshot?.nodes.find(node => node.id === editingNodeId);
   const connection = connectionPresentation(fleet.connection);
   const filtersActive = query.trim().length > 0 || healthFilters.length > 0 || warningsOnly;
+  const visibleNodeKey = visibleNodes.map(node => node.id).join("|");
+
+  useEffect(() => {
+    if (viewMode !== "detailed") return;
+    const selection = CARD_TREND_RANGES[cardTrendRange];
+    const nodeIds = visibleNodeKey.split("|").filter(Boolean).filter(nodeId => !completedCardHistories.current.has(`${cardTrendRange}:${nodeId}`));
+    if (nodeIds.length === 0) return;
+    let active = true;
+    const controllers = new Set<AbortController>();
+    let nextIndex = 0;
+    setCardHistories(current => {
+      const next = {...current};
+      for (const nodeId of nodeIds) next[`${cardTrendRange}:${nodeId}`] = {error: "", loading: true};
+      return next;
+    });
+
+    async function worker() {
+      while (active && nextIndex < nodeIds.length) {
+        const nodeId = nodeIds[nextIndex++]!;
+        const controller = new AbortController();
+        controllers.add(controller);
+        const end = new Date();
+        const start = new Date(end.getTime() - selection.hours * 60 * 60 * 1_000);
+        try {
+          const history = await api.nodeTelemetryHistory(nodeId, start.toISOString(), end.toISOString(), selection.resolution, selection.maximumPoints, controller.signal);
+          if (!active || controller.signal.aborted) continue;
+          const historyKey = `${cardTrendRange}:${nodeId}`;
+          completedCardHistories.current.add(historyKey);
+          setCardHistories(current => ({...current, [historyKey]: {error: "", history, loading: false}}));
+        } catch (value) {
+          if (!active || controller.signal.aborted) continue;
+          const historyKey = `${cardTrendRange}:${nodeId}`;
+          completedCardHistories.current.add(historyKey);
+          const message = value instanceof Error ? value.message : "Telemetry history is unavailable";
+          setCardHistories(current => ({...current, [historyKey]: {error: message.slice(0, 256), loading: false}}));
+        } finally {
+          controllers.delete(controller);
+        }
+      }
+    }
+    void Promise.all(Array.from({length: Math.min(3, nodeIds.length)}, () => worker()));
+    return () => {
+      active = false;
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+    };
+  }, [api, cardTrendRange, viewMode, visibleNodeKey]);
 
   useEffect(() => {
     if (!selectedNodeId || selectedNode) return;
@@ -313,6 +355,16 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   function closeOnboarding() {
     setOnboarding(false);
     queueMicrotask(() => onboardingTrigger.current?.focus());
+  }
+
+  function editNode(nodeId: string) {
+    if (document.activeElement instanceof HTMLElement) editTrigger.current = document.activeElement;
+    setEditingNodeId(nodeId);
+  }
+
+  function closeEditor() {
+    setEditingNodeId(undefined);
+    queueMicrotask(() => editTrigger.current?.focus());
   }
 
   function changeView(next: FleetViewMode) {
@@ -346,6 +398,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </div>
     </header>
     {onboarding && <SparkOnboarding api={api} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
+    {editingNode && <NodeProfileDialog api={api} node={editingNode} onClose={closeEditor} onSaved={displayName => fleet.updateNodeProfile(editingNode.id, displayName)}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
@@ -414,8 +467,11 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </section>
       <div className="fleet-view-toolbar">
         <div><strong>Fleet view</strong><span>Choose the level of detail that suits this task.</span></div>
-        <div className="fleet-view-switcher" role="group" aria-label="Fleet view">
-          {FLEET_VIEWS.map(option => <button key={option.value} type="button" aria-pressed={viewMode === option.value} onClick={() => changeView(option.value)}><ViewIcon kind={option.icon}/><span>{option.label}</span></button>)}
+        <div className="fleet-toolbar-controls">
+          <label className="fleet-trend-range"><span>Card trends</span><select aria-label="Card trend range" value={cardTrendRange} onChange={event => setCardTrendRange(event.currentTarget.value as CardTrendRange)}>{(Object.keys(CARD_TREND_RANGES) as CardTrendRange[]).map(range => <option key={range} value={range}>{CARD_TREND_RANGES[range].label}</option>)}</select></label>
+          <div className="fleet-view-switcher" role="group" aria-label="Fleet view">
+            {FLEET_VIEWS.map(option => <button key={option.value} type="button" aria-pressed={viewMode === option.value} onClick={() => changeView(option.value)}><ViewIcon kind={option.icon}/><span>{option.label}</span></button>)}
+          </div>
         </div>
       </div>
       <div className={`fleet-workspace fleet-view-${viewMode}${selectedNode ? " has-detail" : ""}`}>
@@ -425,9 +481,13 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
             key={node.id}
             node={node}
             now={fleet.now}
+            onEdit={() => editNode(node.id)}
             onSelect={() => selectNode(node.id)}
             selected={node.id === selectedNodeId}
-            trend={gpuTrends[node.id]}
+            history={cardHistories[`${cardTrendRange}:${node.id}`]?.history}
+            historyLabel={CARD_TREND_RANGES[cardTrendRange].label}
+            historyLoading={cardHistories[`${cardTrendRange}:${node.id}`]?.loading}
+            historyError={cardHistories[`${cardTrendRange}:${node.id}`]?.error}
           />)}
         </section>}
         {visibleNodes.length > 0 && viewMode === "compact" && <FleetCompactView nodes={visibleNodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
