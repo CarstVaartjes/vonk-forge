@@ -972,6 +972,9 @@ def create_app(
                     "action": event.action,
                     "authority_revision": event.authority_revision,
                     "targets": list(event.targets),
+                    "occurred_at": event.occurred_at.isoformat()
+                    if event.occurred_at is not None
+                    else None,
                 }
                 for event in audits.list()
             ]

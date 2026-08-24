@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -16,12 +17,17 @@ class AuditRecord:
     action: str
     authority_revision: str | None
     targets: tuple[str, ...]
+    occurred_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Keep audit projections free of bearer keys and private credentials."""
         values = (self.request_id, self.actor, self.action, self.authority_revision, *self.targets)
         if any(_contains_secret_material(value) for value in values if value is not None):
             raise ValueError("audit record contains secret material")
+        if self.occurred_at is not None and (
+            self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None
+        ):
+            raise ValueError("audit timestamp must be timezone-aware")
 
 
 def _contains_secret_material(value: str) -> bool:
@@ -65,11 +71,14 @@ def _identity_history_rows(sessions: sessionmaker[Session], limit: int) -> list[
         ]
 
 class MemoryAuditStore:
-    def __init__(self) -> None:
+    def __init__(self, clock=lambda: datetime.now(UTC)) -> None:
         self._events: list[AuditRecord] = []
+        self._clock = clock
 
     def append(self, event: AuditRecord) -> None:
-        self._events.append(event)
+        self._events.append(
+            event if event.occurred_at is not None else replace(event, occurred_at=self._clock())
+        )
 
     def for_request(self, request_id: str) -> AuditRecord:
         matches = [event for event in self._events if event.request_id == request_id]
@@ -90,6 +99,7 @@ class SqlAuditStore:
         self._clock = clock
 
     def append(self, event: AuditRecord) -> None:
+        occurred_at = event.occurred_at or self._clock()
         with self._sessions.begin() as session:
             session.add(AuditEvent(
                 request_id=event.request_id,
@@ -97,7 +107,7 @@ class SqlAuditStore:
                 action=event.action,
                 authority_revision=event.authority_revision,
                 targets=list(event.targets),
-                occurred_at=self._clock(),
+                occurred_at=occurred_at,
             ))
 
     def list(self, *, limit: int = 100) -> list[AuditRecord]:
@@ -105,6 +115,18 @@ class SqlAuditStore:
 
         with self._sessions() as session:
             rows = session.scalars(select(AuditEvent).order_by(AuditEvent.occurred_at.desc()).limit(limit))
-            return [AuditRecord(row.request_id, row.actor, row.action, row.authority_revision, tuple(row.targets)) for row in rows]
+            return [
+                AuditRecord(
+                    row.request_id,
+                    row.actor,
+                    row.action,
+                    row.authority_revision,
+                    tuple(row.targets),
+                    row.occurred_at.replace(tzinfo=UTC)
+                    if row.occurred_at.tzinfo is None
+                    else row.occurred_at.astimezone(UTC),
+                )
+                for row in rows
+            ]
     def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]:
         return _identity_history_rows(self._sessions, limit)
