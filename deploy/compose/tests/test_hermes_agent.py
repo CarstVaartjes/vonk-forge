@@ -210,6 +210,7 @@ def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> N
     assert service["read_only"] is True
     assert service["user"] == "0:0"
     assert service["cap_drop"] == ["ALL"]
+    assert service["cap_add"] == ["DAC_OVERRIDE"]
     assert service["security_opt"] == ["no-new-privileges:true"]
     assert set(service["networks"]) == {"litellm-edge"}
     assert {secret["target"] for secret in service["secrets"]} == {

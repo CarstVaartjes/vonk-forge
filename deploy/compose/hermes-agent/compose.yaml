@@ -52,11 +52,12 @@ services:
         max-file: "5"
     read_only: true
     # Local Compose secrets retain the installer file's owner-only mode. Run as
-    # UID 0 with every capability dropped so this one-shot can read only its two
-    # mounted secret files without gaining host or filesystem authority.
+    # UID 0 with only DAC_OVERRIDE so this one-shot can read its two owner-only
+    # local Compose secret mounts without gaining host or write authority.
     user: "0:0"
     entrypoint: [python, /usr/local/bin/provision-hermes-litellm-key]
     cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     environment:
       HERMES_LITELLM_KEY_FILE: /run/secrets/hermes-litellm-key
