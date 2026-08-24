@@ -71,6 +71,7 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     repository = "\n".join(_workflow_job_lines(workflow, "repository-suite"))
     control = "\n".join(_workflow_job_lines(workflow, "control-suite"))
     web = "\n".join(_workflow_job_lines(workflow, "web-suite"))
+    browser = "\n".join(_workflow_job_lines(workflow, "web-browser-acceptance"))
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
     assert "cargo test --workspace --locked" in rust
@@ -100,15 +101,17 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "--python 3.12" in control
     assert "npm test --prefix control/web -- --run" in web
     assert "npm run build --prefix control/web" in web
+    assert "npm run test:e2e --prefix control/web -- --project=chromium" in browser
     assert "name: Catalog and service suites" in aggregate
     assert (
-        "needs: [repository-suite, control-suite, web-suite]"
+        "needs: [repository-suite, control-suite, web-suite, web-browser-acceptance]"
         in aggregate
     )
     assert "if: always()" in aggregate
     assert "needs.repository-suite.result" in aggregate
     assert "needs.control-suite.result" in aggregate
     assert "needs.web-suite.result" in aggregate
+    assert "needs.web-browser-acceptance.result" in aggregate
     assert "  agent-suite:" not in workflow
     assert "AGENT_RESULT" not in aggregate
     assert "scripts/update-global-contracts" not in workflow

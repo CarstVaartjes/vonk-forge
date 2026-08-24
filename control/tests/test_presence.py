@@ -47,6 +47,15 @@ def test_management_address_policy_accepts_secret_file_line_format() -> None:
     assert policy.validate("2001:db8:42::2") == "2001:db8:42::2"
 
 
+def test_management_address_policy_accepts_exact_host_routes() -> None:
+    policy = ManagementAddressPolicy.parse(
+        "192.168.1.211/32,2001:db8:42::211/128"
+    )
+
+    assert policy.validate("192.168.1.211") == "192.168.1.211"
+    assert policy.validate("2001:db8:42::211") == "2001:db8:42::211"
+
+
 def test_management_address_policy_rejects_ambiguous_network_policy() -> None:
     for allowed, forbidden, error in (
         ("10.0.0.1/24", "", "canonical"),
