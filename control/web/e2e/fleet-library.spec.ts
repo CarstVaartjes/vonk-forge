@@ -92,6 +92,7 @@ function localSnapshot() {
       id: nodeId,
       display_name: nodeId,
       hostname: "aurora.fixture.invalid",
+      ip_address: "192.168.1.211",
       lifecycle: "managed",
       labels: {role: "inference"},
       connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: observedAt, last_seen_age_seconds: 0},
@@ -111,6 +112,7 @@ function localSnapshot() {
       id: borealisId,
       display_name: borealisId,
       hostname: "borealis.fixture.invalid",
+      ip_address: "192.168.1.212",
       lifecycle: "managed",
       labels: {role: "inference"},
       connection: {agent_state: "inactive", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
@@ -140,6 +142,17 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/v1/nodes/*/profile", async route => {
+    const nodeId = route.request().url().split("/").at(-2) ?? "";
+    const input = await route.request().postDataJSON() as {display_name: string};
+    const node = snapshot.nodes.find(item => item.id === nodeId);
+    return route.fulfill({json: {
+      id: nodeId,
+      display_name: input.display_name,
+      hostname: node?.hostname ?? "",
+      ip_address: node?.ip_address ?? null,
+    }});
+  });
   await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: []}}));
   await page.route("**/api/v1/library?*", route => {
     if (libraryState.snapshotFailuresRemaining > 0) {
@@ -232,13 +245,13 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expect(page.getByRole("region", {name: "Fleet summary"})).toContainText("1 loaded recipe");
   const aurora = page.getByRole("article", {name: /Aurora — (Live|Delayed)/});
   await expect(aurora).toContainText("NVIDIA GB10 · P0");
-  await expect(aurora.getByRole("region", {name: "Loaded recipes on Aurora"})).toContainText("Aurora solo");
-  await expect(aurora.getByRole("region", {name: "Run state on Aurora"})).toContainText("Degraded · 2 of 2 ranks");
-  await expect(aurora.getByRole("region", {name: "Installed recipes on Aurora"})).toContainText("Complete · 2 of 2 ranks");
+  await expect(aurora.getByRole("img", {name: "GPU 24h trend"})).toBeVisible();
+  await expect(aurora.locator(".node-workload-summary")).toContainText("Aurora solo");
+  await expect(aurora).toContainText("The Qwen pair route is not published.");
   const borealis = page.getByRole("article", {name: "Borealis — Offline"});
   await expect(borealis).toContainText("Certificate expired");
-  await expect(borealis.getByRole("region", {name: "Installed recipes on Borealis"})).toContainText("worker rank 1");
-  await expect(borealis.getByRole("region", {name: "Run state on Borealis"})).toContainText("member rank unhealthy");
+  await expect(borealis.locator(".node-workload-summary")).toContainText("Qwen pair");
+  await expect(borealis).toContainText("The Qwen pair has an unhealthy member rank.");
 
   const detailButton = aurora.getByRole("button", {name: "View Aurora details"});
   await detailButton.focus();
@@ -249,6 +262,24 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Fleet cards default to 24h trends and expose editable friendly identity", async ({page}) => {
+  await page.goto("/fleet");
+
+  const range = page.getByRole("combobox", {name: "Card trend range"});
+  await expect(range).toHaveValue("24h");
+  await expect(range.getByRole("option")).toHaveText(["1h", "24h", "7d", "31d"]);
+
+  await page.getByRole("button", {name: "Edit Aurora"}).click();
+  const dialog = page.getByRole("dialog", {name: "Name this Spark"});
+  await expect(dialog.getByText("aurora.fixture.invalid")).toBeVisible();
+  await expect(dialog.getByText("192.168.1.211")).toBeVisible();
+  await expect(dialog.getByText(nodeId)).toBeVisible();
+  await dialog.getByRole("textbox", {name: "Friendly name"}).fill("Studio Spark");
+  await dialog.getByRole("button", {name: "Save friendly name"}).click();
+  await expect(page.getByRole("article", {name: /Studio Spark —/})).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test("Fleet discovery searches friendly names and combines actionable health filters", async ({page}) => {

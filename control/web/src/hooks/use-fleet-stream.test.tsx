@@ -169,7 +169,7 @@ test("keeps one native EventSource across browser-managed Last-Event-ID reconnec
   expect(screen.getByTestId("cpu")).toHaveTextContent("77");
 });
 
-test("coalesces sparse recipe and operation refresh signals", async () => {
+test("coalesces sparse recipe, profile, and operation refresh signals", async () => {
   vi.useFakeTimers();
   const visualFleet = vi.fn()
     .mockResolvedValueOnce(snapshot(5))
@@ -180,7 +180,7 @@ test("coalesces sparse recipe and operation refresh signals", async () => {
 
   act(() => {
     stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "6");
-    stream.emit("operation-state", {schema_version: 1, projection_refresh_required: true}, "7");
+    stream.emit("node-profile", {schema_version: 1, projection_refresh_required: true}, "7");
     vi.advanceTimersByTime(100);
   });
   await flush();

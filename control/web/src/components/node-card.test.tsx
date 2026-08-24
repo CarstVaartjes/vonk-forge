@@ -1,5 +1,5 @@
 import {render, screen, within} from "@testing-library/react";
-import type {VisualFleetNode} from "../api/types";
+import type {TelemetryHistory, VisualFleetNode} from "../api/types";
 import {NodeCard} from "./node-card";
 
 const GIB = 1024 ** 3;
@@ -49,11 +49,11 @@ function completeNode(): VisualFleetNode {
 }
 
 test("renders the complete node telemetry hierarchy and distinct recipe groups", () => {
-  render(<NodeCard node={completeNode()} now={NOW} selected={false} onSelect={() => undefined}/>);
+  render(<NodeCard node={completeNode()} now={NOW} selected={false} onEdit={() => undefined} onSelect={() => undefined}/>);
   const card = screen.getByRole("article", {name: "Spark One — Live"});
 
   expect(within(card).getByText("NVIDIA GB10 · P0")).toBeVisible();
-  expect(within(card).getByText("73.0%")).toBeVisible();
+  expect(within(card).getByText("73%" )).toBeVisible();
   expect(within(card).getByRole("meter", {name: "Unified memory in use"})).toHaveValue(30 * GIB);
   expect(within(card).getAllByText("70.0 GiB available of 100.0 GiB")[0]).toBeVisible();
   expect(within(card).queryByText("Host memory")).not.toBeInTheDocument();
@@ -62,25 +62,13 @@ test("renders the complete node telemetry hierarchy and distinct recipe groups",
   expect(within(card).getByText("12.5% · load 1.50")).toBeVisible();
   expect(within(card).getByText("42.5 °C")).toBeVisible();
   expect(within(card).getByText("18.3 W")).toBeVisible();
-  expect(within(card).getByText("↓ 1.0 KiB/s · ↑ 512 B/s")).toBeVisible();
   expect(within(card).getByText("Updated 2 seconds ago")).toBeVisible();
   expect(within(card).getByText("Updated 2 seconds ago")).toHaveAttribute("title");
 
-  const installed = within(card).getByRole("region", {name: "Installed recipes on Spark One"});
-  const loaded = within(card).getByRole("region", {name: "Loaded recipes on Spark One"});
-  const installationState = within(card).getByRole("region", {name: "Installation state on Spark One"});
-  const runState = within(card).getByRole("region", {name: "Run state on Spark One"});
-  expect(installed).toHaveTextContent("Qwen pair");
-  expect(installed).toHaveTextContent("Complete · 2 of 2 ranks");
-  expect(installed).not.toHaveTextContent("Vision pair");
-  expect(installationState).toHaveTextContent("Vision pair");
-  expect(installationState).toHaveTextContent("Partial · 1 of 2 ranks · missing ranks");
-  expect(installationState).toHaveTextContent("Group partial · Rank installed");
-  expect(loaded).toHaveTextContent("Healthy · 2 of 2 ranks");
-  expect(loaded).not.toHaveTextContent("Vision pair");
-  expect(runState).toHaveTextContent("Vision pair");
-  expect(runState).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
-  expect(runState).toHaveTextContent("Group degraded · Run running · Rank running · Route failed");
+  const workloads = within(card).getByLabelText("Workloads on Spark One");
+  expect(workloads).toHaveTextContent("Loaded now1Qwen pair");
+  expect(workloads).toHaveTextContent("Installed1Qwen pair");
+  expect(workloads).toHaveTextContent("2 workload states need attention");
   expect(within(card).getByText("Vision pair route is not published.")).toBeVisible();
 });
 
@@ -93,16 +81,14 @@ test("renders offline certificate reasons and absent metrics honestly", () => {
   node.loaded = [];
   node.warnings = [];
 
-  render(<NodeCard node={node} now={NOW} selected={false} onSelect={() => undefined}/>);
+  render(<NodeCard node={node} now={NOW} selected={false} onEdit={() => undefined} onSelect={() => undefined}/>);
   const card = screen.getByRole("article", {name: "Spark One — Offline"});
 
   expect(within(card).getByText("Certificate expired")).toBeVisible();
   expect(within(card).getAllByText("Not reported").length).toBeGreaterThanOrEqual(6);
   expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
-  expect(within(card).getByText("No complete installations reported")).toBeVisible();
-  expect(within(card).getByText("Nothing is loaded now")).toBeVisible();
-  expect(within(card).getByText("No incomplete installation states")).toBeVisible();
-  expect(within(card).getByText("No inactive or degraded run states")).toBeVisible();
+  expect(within(card).getByText("No complete install")).toBeVisible();
+  expect(within(card).getByText("No active model")).toBeVisible();
 });
 
 test("uses a friendly hostname fallback and renders an accessible live trend", () => {
@@ -110,10 +96,20 @@ test("uses a friendly hostname fallback and renders an accessible live trend", (
   projected.display_name = projected.id;
   projected.hostname = "mia-lab-west.internal";
 
-  render(<NodeCard node={projected} now={NOW} selected={false} trend={[18, 42, 73]} onSelect={() => undefined}/>);
+  const history: TelemetryHistory = {
+    schema_version: 1,
+    node_id: projected.id,
+    start: "2026-08-15T11:00:00Z",
+    end: "2026-08-15T12:00:00Z",
+    resolution: "raw",
+    maximum_points: 60,
+    points: [18, 42].map((gpu, index) => ({...projected.telemetry!.sample, id: `00000000-0000-4000-8000-00000000000${index + 2}`, sequence: index + 3, gpu_utilization_percent: gpu})),
+  };
+  render(<NodeCard node={projected} now={NOW} selected={false} history={history} onEdit={() => undefined} onSelect={() => undefined}/>);
 
   const card = screen.getByRole("article", {name: "Mia Lab West — Live"});
   expect(within(card).getByRole("heading", {name: "Mia Lab West"})).toBeVisible();
   expect(within(card).queryByText(projected.id)).not.toBeInTheDocument();
-  expect(within(card).getByRole("img", {name: "Mia Lab West recent GPU utilization"})).toHaveAccessibleDescription(/Latest 73.0%/);
+  expect(within(card).getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Latest 73%/);
+  expect(within(card).getByRole("button", {name: "Edit Mia Lab West"})).toBeVisible();
 });

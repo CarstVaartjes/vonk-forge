@@ -738,6 +738,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{node_id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Node Profile */
+        patch: operations["updateNodeProfile"];
+        trace?: never;
+    };
     "/api/v1/nodes/{node_id}/telemetry": {
         parameters: {
             query?: never;
@@ -1334,6 +1351,8 @@ export interface components {
             /** Installed */
             installed: components["schemas"]["RecipePresence"][];
             inventory: components["schemas"]["InventoryState"] | null;
+            /** Ip Address */
+            ip_address?: string | null;
             /** Labels */
             labels: {
                 [key: string]: string;
@@ -1346,6 +1365,17 @@ export interface components {
             telemetry: components["schemas"]["TelemetryState"] | null;
             /** Warnings */
             warnings: components["schemas"]["vonk_control__fleet_projection__ProjectionReason"][];
+        };
+        /** FleetNodeIdentity */
+        FleetNodeIdentity: {
+            /** Display Name */
+            display_name: string;
+            /** Hostname */
+            hostname: string;
+            /** Id */
+            id: string;
+            /** Ip Address */
+            ip_address?: string | null;
         };
         /** FleetSnapshot */
         FleetSnapshot: {
@@ -1982,6 +2012,11 @@ export interface components {
              * @enum {string}
              */
             online_state: "online" | "offline" | "unregistered";
+        };
+        /** NodeProfileUpdateRequest */
+        NodeProfileUpdateRequest: {
+            /** Display Name */
+            display_name: string;
         };
         /** NodeStatus */
         NodeStatus: {
@@ -5803,6 +5838,77 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    updateNodeProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeProfileUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetNodeIdentity"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

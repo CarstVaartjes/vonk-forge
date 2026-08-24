@@ -48,6 +48,7 @@ _ADMIN_OPERATION_IDS = {
         "/api/v1/library/recipes/{recipe_id}",
     ): "getLibraryRecipe",
     ("get", "/api/v1/nodes/status"): "getNodeStatuses",
+    ("patch", "/api/v1/nodes/{node_id}/profile"): "updateNodeProfile",
     (
         "get",
         "/api/v1/nodes/{node_id}/telemetry",

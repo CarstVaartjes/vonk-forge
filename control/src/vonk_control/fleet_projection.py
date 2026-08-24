@@ -10,11 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .fleet_events import FleetEventRepository
+from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentCertificate,
     AgentNode,
     AgentNodeProfile,
+    AgentPresence,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
@@ -272,6 +273,7 @@ class FleetNode(_StrictModel):
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
+    ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
     lifecycle: Text64
     labels: dict[Text64, Text256] = Field(max_length=64)
     connection: NodeConnection
@@ -291,14 +293,21 @@ class FleetSnapshot(_StrictModel):
     nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
 
 
+class FleetNodeIdentity(_StrictModel):
+    id: NodeId
+    display_name: Text200
+    hostname: Annotated[str, StringConstraints(max_length=255)]
+    ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
+
+
 class TelemetryHistoryResponse(_StrictModel):
     schema_version: Literal[1] = 1
     node_id: NodeId
     start: datetime
     end: datetime
     resolution: TelemetryResolution
-    maximum_points: int = Field(ge=1, le=1_500)
-    points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=1_500)
+    maximum_points: int = Field(ge=1, le=3_000)
+    points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=3_000)
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
@@ -402,6 +411,42 @@ class FleetProjection:
     def read(self) -> FleetSnapshot:
         return self.read_at(self._events.high_watermark())
 
+    def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
+        """Persist an operator alias without changing the node's technical identity."""
+
+        with self._sessions.begin() as session:
+            node = session.get(AgentNode, node_id)
+            if node is None or node.state == "revoked" or node.revoked_at is not None:
+                raise KeyError(node_id)
+            profile = session.get(AgentNodeProfile, node_id)
+            if profile is None:
+                raise KeyError(node_id)
+            presence = session.get(AgentPresence, node_id)
+            if profile.display_name != display_name:
+                profile.display_name = display_name
+                self._events.append_in_session(
+                    session,
+                    FleetEventDraft(
+                        event_type="node-profile",
+                        node_id=node_id,
+                        entity_kind="node-profile",
+                        entity_id=node_id,
+                        payload={
+                            "schema_version": 1,
+                            "node_id": node_id,
+                            "display_name_changed": True,
+                        },
+                    ),
+                )
+            return FleetNodeIdentity(
+                id=node_id,
+                display_name=profile.display_name,
+                hostname=profile.hostname,
+                ip_address=(
+                    None if presence is None else presence.management_address
+                ),
+            )
+
     def read_at(self, event_cursor: int) -> FleetSnapshot:
         if (
             type(event_cursor) is not int
@@ -414,6 +459,7 @@ class FleetProjection:
             agents = self._registered_agents(session)
             node_ids = tuple(agents)
             profiles = self._node_profiles(session, node_ids)
+            presences = self._node_presences(session, node_ids)
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
@@ -443,6 +489,7 @@ class FleetProjection:
                 self._node(
                     node_id,
                     profiles.get(node_id),
+                    presences.get(node_id),
                     current=current,
                     agent=agents[node_id],
                     certificate=certificates.get(node_id),
@@ -465,7 +512,7 @@ class FleetProjection:
         maximum_points: int,
         resolution: TelemetryResolution,
     ) -> TelemetryHistoryResponse:
-        if type(maximum_points) is not int or not 1 <= maximum_points <= 1_500:
+        if type(maximum_points) is not int or not 1 <= maximum_points <= 3_000:
             raise ValueError("telemetry history maximum points is invalid")
         if (
             start.tzinfo is None
@@ -544,6 +591,17 @@ class FleetProjection:
             select(AgentNodeProfile)
             .where(AgentNodeProfile.node_id.in_(node_ids))
             .order_by(AgentNodeProfile.node_id)
+        )
+        return {row.node_id: row for row in rows}
+
+    @staticmethod
+    def _node_presences(
+        session: Session, node_ids: Sequence[str]
+    ) -> dict[str, AgentPresence]:
+        rows = session.scalars(
+            select(AgentPresence)
+            .where(AgentPresence.node_id.in_(node_ids))
+            .order_by(AgentPresence.node_id)
         )
         return {row.node_id: row for row in rows}
 
@@ -907,6 +965,7 @@ class FleetProjection:
         self,
         node_id: str,
         profile: AgentNodeProfile | None,
+        presence: AgentPresence | None,
         *,
         current: datetime,
         agent: AgentNode,
@@ -992,6 +1051,9 @@ class FleetProjection:
             id=node_id,
             display_name=node_id if profile is None else profile.display_name,
             hostname="" if profile is None else profile.hostname,
+            ip_address=(
+                None if presence is None else presence.management_address
+            ),
             lifecycle="managed" if profile is None else profile.lifecycle,
             labels=dict(labels),
             connection=connection,

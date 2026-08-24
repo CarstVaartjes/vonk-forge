@@ -838,12 +838,6 @@ def test_vllm_accepts_text_only_multimodal_mode() -> None:
 
 def test_vllm_accepts_bounded_offline_multimodal_recipe_arguments() -> None:
     recipe = _recipe("vllm")
-    recipe["interfaces"][0]["input"] = {
-        "path": "/inputs",
-        "required": False,
-        "media_types": ["image/png", "video/mp4"],
-        "max_bytes": 100_000_000,
-    }
     recipe["runtime"]["security"]["mounts"].append(
         {"source": "inputs", "target": "/inputs", "read_only": True}
     )
@@ -896,7 +890,7 @@ def test_vllm_local_media_path_requires_declared_input_mount() -> None:
         {"name": "allowed-local-media-path", "value": "/inputs"}
     )
 
-    with pytest.raises(HarnessCompileError, match="declared /inputs"):
+    with pytest.raises(HarnessCompileError, match="input mount"):
         _compile("vllm", recipe=recipe)
 
 

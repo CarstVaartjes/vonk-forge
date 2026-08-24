@@ -56,8 +56,12 @@ function snapshot(nodes: VisualFleetNode[], cursor = 5): VisualFleetSnapshot {
   return {schema_version: 1, event_cursor: cursor, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes};
 }
 
-function control(visualFleet: ControlApi["visualFleet"], history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []})): ControlApi {
-  return {visualFleet, nodeTelemetryHistory: history} as ControlApi;
+function control(
+  visualFleet: ControlApi["visualFleet"],
+  history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []}),
+  updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, ip_address: null}),
+): ControlApi {
+  return {visualFleet, nodeTelemetryHistory: history, updateNodeProfile} as ControlApi;
 }
 
 async function flush(): Promise<void> {
@@ -244,15 +248,53 @@ test("keeps selected details across views and clears them with safe focus when f
   expect(search).toHaveFocus();
 });
 
-test("builds a short in-session GPU trend from live samples", async () => {
-  render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
+test("defaults card trends to 24h, supports the four bounded ranges, and appends the live sample", async () => {
+  const alpha = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
+  const historyCalls: Array<{maximumPoints: number; resolution: string; start: string}> = [];
+  const telemetryHistory: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => {
+    historyCalls.push({maximumPoints, resolution, start});
+    return {
+      schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints,
+      points: [{...alpha.telemetry!.sample, id: "history-sample", gpu_utilization_percent: 41}],
+    };
+  };
+  render(<FleetPage api={control(async () => snapshot([alpha]), telemetryHistory)}/>);
   await flush();
-  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/1 recent sample/);
+  const range = screen.getByRole("combobox", {name: "Card trend range"});
+  expect(range).toHaveValue("24h");
+  expect(within(range).getAllByRole("option").map(option => option.textContent)).toEqual(["1h", "24h", "7d", "31d"]);
+  expect(historyCalls[0]).toEqual({maximumPoints: 1440, resolution: "minute", start: "2026-08-14T12:00:00.000Z"});
+  expect(screen.getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/2 reported points/);
 
   act(() => FakeEventSource.instances[0].emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
 
-  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/2 recent samples/);
-  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/Latest 73.0%/);
+  expect(screen.getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Latest 73%/);
+  fireEvent.change(range, {target: {value: "31d"}});
+  await flush();
+  expect(historyCalls.at(-1)).toEqual({maximumPoints: 2976, resolution: "fifteen-minute", start: "2026-07-15T12:00:00.000Z"});
+  expect(screen.getByRole("img", {name: "GPU 31d trend"})).toBeVisible();
+});
+
+test("edits the friendly name while exposing read-only Spark identity facts", async () => {
+  const alpha = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
+  alpha.hostname = "spark-3542.internal";
+  alpha.ip_address = "192.168.1.211";
+  const updateNodeProfile = vi.fn(async (nodeId: string, input: {display_name: string}) => ({id: nodeId, display_name: input.display_name, hostname: alpha.hostname, ip_address: alpha.ip_address}));
+  render(<FleetPage api={control(async () => snapshot([alpha]), undefined, updateNodeProfile as ControlApi["updateNodeProfile"])}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Edit Alpha"}));
+  const dialog = screen.getByRole("dialog", {name: "Name this Spark"});
+  expect(within(dialog).getByText("spark-3542.internal")).toBeVisible();
+  expect(within(dialog).getByText("192.168.1.211")).toBeVisible();
+  expect(within(dialog).getByText("node-a")).toBeVisible();
+  fireEvent.change(within(dialog).getByRole("textbox", {name: /^Friendly name/}), {target: {value: "Studio Spark"}});
+  fireEvent.click(within(dialog).getByRole("button", {name: "Save friendly name"}));
+  await flush();
+
+  expect(updateNodeProfile).toHaveBeenCalledWith("node-a", {display_name: "Studio Spark"});
+  expect(screen.getByRole("article", {name: "Studio Spark — Live"})).toBeVisible();
+  expect(screen.queryByRole("dialog", {name: "Name this Spark"})).not.toBeInTheDocument();
 });
 
 test("keeps selected detail and focus while a keyed node card updates", async () => {
@@ -266,7 +308,7 @@ test("keeps selected detail and focus while a keyed node card updates", async ()
 
   act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
 
-  expect(screen.getByText("73.0%", {selector: "[data-metric='gpu'] dd"})).toBeVisible();
+  expect(screen.getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Latest 73%/);
   expect(screen.getByRole("complementary", {name: "Alpha details"})).toBeVisible();
   expect(close).toHaveFocus();
 });

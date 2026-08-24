@@ -1,15 +1,13 @@
-import type {VisualFleetNode} from "../api/types";
+import type {TelemetryHistory, TelemetryHistoryPoint, VisualFleetNode} from "../api/types";
 import {
   formatBytes,
   formatMetric,
-  installationGroupLabel,
   nodeDisplayName,
   nodeOperationalState,
   nodeSecondaryName,
   nodeUnifiedMemory,
   nodeWarningsAt,
   offlineReasonLabel,
-  runGroupLabel,
   timestampPresentation,
 } from "../lib/fleet";
 import {Meter} from "./meter";
@@ -35,81 +33,85 @@ function capacity(free: number | null, total: number | null, freeLabel: string):
   return `${formatBytes(free)} ${freeLabel} / ${formatBytes(total)}`;
 }
 
-function RecipeGroups({node, name}: {node: VisualFleetNode; name: string}) {
-  const installed = node.installed.filter(installation => installation.complete);
-  const installationStates = node.installed.filter(installation => !installation.complete);
-  const loaded = node.loaded.filter(run => run.healthy);
-  const runStates = node.loaded.filter(run => !run.healthy);
-  return <div className="node-recipe-groups">
-    <section aria-label={`Loaded recipes on ${name}`}>
-      <h4>Loaded now</h4>
-      {loaded.length === 0
-        ? <p className="empty-copy">Nothing is loaded now</p>
-        : <ul className="recipe-presence-list">{loaded.map(run => <li key={`${run.run_id}:${run.rank}`} className="is-healthy">
-          <strong>{run.title}</strong><span>{run.alias} · {run.role} rank {run.rank}</span><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><small>{runGroupLabel(run)}</small>
-        </li>)}</ul>}
-    </section>
-    <section aria-label={`Installed recipes on ${name}`}>
-      <h4>Installed</h4>
-      {installed.length === 0
-        ? <p className="empty-copy">No complete installations reported</p>
-        : <ul className="recipe-presence-list">{installed.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-healthy">
-          <strong>{installation.title}</strong><span>{installation.topology_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
-        </li>)}</ul>}
-    </section>
-    <section aria-label={`Installation state on ${name}`}>
-      <h4>Installation state</h4>
-      {installationStates.length === 0
-        ? <p className="empty-copy">No incomplete installation states</p>
-        : <ul className="recipe-presence-list">{installationStates.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-degraded">
-          <strong>{installation.title}</strong><span>{installation.topology_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
-        </li>)}</ul>}
-    </section>
-    <section aria-label={`Run state on ${name}`}>
-      <h4>Run state</h4>
-      {runStates.length === 0
-        ? <p className="empty-copy">No inactive or degraded run states</p>
-        : <ul className="recipe-presence-list">{runStates.map(run => <li key={`${run.run_id}:${run.rank}`} className="is-degraded">
-          <strong>{run.title}</strong><span>{run.alias} · {run.role} rank {run.rank}</span><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><small>{runGroupLabel(run)}</small>
-        </li>)}</ul>}
-    </section>
-  </div>;
-}
-
 function utilizationTone(percent: number): "danger" | "healthy" | "warning" {
   if (percent >= 90) return "danger";
   if (percent >= 75) return "warning";
   return "healthy";
 }
 
-function MiniTrend({label, values}: {label: string; values: readonly number[]}) {
-  const path = sparklinePath(values);
-  const latest = values.at(-1);
-  const minimum = values.length > 0 ? Math.min(...values) : undefined;
-  const maximum = values.length > 0 ? Math.max(...values) : undefined;
-  const description = latest === undefined
-    ? "No recent samples."
-    : `Latest ${latest.toFixed(1)}%; range ${minimum?.toFixed(1)}% to ${maximum?.toFixed(1)}%; ${values.length} recent ${values.length === 1 ? "sample" : "samples"}.`;
-  return <figure className="node-mini-trend">
-    <svg role="img" aria-label={label} aria-description={description} viewBox="0 0 100 30" preserveAspectRatio="none">
+type TrendMetric = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
+
+function pointValue(point: TelemetryHistoryPoint, metric: TrendMetric): number | null {
+  if ("resolution" in point) return point.metrics[metric]?.mean ?? null;
+  return finite(point[metric]);
+}
+
+function CardTrend({
+  current,
+  domain,
+  format,
+  history,
+  historyLabel,
+  label,
+  metric,
+}: {
+  current: number | null;
+  domain?: readonly [number, number];
+  format(value: number): string;
+  history?: TelemetryHistory;
+  historyLabel: string;
+  label: string;
+  metric: TrendMetric;
+}) {
+  const values = (history?.points ?? []).map(point => pointValue(point, metric));
+  if (current !== null && values.at(-1) !== current) values.push(current);
+  const finiteValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const plotted = values.length === 1 ? [values[0], values[0]] : values;
+  const path = sparklinePath(plotted, 100, 30, domain);
+  const minimum = finiteValues.length > 0 ? Math.min(...finiteValues) : undefined;
+  const maximum = finiteValues.length > 0 ? Math.max(...finiteValues) : undefined;
+  const description = current === null || minimum === undefined || maximum === undefined
+    ? "No reported samples."
+    : `Latest ${format(current)}; range ${format(minimum)} to ${format(maximum)}; ${finiteValues.length} reported points.`;
+  return <figure className="node-card-trend">
+    <figcaption><span>{label}</span><strong>{current === null ? "Not reported" : format(current)}</strong></figcaption>
+    <svg role="img" aria-label={`${label} ${historyLabel} trend`} aria-description={description} viewBox="0 0 100 30" preserveAspectRatio="none">
       {path && <path aria-hidden="true" d={path} vectorEffect="non-scaling-stroke"/>}
     </svg>
-    <figcaption>Recent GPU trend</figcaption>
   </figure>;
+}
+
+function WorkloadSummary({node, name}: {node: VisualFleetNode; name: string}) {
+  const loaded = node.loaded.filter(run => run.healthy);
+  const installed = node.installed.filter(item => item.complete);
+  const degraded = node.loaded.filter(run => !run.healthy).length + node.installed.filter(item => !item.complete).length;
+  return <div className="node-workload-summary" aria-label={`Workloads on ${name}`}>
+    <div><span>Loaded now</span><strong>{loaded.length}</strong><small>{loaded[0]?.title ?? "No active model"}</small></div>
+    <div><span>Installed</span><strong>{installed.length}</strong><small>{installed[0]?.title ?? "No complete install"}</small></div>
+    {degraded > 0 && <p><strong>{degraded}</strong> workload {degraded === 1 ? "state needs" : "states need"} attention</p>}
+  </div>;
 }
 
 export function NodeCard({
   node,
   now,
   onSelect,
+  onEdit,
   selected,
-  trend = [],
+  history,
+  historyLabel = "24h",
+  historyLoading = false,
+  historyError = "",
 }: {
   node: VisualFleetNode;
   now: Date;
   onSelect(): void;
+  onEdit(): void;
   selected: boolean;
-  trend?: readonly number[];
+  history?: TelemetryHistory;
+  historyLabel?: string;
+  historyLoading?: boolean;
+  historyError?: string;
 }) {
   const name = nodeDisplayName(node);
   const secondaryName = nodeSecondaryName(node);
@@ -124,8 +126,6 @@ export function NodeCard({
     : "Not reported";
   const cpu = formatMetric(sample?.cpu_utilization_percent, value => `${value.toFixed(1)}%`);
   const load = formatMetric(sample?.load_average_1m, value => value.toFixed(2));
-  const receive = formatMetric(sample?.network_receive_bytes_per_second, value => `${formatBytes(value)}/s`);
-  const transmit = formatMetric(sample?.network_transmit_bytes_per_second, value => `${formatBytes(value)}/s`);
   const observedAt = sample?.observed_at;
   const timestamp = timestampPresentation(observedAt, now);
   const warnings = nodeWarningsAt(node, now);
@@ -137,7 +137,7 @@ export function NodeCard({
         <h3>{name}</h3>
         {secondaryName && <p className="node-host">{secondaryName}</p>}
       </div>
-      <StatusPill tone={statusTone(state)}>{label}</StatusPill>
+      <div className="node-card-heading-actions"><StatusPill tone={statusTone(state)}>{label}</StatusPill><button type="button" className="node-edit-button" aria-label={`Edit ${name}`} onClick={onEdit}>Edit</button></div>
     </header>
     <div className="node-freshness">
       {timestamp
@@ -150,20 +150,25 @@ export function NodeCard({
       {unified
         ? <Meter label="Unified memory in use" max={unified.total} value={unified.used} tone={utilizationTone(unified.utilizationPercent)} valueLabel={`${formatBytes(unified.available)} available of ${formatBytes(unified.total)}`}/>
         : <div className="meter meter-neutral"><div className="meter-heading"><span>Unified memory</span><strong>Not reported</strong></div><div className="meter-unknown" role="img" aria-label="Unified memory not reported"/></div>}
-      {trend.length > 0 && <MiniTrend label={`${name} recent GPU utilization`} values={trend}/>}
     </div>
+
+    <section className="node-card-trends" aria-label={`${name} ${historyLabel} telemetry`}>
+      <div className="node-card-trends-heading"><strong>{historyLabel} trend</strong>{historyLoading ? <span role="status">Loading history…</span> : historyError ? <span title={historyError}>Latest sample only</span> : <span>{history?.resolution === "fifteen-minute" ? "15-minute" : "Minute"} history</span>}</div>
+      <div className="node-card-trend-grid">
+        <CardTrend label="GPU" historyLabel={historyLabel} metric="gpu_utilization_percent" current={finite(sample?.gpu_utilization_percent)} history={history} domain={[0, 100]} format={value => `${Number(value.toFixed(1))}%`}/>
+        <CardTrend label="Memory free" historyLabel={historyLabel} metric="memory_available_bytes" current={finite(sample?.memory_available_bytes)} history={history} format={formatBytes}/>
+        <CardTrend label="Temperature" historyLabel={historyLabel} metric="temperature_c" current={finite(sample?.temperature_c)} history={history} domain={[0, 100]} format={value => `${Number(value.toFixed(1))} °C`}/>
+      </div>
+    </section>
 
     <dl className="node-metrics">
       <div className="metric metric-featured"><dt>Accelerator</dt><dd>{accelerator}</dd></div>
-      <div className="metric metric-featured" data-metric="gpu"><dt>GPU utilization</dt><dd>{formatMetric(sample?.gpu_utilization_percent, value => `${value.toFixed(1)}%`)}</dd></div>
       <div className="metric"><dt>Disk</dt><dd>{capacity(diskFree, diskTotal, "free")}</dd></div>
       <div className="metric"><dt>CPU / load</dt><dd>{cpu === "Not reported" && load === "Not reported" ? "Not reported" : `${cpu} · load ${load}`}</dd></div>
-      <div className="metric"><dt>Temperature</dt><dd>{formatMetric(sample?.temperature_c, value => `${value.toFixed(1)} °C`)}</dd></div>
       <div className="metric"><dt>Power</dt><dd>{formatMetric(sample?.power_watts, value => `${value.toFixed(1)} W`)}</dd></div>
-      <div className="metric"><dt>Network</dt><dd>{receive === "Not reported" && transmit === "Not reported" ? "Not reported" : `↓ ${receive} · ↑ ${transmit}`}</dd></div>
     </dl>
 
-    <RecipeGroups node={node} name={name}/>
+    <WorkloadSummary node={node} name={name}/>
     {warnings.length > 0 && <ul className="node-warnings" aria-label={`Warnings for ${name}`}>
       {warnings.map((warning, index) => <li key={`${warning.code}:${index}`} className={`severity-${warning.severity}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}
     </ul>}

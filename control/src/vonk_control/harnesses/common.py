@@ -536,6 +536,7 @@ def projection(
     recipe: Mapping[str, object],
     distribution: Mapping[str, object],
     environment: tuple[tuple[str, str], ...],
+    allow_local_media_input: bool = False,
 ) -> HarnessProjection:
     platform = distribution.get("platform")
     image = distribution.get("image")
@@ -572,10 +573,11 @@ def projection(
         and distributed_runtime.get("verified") is True
         and isinstance(topology, Mapping)
         and topology.get("mode") == "distributed",
+        allow_input_mount=allow_local_media_input,
     )
     input_mount = (
         HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True)
-        if job_input_contract(recipe) is not None
+        if job_input_contract(recipe) is not None or allow_local_media_input
         else None
     )
     value = HarnessProjection(
@@ -799,7 +801,11 @@ def _validate_parameter_value(
 
 
 def _require_recipe_mounts(
-    recipe: Mapping[str, object], user: str, *, allow_host_network: bool = False
+    recipe: Mapping[str, object],
+    user: str,
+    *,
+    allow_host_network: bool = False,
+    allow_input_mount: bool = False,
 ) -> None:
     model_artifact_mounts(recipe)
     runtime = recipe.get("runtime")
@@ -810,7 +816,7 @@ def _require_recipe_mounts(
         ("model", "/models", True),
         ("outputs", "/outputs", False),
     }
-    if input_contract is not None:
+    if input_contract is not None or allow_input_mount:
         expected_mounts.add(("inputs", "/inputs", True))
     if (
         not isinstance(security, Mapping)
