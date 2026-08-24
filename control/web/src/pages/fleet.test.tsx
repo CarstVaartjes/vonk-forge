@@ -1,6 +1,6 @@
 import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import type {ControlApi, TelemetryPoint, VisualFleetNode, VisualFleetSnapshot} from "../api/types";
-import {ENROLLMENT_GRANT_TTL_SECONDS, FleetPage} from "./fleet";
+import {ENROLLMENT_GRANT_TTL_SECONDS, FLEET_VIEW_STORAGE_KEY, FleetPage} from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const GIB = 1024 ** 3;
@@ -68,6 +68,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -129,6 +130,46 @@ test("labels partial and unknown unified capacity instead of implying a measured
   expect(within(summary).queryByText("0 B")).not.toBeInTheDocument();
 });
 
+test("switches between persisted compact and graphical topology views without exposing node IDs", async () => {
+  const identity = "spk_0123456789abcdef0123456789abcdef";
+  const alpha = node(identity, identity, "2026-08-15T11:59:58Z");
+  alpha.hostname = "mia-lab-west.internal";
+  alpha.loaded = [{run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "DeepSeek pair", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: [identity], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null}];
+  const api = control(async () => snapshot([alpha]));
+  const view = render(<FleetPage api={api}/>);
+  await flush();
+
+  expect(screen.getByRole("article", {name: "Mia Lab West — Live"})).toBeVisible();
+  expect(screen.queryByText(identity)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", {name: "Compact"}));
+  expect(screen.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
+  expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("compact");
+
+  fireEvent.click(screen.getByRole("button", {name: "Topology"}));
+  expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+  expect(screen.getByText("DeepSeek pair")).toBeVisible();
+  expect(screen.queryByText(identity)).not.toBeInTheDocument();
+  expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("topology");
+
+  view.unmount();
+  render(<FleetPage api={api}/>);
+  await flush();
+  expect(screen.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+});
+
+test("builds a short in-session GPU trend from live samples", async () => {
+  render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
+  await flush();
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/1 recent sample/);
+
+  act(() => FakeEventSource.instances[0].emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
+
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/2 recent samples/);
+  expect(screen.getByRole("img", {name: "Alpha recent GPU utilization"})).toHaveAccessibleDescription(/Latest 73.0%/);
+});
+
 test("keeps selected detail and focus while a keyed node card updates", async () => {
   render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
   await flush();
@@ -174,16 +215,45 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   await flush();
 
   expect(screen.getByRole("heading", {name: "No registered Fleet nodes"})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Add your first Spark"})).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });
+
+test("keeps Add Spark modal focus contained and restores the trigger on Escape", async () => {
+  const api = control(async () => snapshot([])) as ControlApi;
+  render(<FleetPage api={api}/>);
+  await flush();
+
+  const trigger = screen.getByRole("button", {name: "Add Spark"});
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole("dialog", {name: "Add Spark"});
+  const close = screen.getByRole("button", {name: "Close Add Spark"});
+  const create = screen.getByRole("button", {name: "Create one-time enrollment command"});
+  expect(close).toHaveFocus();
+  expect(document.body).toHaveStyle({overflow: "hidden"});
+
+  fireEvent.keyDown(close, {key: "Tab", shiftKey: true});
+  expect(create).toHaveFocus();
+  fireEvent.keyDown(create, {key: "Tab"});
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(dialog, {key: "Escape"});
+  await flush();
+
+  expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  expect(document.body.style.overflow).toBe("");
+});
+
 test("renders the one-command Spark installer with enrollment inputs", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", {...navigator, clipboard: {writeText}});
   const visualFleet = vi.fn().mockResolvedValue(snapshot([]));
   const api = control(visualFleet) as ControlApi;
   api.agents = vi.fn().mockResolvedValue({agents: []});
   api.enrollments = vi.fn().mockResolvedValue({enrollments: []});
   api.createEnrollmentGrant = vi.fn().mockResolvedValue({
-    id: "grant-1", purpose: "new-node", token: "secret-token", expires_at: "2099-01-01T00:00:00Z",
+    id: "grant-1", purpose: "new-node", token: "secret-token", expires_at: "2026-08-15T12:15:00Z",
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "a".repeat(64),
@@ -194,17 +264,26 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   await flush();
   fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
   expect(screen.getByText(/generates its immutable/i)).toBeVisible();
+  expect(screen.getByText("Create grant").parentElement).toHaveTextContent("Generate a one-time authorization here.");
   fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
   await flush();
   expect(api.createEnrollmentGrant).toHaveBeenCalledWith(ENROLLMENT_GRANT_TTL_SECONDS);
+  expect(document.querySelector(".grant-success")).toHaveFocus();
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
   expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
   expect(command).not.toHaveTextContent("sudo");
   expect(command).not.toHaveTextContent("vonk-agent pair");
+  expect(screen.getByText("Expires in 15m 00s")).toBeVisible();
+  expect(screen.getByText(/Keep these setup values private/)).toBeVisible();
   expect(screen.getByText("https://controller.example.test:9443")).toBeVisible();
   expect(screen.getByText("https://enrollment.example.test:9444")).toBeVisible();
   expect(screen.getByText("secret-token")).toBeVisible();
   expect(screen.getByText("NAS LAN address")).toBeVisible();
   expect(screen.getByText("192.168.1.231")).toBeVisible();
+  expect(screen.getAllByRole("button", {name: /^Copy /})).toHaveLength(6);
+  fireEvent.click(screen.getByRole("button", {name: "Copy installer command"}));
+  await flush();
+  expect(writeText).toHaveBeenCalledWith("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
+  expect(screen.getAllByRole("status").some(status => status.textContent === "Copied")).toBe(true);
 });

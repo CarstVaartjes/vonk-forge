@@ -3,6 +3,13 @@ import type {VisualFleetNode, VisualFleetSnapshot} from "../api/types";
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 export type NodeOperationalState = TelemetryFreshness | "offline";
 
+export type NodeMemoryCapacity = {
+  available: number;
+  total: number;
+  used: number;
+  utilizationPercent: number;
+};
+
 const LIVE_MAXIMUM_MS = 6_000;
 const DELAYED_MAXIMUM_MS = 20_000;
 
@@ -78,6 +85,90 @@ export function formatBytes(value: number | null | undefined): string {
   });
 }
 
+const SPARK_ID = /^spk_[0-9a-f]{32}$/i;
+const SPARK_HOSTNAME = /^spk_[0-9a-f]{32}(?:\.|$)/i;
+
+export function isTechnicalSparkIdentity(value: string | null | undefined): boolean {
+  const normalized = value?.trim() ?? "";
+  return SPARK_ID.test(normalized) || SPARK_HOSTNAME.test(normalized);
+}
+
+function humanizeName(value: string): string {
+  return value
+    .trim()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\p{L}/gu, character => character.toLocaleUpperCase());
+}
+
+export function nodeDisplayName(node: VisualFleetNode): string {
+  const explicit = node.display_name.trim();
+  if (explicit && !isTechnicalSparkIdentity(explicit)) return explicit;
+
+  for (const key of ["display_name", "name", "spark_name"] as const) {
+    const candidate = node.labels[key]?.trim();
+    if (candidate && !isTechnicalSparkIdentity(candidate)) return humanizeName(candidate);
+  }
+
+  const hostname = node.hostname.trim();
+  if (hostname && !isTechnicalSparkIdentity(hostname)) {
+    const shortHostname = hostname.split(".")[0] ?? hostname;
+    if (shortHostname) return humanizeName(shortHostname);
+  }
+
+  const role = node.labels.role?.trim();
+  return role ? `${humanizeName(role)} Spark` : "Unnamed Spark";
+}
+
+export function nodeSecondaryName(node: VisualFleetNode): string | null {
+  const hostname = node.hostname.trim();
+  if (!hostname || isTechnicalSparkIdentity(hostname)) return null;
+  const primary = nodeDisplayName(node);
+  return hostname.localeCompare(primary, undefined, {sensitivity: "accent"}) === 0 ? null : hostname;
+}
+
+export function timestampPresentation(value: string | null | undefined, now: Date, prefix = "Updated"): {dateTime: string; exact: string; relative: string} | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const deltaSeconds = Math.max(0, Math.round((now.getTime() - parsed.getTime()) / 1000));
+  let amount = deltaSeconds;
+  let unit = "second";
+  if (deltaSeconds >= 86_400) {
+    amount = Math.floor(deltaSeconds / 86_400);
+    unit = "day";
+  } else if (deltaSeconds >= 3_600) {
+    amount = Math.floor(deltaSeconds / 3_600);
+    unit = "hour";
+  } else if (deltaSeconds >= 60) {
+    amount = Math.floor(deltaSeconds / 60);
+    unit = "minute";
+  }
+  return {
+    dateTime: parsed.toISOString(),
+    exact: parsed.toLocaleString([], {dateStyle: "medium", timeStyle: "long"}),
+    relative: `${prefix} ${amount} ${unit}${amount === 1 ? "" : "s"} ago`,
+  };
+}
+
+function finite(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function nodeUnifiedMemory(node: VisualFleetNode): NodeMemoryCapacity | null {
+  const sample = node.telemetry?.sample;
+  const hostAvailable = finite(sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes);
+  const hostTotal = finite(sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes);
+  const gpuAvailable = finite(sample?.gpu_memory_free_bytes ?? node.inventory?.gpu_memory_free_bytes);
+  const gpuTotal = finite(sample?.gpu_memory_total_bytes ?? node.inventory?.gpu_memory_total_bytes);
+  if (hostAvailable === null || hostTotal === null || gpuAvailable === null || gpuTotal === null) return null;
+  const total = Math.min(hostTotal, gpuTotal);
+  if (total <= 0) return null;
+  const available = Math.min(total, Math.min(hostAvailable, gpuAvailable));
+  const used = Math.max(0, total - available);
+  return {available, total, used, utilizationPercent: (used / total) * 100};
+}
+
 function groupReason(reason: string | null | undefined): string {
   return reason ? reason.replaceAll("-", " ") : "reason unavailable";
 }
@@ -107,6 +198,7 @@ export type FleetSummary = {
   unifiedAvailableBytes: number | null;
   unifiedCapacity: "known" | "partial" | "unknown";
   unifiedReportingNodes: number;
+  unifiedTotalBytes: number | null;
   warnings: number;
 };
 
@@ -127,6 +219,7 @@ export function summarizeFleet(snapshot: VisualFleetSnapshot, now: Date): FleetS
     unifiedAvailableBytes: 0,
     unifiedCapacity: "unknown",
     unifiedReportingNodes: 0,
+    unifiedTotalBytes: 0,
     warnings: 0,
   };
   const installed = new Set<string>();
@@ -147,11 +240,10 @@ export function summarizeFleet(snapshot: VisualFleetSnapshot, now: Date): FleetS
       if (run.healthy) loaded.add(run.run_id);
     }
     if (state !== "live") continue;
-    const hostFree = node.telemetry?.sample.memory_available_bytes;
-    const gpuFree = node.telemetry?.sample.gpu_memory_free_bytes;
-    if (typeof hostFree === "number" && Number.isFinite(hostFree)
-        && typeof gpuFree === "number" && Number.isFinite(gpuFree)) {
-      summary.unifiedAvailableBytes! += Math.min(hostFree, gpuFree);
+    const unified = nodeUnifiedMemory(node);
+    if (unified) {
+      summary.unifiedAvailableBytes! += unified.available;
+      summary.unifiedTotalBytes! += unified.total;
       summary.unifiedReportingNodes += 1;
     }
   }
@@ -160,6 +252,7 @@ export function summarizeFleet(snapshot: VisualFleetSnapshot, now: Date): FleetS
   summary.warnings = warningConditions.size;
   if (summary.unifiedReportingNodes === 0) {
     summary.unifiedAvailableBytes = null;
+    summary.unifiedTotalBytes = null;
     summary.unifiedCapacity = "unknown";
   } else if (summary.unifiedReportingNodes < summary.live) {
     summary.unifiedCapacity = "partial";

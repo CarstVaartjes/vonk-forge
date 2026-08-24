@@ -1,6 +1,8 @@
 import {useEffect, useId, useRef, useState} from "react";
 import type {ControlApi, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, VisualFleetNode} from "../api/types";
-import {formatBytes, installationGroupLabel, nodeWarningsAt, runGroupLabel} from "../lib/fleet";
+import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
+import {CopyButton} from "./copy-button";
+import {Meter} from "./meter";
 import {Sparkline, type SparklineSeriesPoint} from "./sparkline";
 import {StatusPill} from "./status-pill";
 
@@ -38,6 +40,13 @@ function metricSeries(points: readonly TelemetryHistoryPoint[], name: RawMetricN
 function boundedError(value: unknown): string {
   const message = value instanceof Error ? value.message : "Telemetry history is unavailable";
   return message.length > 512 ? `${message.slice(0, 512)}…` : message;
+}
+
+function RelativeTimestamp({label, now, value}: {label: string; now: Date; value: string | null | undefined}) {
+  const timestamp = timestampPresentation(value, now, label);
+  return timestamp
+    ? <time dateTime={timestamp.dateTime} title={timestamp.exact} aria-label={`${timestamp.relative}; exact time ${timestamp.exact}`}>{timestamp.relative}</time>
+    : <>Not reported</>;
 }
 
 export function NodeDetail({
@@ -95,15 +104,18 @@ export function NodeDetail({
   const loaded = node.loaded.filter(run => run.healthy);
   const runStates = node.loaded.filter(run => !run.healthy);
   const warnings = nodeWarningsAt(node, now);
+  const name = nodeDisplayName(node);
+  const secondaryName = nodeSecondaryName(node);
+  const memory = nodeUnifiedMemory(node);
 
   return <aside className="node-detail" role="complementary" aria-labelledby={headingId}>
     <header className="node-detail-heading">
       <div>
         <p className="node-eyebrow">Node detail</p>
-        <h3 id={headingId}>{node.display_name} details</h3>
-        <p>{node.hostname}</p>
+        <h3 id={headingId}>{name} details</h3>
+        {secondaryName && <p>{secondaryName}</p>}
       </div>
-      <button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${node.display_name} details`} onClick={onClose}>Close</button>
+      <button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button>
     </header>
 
     <section aria-labelledby={`${headingId}-overview`}>
@@ -111,20 +123,21 @@ export function NodeDetail({
       <dl className="detail-facts">
         <div><dt>Agent</dt><dd><StatusPill tone={node.connection.online_state === "online" ? "healthy" : "danger"}>{node.connection.online_state}</StatusPill> {node.connection.agent_state}</dd></div>
         <div><dt>Lifecycle</dt><dd>{node.lifecycle}</dd></div>
-        <div><dt>Last agent presence</dt><dd>{node.connection.last_seen_at ?? "Not reported"}</dd></div>
-        <div><dt>Latest telemetry</dt><dd>{node.telemetry?.sample.observed_at ?? "Not reported"}</dd></div>
-        <div><dt>Inventory</dt><dd>{node.inventory?.observed_at ?? "Not reported"}</dd></div>
+        <div><dt>Last agent presence</dt><dd><RelativeTimestamp label="Seen" now={now} value={node.connection.last_seen_at}/></dd></div>
+        <div><dt>Latest telemetry</dt><dd><RelativeTimestamp label="Updated" now={now} value={node.telemetry?.sample.observed_at}/></dd></div>
+        <div><dt>Inventory</dt><dd><RelativeTimestamp label="Observed" now={now} value={node.inventory?.observed_at}/></dd></div>
         <div><dt>Reservations</dt><dd>{formatBytes(node.reservations.unified_memory_bytes)} unified · {formatBytes(node.reservations.disk_bytes)} disk · {node.reservations.port_count} ports</dd></div>
       </dl>
+      {memory && <div className="detail-memory-meter"><Meter label="Unified memory in use" max={memory.total} value={memory.used} tone={memory.utilizationPercent >= 90 ? "danger" : memory.utilizationPercent >= 75 ? "warning" : "healthy"} valueLabel={`${formatBytes(memory.available)} available of ${formatBytes(memory.total)}`}/></div>}
     </section>
 
     <section aria-labelledby={`${headingId}-recipes`}>
       <h4 id={`${headingId}-recipes`}>Recipes</h4>
       <div className="detail-recipe-columns">
-        <section aria-label={`Loaded recipes in ${node.display_name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
-        <section aria-label={`Installed recipes in ${node.display_name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
-        <section aria-label={`Installation state in ${node.display_name} details`}><h5>Installation state</h5>{installationStates.length === 0 ? <p>No incomplete installation states</p> : <ul>{installationStates.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
-        <section aria-label={`Run state in ${node.display_name} details`}><h5>Run state</h5>{runStates.length === 0 ? <p>No inactive or degraded run states</p> : <ul>{runStates.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
+        <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installed recipes in ${name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installation state in ${name} details`}><h5>Installation state</h5>{installationStates.length === 0 ? <p>No incomplete installation states</p> : <ul>{installationStates.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Run state in ${name} details`}><h5>Run state</h5>{runStates.length === 0 ? <p>No inactive or degraded run states</p> : <ul>{runStates.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
       </div>
     </section>
 
@@ -141,9 +154,9 @@ export function NodeDetail({
       {historyError && <div className="history-error"><p role="alert">{historyError}</p><button type="button" onClick={() => setRetryRevision(value => value + 1)}>Retry history</button></div>}
       {history && points.length === 0 && <p role="status">No telemetry samples are available in this window.</p>}
       {history && points.length > 0 && <div className="history-grid">
-        <Sparkline label={`${node.display_name} GPU utilization history`} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
-        <Sparkline label={`${node.display_name} available memory history`} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
-        <Sparkline label={`${node.display_name} temperature history`} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
+        <Sparkline label={`${name} GPU utilization history`} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
+        <Sparkline label={`${name} available memory history`} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
+        <Sparkline label={`${name} temperature history`} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
       </div>}
     </section>
 
@@ -155,12 +168,15 @@ export function NodeDetail({
     <details className="technical-details">
       <summary>Technical details</summary>
       <dl className="detail-facts">
-        <div><dt>Node ID</dt><dd><code>{node.id}</code></dd></div>
+        <div><dt>Node ID</dt><dd><div className="technical-identifier"><code>{node.id}</code><CopyButton label="node ID" value={node.id}/></div></dd></div>
+        <div><dt>Hostname</dt><dd><code>{node.hostname || "Not reported"}</code></dd></div>
         <div><dt>Certificate</dt><dd>{node.connection.certificate_state}</dd></div>
         <div><dt>Telemetry sample</dt><dd><code>{node.telemetry?.sample.id ?? "Not reported"}</code></dd></div>
         <div><dt>Boot ID</dt><dd><code>{node.telemetry?.sample.boot_id ?? "Not reported"}</code></dd></div>
         <div><dt>Inventory runtime</dt><dd>{node.inventory?.container_runtime_version ?? "Not reported"}</dd></div>
         <div><dt>NVIDIA driver</dt><dd>{node.inventory?.nvidia_driver_version ?? "Not reported"}</dd></div>
+        <div><dt>Reported host memory</dt><dd>{formatBytes(node.telemetry?.sample.memory_available_bytes ?? node.inventory?.host_memory_free_bytes)} available / {formatBytes(node.telemetry?.sample.memory_total_bytes ?? node.inventory?.host_memory_total_bytes)}</dd></div>
+        <div><dt>Reported GPU memory</dt><dd>{formatBytes(node.telemetry?.sample.gpu_memory_free_bytes ?? node.inventory?.gpu_memory_free_bytes)} available / {formatBytes(node.telemetry?.sample.gpu_memory_total_bytes ?? node.inventory?.gpu_memory_total_bytes)}</dd></div>
       </dl>
     </details>
   </aside>;

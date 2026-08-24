@@ -3,12 +3,16 @@ import {
   formatBytes,
   formatMetric,
   installationGroupLabel,
+  nodeDisplayName,
   nodeOperationalState,
+  nodeSecondaryName,
+  nodeUnifiedMemory,
   nodeWarningsAt,
   offlineReasonLabel,
   runGroupLabel,
   summarizeFleet,
   telemetryFreshnessAt,
+  timestampPresentation,
 } from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -112,6 +116,31 @@ test("formats absent and invalid metrics as explicitly unreported", () => {
   expect(formatBytes(80 * 1024 ** 3)).toBe("80.0 GiB");
 });
 
+test("keeps technical Spark identities out of the primary name", () => {
+  const technical = node({
+    display_name: "spk_0123456789abcdef0123456789abcdef",
+    hostname: "carst-spark-3.internal",
+  });
+  expect(nodeDisplayName(technical)).toBe("Carst Spark 3");
+  expect(nodeSecondaryName(technical)).toBe("carst-spark-3.internal");
+
+  const labeled = node({...technical, labels: {name: "mia-lab-west"}});
+  expect(nodeDisplayName(labeled)).toBe("Mia Lab West");
+
+  const identityHostname = node({...technical, hostname: `${technical.id}.internal`, labels: {role: "inference"}});
+  expect(nodeDisplayName(identityHostname)).toBe("Inference Spark");
+  expect(nodeSecondaryName(identityHostname)).toBeNull();
+});
+
+test("presents unified memory once and timestamps as relative text with an exact value", () => {
+  const reporting = node({telemetry: telemetry("2026-08-15T11:58:30Z", 80)});
+  expect(nodeUnifiedMemory(reporting)).toEqual({available: 70, total: 100, used: 30, utilizationPercent: 30});
+  expect(timestampPresentation(reporting.telemetry?.sample.observed_at, NOW)).toMatchObject({
+    dateTime: "2026-08-15T11:58:30.000Z",
+    relative: "Updated 1 minute ago",
+  });
+});
+
 test("labels installation and running groups from complete group evidence", () => {
   const installed = {
     installation_id: "10000000-0000-4000-8000-000000000001",
@@ -192,6 +221,7 @@ test("summarizes live delayed stale and offline nodes without treating null as c
     unifiedCapacity: "known",
     unifiedAvailableBytes: 70,
     unifiedReportingNodes: 1,
+    unifiedTotalBytes: 100,
     warnings: 3,
   });
 });

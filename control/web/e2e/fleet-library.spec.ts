@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
 import {fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
 
@@ -16,6 +17,11 @@ type LibraryFixtureState = {
   snapshotFailuresRemaining: number;
 };
 const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
+
+async function expectNoSeriousAccessibilityViolations(page: Page) {
+  const results = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(results.violations, results.violations.map(value => `${value.id}: ${value.help}`).join("\n")).toEqual([]);
+}
 
 function libraryLoadPlan() {
   return {
@@ -67,7 +73,7 @@ function localSnapshot() {
     authority_revision: commit,
     nodes: [{
       id: nodeId,
-      display_name: "Aurora",
+      display_name: nodeId,
       hostname: "aurora.fixture.invalid",
       lifecycle: "managed",
       labels: {role: "inference"},
@@ -86,7 +92,7 @@ function localSnapshot() {
       warnings: [{code: "run.degraded", detail: "The Qwen pair route is not published.", severity: "warning"}],
     }, {
       id: borealisId,
-      display_name: "Borealis",
+      display_name: borealisId,
       hostname: "borealis.fixture.invalid",
       lifecycle: "managed",
       labels: {role: "inference"},
@@ -218,6 +224,7 @@ test("Fleet cards and bounded history are keyboard-accessible with local evidenc
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
   await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/1 reported buckets/);
+  await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
 });
@@ -264,6 +271,36 @@ test("Fleet has no document overflow from phone through large desktop", async ({
   await page.getByRole("button", {name: "Close Aurora details"}).click();
   const columns = await page.locator(".node-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(columns).toBeGreaterThanOrEqual(2);
+});
+
+test("Fleet compact and topology views persist, reflow, and keep technical IDs out of browse views", async ({page}, testInfo) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/fleet");
+  await page.getByRole("button", {name: "Topology"}).click();
+
+  await expect(page.getByRole("region", {name: "Fleet topology"})).toBeVisible();
+  await expect(page.getByRole("button", {name: /View Aurora details/})).toBeVisible();
+  await expect(page.getByText("Qwen pair", {exact: true}).first()).toBeVisible();
+  await expect(page.getByText(nodeId, {exact: true})).toHaveCount(0);
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("fleet-topology-desktop.png"), fullPage: true});
+
+  await page.reload();
+  await expect(page.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", {name: "Compact"}).click();
+  await expect(page.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
+
+  for (const width of [320, 360, 760, 1280]) {
+    await page.setViewportSize({width, height: width <= 360 ? 800 : 900});
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
+  await page.setViewportSize({width: 360, height: 800});
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
 });
 
 test("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
