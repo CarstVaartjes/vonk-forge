@@ -124,10 +124,13 @@ class ManagementAddressPolicy:
         ):
             raise PresenceError("management address belongs to a forbidden CIDR")
         if any(
-            address == network.network_address
-            or (
-                isinstance(network, ipaddress.IPv4Network)
-                and address == network.broadcast_address
+            network.prefixlen < network.max_prefixlen
+            and (
+                address == network.network_address
+                or (
+                    isinstance(network, ipaddress.IPv4Network)
+                    and address == network.broadcast_address
+                )
             )
             for network in matching
         ):
