@@ -958,9 +958,13 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
             reconciler.kill()
             stdout, stderr = reconciler.communicate(timeout=5)
         daemon_socket.close()
-    assert reconciler.returncode in {-15, 0}, (stdout, stderr)
+    assert reconciler.returncode == 0, (stdout, stderr)
     assert stdout == ""
     assert stderr == ""
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "config": {"version": "0.0.1", "services": {}},
+        "advertised": [],
+    }
     allocated = allocations.read_text(encoding="utf-8").splitlines()
     assert len(allocated) >= 5
     assert len(allocated) == len(set(allocated))
@@ -980,6 +984,15 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
         if invocation.startswith("serve set-config --all ")
     )
     assert drain_api < clear_api < drain_dashboard < clear_dashboard < clear_all
+
+
+def test_healthcheck_mode_cannot_register_service_withdrawal_trap() -> None:
+    text = (COMPOSE / "tailscale/configure.sh").read_text()
+    healthcheck = text.index('if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then')
+    healthcheck_exit = text.index("\nfi", healthcheck)
+    shutdown_trap = text.index("trap shutdown_services 1 2 15")
+
+    assert healthcheck < healthcheck_exit < shutdown_trap
 
 
 def test_grants_example_is_exact_service_least_privilege() -> None:

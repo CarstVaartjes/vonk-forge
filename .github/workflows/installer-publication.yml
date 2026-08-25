@@ -622,12 +622,17 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    needs: [authority, candidate]
+    # All acceptance shapes intentionally use the same three fixed Tailscale
+    # Services. Give each runner exclusive ownership so one gate cannot become
+    # another gate's PrimaryRoute or satisfy its HTTPS probes.
+    needs: [authority, candidate, nas-acceptance]
     if: >-
       needs.authority.result == 'success' &&
-      needs.candidate.result == 'success'
+      needs.candidate.result == 'success' &&
+      needs['nas-acceptance'].result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: linux-amd64
