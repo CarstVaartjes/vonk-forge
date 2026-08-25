@@ -53,7 +53,6 @@ cleanup() {
     esac
 }
 trap cleanup 0
-trap 'exit 0' 1 2 15
 
 ts() {
     tailscale --socket="${socket}" "$@"
@@ -112,6 +111,24 @@ withdraw_hermes_services() {
     ts serve clear "${hermes_api_service}" >/dev/null 2>&1
     ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1
     ts serve clear "${hermes_dashboard_service}" >/dev/null 2>&1
+}
+
+withdraw_all_services() {
+    # A stopped gateway must not remain registered as a candidate host for the
+    # fixed Service VIPs. Drain first, then atomically clear the full map and
+    # AdvertiseServices preference before tailscaled itself is stopped.
+    ts serve drain "${control_service}" >/dev/null 2>&1 || true
+    ts serve drain "${hermes_api_service}" >/dev/null 2>&1 || true
+    ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1 || true
+    ts serve set-config --all "${empty_service_map}" >/dev/null 2>&1 || true
+}
+
+shutdown_services() {
+    trap - 1 2 15
+    if [ -S "${socket}" ]; then
+        withdraw_all_services
+    fi
+    exit 0
 }
 
 serve_is_exact() {
@@ -300,6 +317,10 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
     esac
     exit
 fi
+
+# Only the long-running reconciler owns Service teardown. A timed-out Docker
+# healthcheck runs this same script and must never withdraw healthy routes.
+trap shutdown_services 1 2 15
 
 while [ "${remaining}" -gt 0 ]; do
     if [ -S "${socket}" ] && ts status --json >/dev/null 2>&1; then

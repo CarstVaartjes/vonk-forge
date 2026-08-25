@@ -78,8 +78,15 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     jobs = workflow["jobs"]
     assert set(jobs["candidate"]["needs"]) == {"authority"}
     assert set(jobs["nas-acceptance"]["needs"]) == {"authority", "candidate"}
-    assert set(jobs["spark-acceptance"]["needs"]) == {"authority", "candidate"}
-    assert "max-parallel" not in jobs["spark-acceptance"]["strategy"]
+    assert set(jobs["spark-acceptance"]["needs"]) == {
+        "authority",
+        "candidate",
+        "nas-acceptance",
+    }
+    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "1"
+    assert "needs['nas-acceptance'].result == 'success'" in jobs[
+        "spark-acceptance"
+    ]["if"]
     expected_services = {
         "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
