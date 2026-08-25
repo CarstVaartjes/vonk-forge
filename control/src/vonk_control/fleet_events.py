@@ -13,6 +13,7 @@ from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
+    AgentNodeProfile,
     AgentOperation,
     FleetEventCursor,
     FleetStreamEvent,
@@ -364,6 +365,7 @@ class FleetEventRecorder:
     """Observe public Fleet state transitions on one session factory."""
 
     _tracked_fields: ClassVar[dict[type[object], tuple[str, ...]]] = {
+        AgentNodeProfile: ("hostname",),
         NodeTelemetryLatest: ("sample_id",),
         RecipeInstallation: ("state",),
         InstallationNode: ("state", "installed_bytes"),
@@ -457,6 +459,18 @@ class FleetEventRecorder:
 
     @staticmethod
     def _render(value: object) -> FleetEventDraft:
+        if isinstance(value, AgentNodeProfile):
+            return FleetEventDraft(
+                event_type="node-profile",
+                node_id=value.node_id,
+                entity_kind="node-profile",
+                entity_id=value.node_id,
+                payload={
+                    "schema_version": 1,
+                    "node_id": value.node_id,
+                    "profile_changed": True,
+                },
+            )
         if isinstance(value, NodeTelemetryLatest):
             return FleetEventDraft(
                 event_type="node-telemetry",

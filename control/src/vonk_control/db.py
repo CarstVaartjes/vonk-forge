@@ -29,7 +29,7 @@ def upgrade_schema(
     *,
     config_path: Path = _ALEMBIC_CONFIG,
 ) -> None:
-    """Upgrade one fresh-only Alembic lineage to its maintained head."""
+    """Upgrade the linear Alembic lineage to its maintained head."""
     if not database_url.strip():
         raise RuntimeError("database URL secret is empty")
     config = Config(str(config_path))

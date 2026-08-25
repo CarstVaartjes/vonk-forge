@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
 from vonk_control.api import AdminServices, create_app
@@ -286,6 +287,26 @@ def test_operator_can_rename_node_without_mutating_technical_identity() -> None:
     assert projection.profile_calls == [(NODE_ID, "Studio Spark")]
     assert audits.list()[0].action == "fleet.node.rename"
     assert audits.list()[0].targets == (NODE_ID,)
+
+
+def test_node_rename_maps_database_failures_to_bounded_unavailability() -> None:
+    class UnavailableFleet(ProjectedFleet):
+        def update_display_name(
+            self, node_id: str, display_name: str
+        ) -> FleetNodeIdentity:
+            del node_id, display_name
+            raise SQLAlchemyError("database detail must not cross the API boundary")
+
+    client, operator, *_ = _client(fleet_projection=UnavailableFleet())
+
+    response = client.patch(
+        f"/api/v1/nodes/{NODE_ID}/profile",
+        headers=operator,
+        json={"display_name": "Studio Spark"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Fleet profile update unavailable"}
 
 
 @pytest.mark.parametrize(

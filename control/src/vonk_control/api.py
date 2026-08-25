@@ -36,6 +36,7 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
@@ -790,7 +791,7 @@ def create_app(
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Fleet node not found") from None
-        except (OSError, RuntimeError, TypeError):
+        except (OSError, RuntimeError, SQLAlchemyError, TypeError):
             raise HTTPException(
                 status_code=503, detail="Fleet profile update unavailable"
             ) from None

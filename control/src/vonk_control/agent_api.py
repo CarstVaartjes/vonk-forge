@@ -276,6 +276,15 @@ class ClaimRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lease_seconds: int = Field(default=30, ge=1, le=300)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
+    hostname: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=(
+            r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+        ),
+    )
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=32)
     runtime_identity: AgentRuntimeIdentityRequest
@@ -1390,6 +1399,7 @@ def install_agent_routes(
                 body.protocol_version,
                 body.capabilities,
                 runtime_identity=body.runtime_identity.model_dump(),
+                hostname=body.hostname,
                 source=source,
             )
         except ValueError as error:

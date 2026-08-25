@@ -576,6 +576,39 @@ def test_recorder_orders_same_transaction_entities_deterministically(sessions) -
     ]
 
 
+def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
+    sessions,
+) -> None:
+    node_id = "spk_" + "a" * 32
+    FleetEventRecorder.install(sessions, clock=lambda: NOW)
+    with sessions.begin() as session:
+        session.add(models.AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.flush()
+        session.add(
+            models.AgentNodeProfile(
+                node_id=node_id,
+                display_name=node_id,
+                hostname="",
+                lifecycle="ready",
+                labels={},
+            )
+        )
+    with sessions.begin() as session:
+        session.get(models.AgentNodeProfile, node_id).hostname = "spark-3542"
+
+    rows = _event_rows(sessions)
+    assert [(row.event_type, row.entity_kind, row.entity_id) for row in rows] == [
+        ("node-profile", "node-profile", node_id),
+        ("node-profile", "node-profile", node_id),
+    ]
+    assert rows[-1].payload == {
+        "schema_version": 1,
+        "node_id": node_id,
+        "profile_changed": True,
+    }
+    assert "spark-3542" not in repr(rows[-1].payload)
+
+
 def test_recorder_uses_attribute_history_for_every_authoritative_transition(
     sessions,
 ) -> None:

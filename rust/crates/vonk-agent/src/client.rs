@@ -54,6 +54,8 @@ impl ClientError {
 #[serde(deny_unknown_fields)]
 struct ClaimRequest<'a> {
     capabilities: &'a [&'a str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hostname: Option<&'a str>,
     lease_seconds: u64,
     node_id: &'a str,
     protocol_version: u32,
@@ -164,11 +166,13 @@ impl AgentHttpClient {
         wait_seconds: u64,
         runtime_identity: Option<&AgentRuntimeIdentity>,
     ) -> Result<Option<AgentClaim>, ClientError> {
+        let hostname = local_hostname();
         let response = self
             .client
             .post(self.endpoint("/agent/v1/claim")?)
             .json(&ClaimRequest {
                 capabilities,
+                hostname: hostname.as_deref(),
                 lease_seconds: 60,
                 node_id: &self.node_id,
                 protocol_version: 3,
@@ -583,13 +587,39 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+fn local_hostname() -> Option<String> {
+    let raw = fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
+    let hostname = raw.trim();
+    valid_reported_hostname(hostname).then(|| hostname.to_owned())
+}
+
+fn valid_reported_hostname(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+        })
+}
+
 fn valid_oci_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(valid_sha256)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentHttpClient, ClientError};
+    use super::{AgentHttpClient, ClientError, valid_reported_hostname};
     use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
     use std::{
@@ -665,6 +695,16 @@ mod tests {
             },
             server,
         )
+    }
+
+    #[test]
+    fn reported_hostname_is_bounded_dns_syntax() {
+        assert!(valid_reported_hostname("spark-3542"));
+        assert!(valid_reported_hostname("spark-3542.lab.internal"));
+        assert!(!valid_reported_hostname(""));
+        assert!(!valid_reported_hostname("-spark"));
+        assert!(!valid_reported_hostname("spark_3542"));
+        assert!(!valid_reported_hostname(&"a".repeat(256)));
     }
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {

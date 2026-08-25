@@ -147,6 +147,7 @@ def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
+        "control/migrations/versions/0002_fleet_node_profile_events.py",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",

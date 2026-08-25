@@ -7,7 +7,7 @@ def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
     assert db._ALEMBIC_CONFIG == Path(db.__file__).resolve().parent / "alembic.ini"
 
 
-def test_upgrade_schema_runs_the_single_alembic_head(
+def test_upgrade_schema_runs_the_linear_alembic_head(
     monkeypatch, tmp_path: Path
 ) -> None:
     from vonk_control import db
