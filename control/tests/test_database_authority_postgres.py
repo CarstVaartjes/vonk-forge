@@ -161,7 +161,7 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
     with postgres_engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "0001_fleet_library_baseline"
+        ).scalar_one() == "0002_fleet_node_profile_events"
         assert connection.exec_driver_sql(
             "SELECT count(*) FROM control_authority_revisions"
         ).scalar_one() == 1

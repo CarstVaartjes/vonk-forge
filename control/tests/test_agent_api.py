@@ -45,6 +45,7 @@ from vonk_control.models import (
     AgentEnrollment,
     AgentEnrollmentGrant,
     AgentNode,
+    AgentNodeProfile,
     AgentOperationAttempt,
     AgentPresence,
     Base,
@@ -1245,12 +1246,23 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
 def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) -> None:
     client, services, _, clock = agent_system
     clock.now += timedelta(seconds=15)
+    with services.sessions.begin() as session:
+        session.add(
+            AgentNodeProfile(
+                node_id=NODE_A,
+                display_name=NODE_A,
+                hostname="",
+                lifecycle="ready",
+                labels={},
+            )
+        )
 
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
+            "hostname": "spark-3542",
             "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
@@ -1273,6 +1285,9 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
         assert node.self_test_passed is True
         assert node.contact_certificate_serial == "serial-a"
         assert node.contact_observation_digest is not None
+        profile = session.get(AgentNodeProfile, NODE_A)
+        assert profile is not None
+        assert profile.hostname == "spark-3542"
     metrics = MetricsRegistry()
     OperationalMetricsCollector(metrics, services.sessions, clock=clock).refresh()
     rendered = metrics.render()
@@ -1281,6 +1296,24 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
         f'vonk_agent_version_compatibility{{node_id="{NODE_A}",version_bucket="supported"}} 1'
         in rendered
     )
+
+
+@pytest.mark.parametrize(
+    "hostname",
+    ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
+)
+def test_authenticated_claim_rejects_invalid_reported_hostname(
+    agent_system, hostname: str
+) -> None:
+    client, _services, _, _clock = agent_system
+
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={"hostname": hostname},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(

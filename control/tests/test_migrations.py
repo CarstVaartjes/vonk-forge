@@ -1,10 +1,12 @@
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 EXPECTED_BASELINE_TABLES = {
     "control_authority_heads",
@@ -119,12 +121,46 @@ def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
     assert ".create_all(" not in migration
 
 
-def test_fresh_install_has_one_baseline_migration() -> None:
+def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
     versions = Path(__file__).resolve().parents[1] / "migrations/versions"
 
     assert sorted(path.name for path in versions.glob("*.py")) == [
-        "0001_fleet_library_baseline.py"
+        "0001_fleet_library_baseline.py",
+        "0002_fleet_node_profile_events.py",
     ]
+
+
+def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0001_fleet_library_baseline")
+    engine = create_engine(url)
+    statement = text(
+        """
+        INSERT INTO fleet_stream_events
+          (id, event_type, node_id, entity_kind, entity_id, payload,
+           occurred_at, expires_at)
+        VALUES
+          (1, 'node-profile', :node_id, 'node-profile', :node_id, '{}',
+           '2026-08-25 12:00:00', '2026-08-26 12:00:00')
+        """
+    )
+    node_id = "spk_" + "a" * 32
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(statement, {"node_id": node_id})
+
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        connection.execute(statement, {"node_id": node_id})
+        assert (
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            == "0002_fleet_node_profile_events"
+        )
 
 
 def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:

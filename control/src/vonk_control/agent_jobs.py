@@ -26,6 +26,7 @@ from .logging import redact_text
 from .models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeProfile,
     AgentOperationAttempt,
     Job,
     Observation,
@@ -288,6 +289,7 @@ class AgentJobService:
         capabilities: Sequence[str] | None = tuple(_NEXT_CAPABILITIES),
         *,
         runtime_identity: Mapping[str, object] | None,
+        hostname: str | None = None,
         source: AgentSource | None = None,
     ) -> AgentClaim | None:
         self._mark_started()
@@ -297,6 +299,20 @@ class AgentJobService:
             or lease_seconds <= 0
             or isinstance(wait_seconds, bool)
             or not 0 <= wait_seconds <= 60
+            or (
+                hostname is not None
+                and (
+                    not isinstance(hostname, str)
+                    or len(hostname) > 255
+                    or re.fullmatch(
+                        r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                        r"(?:\.[A-Za-z0-9]"
+                        r"(?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*",
+                        hostname,
+                    )
+                    is None
+                )
+            )
             or (
                 protocol_version is not None
                 and (
@@ -319,6 +335,7 @@ class AgentJobService:
                     protocol_version,
                     advertised,
                     running,
+                    hostname,
                     source,
                 )
                 if claim is not None:
@@ -336,6 +353,7 @@ class AgentJobService:
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
         runtime_identity: dict[str, object],
+        hostname: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
@@ -364,12 +382,14 @@ class AgentJobService:
             )
             self._consume_contact(session, source, node, certificate)
             self._record_contact(
+                session,
                 node,
                 certificate,
                 now,
                 protocol_version,
                 capabilities,
                 runtime_identity,
+                hostname,
             )
             expired_attempt = (
                 select(AgentOperationAttempt.id)
@@ -928,7 +948,16 @@ class AgentJobService:
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
             )
-        self._record_contact(node, certificate, now, None, None, None)
+        self._record_contact(
+            session,
+            node,
+            certificate,
+            now,
+            None,
+            None,
+            None,
+            None,
+        )
         return operation, attempt
 
     @staticmethod
@@ -1022,12 +1051,14 @@ class AgentJobService:
 
     @staticmethod
     def _record_contact(
+        session: Session,
         node: AgentNode,
         certificate: AgentCertificate,
         now: datetime,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
         runtime_identity: dict[str, object] | None,
+        hostname: str | None,
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
         observed = _aware(now)
@@ -1037,6 +1068,14 @@ class AgentJobService:
             node.protocol_version = protocol_version
         if capabilities is not None:
             node.capabilities = list(capabilities)
+        if hostname is not None:
+            profile = session.scalar(
+                select(AgentNodeProfile)
+                .where(AgentNodeProfile.node_id == node.node_id)
+                .with_for_update(of=AgentNodeProfile)
+            )
+            if profile is not None and profile.hostname != hostname:
+                profile.hostname = hostname
         if runtime_identity is not None:
             node.architecture = str(runtime_identity["architecture"])
             node.semantic_version = str(runtime_identity["semantic_version"])
@@ -1051,6 +1090,7 @@ class AgentJobService:
                         "certificate_serial": certificate.serial,
                         "node_id": node.node_id,
                         "observed_at": _aware(node.last_seen_at).isoformat(),
+                        "hostname": hostname,
                         "runtime_identity": runtime_identity,
                     }
                 )
