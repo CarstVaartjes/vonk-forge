@@ -726,9 +726,7 @@ def test_vllm_accepts_only_snapshot_owned_nemotron_parser_plugins(
 
 
 def test_vllm_accepts_super_snapshot_parser_with_a_companion_model() -> None:
-    recipe = _multi_artifact_vllm_recipe(
-        '{"method":"mtp","model":"/models/draft"}'
-    )
+    recipe = _multi_artifact_vllm_recipe('{"method":"mtp","model":"/models/draft"}')
     plugin = "/models/target/super_v3_reasoning_parser.py"
     recipe["runtime"]["arguments"].extend(
         [
@@ -1188,10 +1186,16 @@ def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
 def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None:
     recipe = _recipe("vllm")
     expected = {
+        "B12X_CUTE_COMPILE_CACHE_DIR": "/cache/b12x-cute-compile",
         "DSPARK_MAX_INFLIGHT_PREFILLS": "2",
         "FLASHINFER_WORKSPACE_BASE": "/cache/flashinfer",
         "TILELANG_CACHE_DIR": "/cache/tilelang",
         "TRITON_CACHE_DIR": "/cache/triton",
+        "TORCH_FR_BUFFER_SIZE": "2000",
+        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/nccl/comm_lib_trace_rank_",
+        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/nccl/fr_dump_pipe_",
+        "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
+        "TORCH_NCCL_ENABLE_MONITORING": "1",
         "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "1",
         "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M": "32",
         "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "120",
