@@ -726,9 +726,7 @@ def test_vllm_accepts_only_snapshot_owned_nemotron_parser_plugins(
 
 
 def test_vllm_accepts_super_snapshot_parser_with_a_companion_model() -> None:
-    recipe = _multi_artifact_vllm_recipe(
-        '{"method":"mtp","model":"/models/draft"}'
-    )
+    recipe = _multi_artifact_vllm_recipe('{"method":"mtp","model":"/models/draft"}')
     plugin = "/models/target/super_v3_reasoning_parser.py"
     recipe["runtime"]["arguments"].extend(
         [
