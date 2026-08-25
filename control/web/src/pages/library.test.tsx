@@ -848,6 +848,7 @@ test("loads the current default catalog recipes when public import opens", async
   expect(catalogCommit).toBeVisible();
   expect(screen.getAllByText("Source: QwenLM")[0]).toBeVisible();
 
+  await user.click(screen.getByRole("button", {name: "More filters"}));
   const qualification = screen.getByRole("combobox", {name: "Filter by qualification"});
   expect(within(qualification).getByRole("option", {name: /^Accepted \(/})).toHaveValue("cataloged");
   expect(within(qualification).queryByRole("option", {name: "Cataloged"})).not.toBeInTheDocument();
@@ -872,7 +873,6 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
   await user.selectOptions(localStatus, "not-imported");
   expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 3})).toBeVisible();
-  await user.click(screen.getByRole("button", {name: "More filters"}));
   await user.click(screen.getByRole("button", {name: "Clear all"}));
   expect(localStatus).toHaveValue("");
 
@@ -929,10 +929,11 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Clear all"}));
-  await user.selectOptions(screen.getByRole("combobox", {name: "Sort recipes"}), "model");
-  expect(screen.getByRole("button", {name: "Clear all"})).toBeEnabled();
+  const sort = screen.getByRole("combobox", {name: "Sort recipes"});
+  await user.selectOptions(sort, "model");
+  expect(screen.queryByRole("button", {name: "Clear all"})).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", {name: "Clear all"}));
+  await user.selectOptions(sort, "catalog");
   await user.type(screen.getByRole("searchbox", {name: "Find a recipe"}), "nonexistent model");
   expect(screen.getByText("No matching recipes")).toBeVisible();
 });

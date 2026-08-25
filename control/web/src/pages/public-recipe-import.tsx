@@ -24,9 +24,19 @@ const PUBLIC_RECIPE_READINESS: Array<{value: PublicRecipeExecutionReadiness; lab
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type RecipeSort = "catalog" | "model" | "sparks" | "download";
 type LocalFilter = "" | "not-imported" | "update-available" | "current" | "needs-review";
+type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d";
 type ImportStep = "catalog" | "review" | "confirm";
 type CatalogView = "cards" | "compact";
-type Facet = "model" | "sourceOwner" | "repository" | "sparks" | "runtime" | "precision" | "topology" | "qualification" | "readiness" | "local" | "capability";
+type Facet = "modelType" | "model" | "sourceOwner" | "repository" | "sparks" | "runtime" | "precision" | "topology" | "qualification" | "readiness" | "local" | "capability";
+
+const MODEL_TYPE_OPTIONS: Array<{value: Exclude<ModelType, "">; label: string}> = [
+  {value: "language", label: "Language / chat"},
+  {value: "vision", label: "Vision / multimodal"},
+  {value: "image", label: "Image"},
+  {value: "video", label: "Video"},
+  {value: "audio", label: "Audio"},
+  {value: "3d", label: "3D"},
+];
 
 const CATALOG_VIEW_STORAGE_KEY = "vonk.public-recipe-catalog.view";
 const PUBLIC_RECIPE_URI_PATTERN = /^vonk:\/\/catalog\/[a-z0-9][a-z0-9-]{1,62}\/[a-z0-9][a-z0-9-]{1,62}@sha256:[0-9a-f]{64}$/;
@@ -62,6 +72,7 @@ function runBoundedRequest<T>(controller: AbortController, onSlow: () => void, t
 
 export type PublicRecipeFilters = {
   query: string;
+  modelType: ModelType;
   model: string;
   sourceOwner: string;
   repository: string;
@@ -77,11 +88,12 @@ export type PublicRecipeFilters = {
 };
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
+  query: "", modelType: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
 const VALID_SPARKS = new Set<SparkFilter>(["", "1", "2", "3", "4+"]);
+const VALID_MODEL_TYPES = new Set<ModelType>(["", ...MODEL_TYPE_OPTIONS.map(option => option.value)]);
 const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download"]);
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
 const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", ...PUBLIC_RECIPE_READINESS.map(option => option.value)]);
@@ -106,6 +118,7 @@ function saveCatalogView(view: CatalogView) {
 export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeFilters; more: boolean; recipe: string; step: ImportStep} {
   const search = new URL(url, "https://vonk.invalid").searchParams;
   const sparks = search.get("sparks") as SparkFilter | null;
+  const modelType = search.get("model_type") as ModelType | null;
   const sort = search.get("sort") as RecipeSort | null;
   const local = search.get("local") as LocalFilter | null;
   const qualification = search.get("qualification");
@@ -116,6 +129,7 @@ export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeF
   return {
     filters: {
       query: search.get("q") ?? "",
+      modelType: modelType && VALID_MODEL_TYPES.has(modelType) ? modelType : "",
       model: search.get("model") ?? "",
       sourceOwner: search.get("source_owner") ?? search.get("creator") ?? "",
       repository: search.get("repository") ?? "",
@@ -138,6 +152,7 @@ export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeF
 export function publicRecipeImportUrl(filters: PublicRecipeFilters, options: {more?: boolean; recipe?: string; step?: ImportStep} = {}): string {
   const search = new URLSearchParams();
   if (filters.query) search.set("q", filters.query);
+  if (filters.modelType) search.set("model_type", filters.modelType);
   if (filters.model) search.set("model", filters.model);
   if (filters.sourceOwner) search.set("source_owner", filters.sourceOwner);
   if (filters.repository) search.set("repository", filters.repository);
@@ -169,10 +184,23 @@ function localMatches(recipe: PublicRecipe, local: LocalFilter): boolean {
   return recipe.local.status === local;
 }
 
+function modelTypeMatches(recipe: PublicRecipe, modelType: ModelType): boolean {
+  if (!modelType) return true;
+  if (modelType === "language") return recipe.capabilities.includes("chat") || recipe.capabilities.includes("reasoning");
+  if (modelType === "vision") return recipe.capabilities.includes("vision");
+  if (modelType === "image") return recipe.capabilities.includes("image-generation") || recipe.capabilities.includes("image-editing");
+  return recipe.capabilities.includes(modelType);
+}
+
+function modelTypeLabel(modelType: Exclude<ModelType, "">): string {
+  return MODEL_TYPE_OPTIONS.find(option => option.value === modelType)?.label ?? modelType;
+}
+
 export function publicRecipeMatches(recipe: PublicRecipe, filters: PublicRecipeFilters, omitted?: Facet): boolean {
   const normalized = filters.query.trim().toLowerCase();
   const queryMatches = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, recipe.precision ?? "", ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
   return queryMatches
+    && (omitted === "modelType" || modelTypeMatches(recipe, filters.modelType))
     && (omitted === "model" || !filters.model || `${recipe.model_publisher}/${recipe.model_slug}` === filters.model)
     && (omitted === "sourceOwner" || !filters.sourceOwner || recipe.source_owner === filters.sourceOwner)
     && (omitted === "repository" || !filters.repository || recipe.source_repository === filters.repository)
@@ -351,6 +379,7 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   const items: ActiveFilter[] = [];
   const add = (key: string, label: string, patch: Partial<PublicRecipeFilters>) => items.push({key, label, remove: current => ({...current, ...patch})});
   if (filters.query) add("query", `Search: ${filters.query}`, {query: ""});
+  if (filters.modelType) add("modelType", `Model type: ${modelTypeLabel(filters.modelType)}`, {modelType: ""});
   if (filters.model) add("model", `Model: ${filters.model.split("/").at(-1)}`, {model: ""});
   if (filters.sourceOwner) add("sourceOwner", `Source owner: ${filters.sourceOwner}`, {sourceOwner: ""});
   if (filters.repository) add("repository", `Repository: ${repositoryLabel(filters.repository)}`, {repository: ""});
@@ -361,7 +390,6 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   if (filters.qualification) add("qualification", `Qualification: ${filters.qualification === "candidate" ? "Candidate" : "Accepted"}`, {qualification: ""});
   if (filters.readiness) add("readiness", `Execution readiness: ${readinessLabel(filters.readiness)}`, {readiness: ""});
   if (filters.local) add("local", `Local: ${filters.local.replaceAll("-", " ")}`, {local: ""});
-  if (filters.sort !== "catalog") add("sort", `Sort: ${filters.sort}`, {sort: "catalog"});
   for (const capability of filters.capabilities) items.push({key: `capability:${capability}`, label: `Capability: ${PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}`, remove: current => ({...current, capabilities: current.capabilities.filter(value => value !== capability)})});
   return items;
 }
@@ -546,12 +574,12 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   }, [selectedUri, step]);
 
   const models = useMemo(() => {
-    const identities = Array.from(new Map(recipes.map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries());
+    const identities = Array.from(new Map(recipes.filter(recipe => modelTypeMatches(recipe, filters.modelType)).map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries());
     const titleCounts = identities.reduce((counts, [, title]) => counts.set(title, (counts.get(title) ?? 0) + 1), new Map<string, number>());
     return identities
       .map(([value, title]) => [value, titleCounts.get(title) === 1 ? title : `${title} · ${value}`] as const)
       .sort((a, b) => a[1].localeCompare(b[1]));
-  }, [recipes]);
+  }, [filters.modelType, recipes]);
   const sourceOwners = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_owner ? [recipe.source_owner] : []))).sort(), [recipes]);
   const repositories = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_repository ? [recipe.source_repository] : []))).sort(), [recipes]);
   const runtimes = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.runtime_distribution))).sort(), [recipes]);
@@ -559,6 +587,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const topologies = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.topology_mode))).sort(), [recipes]);
   const filtered = useMemo(() => sortRecipes(recipes.filter(recipe => publicRecipeMatches(recipe, filters)), filters.sort), [filters, recipes]);
   const count = (facet: Facet, predicate: (recipe: PublicRecipe) => boolean) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, facet) && predicate(recipe)).length;
+  const modelTypeCount = (modelType: ModelType) => recipes.filter(recipe => publicRecipeMatches(recipe, {...filters, model: ""}, "modelType") && modelTypeMatches(recipe, modelType)).length;
   const capabilityCount = (capability: PublicRecipeCapability) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, "capability") && filters.capabilities.filter(value => value !== capability).every(value => recipe.capabilities.includes(value)) && recipe.capabilities.includes(capability)).length;
   const applied = activeFilters(filters);
   const comparedRecipes = compareUris.flatMap(uri => recipes.find(recipe => recipe.uri === uri) ?? []);
@@ -570,6 +599,11 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
 
   function selectRecipe(uri: string) {
     onNavigate(publicRecipeImportUrl(filters, {more, recipe: uri, step: "review"}));
+  }
+
+  function updateModelType(modelType: ModelType) {
+    const selectedModelMatches = !filters.model || recipes.some(recipe => `${recipe.model_publisher}/${recipe.model_slug}` === filters.model && modelTypeMatches(recipe, modelType));
+    navigateFilters({...filters, modelType, model: selectedModelMatches ? filters.model : ""});
   }
 
   function reviewManualUri() {
@@ -691,29 +725,32 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
       <aside id="public-import-filter-rail" className={`public-import-filter-rail${mobileFiltersOpen ? " is-mobile-open" : ""}`} aria-label="Recipe filters">
         <div className="public-import-filter-heading"><div><span className="public-import-kicker">Narrow the catalog</span><h2>Filters</h2></div>{applied.length > 0 && <button type="button" className="public-import-text-button" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear all</button>}</div>
         <label className="public-import-search"><span>Find a recipe</span><input type="search" value={filters.query} onChange={event => updateFilter("query", event.target.value)} placeholder="Model, modality, runtime…" /></label>
+        <label><span>Model type</span><select aria-label="Filter by model type" value={filters.modelType} onChange={event => updateModelType(event.target.value as ModelType)}><option value="">All types ({modelTypeCount("")})</option>{MODEL_TYPE_OPTIONS.map(option => { const available = modelTypeCount(option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
         <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
-        <label><span>Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
-        <label><span>Qualification</span><select aria-label="Filter by qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as PublicRecipeFilters["qualification"])}><option value="">Any status ({count("qualification", () => true)})</option><option value="cataloged" disabled={count("qualification", recipe => recipe.qualification === "cataloged") === 0}>Accepted ({count("qualification", recipe => recipe.qualification === "cataloged")})</option><option value="candidate" disabled={count("qualification", recipe => recipe.qualification === "candidate") === 0}>Candidate ({count("qualification", recipe => recipe.qualification === "candidate")})</option></select></label>
-        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">Any readiness ({count("readiness", () => true)})</option>{PUBLIC_RECIPE_READINESS.map(option => { const available = count("readiness", recipe => recipe.execution_readiness === option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
         <label><span>Local status</span><select aria-label="Filter by local status" value={filters.local} onChange={event => updateFilter("local", event.target.value as LocalFilter)}><option value="">All ({count("local", () => true)})</option>{(["not-imported", "update-available", "current", "needs-review"] as LocalFilter[]).map(value => { const available = count("local", recipe => localMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value === "not-imported" ? "Not installed" : value === "update-available" ? "Update available" : value === "current" ? "Installed current" : "Needs review"} ({available})</option>; })}</select></label>
+        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">Any readiness ({count("readiness", () => true)})</option>{PUBLIC_RECIPE_READINESS.map(option => { const available = count("readiness", recipe => recipe.execution_readiness === option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
+        <fieldset className="public-import-capabilities"><legend>Capabilities <span>Must all match</span></legend>{PUBLIC_RECIPE_CAPABILITIES.map(option => { const selected = filters.capabilities.includes(option.value); const available = capabilityCount(option.value); return <label className={available === 0 && !selected ? "is-disabled" : ""} key={option.value}><input type="checkbox" checked={selected} disabled={available === 0 && !selected} onChange={() => updateFilter("capabilities", selected ? filters.capabilities.filter(value => value !== option.value) : [...filters.capabilities, option.value])}/><span>{option.label}</span><small>{available}</small></label>; })}</fieldset>
         <button type="button" className="button secondary public-import-more-toggle" aria-expanded={more} aria-controls="public-import-more-filters" onClick={() => onNavigate(publicRecipeImportUrl(filters, {more: !more}), true)}>{more ? "Hide more filters" : "More filters"}</button>
         <div id="public-import-more-filters" hidden={!more} className="public-import-more-filters">
+          <label><span>Required Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
+          <label><span>Qualification</span><select aria-label="Filter by qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as PublicRecipeFilters["qualification"])}><option value="">Any status ({count("qualification", () => true)})</option><option value="cataloged" disabled={count("qualification", recipe => recipe.qualification === "cataloged") === 0}>Accepted ({count("qualification", recipe => recipe.qualification === "cataloged")})</option><option value="candidate" disabled={count("qualification", recipe => recipe.qualification === "candidate") === 0}>Candidate ({count("qualification", recipe => recipe.qualification === "candidate")})</option></select></label>
           <label><span>Source owner</span><select aria-label="Filter by source owner" value={filters.sourceOwner} onChange={event => updateFilter("sourceOwner", event.target.value)}><option value="">All source owners</option>{sourceOwners.map(value => <option key={value} value={value} disabled={count("sourceOwner", recipe => recipe.source_owner === value) === 0}>{value} ({count("sourceOwner", recipe => recipe.source_owner === value)})</option>)}</select></label>
           <label><span>Original repository</span><select aria-label="Filter by original repository" value={filters.repository} onChange={event => updateFilter("repository", event.target.value)}><option value="">All repositories</option>{repositories.map(value => <option key={value} value={value} disabled={count("repository", recipe => recipe.source_repository === value) === 0}>{repositoryLabel(value)} ({count("repository", recipe => recipe.source_repository === value)})</option>)}</select></label>
           <label><span>Runtime</span><select aria-label="Filter by runtime" value={filters.runtime} onChange={event => updateFilter("runtime", event.target.value)}><option value="">All runtimes</option>{runtimes.map(value => <option key={value} value={value} disabled={count("runtime", recipe => recipe.runtime_distribution === value) === 0}>{runtimeLabel(value)} ({count("runtime", recipe => recipe.runtime_distribution === value)})</option>)}</select></label>
           <label><span>Precision</span><select aria-label="Filter by precision" value={filters.precision} onChange={event => updateFilter("precision", event.target.value)}><option value="">Any precision</option>{precisions.map(value => <option key={value} value={value} disabled={count("precision", recipe => recipe.precision === value) === 0}>{value} ({count("precision", recipe => recipe.precision === value)})</option>)}</select></label>
           <label><span>Topology</span><select aria-label="Filter by topology" value={filters.topology} onChange={event => updateFilter("topology", event.target.value)}><option value="">Any topology</option>{topologies.map(value => <option key={value} value={value} disabled={count("topology", recipe => recipe.topology_mode === value) === 0}>{runtimeLabel(value)} ({count("topology", recipe => recipe.topology_mode === value)})</option>)}</select></label>
-          <label><span>Sort</span><select aria-label="Sort recipes" value={filters.sort} onChange={event => updateFilter("sort", event.target.value as RecipeSort)}><option value="catalog">Catalog order</option><option value="model">Model A–Z</option><option value="sparks">Fewest Sparks</option><option value="download">Smallest download</option></select></label>
         </div>
-        <fieldset className="public-import-capabilities"><legend>Capabilities <span>Must all match</span></legend>{PUBLIC_RECIPE_CAPABILITIES.map(option => { const selected = filters.capabilities.includes(option.value); const available = capabilityCount(option.value); return <label className={available === 0 && !selected ? "is-disabled" : ""} key={option.value}><input type="checkbox" checked={selected} disabled={available === 0 && !selected} onChange={() => updateFilter("capabilities", selected ? filters.capabilities.filter(value => value !== option.value) : [...filters.capabilities, option.value])}/><span>{option.label}</span><small>{available}</small></label>; })}</fieldset>
         <details className="public-import-manual"><summary>Advanced: import URI</summary><div><label><span>Public recipe URI</span><input value={manualUri} aria-invalid={manualUriError ? "true" : undefined} aria-describedby={manualUriError ? "public-recipe-uri-error" : undefined} onChange={event => { setManualUri(event.target.value); setManualUriError(""); }} placeholder="vonk://catalog/…@sha256:…" /></label>{manualUriError && <small id="public-recipe-uri-error" role="alert">{manualUriError}</small>}<button type="button" className="button secondary" disabled={!manualUri.trim()} onClick={reviewManualUri}>Review URI</button></div></details>
       </aside>
       <section className="public-import-results" aria-busy={loading || refreshing} aria-labelledby="public-recipe-results-heading">
         <header><div><span className="public-import-kicker">Public recipe library</span><h2 id="public-recipe-results-heading">Choose a recipe</h2></div><div><span>{refreshing ? "Refreshing…" : `${filtered.length} of ${recipes.length}`}</span><button type="button" className="public-import-icon-button" aria-label="Refresh public catalog" onClick={() => void loadCatalog(true)}>↻</button></div></header>
         <div className="public-import-results-tools">
-          <div className="public-import-view-switch" role="group" aria-label="Catalog view">
-            <button type="button" aria-pressed={catalogView === "cards"} onClick={() => chooseCatalogView("cards")}><span aria-hidden="true">▦</span> Detailed</button>
-            <button type="button" aria-pressed={catalogView === "compact"} onClick={() => chooseCatalogView("compact")}><span aria-hidden="true">☷</span> Compact</button>
+          <div className="public-import-results-controls">
+            <div className="public-import-view-switch" role="group" aria-label="Catalog view">
+              <button type="button" aria-pressed={catalogView === "cards"} onClick={() => chooseCatalogView("cards")}><span aria-hidden="true">▦</span> Detailed</button>
+              <button type="button" aria-pressed={catalogView === "compact"} onClick={() => chooseCatalogView("compact")}><span aria-hidden="true">☷</span> Compact</button>
+            </div>
+            <label className="public-import-sort"><span>Sort by</span><select aria-label="Sort recipes" value={filters.sort} onChange={event => updateFilter("sort", event.target.value as RecipeSort)}><option value="catalog">Catalog order</option><option value="model">Model A–Z</option><option value="sparks">Fewest Sparks</option><option value="download">Smallest download</option></select></label>
           </div>
           {commit && <details className="public-import-snapshot"><summary>Catalog snapshot</summary><div><span>Immutable commit</span><code>{commit}</code></div></details>}
         </div>

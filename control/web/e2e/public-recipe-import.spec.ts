@@ -56,6 +56,7 @@ test("desktop catalog is accessible, filterable and explains candidate qualifica
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/import");
   await expect(page.getByRole("heading", {name: "Import a public recipe"})).toBeFocused();
+  await page.getByRole("button", {name: "More filters"}).click();
   await expect(page.getByRole("option", {name: /4\+ Sparks \(1\)/})).toBeEnabled();
   await expect(page.getByRole("option", {name: /Executable contract \(1\)/})).toBeEnabled();
   await expect(page.getByRole("option", {name: /^4 Sparks/})).toHaveCount(0);
