@@ -84,6 +84,34 @@ token file and the control-plane URL:
 Container and Spark qualification still require the native ARM64/NVIDIA
 environment and exact artifact cache described in the acceptance runbook.
 
+## Runtime environment authority
+
+Built-in harnesses retain a small compatibility allowlist. A runtime
+distribution can extend it for image-specific tunables by declaring the exact
+names it implements:
+
+```json
+{
+  "capabilities": {
+    "runtime_environment": {
+      "allowed_names": ["UPSTREAM_RUNTIME_TUNING"]
+    }
+  }
+}
+```
+
+The recipe can set only names admitted by the built-in harness or its exact
+runtime distribution. Because recipes bind the distribution by content digest,
+changing this authority also requires new distribution, patch-bundle, and
+recipe digests. The Spark agent already transports bounded environment entries,
+so adding a safe image-specific tuning variable does not require an agent or
+control-plane release.
+
+The controller still rejects reserved `VONK_*` names, dynamic-loader variables,
+interpreter injection hooks, and executable-path overrides even when a
+distribution declares them. Values remain ordinary bounded recipe scalars;
+this capability does not grant secret access or shell execution.
+
 The public Library API also fails closed when it projects qualification. It
 returns the existing `cataloged` wire value (shown as **Accepted** in the UI)
 only when the exact indexed recipe document explicitly carries the `accepted`

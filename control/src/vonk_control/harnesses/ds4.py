@@ -59,7 +59,9 @@ class Ds4HarnessCompiler:
             modes=frozenset({"single"}),
         )
         environment = compile_environment(
-            recipe, frozenset({"DS4_LOG_LEVEL", "HF_HUB_OFFLINE"})
+            recipe,
+            distribution,
+            frozenset({"DS4_LOG_LEVEL", "HF_HUB_OFFLINE"}),
         )
         return projection(
             slug=self.slug,

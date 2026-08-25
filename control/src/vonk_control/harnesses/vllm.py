@@ -312,9 +312,9 @@ class VllmHarnessCompiler:
             )
         environment = compile_environment(
             recipe,
+            distribution,
             frozenset(
                 {
-                    "B12X_CUTE_COMPILE_CACHE_DIR",
                     "CUTE_DSL_ARCH",
                     "DG_JIT_NVCC_COMPILER",
                     "DG_JIT_USE_NVRTC",
@@ -358,12 +358,7 @@ class VllmHarnessCompiler:
                     "PYTORCH_CUDA_ALLOC_CONF",
                     "TILELANG_CACHE_DIR",
                     "TILELANG_CLEANUP_TEMP_FILES",
-                    "TORCH_FR_BUFFER_SIZE",
-                    "TORCH_FR_DUMP_TEMP_FILE",
                     "TORCH_CUDA_ARCH_LIST",
-                    "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
-                    "TORCH_NCCL_DUMP_ON_TIMEOUT",
-                    "TORCH_NCCL_ENABLE_MONITORING",
                     "TRANSFORMERS_OFFLINE",
                     "TRITON_CACHE_DIR",
                     "VLLM_ALLOW_LONG_MAX_MODEL_LEN",

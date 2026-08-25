@@ -57,7 +57,9 @@ class LlamaCppHarnessCompiler:
         )
         if node_count != 1:
             raise HarnessCompileError("llama.cpp topology must contain one node")
-        environment = compile_environment(recipe, frozenset({"LLAMA_ARG_N_THREADS"}))
+        environment = compile_environment(
+            recipe, distribution, frozenset({"LLAMA_ARG_N_THREADS"})
+        )
         return projection(
             slug=self.slug,
             command=(

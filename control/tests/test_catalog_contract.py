@@ -197,6 +197,31 @@ def test_runtime_distribution_accepts_verified_vllm_ray_mechanism() -> None:
     validate_catalog_document(document)
 
 
+def test_runtime_distribution_accepts_digest_bound_environment_authority() -> None:
+    path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    original_digest = catalog_content_sha256(document)
+    document["capabilities"]["runtime_environment"] = {
+        "allowed_names": ["UPSTREAM_RUNTIME_TUNING"]
+    }
+
+    validate_catalog_document(document)
+
+    assert catalog_content_sha256(document) != original_digest
+
+
+@pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH", "VONK_MASTER_ADDR"])
+def test_runtime_distribution_rejects_unsafe_environment_authority(
+    unsafe: str,
+) -> None:
+    path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["capabilities"]["runtime_environment"] = {"allowed_names": [unsafe]}
+
+    with pytest.raises(CatalogContractError, match="unsafe"):
+        validate_catalog_document(document)
+
+
 def test_runtime_distribution_accepts_exact_distributed_sglang_authority() -> None:
     path = ROOT / "config/runtime-distributions/anemll-vllm-mia.json"
     document = json.loads(path.read_text(encoding="utf-8"))

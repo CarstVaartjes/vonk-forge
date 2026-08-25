@@ -78,7 +78,9 @@ class TensorRtLlmHarnessCompiler:
                 "parallelism or expert parallelism"
             )
         environment = compile_environment(
-            recipe, frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"})
+            recipe,
+            distribution,
+            frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"}),
         )
         return projection(
             slug=self.slug,

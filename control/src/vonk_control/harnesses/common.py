@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
+from ..runtime_environment import distribution_allowed_environment
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
@@ -310,19 +311,27 @@ def require_literal_arguments(
 
 
 def compile_environment(
-    recipe: Mapping[str, object], allowlist: frozenset[str]
+    recipe: Mapping[str, object],
+    distribution: Mapping[str, object],
+    allowlist: frozenset[str],
 ) -> tuple[tuple[str, str], ...]:
     runtime = recipe.get("runtime")
     environment = runtime.get("environment") if isinstance(runtime, Mapping) else None
     if type(environment) is not list:
         raise HarnessCompileError("harness environment is invalid")
+    try:
+        allowed_names = allowlist | distribution_allowed_environment(
+            distribution.get("capabilities")
+        )
+    except (TypeError, ValueError) as exc:
+        raise HarnessCompileError(str(exc)) from exc
     result: list[tuple[str, str]] = []
     names: set[str] = set()
     for item in environment:
         if not isinstance(item, Mapping) or set(item) != {"name", "value"}:
             raise HarnessCompileError("harness environment is invalid")
         name = item.get("name")
-        if type(name) is not str or name not in allowlist or name in names:
+        if type(name) is not str or name not in allowed_names or name in names:
             raise HarnessCompileError("harness environment is not allowlisted")
         result.append((name, _safe_scalar(item.get("value"), "harness environment")))
         names.add(name)
@@ -375,9 +384,8 @@ def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | N
         or not value["media_types"]
         or any(
             type(media_type) is not str
-            or re.fullmatch(
-                r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type
-            ) is None
+            or re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type)
+            is None
             for media_type in value["media_types"]
         )
         or len(set(value["media_types"])) != len(value["media_types"])
@@ -709,16 +717,13 @@ def require_source_bundle_identity(recipe: Mapping[str, object]) -> None:
     required = {"sha256", "expected_bytes", "media_type"}
     allowed = required | {"path"}
     path = context.get("path") if isinstance(context, Mapping) else None
-    path_is_valid = (
-        path is None
-        or (
-            type(path) is str
-            and bool(path)
-            and not path.startswith("/")
-            and "\\" not in path
-            and all(part not in {"", ".", ".."} for part in path.split("/"))
-            and PurePosixPath(path).as_posix() == path
-        )
+    path_is_valid = path is None or (
+        type(path) is str
+        and bool(path)
+        and not path.startswith("/")
+        and "\\" not in path
+        and all(part not in {"", ".", ".."} for part in path.split("/"))
+        and PurePosixPath(path).as_posix() == path
     )
     if (
         not isinstance(context, Mapping)

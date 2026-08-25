@@ -84,7 +84,9 @@ class DiffusersHarnessCompiler:
             modes=frozenset({"single", "data_parallel"}),
         )
         environment = compile_environment(
-            recipe, frozenset({"HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"})
+            recipe,
+            distribution,
+            frozenset({"HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"}),
         )
         return projection(
             slug=self.slug,
