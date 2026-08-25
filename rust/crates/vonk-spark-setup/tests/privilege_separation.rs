@@ -991,6 +991,32 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
 }
 
 #[test]
+fn existing_upgrade_preparation_does_not_read_root_private_firewall_state() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    fs::set_permissions(
+        &install_paths.firewall_config,
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    let mut prompt = NoPrompt;
+    let mut runner = RecordingRunner::default();
+
+    let result = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    assert!(result.is_ok());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
 fn tty_prompt_construction_is_lazy_for_headless_upgrades() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
