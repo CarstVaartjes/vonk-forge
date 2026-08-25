@@ -12,6 +12,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from .runtime_environment import distribution_allowed_environment
 from .schema_resources import read_runtime_schema
 
 
@@ -158,10 +159,16 @@ def _validate_model_version(document: Mapping[str, object]) -> None:
     source = document.get("source")
     if not isinstance(artifacts, list) or not isinstance(sizes, Mapping):
         raise CatalogContractError(
-            "catalog.model_version_shape", "artifacts", "model version inventory is invalid"
+            "catalog.model_version_shape",
+            "artifacts",
+            "model version inventory is invalid",
         )
-    ids = [artifact.get("id") for artifact in artifacts if isinstance(artifact, Mapping)]
-    paths = [artifact.get("path") for artifact in artifacts if isinstance(artifact, Mapping)]
+    ids = [
+        artifact.get("id") for artifact in artifacts if isinstance(artifact, Mapping)
+    ]
+    paths = [
+        artifact.get("path") for artifact in artifacts if isinstance(artifact, Mapping)
+    ]
     if len(ids) != len(artifacts) or len(set(ids)) != len(ids):
         raise CatalogContractError(
             "catalog.artifact_id", "artifacts", "artifact IDs must be unique"
@@ -210,6 +217,14 @@ def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
                 "image manifest digest must match the pinned image",
             )
     capabilities = document.get("capabilities")
+    try:
+        distribution_allowed_environment(capabilities)
+    except (TypeError, ValueError) as exc:
+        raise CatalogContractError(
+            "catalog.runtime_environment",
+            "capabilities.runtime_environment",
+            str(exc),
+        ) from exc
     distributed_capabilities = (
         tuple(
             (name, capabilities.get(name))
@@ -296,7 +311,9 @@ def parse_catalog_reference(
 ) -> CatalogReference:
     if set(value) != {"kind", "publisher", "slug", "content_sha256"}:
         raise CatalogContractError(
-            "catalog.reference_shape", "$", "reference must contain exactly kind, publisher, slug, and content_sha256"
+            "catalog.reference_shape",
+            "$",
+            "reference must contain exactly kind, publisher, slug, and content_sha256",
         )
     try:
         kind = CatalogKind(value["kind"])
@@ -309,7 +326,9 @@ def parse_catalog_reference(
     content_sha256 = value["content_sha256"]
     if not isinstance(publisher, str) or not _SLUG.fullmatch(publisher):
         raise CatalogContractError(
-            "catalog.reference_publisher", "publisher", "publisher must be a catalog slug"
+            "catalog.reference_publisher",
+            "publisher",
+            "publisher must be a catalog slug",
         )
     if not isinstance(slug, str) or not _SLUG.fullmatch(slug):
         raise CatalogContractError(
@@ -317,11 +336,15 @@ def parse_catalog_reference(
         )
     if not isinstance(content_sha256, str) or not _SHA256.fullmatch(content_sha256):
         raise CatalogContractError(
-            "catalog.reference_digest", "content_sha256", "content_sha256 must be a lowercase SHA-256 digest"
+            "catalog.reference_digest",
+            "content_sha256",
+            "content_sha256 must be a lowercase SHA-256 digest",
         )
     if expected_kind is not None and kind is not expected_kind:
         raise CatalogContractError(
-            "catalog.reference_kind", "kind", f"reference kind must be {expected_kind.value}"
+            "catalog.reference_kind",
+            "kind",
+            f"reference kind must be {expected_kind.value}",
         )
     return CatalogReference(kind, publisher, slug, content_sha256)
 

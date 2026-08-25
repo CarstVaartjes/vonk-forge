@@ -327,6 +327,7 @@ def _compile(
     slug: str,
     *,
     recipe: dict[str, object] | None = None,
+    distribution: dict[str, object] | None = None,
     parameters: dict[str, object] | None = None,
     topology: dict[str, object] | None = None,
     role: str = "entrypoint",
@@ -337,7 +338,9 @@ def _compile(
     return HarnessRegistry.with_builtins().compile(
         harness,
         recipe=selected_recipe,
-        distribution=_distribution(slug, harness),
+        distribution=(
+            distribution if distribution is not None else _distribution(slug, harness)
+        ),
         patch=None,
         parameters=parameters or {},
         topology=topology or selected_recipe["topology"],
@@ -1204,8 +1207,25 @@ def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None
     recipe["runtime"]["environment"] = [
         {"name": name, "value": value} for name, value in expected.items()
     ]
+    harness = _harness_document("vllm")
+    distribution = _distribution("vllm", harness)
+    distribution["capabilities"] = {
+        "runtime_environment": {
+            "allowed_names": [
+                "B12X_CUTE_COMPILE_CACHE_DIR",
+                "TORCH_FR_BUFFER_SIZE",
+                "TORCH_FR_DUMP_TEMP_FILE",
+                "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
+                "TORCH_NCCL_DUMP_ON_TIMEOUT",
+                "TORCH_NCCL_ENABLE_MONITORING",
+            ]
+        }
+    }
+    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
+        distribution
+    )
 
-    projection = _compile("vllm", recipe=recipe)
+    projection = _compile("vllm", recipe=recipe, distribution=distribution)
 
     assert set(projection.environment) == set(expected.items())
 
@@ -1258,6 +1278,43 @@ def test_builtin_harness_emits_only_allowlisted_environment(slug: str) -> None:
     projection = _compile(slug, recipe=recipe)
 
     assert projection.environment == ((name, value),)
+
+
+@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
+def test_builtin_harness_accepts_distribution_environment_authority(slug: str) -> None:
+    recipe = _recipe(slug)
+    recipe["runtime"]["environment"] = [
+        {"name": "UPSTREAM_RUNTIME_TUNING", "value": "enabled"}
+    ]
+    harness = _harness_document(slug)
+    distribution = _distribution(slug, harness)
+    distribution["capabilities"] = {
+        "runtime_environment": {"allowed_names": ["UPSTREAM_RUNTIME_TUNING"]}
+    }
+    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
+        distribution
+    )
+
+    projection = _compile(slug, recipe=recipe, distribution=distribution)
+
+    assert projection.environment == (("UPSTREAM_RUNTIME_TUNING", "enabled"),)
+
+
+@pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH", "VONK_MASTER_ADDR"])
+def test_builtin_harness_rejects_unsafe_distribution_environment_authority(
+    unsafe: str,
+) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["environment"] = [{"name": unsafe, "value": "/tmp/value"}]
+    harness = _harness_document("vllm")
+    distribution = _distribution("vllm", harness)
+    distribution["capabilities"] = {"runtime_environment": {"allowed_names": [unsafe]}}
+    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
+        distribution
+    )
+
+    with pytest.raises(HarnessCompileError, match="invalid"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)

@@ -76,7 +76,9 @@ class ComfyUiHarnessCompiler:
             modes=frozenset({"single", "data_parallel"}),
         )
         environment = compile_environment(
-            recipe, frozenset({"COMFYUI_DISABLE_TELEMETRY", "HF_HUB_OFFLINE"})
+            recipe,
+            distribution,
+            frozenset({"COMFYUI_DISABLE_TELEMETRY", "HF_HUB_OFFLINE"}),
         )
         return projection(
             slug=self.slug,

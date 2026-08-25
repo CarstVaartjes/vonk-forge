@@ -102,7 +102,9 @@ class PytorchPipelineHarnessCompiler:
             modes=frozenset({"single", "data_parallel"}),
         )
         environment = compile_environment(
-            recipe, frozenset({"HF_HUB_OFFLINE", "PYTORCH_CUDA_ALLOC_CONF"})
+            recipe,
+            distribution,
+            frozenset({"HF_HUB_OFFLINE", "PYTORCH_CUDA_ALLOC_CONF"}),
         )
         return projection(
             slug=self.slug,

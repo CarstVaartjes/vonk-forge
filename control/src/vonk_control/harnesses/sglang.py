@@ -188,6 +188,7 @@ class SglangHarnessCompiler:
             )
         environment = compile_environment(
             recipe,
+            distribution,
             frozenset(
                 {"NCCL_DEBUG", "HF_HUB_OFFLINE", "SGLANG_ENABLE_UNIFIED_RADIX_TREE"}
             ),
