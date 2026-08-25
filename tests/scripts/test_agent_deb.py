@@ -230,8 +230,16 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
 
     assert 'if [ -n "${2:-}" ]' in postinst
     upgrade_guard = postinst.index('if [ -n "${2:-}" ]')
-    assert postinst.index("deb-systemd-invoke restart", upgrade_guard) > upgrade_guard
-    assert postinst.index("self-test", upgrade_guard) > upgrade_guard
+    restart = postinst.index("deb-systemd-invoke restart", upgrade_guard)
+    self_test = postinst.index("post_restart_self_test", upgrade_guard)
+    assert restart > upgrade_guard
+    assert self_test > restart
+    helper = postinst.index("post_restart_self_test()")
+    assert postinst.index("self-test", helper) < upgrade_guard
+    assert 'while [ "$self_test_attempts" -lt 5 ]' in postinst
+    assert "[ -d /run/vonk-forge-agent ]" in postinst
+    assert "sleep 1" in postinst
+    assert postinst.count("sleep 1") == 1
     for forbidden in (
         "verify-readiness",
         "MainPID",
