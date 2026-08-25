@@ -708,13 +708,6 @@ def _public_recipe_tags(document: Mapping[str, object]) -> set[str]:
     return {value.lower() for value in raw_tags if isinstance(value, str)}
 
 
-def _public_recipe_is_executable(document: Mapping[str, object]) -> bool:
-    readiness, _basis, _detail = _public_recipe_execution_readiness(
-        _public_recipe_tags(document)
-    )
-    return readiness == "executable"
-
-
 def _public_recipe_source(
     document: Mapping[str, object],
 ) -> tuple[str | None, str | None]:
@@ -931,50 +924,20 @@ def install_catalog_routes(
             )
         return global_catalog.fetch(uri)
 
-    def public_remote(uri: str) -> tuple[Literal["global", "recipe_library"], object]:
-        if recipe_library is not None:
-            try:
-                return "recipe_library", recipe_library.fetch(uri)
-            except RecipeLibraryError:
-                pass
-        return "global", remote(uri)
-
-    def public_preview(
-        source: Literal["global", "recipe_library"], value: object
-    ) -> dict[str, object]:
-        if source == "recipe_library":
-            assert isinstance(value, RecipeLibraryItem)
-            release_state, changes = _public_recipe_release_state(
-                source_kind="recipe_library",
-                publisher=value.publisher,
-                content_sha256=value.content_sha256,
-                releases=value.release_history,
-                local=catalog()
-                .recipe_catalog_local_revisions([value.slug])
-                .get(value.slug),
+    def public_remote(uri: str) -> RecipeLibraryItem:
+        if recipe_library is None:
+            raise RecipeLibraryError(
+                "recipe_library.unavailable",
+                "recipe library is not configured",
             )
-            return {
-                "publisher": value.publisher,
-                "slug": value.slug,
-                "title": value.title,
-                "description": value.description,
-                "tags": list(value.tags),
-                "uri": value.uri,
-                "content_sha256": value.content_sha256,
-                "source": source,
-                **_public_recipe_metadata(value.document, value.dependencies),
-                **release_state,
-                "changes_since_local": changes,
-            }
-        assert isinstance(value, GlobalRecipeRevision)
-        metadata = value.document.get("metadata")
-        metadata = metadata if isinstance(metadata, dict) else {}
-        tags = metadata.get("tags", [])
+        return recipe_library.fetch(uri)
+
+    def public_preview(value: RecipeLibraryItem) -> dict[str, object]:
         release_state, changes = _public_recipe_release_state(
-            source_kind="global",
+            source_kind="recipe_library",
             publisher=value.publisher,
             content_sha256=value.content_sha256,
-            releases=(),
+            releases=value.release_history,
             local=catalog()
             .recipe_catalog_local_revisions([value.slug])
             .get(value.slug),
@@ -982,13 +945,13 @@ def install_catalog_routes(
         return {
             "publisher": value.publisher,
             "slug": value.slug,
-            "title": metadata.get("title", value.slug),
-            "description": metadata.get("description", ""),
-            "tags": tags if isinstance(tags, list) else [],
+            "title": value.title,
+            "description": value.description,
+            "tags": list(value.tags),
             "uri": value.uri,
             "content_sha256": value.content_sha256,
-            "source": source,
-            **_public_recipe_metadata(value.document),
+            "source": "recipe_library",
+            **_public_recipe_metadata(value.document, value.dependencies),
             **release_state,
             "changes_since_local": changes,
         }
@@ -1536,13 +1499,8 @@ def install_catalog_routes(
             )
         try:
             snapshot = recipe_library.list()
-            executable_items = tuple(
-                item
-                for item in snapshot.items
-                if _public_recipe_is_executable(item.document)
-            )
             local_revisions = catalog().recipe_catalog_local_revisions(
-                [item.slug for item in executable_items]
+                [item.slug for item in snapshot.items]
             )
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
@@ -1569,7 +1527,7 @@ def install_catalog_routes(
                         local=local_revisions.get(item.slug),
                     )[0],
                 }
-                for item in executable_items
+                for item in snapshot.items
             ],
         }
 
@@ -1585,12 +1543,10 @@ def install_catalog_routes(
     ):
         administrator(actor)
         try:
-            source, value = public_remote(body.uri)
-            return public_preview(source, value)
+            value = public_remote(body.uri)
+            return public_preview(value)
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
-        except GlobalCatalogError as error:
-            return global_problem(request, error)
 
     @app.post(
         "/api/v1/catalog/imports/public",
@@ -1605,8 +1561,8 @@ def install_catalog_routes(
     ):
         administrator(actor)
         try:
-            source, value = public_remote(body.uri)
-            preview = public_preview(source, value)
+            value = public_remote(body.uri)
+            preview = public_preview(value)
             if preview["content_sha256"] != body.expected_content_sha256:
                 return _problem(
                     request,
@@ -1624,45 +1580,7 @@ def install_catalog_routes(
                         "explicitly declare a complete executable runtime contract",
                     ),
                 )
-            if source == "recipe_library":
-                assert isinstance(value, RecipeLibraryItem)
-                if value.source_bundle is not None:
-                    build = value.document.get("build")
-                    context = build.get("context") if isinstance(build, dict) else None
-                    source_sha256 = (
-                        context.get("sha256") if isinstance(context, dict) else None
-                    )
-                    if not isinstance(source_sha256, str):
-                        raise CatalogValidationError(
-                            "recipe_library.source_invalid",
-                            "recipe library source identity is invalid",
-                        )
-                    catalog().store_source_bundle(
-                        source_sha256,
-                        io.BytesIO(value.source_bundle),
-                        actor.subject,
-                    )
-                result = catalog().import_recipe_library(
-                    actor.subject,
-                    library_commit=value.library_commit,
-                    source_path=value.source_path,
-                    document=value.document,
-                    expected_content_sha256=value.content_sha256,
-                    dependency_documents=value.dependencies,
-                    release_version=(
-                        value.release_history[0].version
-                        if value.release_history
-                        else None
-                    ),
-                    release_released_at=(
-                        value.release_history[0].released_at
-                        if value.release_history
-                        else None
-                    ),
-                )
-                action = "catalog.public.import"
-            else:
-                assert isinstance(value, GlobalRecipeRevision)
+            if value.source_bundle is not None:
                 build = value.document.get("build")
                 context = build.get("context") if isinstance(build, dict) else None
                 source_sha256 = (
@@ -1670,25 +1588,37 @@ def install_catalog_routes(
                 )
                 if not isinstance(source_sha256, str):
                     raise CatalogValidationError(
-                        "global.source_invalid",
-                        "global recipe source identity is invalid",
+                        "recipe_library.source_invalid",
+                        "recipe library source identity is invalid",
                     )
-                source_bundle = (
-                    global_catalog.fetch_source_bundle(source_sha256)
-                    if global_catalog is not None
-                    else b""
-                )
                 catalog().store_source_bundle(
-                    source_sha256, io.BytesIO(source_bundle), actor.subject
+                    source_sha256,
+                    io.BytesIO(value.source_bundle),
+                    actor.subject,
                 )
-                result = catalog().import_global(actor.subject, value)
-                action = "catalog.public.import"
+            result = catalog().import_recipe_library(
+                actor.subject,
+                library_commit=value.library_commit,
+                source_path=value.source_path,
+                document=value.document,
+                expected_content_sha256=value.content_sha256,
+                dependency_documents=value.dependencies,
+                release_version=(
+                    value.release_history[0].version
+                    if value.release_history
+                    else None
+                ),
+                release_released_at=(
+                    value.release_history[0].released_at
+                    if value.release_history
+                    else None
+                ),
+            )
+            action = "catalog.public.import"
         except CatalogError as error:
             return _problem(request, error)
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
-        except GlobalCatalogError as error:
-            return global_problem(request, error)
         audits.append(
             AuditRecord(
                 request.state.request_id,

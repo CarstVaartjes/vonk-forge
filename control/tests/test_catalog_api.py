@@ -28,6 +28,7 @@ from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_library import (
     RecipeLibraryChange,
+    RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
@@ -743,8 +744,32 @@ def test_explicit_recipe_library_import_records_commit_and_requires_admin(
     )
 
 
-def test_public_recipe_import_uses_global_catalog_for_manual_uri(bridge_api) -> None:
-    client, headers, _audits, _service, remote = bridge_api
+def test_public_recipe_import_never_falls_back_to_global_catalog_for_manual_uri(
+    bridge_api,
+) -> None:
+    _client, headers, audits, service, remote = bridge_api
+
+    class MissingLibrary:
+        def fetch(self, uri: str):
+            assert uri == remote.uri
+            raise RecipeLibraryError(
+                "recipe_library.not_found",
+                "recipe is absent from the immutable library snapshot",
+            )
+
+    class ForbiddenGlobalFallback:
+        def fetch(self, _uri: str):
+            raise AssertionError("public import must not query the global catalog")
+
+    client = TestClient(
+        _catalog_app(
+            TokenCodec(b"b" * 32),
+            audits,
+            service,
+            global_catalog=ForbiddenGlobalFallback(),
+            recipe_library=MissingLibrary(),
+        )
+    )
 
     preview = client.post(
         "/api/v1/catalog/imports/public/preview",
@@ -757,10 +782,11 @@ def test_public_recipe_import_uses_global_catalog_for_manual_uri(bridge_api) -> 
         json={"uri": remote.uri, "expected_content_sha256": remote.content_sha256},
     )
 
-    assert preview.status_code == 200
-    assert preview.json()["source"] == "global"
-    assert imported.status_code == 201, imported.text
-    assert imported.json()["origin"] == "global"
+    assert preview.status_code == 404
+    assert preview.json()["code"] == "recipe_library.not_found"
+    assert imported.status_code == 404
+    assert imported.json()["code"] == "recipe_library.not_found"
+    assert service.list_recipes()[0] == []
 
 
 def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
@@ -834,7 +860,7 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
         ("integration-required", "integration-required"),
     ],
 )
-def test_public_catalog_hides_and_rejects_recipes_without_executable_contract(
+def test_public_catalog_lists_and_rejects_recipes_without_executable_contract(
     bridge_api, readiness_tag: str | None, expected_readiness: str
 ) -> None:
     _client, _headers, audits, service, remote = bridge_api
@@ -903,7 +929,11 @@ def test_public_catalog_hides_and_rejects_recipes_without_executable_contract(
     )
 
     assert listed.status_code == 200, listed.text
-    assert [recipe["slug"] for recipe in listed.json()["recipes"]] == [remote.slug]
+    assert [recipe["slug"] for recipe in listed.json()["recipes"]] == [
+        item.slug,
+        remote.slug,
+    ]
+    assert listed.json()["recipes"][0]["execution_readiness"] == expected_readiness
     assert preview.status_code == 200, preview.text
     assert preview.json()["execution_readiness"] == expected_readiness
     assert imported.status_code == 422, imported.text

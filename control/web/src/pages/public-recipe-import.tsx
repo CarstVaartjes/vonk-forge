@@ -14,6 +14,13 @@ const PUBLIC_RECIPE_CAPABILITIES: Array<{value: PublicRecipeCapability; label: s
   {value: "3d", label: "3D"},
 ];
 
+const PUBLIC_RECIPE_READINESS: Array<{value: PublicRecipeExecutionReadiness; label: string}> = [
+  {value: "executable", label: "Executable contract"},
+  {value: "integration-required", label: "Integration required"},
+  {value: "not-executable", label: "Not executable"},
+  {value: "not-declared", label: "Readiness not declared"},
+];
+
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type RecipeSort = "catalog" | "model" | "sparks" | "download";
 type LocalFilter = "" | "not-imported" | "update-available" | "current" | "needs-review";
@@ -77,7 +84,7 @@ const EMPTY_FILTERS: PublicRecipeFilters = {
 const VALID_SPARKS = new Set<SparkFilter>(["", "1", "2", "3", "4+"]);
 const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download"]);
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
-const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", "executable"]);
+const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", ...PUBLIC_RECIPE_READINESS.map(option => option.value)]);
 const VALID_CAPABILITIES = new Set(PUBLIC_RECIPE_CAPABILITIES.map(option => option.value));
 
 function storedCatalogView(): CatalogView {
@@ -538,7 +545,13 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     setSaving(false);
   }, [selectedUri, step]);
 
-  const models = useMemo(() => Array.from(new Map(recipes.map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries()).sort((a, b) => a[1].localeCompare(b[1])), [recipes]);
+  const models = useMemo(() => {
+    const identities = Array.from(new Map(recipes.map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries());
+    const titleCounts = identities.reduce((counts, [, title]) => counts.set(title, (counts.get(title) ?? 0) + 1), new Map<string, number>());
+    return identities
+      .map(([value, title]) => [value, titleCounts.get(title) === 1 ? title : `${title} · ${value}`] as const)
+      .sort((a, b) => a[1].localeCompare(b[1]));
+  }, [recipes]);
   const sourceOwners = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_owner ? [recipe.source_owner] : []))).sort(), [recipes]);
   const repositories = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_repository ? [recipe.source_repository] : []))).sort(), [recipes]);
   const runtimes = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.runtime_distribution))).sort(), [recipes]);
@@ -681,7 +694,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
         <label><span>Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
         <label><span>Qualification</span><select aria-label="Filter by qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as PublicRecipeFilters["qualification"])}><option value="">Any status ({count("qualification", () => true)})</option><option value="cataloged" disabled={count("qualification", recipe => recipe.qualification === "cataloged") === 0}>Accepted ({count("qualification", recipe => recipe.qualification === "cataloged")})</option><option value="candidate" disabled={count("qualification", recipe => recipe.qualification === "candidate") === 0}>Candidate ({count("qualification", recipe => recipe.qualification === "candidate")})</option></select></label>
-        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">All executable recipes ({count("readiness", () => true)})</option><option value="executable" disabled={count("readiness", recipe => recipe.execution_readiness === "executable") === 0}>Executable contract ({count("readiness", recipe => recipe.execution_readiness === "executable")})</option></select></label>
+        <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">Any readiness ({count("readiness", () => true)})</option>{PUBLIC_RECIPE_READINESS.map(option => { const available = count("readiness", recipe => recipe.execution_readiness === option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
         <label><span>Local status</span><select aria-label="Filter by local status" value={filters.local} onChange={event => updateFilter("local", event.target.value as LocalFilter)}><option value="">All ({count("local", () => true)})</option>{(["not-imported", "update-available", "current", "needs-review"] as LocalFilter[]).map(value => { const available = count("local", recipe => localMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value === "not-imported" ? "Not installed" : value === "update-available" ? "Update available" : value === "current" ? "Installed current" : "Needs review"} ({available})</option>; })}</select></label>
         <button type="button" className="button secondary public-import-more-toggle" aria-expanded={more} aria-controls="public-import-more-filters" onClick={() => onNavigate(publicRecipeImportUrl(filters, {more: !more}), true)}>{more ? "Hide more filters" : "More filters"}</button>
         <div id="public-import-more-filters" hidden={!more} className="public-import-more-filters">

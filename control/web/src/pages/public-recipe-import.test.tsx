@@ -69,8 +69,8 @@ async function advanceRequestTime(milliseconds: number) {
 
 it("round-trips validated URL state with readiness, source owner, and repeated capabilities", () => {
   const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?step=confirm").step).toBe("catalog");
@@ -87,6 +87,21 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   await userEvent.click(screen.getByRole("checkbox", {name: /Vision/}));
   expect(screen.getByRole("heading", {name: "both", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "chat", level: 3})).not.toBeInTheDocument();
+});
+
+it("disambiguates distinct model identities that share a display title", async () => {
+  const mova360 = recipe("mova-360p-recipe", {model_publisher: "openmoss", model_slug: "mova-360p", model_title: "MOVA"});
+  const mova720 = recipe("mova-720p-recipe", {model_publisher: "openmoss", model_slug: "mova-720p", model_title: "MOVA"});
+  render(<Harness api={apiFor([mova360, mova720])}/>);
+
+  const models = await screen.findByRole("combobox", {name: "Filter by model"});
+  expect(within(models).getByRole("option", {name: "MOVA · openmoss/mova-360p (1)"})).toBeVisible();
+  expect(within(models).getByRole("option", {name: "MOVA · openmoss/mova-720p (1)"})).toBeVisible();
+
+  await userEvent.selectOptions(models, "openmoss/mova-360p");
+  expect(screen.getByRole("heading", {name: "MOVA", level: 3})).toBeVisible();
+  expect(screen.getByText(mova360.title)).toBeVisible();
+  expect(screen.queryByText(mova720.title)).not.toBeInTheDocument();
 });
 
 it("persists the compact catalog preference independently from URL state", async () => {
@@ -165,7 +180,7 @@ it("hydrates legacy creator and original-repository filters under truthful sourc
   expect(screen.getByRole("button", {name: /Repository: MiaLabs\/Alpha/})).toBeVisible();
 });
 
-it("keeps unsupported readiness out of normal filters and blocks its import while preserving evidence", async () => {
+it("lists every readiness status and blocks unsupported imports while preserving evidence", async () => {
   const executableCandidate = recipe("Executable", {execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable contract declared."});
   const blockedAccepted = recipe("Metadata", {qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted review evidence.", execution_readiness: "not-executable", execution_readiness_basis: "explicit-non-executable-metadata", execution_readiness_detail: "No executable runtime contract."});
   const importPublicRecipe = vi.fn();
@@ -175,7 +190,7 @@ it("keeps unsupported readiness out of normal filters and blocks its import whil
   expect(await screen.findByRole("heading", {name: "Metadata", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "Executable", level: 3})).not.toBeInTheDocument();
   const readiness = screen.getByRole("combobox", {name: "Filter by execution readiness"});
-  expect(within(readiness).getAllByRole("option").map(option => option.getAttribute("value"))).toEqual(["", "executable"]);
+  expect(within(readiness).getAllByRole("option").map(option => option.getAttribute("value"))).toEqual(["", "executable", "integration-required", "not-executable", "not-declared"]);
   expect(screen.getByText("Not executable")).toBeVisible();
   expect(screen.getByText("Accepted · v1.1.0")).toBeVisible();
   await userEvent.click(screen.getByRole("button", {name: `Review ${blockedAccepted.title}`}));
