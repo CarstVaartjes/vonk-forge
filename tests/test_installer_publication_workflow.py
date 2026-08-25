@@ -405,6 +405,19 @@ def test_publication_refreshes_both_signed_channels_before_expiry() -> None:
         "stable",
     }
     assert refresh["environment"] == "installer-promotion-${{ matrix.channel }}"
+    availability = next(
+        step for step in refresh["steps"] if step.get("id") == "availability"
+    )
+    assert availability["name"] == "Detect published channel"
+    assert "rclone lsf" in availability["run"]
+    assert "refs/tags/v" in availability["run"]
+    assert "Stable installer channel is not published yet" in availability["run"]
+    renewal = next(
+        step
+        for step in refresh["steps"]
+        if step["name"] == "Verify immutable generation and refresh signed pointer"
+    )
+    assert renewal["if"] == "steps.availability.outputs.published == 'true'"
 
 
 def test_setup_build_matrix_is_complete_and_native() -> None:

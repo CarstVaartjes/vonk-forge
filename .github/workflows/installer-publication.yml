@@ -954,7 +954,53 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes rclone
 
+      - name: Detect published channel
+        id: availability
+        shell: bash
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          pointer=$(rclone lsf \
+            --files-only \
+            --include current.manifest \
+            --max-depth 1 \
+            "r2:$R2_INSTALLER_PUBLIC_BUCKET/artifacts/$CHANNEL")
+          case "$pointer" in
+            current.manifest)
+              printf 'published=true\n' >> "$GITHUB_OUTPUT"
+              ;;
+            '')
+              if [ "$CHANNEL" != stable ]; then
+                echo "published $CHANNEL channel manifest is missing" >&2
+                exit 1
+              fi
+              remote_tags=$(git ls-remote --tags origin)
+              if printf '%s\n' "$remote_tags" \
+                | grep -E '^.+[[:space:]]+refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+              then
+                echo "stable channel manifest is missing despite a stable release tag" >&2
+                exit 1
+              fi
+              printf 'published=false\n' >> "$GITHUB_OUTPUT"
+              echo "::notice::Stable installer channel is not published yet; skipping refresh"
+              ;;
+            *)
+              echo "channel pointer listing is inconsistent" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Verify immutable generation and refresh signed pointer
+        if: steps.availability.outputs.published == 'true'
         shell: bash
         env:
           CHANNEL: ${{ matrix.channel }}
