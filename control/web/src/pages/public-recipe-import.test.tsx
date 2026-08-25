@@ -5,7 +5,7 @@ import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {PublicRecipeImportPage, parsePublicRecipeImportUrl, publicRecipeImportUrl, publicRecipeMatches, type PublicRecipeFilters} from "./public-recipe-import";
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
+  query: "", modelType: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
@@ -67,10 +67,11 @@ async function advanceRequestTime(milliseconds: number) {
   });
 }
 
-it("round-trips validated URL state with readiness, source owner, and repeated capabilities", () => {
-  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+it("round-trips validated URL state with model type, readiness, source owner, and repeated capabilities", () => {
+  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsePublicRecipeImportUrl("/library/import?model_type=bogus").filters.modelType).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?step=confirm").step).toBe("catalog");
@@ -80,6 +81,7 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   const both = recipe("both", {node_count: 4, capabilities: ["chat", "vision"]});
   const chat = recipe("chat", {node_count: 3, capabilities: ["chat"]});
   render(<Harness api={apiFor([both, chat])}/>);
+  await userEvent.click(await screen.findByRole("button", {name: "More filters"}));
   const sparks = await screen.findByRole("combobox", {name: "Filter by required Sparks"});
   expect(within(sparks).getAllByRole("option").map(option => option.getAttribute("value"))).toEqual(["", "1", "2", "3", "4+"]);
   expect(within(sparks).queryByRole("option", {name: /^4 Sparks/})).not.toBeInTheDocument();
@@ -87,6 +89,41 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   await userEvent.click(screen.getByRole("checkbox", {name: /Vision/}));
   expect(screen.getByRole("heading", {name: "both", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "chat", level: 3})).not.toBeInTheDocument();
+});
+
+it("puts broad model type first and limits model identities without hiding overlapping categories", async () => {
+  const language = recipe("language", {model_publisher: "acme", model_slug: "language", model_title: "Language model", capabilities: ["chat", "reasoning"]});
+  const image = recipe("image", {model_publisher: "acme", model_slug: "image", model_title: "Image model", capabilities: ["image-generation"]});
+  const multimodal = recipe("multimodal", {model_publisher: "acme", model_slug: "multimodal", model_title: "Multimodal model", capabilities: ["chat", "vision", "image-editing"]});
+  render(<Harness api={apiFor([language, image, multimodal])}/>);
+
+  const modelType = await screen.findByRole("combobox", {name: "Filter by model type"});
+  const model = screen.getByRole("combobox", {name: "Filter by model"});
+  expect(modelType.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(modelType).getByRole("option", {name: "Language / chat (2)"})).toBeEnabled();
+  expect(within(modelType).getByRole("option", {name: "Image (2)"})).toBeEnabled();
+
+  await userEvent.selectOptions(modelType, "image");
+  const imageModels = screen.getByRole("combobox", {name: "Filter by model"});
+  expect(within(imageModels).queryByRole("option", {name: /Language model/})).not.toBeInTheDocument();
+  expect(within(imageModels).getByRole("option", {name: /Image model/})).toBeVisible();
+  expect(within(imageModels).getByRole("option", {name: /Multimodal model/})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: "Language model", level: 3})).not.toBeInTheDocument();
+
+  await userEvent.selectOptions(imageModels, "acme/image");
+  await userEvent.selectOptions(screen.getByRole("combobox", {name: "Filter by model type"}), "language");
+  expect(screen.getByRole("combobox", {name: "Filter by model"})).toHaveValue("");
+  expect(screen.getByRole("heading", {name: "Language model", level: 3})).toBeVisible();
+  expect(screen.getByRole("heading", {name: "Multimodal model", level: 3})).toBeVisible();
+});
+
+it("keeps sorting with the result controls instead of treating it as an applied filter", async () => {
+  render(<Harness api={apiFor([recipe("Zulu"), recipe("Alpha")])}/>);
+  const sort = await screen.findByRole("combobox", {name: "Sort recipes"});
+  expect(sort.closest(".public-import-results-tools")).not.toBeNull();
+  await userEvent.selectOptions(sort, "model");
+  expect(screen.queryByRole("button", {name: /Sort:/})).not.toBeInTheDocument();
+  expect(screen.getAllByRole("heading", {level: 3}).map(element => element.textContent)).toEqual(["Alpha", "Zulu"]);
 });
 
 it("disambiguates distinct model identities that share a display title", async () => {

@@ -95,8 +95,8 @@
 
 .public-import-filter-rail {
   display: grid;
-  gap: 0.8rem;
-  padding: 1rem;
+  gap: 0.58rem;
+  padding: 0.85rem;
   position: sticky;
   top: 1rem;
 }
@@ -227,7 +227,7 @@
 .public-import-more-filters label,
 .public-import-manual label {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
 .public-import-filter-rail input,
@@ -257,20 +257,22 @@
 .public-import-more-filters {
   border-top: 1px solid var(--border);
   display: grid;
-  gap: 0.75rem;
-  padding-top: 0.8rem;
+  gap: 0.55rem;
+  padding-top: 0.65rem;
 }
 
 .public-import-capabilities {
   border: 0;
   display: grid;
-  gap: 0.35rem;
+  gap: 0.3rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 0;
   min-width: 0;
   padding: 0;
 }
 
 .public-import-capabilities legend {
+  grid-column: 1 / -1;
   margin-bottom: 0.3rem;
 }
 
@@ -289,10 +291,10 @@
   border-radius: 0.55rem;
   cursor: pointer;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.35rem;
   grid-template-columns: auto 1fr auto;
   min-height: 2.75rem;
-  padding: 0.45rem 0.6rem;
+  padding: 0.35rem 0.45rem;
 }
 
 .public-import-capabilities label:has(input:checked) {
@@ -357,13 +359,39 @@
 }
 
 .public-import-results-tools {
-  align-items: start;
+  align-items: center;
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 0.65rem;
   justify-content: space-between;
   margin: 0 -0.1rem 0.85rem;
   padding: 0 0.1rem 0.8rem;
+}
+
+.public-import-results-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.public-import-sort {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.public-import-sort > span {
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.public-import-sort select {
+  min-height: 2.75rem;
 }
 
 .public-import-view-switch {
@@ -1250,6 +1278,16 @@
 
   .public-import-view-switch {
     width: 100%;
+  }
+
+  .public-import-results-controls,
+  .public-import-sort {
+    width: 100%;
+  }
+
+  .public-import-sort select {
+    flex: 1;
+    min-width: 0;
   }
 
   .public-import-snapshot {
