@@ -62,13 +62,17 @@ test("renders the complete node telemetry hierarchy and distinct recipe groups",
   expect(within(card).getByText("12.5% · load 1.50")).toBeVisible();
   expect(within(card).getByText("42.5 °C")).toBeVisible();
   expect(within(card).getByText("18.3 W")).toBeVisible();
+  expect(within(card).getByText("↓ 1.0 KiB/s · ↑ 512 B/s")).toBeVisible();
   expect(within(card).getByText("Updated 2 seconds ago")).toBeVisible();
   expect(within(card).getByText("Updated 2 seconds ago")).toHaveAttribute("title");
 
   const workloads = within(card).getByLabelText("Workloads on Spark One");
-  expect(workloads).toHaveTextContent("Loaded now1Qwen pair");
-  expect(workloads).toHaveTextContent("Installed1Qwen pair");
-  expect(workloads).toHaveTextContent("2 workload states need attention");
+  expect(workloads).toHaveTextContent("Loaded now2");
+  expect(workloads).toHaveTextContent("Installed2");
+  expect(within(workloads).getAllByText("Qwen pair")).toHaveLength(2);
+  expect(within(workloads).getAllByText("Vision pair")).toHaveLength(2);
+  expect(workloads).toHaveTextContent("vision · degraded");
+  expect(workloads).toHaveTextContent("partial");
   expect(within(card).getByText("Vision pair route is not published.")).toBeVisible();
 });
 
