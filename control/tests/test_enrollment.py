@@ -581,6 +581,34 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
         enrollment.renew(NODE_ID, renewed.serial, csr())
 
 
+def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_valid(
+    service,
+) -> None:
+    enrollment, sessions, clock, authority = service
+    issued = enroll(enrollment)
+    request = csr()
+    stale = enrollment.renew(NODE_ID, issued.serial, request)
+    with sessions.begin() as session:
+        source = session.get(AgentCertificate, issued.serial)
+        staged = session.get(AgentCertificate, stale.serial)
+        assert source is not None and staged is not None
+        source.not_after = clock.now + timedelta(hours=1)
+        staged.not_after = clock.now - timedelta(seconds=1)
+
+    replacement = enrollment.renew(NODE_ID, issued.serial, request)
+
+    assert replacement.serial != stale.serial
+    assert replacement.generation == stale.generation + 1
+    assert len(authority.calls) == 3
+    with sessions() as session:
+        expired = session.get(AgentCertificate, stale.serial)
+        replacement_row = session.get(AgentCertificate, replacement.serial)
+        assert expired is not None and expired.state == "revoked"
+        assert expired.revoked_at is not None
+        assert expired.revoked_at.replace(tzinfo=UTC) == clock.now
+        assert replacement_row is not None and replacement_row.state == "staged"
+
+
 def test_renewal_intent_is_committed_before_provider_call(service) -> None:
     enrollment, sessions, _clock, authority = service
     issued = enroll(enrollment)

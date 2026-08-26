@@ -28,7 +28,8 @@ size or repository-owned node list.
 ## Re-enroll an installed Spark
 
 Use **Re-enroll Spark** in Fleet when the controller database was restored or
-reset, or when an installed Spark needs a replacement certificate. Run the
+reset, when an installed Spark's certificate expired after it could not rotate,
+or when a stale staged generation needs replacement. Run the
 generated command; it uses the NAS installation's own publication channel and
 the same generic enrollment intent used for a new Spark:
 

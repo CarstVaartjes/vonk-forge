@@ -83,29 +83,6 @@ ensure_subid_range() {
     esac
 }
 
-# systemd may report the restart request complete before RuntimeDirectory and
-# the freshly restarted agent's identity paths are simultaneously observable
-# to this maintainer process. Keep the package transaction local, but tolerate
-# that short upgrade-only convergence window. A persistent failure is rerun
-# without stderr suppression so dpkg retains an actionable error.
-post_restart_self_test() {
-    self_test_attempts=0
-    while [ "$self_test_attempts" -lt 5 ]; do
-        if [ -d /run/vonk-forge-agent ] \
-            && /usr/lib/vonk-forge/vonk-agent \
-                --config /etc/vonk-forge-agent/agent.toml self-test \
-                >/dev/null 2>&1; then
-            return 0
-        fi
-        self_test_attempts=$((self_test_attempts + 1))
-        if [ "$self_test_attempts" -lt 5 ]; then
-            sleep 1
-        fi
-    done
-    /usr/lib/vonk-forge/vonk-agent \
-        --config /etc/vonk-forge-agent/agent.toml self-test >/dev/null
-}
-
 sub_uid_min=$(login_value SUB_UID_MIN 100000)
 sub_uid_max=$(login_value SUB_UID_MAX 600100000)
 sub_uid_count=$(login_value SUB_UID_COUNT 65536)
@@ -164,8 +141,11 @@ fi
 if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
     if [ -n "${2:-}" ]; then
+        # Restart an upgraded agent, but do not make dpkg configuration depend
+        # on controller reachability or the continued existence of systemd's
+        # transient RuntimeDirectory. The signed Spark installer owns the
+        # sustained-readiness gate and explicit re-enrollment recovery.
         deb-systemd-invoke restart vonk-forge-agent.service >/dev/null
-        post_restart_self_test
     fi
 fi
 
