@@ -17,8 +17,10 @@ from .control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
+from .controller_cli import add_controller_commands, run_controller
 
 _MAX_TEXT_CHARS = 1_024
+_MAX_COLLECTION_ITEMS = 1_024
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b(authorization|api[_-]?key|password|secret|token)\b"
     r"(\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
@@ -27,6 +29,8 @@ _BEARER = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _SENSITIVE_OPTION = re.compile(
     r"(?i)^--(?:[a-z0-9]+-)*(?:authorization|api-key|password|secret|token|private-key)(?:=|$)"
 )
+
+
 class _UsageError(ValueError):
     pass
 
@@ -44,6 +48,14 @@ class _RoutineControlClient(Protocol):
     def nodes(self) -> _GeneratedModel: ...
 
     def endpoint(self, alias: str) -> _GeneratedModel: ...
+
+
+def _runs_without_controller(args: argparse.Namespace) -> bool:
+    if args.command == "admin" and args.admin_command == "deploy":
+        return not args.apply
+    if args.command == "library" and args.library_command == "template":
+        return True
+    return hasattr(args, "apply") and not args.apply
 
 
 def _add_json(command: argparse.ArgumentParser) -> None:
@@ -80,6 +92,7 @@ def _parser() -> argparse.ArgumentParser:
     deploy.add_argument("--proposal-digest", required=True)
     deploy.add_argument("--apply", action="store_true")
     _add_json(deploy)
+    add_controller_commands(commands)
     return parser
 
 
@@ -102,7 +115,7 @@ def _sanitize(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(key): _sanitize(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
-        return [_sanitize(item) for item in value[:64]]
+        return [_sanitize(item) for item in value[:_MAX_COLLECTION_ITEMS]]
     return value
 
 
@@ -116,6 +129,187 @@ def _arguments_may_contain_secrets(argv: Sequence[str]) -> bool:
     )
 
 
+def _table_cell(value: object, *, maximum: int = 48) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        text = ", ".join(str(item) for item in value)
+    elif isinstance(value, Mapping):
+        text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    return text if len(text) <= maximum else text[: maximum - 1] + "…"
+
+
+def _print_table(
+    rows: list[Mapping[str, object]], columns: tuple[tuple[str, str], ...]
+) -> None:
+    rendered = [[_table_cell(row.get(key)) for key, _label in columns] for row in rows]
+    widths = [
+        max(len(label), *(len(row[index]) for row in rendered))
+        for index, (_key, label) in enumerate(columns)
+    ]
+    print(
+        "  ".join(
+            label.ljust(widths[index]) for index, (_key, label) in enumerate(columns)
+        )
+    )
+    print("  ".join("-" * width for width in widths))
+    for row in rendered:
+        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
+
+
+def _emit_list_table(payload: Mapping[str, object]) -> bool:
+    facets = payload.get("facets")
+    if isinstance(facets, Mapping):
+        for facet, raw_options in facets.items():
+            if not isinstance(raw_options, list):
+                continue
+            print(str(facet).replace("_", " ").title())
+            rows = [option for option in raw_options if isinstance(option, Mapping)]
+            if rows:
+                _print_table(rows, (("value", "VALUE"), ("count", "COUNT")))
+            else:
+                print("No available values.")
+            print()
+        if "matching_count" in payload:
+            print(f"matching_count: {_table_cell(payload['matching_count'])}")
+        return True
+
+    models = payload.get("models")
+    if isinstance(models, list):
+        library_rows: list[Mapping[str, object]] = []
+        for model in models:
+            if not isinstance(model, Mapping):
+                continue
+            identity = model.get("model")
+            if isinstance(identity, Mapping):
+                model_name = (
+                    f"{identity.get('publisher', '-')}/{identity.get('slug', '-')}"
+                )
+            else:
+                model_name = "-"
+            recipes = model.get("recipes")
+            if isinstance(recipes, list):
+                library_rows.extend(
+                    {**recipe, "model_name": model_name}
+                    for recipe in recipes
+                    if isinstance(recipe, Mapping)
+                )
+        unlinked = payload.get("unlinked_recipes")
+        if isinstance(unlinked, list):
+            library_rows.extend(
+                {**recipe, "model_name": "Unlinked"}
+                for recipe in unlinked
+                if isinstance(recipe, Mapping)
+            )
+        if library_rows:
+            _print_table(
+                library_rows,
+                (
+                    ("model_name", "MODEL"),
+                    ("title", "RECIPE"),
+                    ("source_kind", "SOURCE"),
+                    ("topology_name", "TOPOLOGY"),
+                    ("recipe_id", "RECIPE ID"),
+                ),
+            )
+        else:
+            print("No models or recipes.")
+        if payload.get("next_cursor") is not None:
+            print(f"next_cursor: {_table_cell(payload['next_cursor'])}")
+        return True
+
+    recipes = payload.get("recipes")
+    if isinstance(recipes, list):
+        recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
+        identity = (
+            "uri" if any("uri" in recipe for recipe in recipe_rows) else "recipe_id"
+        )
+        if recipe_rows:
+            _print_table(
+                recipe_rows,
+                (
+                    ("title", "RECIPE"),
+                    ("qualification", "QUALIFICATION"),
+                    ("execution_readiness", "READINESS"),
+                    ("node_count", "SPARKS"),
+                    (identity, "URI" if identity == "uri" else "RECIPE ID"),
+                ),
+            )
+        else:
+            print("No recipes.")
+        for metadata in ("filtered_count", "next_cursor"):
+            if metadata in payload and payload[metadata] is not None:
+                print(f"{metadata}: {_table_cell(payload[metadata])}")
+        return True
+
+    candidates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+        (
+            "nodes",
+            (
+                ("display_name", "NAME"),
+                ("operational_state", "HEALTH"),
+                ("lifecycle", "LIFECYCLE"),
+                ("id", "NODE ID"),
+            ),
+        ),
+        (
+            "jobs",
+            (
+                ("created_at", "CREATED"),
+                ("kind", "KIND"),
+                ("state", "STATE"),
+                ("id", "JOB ID"),
+            ),
+        ),
+        (
+            "events",
+            (
+                ("label", "EVENT"),
+                ("area", "AREA"),
+                ("status", "STATUS"),
+                ("occurred_at", "OCCURRED"),
+                ("actor", "OPERATOR"),
+                ("request_id", "REQUEST ID"),
+            ),
+        ),
+        (
+            "agents",
+            (
+                ("node_id", "NODE ID"),
+                ("state", "STATE"),
+                ("semantic_version", "VERSION"),
+                ("last_seen_at", "LAST SEEN"),
+            ),
+        ),
+        (
+            "enrollments",
+            (
+                ("created_at", "CREATED"),
+                ("state", "STATE"),
+                ("node_id", "NODE ID"),
+                ("id", "ENROLLMENT ID"),
+            ),
+        ),
+    )
+    for key, columns in candidates:
+        value = payload.get(key)
+        if not isinstance(value, list):
+            continue
+        rows = [row for row in value if isinstance(row, Mapping)]
+        if rows:
+            _print_table(rows, columns)
+        else:
+            print(f"No {key}.")
+        for metadata in ("filtered_count", "next_cursor", "total"):
+            if metadata in payload and payload[metadata] is not None:
+                print(f"{metadata}: {_table_cell(payload[metadata])}")
+        return True
+    return False
+
+
 def _emit(
     payload: Mapping[str, object],
     args: argparse.Namespace,
@@ -126,6 +320,14 @@ def _emit(
     assert isinstance(safe, dict)
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
+        return
+    if (
+        getattr(args, "command", None) == "library"
+        and getattr(args, "library_command", None) == "template"
+    ):
+        print(json.dumps(safe, sort_keys=True, indent=2))
+        return
+    if _emit_list_table(safe):
         return
     priority = (
         "state",
@@ -241,11 +443,19 @@ def main(
         return 2
 
     try:
-        client = control_client or ControlClient.from_environment()
+        client = control_client
+        if client is None and not _runs_without_controller(args):
+            client = ControlClient.from_environment()
         if args.command == "admin":
             result = _admin(
                 args,
                 client,
+                request_id_factory or (lambda: str(uuid.uuid4())),
+            )
+        elif args.command in {"fleet", "library", "activity"}:
+            result = run_controller(
+                args,
+                client,  # type: ignore[arg-type]
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
         else:
@@ -254,8 +464,19 @@ def main(
                 client,  # type: ignore[arg-type]
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
-        _emit(result, args, exact_structure=args.command != "admin")
+        _emit(
+            result,
+            args,
+            exact_structure=args.command
+            not in {"admin", "fleet", "library", "activity"},
+        )
         return 0
-    except (ControlClientError, OSError, ValueError, json.JSONDecodeError) as error:
+    except (
+        ControlClientError,
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
         _emit(_control_error(error), args)
         return 2

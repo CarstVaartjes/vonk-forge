@@ -1,0 +1,242 @@
+{
+  "base": {
+    "schema_version": 1,
+    "identity": {"publisher": "local", "slug": "custom-service"},
+    "metadata": {
+      "title": "Custom model service",
+      "description": "A locally maintained model service recipe.",
+      "tags": ["custom"]
+    },
+    "model": {
+      "kind": "model-version",
+      "publisher": "model-owner",
+      "slug": "model-name",
+      "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "execution": {
+      "harness": {
+        "kind": "execution-harness",
+        "publisher": "local",
+        "slug": "service",
+        "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "patch_bundle": null
+    },
+    "build": {
+      "context": {
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "expected_bytes": 536870912,
+        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
+      },
+      "dockerfile": "Dockerfile",
+      "platform": "linux/arm64",
+      "arguments": [],
+      "network": {"mode": "none", "hosts": []},
+      "resources": {
+        "download_bytes": 0,
+        "temporary_bytes": 4294967296,
+        "memory_bytes": 17179869184,
+        "timeout_seconds": 3600
+      }
+    },
+    "parameters": [],
+    "artifacts": [
+      {
+        "id": "weights",
+        "kind": "huggingface.snapshot",
+        "repository": "model-owner/model-name",
+        "revision": "0123456789abcdef0123456789abcdef01234567",
+        "download_bytes": 1073741824,
+        "installed_bytes": 1073741824,
+        "mount": {"target": "/models", "read_only": true},
+        "roles": ["entrypoint"]
+      }
+    ],
+    "runtime": {
+      "distribution": {
+        "kind": "runtime-distribution",
+        "publisher": "local",
+        "slug": "runtime",
+        "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "entrypoint": ["run"],
+      "arguments": [],
+      "environment": [],
+      "security": {
+        "devices": ["nvidia.com/gpu=all"],
+        "capabilities": [],
+        "host_network": false,
+        "privileged": false,
+        "user": "10001:10001",
+        "mounts": [
+          {"source": "model", "target": "/models", "read_only": true},
+          {"source": "state", "target": "/state", "read_only": false}
+        ]
+      },
+      "lifecycle": {"pre_start": [], "post_stop": [], "stop_timeout_seconds": 30}
+    },
+    "topology": {
+      "name": "solo",
+      "mode": "single",
+      "node_count": 1,
+      "roles": [
+        {
+          "name": "entrypoint",
+          "count": 1,
+          "endpoint_owner": true,
+          "artifacts": ["weights"],
+          "resources": {
+            "disk": {
+              "image_bytes": 5368709120,
+              "artifact_bytes": 1073741824,
+              "staging_bytes": 4294967296,
+              "cache_bytes": 2147483648,
+              "rollback_bytes": 0,
+              "safety_margin_bytes": 4294967296
+            },
+            "memory": {
+              "kind": "unified",
+              "startup_peak_bytes": 17179869184,
+              "steady_state_bytes": 12884901888,
+              "runtime_growth_bytes": 2147483648,
+              "system_reserve_bytes": 2147483648
+            }
+          }
+        }
+      ],
+      "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+      "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
+      "start_order": ["entrypoint"],
+      "stop_order": ["entrypoint"]
+    },
+    "interfaces": [
+      {"adapter": "openai", "port": 8000, "model_aliases": ["model-name"], "health_path": "/health"}
+    ],
+    "validation": {
+      "validators": [{"interface": "openai", "checks": ["endpoint.healthy"]}],
+      "benchmarks": []
+    },
+    "provenance": {"source_kind": "local", "source_reference": null, "attribution": []}
+  },
+  "presets": {
+    "custom": {},
+    "vllm": {
+      "identity": {"slug": "custom-vllm-chat"},
+      "metadata": {
+        "title": "vLLM chat service",
+        "description": "An OpenAI-compatible text generation service powered by vLLM.",
+        "tags": ["chat", "reasoning", "vllm"]
+      },
+      "execution": {"harness": {"slug": "vllm-openai"}},
+      "build": {
+        "network": {"mode": "public", "hosts": ["huggingface.co"]},
+        "resources": {"download_bytes": 85899345920, "temporary_bytes": 17179869184, "memory_bytes": 68719476736}
+      },
+      "artifacts": [
+        {
+          "id": "weights",
+          "kind": "huggingface.snapshot",
+          "repository": "model-owner/model-name",
+          "revision": "0123456789abcdef0123456789abcdef01234567",
+          "download_bytes": 85899345920,
+          "installed_bytes": 85899345920,
+          "mount": {"target": "/models", "read_only": true},
+          "roles": ["entrypoint"]
+        }
+      ],
+      "runtime": {
+        "distribution": {"slug": "vllm-cuda"},
+        "entrypoint": ["python", "-m", "vllm.entrypoints.openai.api_server"]
+      },
+      "topology": {
+        "roles": [
+          {
+            "name": "entrypoint",
+            "count": 1,
+            "endpoint_owner": true,
+            "artifacts": ["weights"],
+            "resources": {
+              "disk": {
+                "image_bytes": 10737418240,
+                "artifact_bytes": 85899345920,
+                "staging_bytes": 17179869184,
+                "cache_bytes": 8589934592,
+                "rollback_bytes": 0,
+                "safety_margin_bytes": 10737418240
+              },
+              "memory": {
+                "kind": "unified",
+                "startup_peak_bytes": 68719476736,
+                "steady_state_bytes": 60129542144,
+                "runtime_growth_bytes": 4294967296,
+                "system_reserve_bytes": 8589934592
+              }
+            }
+          }
+        ]
+      },
+      "interfaces": [
+        {"adapter": "openai", "port": 8000, "model_aliases": ["model-name"], "health_path": "/health"}
+      ],
+      "validation": {"validators": [{"interface": "openai", "checks": ["endpoint.healthy", "chat.completion"]}]}
+    },
+    "diffusers": {
+      "identity": {"slug": "custom-diffusers-image"},
+      "metadata": {
+        "title": "Diffusers image service",
+        "description": "An image-generation job service powered by Diffusers.",
+        "tags": ["image-generation", "diffusers"]
+      },
+      "execution": {"harness": {"slug": "diffusers-service"}},
+      "build": {
+        "network": {"mode": "public", "hosts": ["huggingface.co"]},
+        "resources": {"download_bytes": 34359738368, "temporary_bytes": 12884901888, "memory_bytes": 51539607552}
+      },
+      "artifacts": [
+        {
+          "id": "weights",
+          "kind": "huggingface.snapshot",
+          "repository": "model-owner/model-name",
+          "revision": "0123456789abcdef0123456789abcdef01234567",
+          "download_bytes": 34359738368,
+          "installed_bytes": 34359738368,
+          "mount": {"target": "/models", "read_only": true},
+          "roles": ["entrypoint"]
+        }
+      ],
+      "runtime": {
+        "distribution": {"slug": "diffusers-cuda"},
+        "entrypoint": ["python", "-m", "service"]
+      },
+      "topology": {
+        "roles": [
+          {
+            "name": "entrypoint",
+            "count": 1,
+            "endpoint_owner": true,
+            "artifacts": ["weights"],
+            "resources": {
+              "disk": {
+                "image_bytes": 10737418240,
+                "artifact_bytes": 34359738368,
+                "staging_bytes": 12884901888,
+                "cache_bytes": 4294967296,
+                "rollback_bytes": 0,
+                "safety_margin_bytes": 8589934592
+              },
+              "memory": {
+                "kind": "unified",
+                "startup_peak_bytes": 51539607552,
+                "steady_state_bytes": 42949672960,
+                "runtime_growth_bytes": 4294967296,
+                "system_reserve_bytes": 8589934592
+              }
+            }
+          }
+        ]
+      },
+      "interfaces": [{"adapter": "image-job", "path": "/generate"}],
+      "validation": {"validators": [{"interface": "image-job", "checks": ["endpoint.healthy", "image.generate"]}]}
+    }
+  }
+}
