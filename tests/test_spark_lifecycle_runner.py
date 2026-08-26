@@ -440,6 +440,7 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control_hostname = "vonk-forge-acceptance.tailnet.example"
+    run.arguments = SimpleNamespace(channel="dev")
     grant = {
         "ca_fingerprint": "a" * 64,
         "controller_address": "127.0.0.1",
@@ -447,6 +448,7 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         "enrollment_endpoint": "https://enroll.spark.localhost:8443",
         "expires_at": "2026-08-22T20:00:00Z",
         "id": "11111111-1111-1111-1111-111111111111",
+        "installer_url": "https://install.vonkforge.ai/dev/spark",
         "purpose": "new-node",
         "service_hostnames": [
             "vonk-forge-acceptance.tailnet.example",
@@ -475,6 +477,11 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         grant["ca_fingerprint"],
         grant["token"],
     )
+
+    invalid = dict(grant, installer_url="https://install.vonkforge.ai/spark")
+    Control.request = staticmethod(lambda method, path, body: (201, invalid))
+    with pytest.raises(lifecycle.LifecycleError, match="grant is invalid"):
+        run._create_grant()
 
 
 def test_installer_environment_routes_spark_bootstrap_to_acceptance_controller(

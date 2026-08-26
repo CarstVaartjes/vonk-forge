@@ -1378,6 +1378,7 @@ class SparkLifecycle:
             "enrollment_endpoint",
             "expires_at",
             "id",
+            "installer_url",
             "purpose",
             "service_hostnames",
             "token",
@@ -1405,6 +1406,12 @@ class SparkLifecycle:
             or SHA256.fullmatch(ca_sha256) is None
             or not isinstance(token, str)
             or not 43 <= len(token) <= 64
+            or grant.get("installer_url")
+            != (
+                "https://install.vonkforge.ai/dev/spark"
+                if self.arguments.channel == "dev"
+                else "https://install.vonkforge.ai/spark"
+            )
             or grant.get("purpose") != "new-node"
         ):
             raise LifecycleError("single-use enrollment grant is invalid")
