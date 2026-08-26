@@ -15,10 +15,18 @@ from tests.acceptance.runtime import (
     assert_bundle_contract,
     assert_compose_compatibility,
     assert_compose_services_healthy,
+    bootstrap_command,
     https_over_command,
     run_interactive,
     write_all,
 )
+
+
+def test_bootstrap_command_forwards_only_explicit_installer_arguments() -> None:
+    command = bootstrap_command("https://install.example.test/spark", "--enroll")
+
+    assert command[-2:] == ["https://install.example.test/spark", "--enroll"]
+    assert '/bin/sh "$bootstrap" "$@"' in command[2]
 
 
 def test_interactive_runner_drives_a_real_tty_without_exporting_answers(

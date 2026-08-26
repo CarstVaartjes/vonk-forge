@@ -29,13 +29,13 @@ def _run_bootstrap(
     artifact = tmp_path / "published-installer"
     artifact.write_text(
         "#!/bin/sh\n"
-        "printf '%s\\n' \"$0|$*\" > \"$VONK_TEST_RECEIPT\"\n"
-        "printf 'mode=%s\\n' \"$(stat -c %a \"$0\" 2>/dev/null || stat -f %Lp \"$0\")\" >> \"$VONK_TEST_RECEIPT\"\n"
-        "previous=\nfor argument in \"$@\"; do\n"
-        "  if [ \"$previous\" = --package ]; then printf 'package-mode=%s\\n' \"$(stat -c %a \"$argument\" 2>/dev/null || stat -f %Lp \"$argument\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
+        'printf \'%s\\n\' "$0|$*" > "$VONK_TEST_RECEIPT"\n'
+        'printf \'mode=%s\\n\' "$(stat -c %a "$0" 2>/dev/null || stat -f %Lp "$0")" >> "$VONK_TEST_RECEIPT"\n'
+        'previous=\nfor argument in "$@"; do\n'
+        '  if [ "$previous" = --package ]; then printf \'package-mode=%s\\n\' "$(stat -c %a "$argument" 2>/dev/null || stat -f %Lp "$argument")" >> "$VONK_TEST_RECEIPT"; fi\n'
         "  previous=$argument\ndone\n"
-        "if [ \"${1:-}\" = --template ]; then printf 'payload=%s\\n' \"$(cat \"$2\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
-        "printf 'controller-address=%s\\n' \"${VONK_CONTROLLER_ADDRESS:-}\" >> \"$VONK_TEST_RECEIPT\"\n"
+        'if [ "${1:-}" = --template ]; then printf \'payload=%s\\n\' "$(cat "$2")" >> "$VONK_TEST_RECEIPT"; fi\n'
+        'printf \'controller-address=%s\\n\' "${VONK_CONTROLLER_ADDRESS:-}" >> "$VONK_TEST_RECEIPT"\n'
     )
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     package = tmp_path / "vonk-forge-agent.deb"
@@ -155,7 +155,9 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
         assert Path(invocation[7]).name == "vonk-spark-setup.sig"
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"
-        assert receipt.read_text().splitlines()[-1] == "controller-address=192.168.1.231"
+        assert (
+            receipt.read_text().splitlines()[-1] == "controller-address=192.168.1.231"
+        )
     assert not forbidden.exists()
 
 
@@ -249,23 +251,23 @@ def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "accepts only --re-enroll" in result.stderr
+    assert "accepts only --enroll" in result.stderr
     assert not receipt.exists()
     assert not forbidden.exists()
 
 
-def test_spark_bootstrap_passes_only_explicit_reenrollment_mode(tmp_path: Path) -> None:
+def test_spark_bootstrap_passes_only_explicit_enrollment_mode(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path,
         "spark",
         system="Linux",
         machine="x86_64",
-        arguments=("--re-enroll",),
+        arguments=("--enroll",),
     )
 
     assert result.returncode == 0, result.stderr
     invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
-    assert invocation[-1] == "--re-enroll"
+    assert invocation[-1] == "--enroll"
     assert not forbidden.exists()
 
 

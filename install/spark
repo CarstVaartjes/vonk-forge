@@ -14,8 +14,8 @@ fail() {
 
 case "$#" in
     0) ;;
-    1) [ "$1" = --re-enroll ] || fail "this installer accepts only --re-enroll" ;;
-    *) fail "this installer accepts only --re-enroll" ;;
+    1) [ "$1" = --enroll ] || fail "this installer accepts only --enroll" ;;
+    *) fail "this installer accepts only --enroll" ;;
 esac
 case "$release_manifest" in /*) ;; *) fail "the signed release manifest is required" ;; esac
 case "$release_signature" in /*) ;; *) fail "the signed release signature is required" ;; esac

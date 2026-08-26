@@ -57,6 +57,7 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     assert command[3:] == [
         "vonk-bootstrap",
         "https://install.example/artifacts/release/bootstraps/spark",
+        "--enroll",
     ]
     assert observed["responses"] == [
         ("Enrollment URL: ", "https://enroll.spark.localhost:8443"),
@@ -107,9 +108,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         + "configs:\n  vonk_runtime_0123456789abcdef:\n"
         + "    file: ./secrets/runtime-configs/vonk_runtime_0123456789abcdef\n"
     )
-    caddy_path = (
-        bundle / "secrets/runtime-configs/vonk_runtime_0123456789abcdef"
-    )
+    caddy_path = bundle / "secrets/runtime-configs/vonk_runtime_0123456789abcdef"
     caddy_path.write_text(
         "reverse_proxy control-api:8443 {\n"
         "\theader_up X-Vonk-Agent-Source {http.request.remote.host}\n"
@@ -135,10 +134,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '300'" in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
-    assert (
-        "header_up X-Vonk-Agent-Source 172.31.42.1"
-        in caddy_path.read_text()
-    )
+    assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddy_path.read_text()
     assert "{http.request.remote.host}" not in caddy_path.read_text()
 
 
@@ -272,8 +268,7 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     assert any("172.31.42.2/30" in argv for argv in observed)
     assert any("/usr/bin/nsenter" in argv for argv in observed)
     assert all(
-        not ("172.31.42.1/30" in argv and "198.19.42.1/24" in argv)
-        for argv in observed
+        not ("172.31.42.1/30" in argv and "198.19.42.1/24" in argv) for argv in observed
     )
     assert all("/usr/bin/install" not in argv for argv in observed)
 
@@ -336,11 +331,13 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
             ],
             bundle,
             120,
-        )
+        ),
     ]
 
 
-def test_local_browser_controller_uses_only_the_loopback_publication(monkeypatch) -> None:
+def test_local_browser_controller_uses_only_the_loopback_publication(
+    monkeypatch,
+) -> None:
     lifecycle = _module()
     observed: dict[str, object] = {}
 
@@ -705,8 +702,8 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
         "serial": serial_after,
     }
     rejected_serials: list[str] = []
-    run._old_certificate_rejected = (
-        lambda serial: rejected_serials.append(serial) is None
+    run._old_certificate_rejected = lambda serial: (
+        rejected_serials.append(serial) is None
     )
 
     observed = run._observe_renewal(node_id, serial_before)

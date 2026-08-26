@@ -5,7 +5,7 @@ command shown by the controller as the normal administrator account. A private
 NAS command looks like:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
 ```
 
 Do not prefix `curl` or the shell with `sudo`. The installer downloads the
@@ -40,15 +40,17 @@ resolve from the Spark:
 curl -fsSL https://install.vonkforge.ai/spark | sh
 ```
 
-For an installed Spark, rerun the command shown by the controller. It preserves configuration and
-identity, replaces the Debian package directly, restarts the service, and
-requires sustained readiness. There is no separate upgrade command, A/B slot,
-supervisor, rollback state, migration command, or follow-up setup step.
+For an installed Spark package-only upgrade, rerun the channel command without
+`--enroll`. It preserves configuration and identity, replaces the Debian package
+directly, restarts the service, and requires sustained readiness. There is no
+separate upgrade command, A/B slot, supervisor, rollback state, migration
+command, or follow-up setup step.
 
-An ordinary rerun is only an upgrade. Certificate recovery is deliberately
-explicit: create a **Re-enroll Spark** grant in Fleet and run its command, which
-passes `--re-enroll` through the signed channel bootstrap. This replaces stale
-credentials and resets a failed systemd start limit automatically. The generated
+An ordinary rerun is only an upgrade. Enrollment commands use the generic
+`--enroll` intent through the signed channel bootstrap. On a fresh Spark that
+creates the identity; on an existing Spark the controller-authorized grant
+automatically replaces the certificate. If pairing succeeded but readiness did
+not, rerunning resumes recovery without consuming another token. The generated
 URL is `/dev/spark` for a development NAS and `/spark` for a stable NAS.
 
 If the command fails, read its final error and rerun the same command after

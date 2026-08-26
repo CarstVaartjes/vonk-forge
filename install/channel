@@ -14,9 +14,9 @@ fail() {
 case "$kind:$#:${1:-}" in
     nas:0:|spark:0:) ;;
     nas:1:--enable-hermes|nas:1:--disable-hermes) ;;
-    spark:1:--re-enroll) ;;
+    spark:1:--enroll) ;;
     nas:*) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
-    spark:*) fail "this installer accepts only --re-enroll" ;;
+    spark:*) fail "this installer accepts only --enroll" ;;
     *) fail "the installer kind is invalid" ;;
 esac
 case "$origin" in https://*) ;; *) fail "the installer origin is invalid" ;; esac
