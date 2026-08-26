@@ -94,6 +94,33 @@ fn registry_fixture() -> OciRegistryFixture {
     }
 }
 
+fn duplicate_layer_registry_fixture() -> OciRegistryFixture {
+    let mut fixture = registry_fixture();
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fixture.manifest).unwrap();
+    let layer = manifest["layers"][0].clone();
+    manifest["layers"].as_array_mut().unwrap().push(layer);
+    fixture.manifest = serde_json::to_vec(&manifest).unwrap();
+    fixture.manifest_digest = format!("sha256:{}", hex_sha256(&fixture.manifest));
+    fixture.reference = format!(
+        "1.1.1.1/vonkforge/base:ignored-tag@{}",
+        fixture.manifest_digest
+    );
+    fixture
+}
+
+fn conflicting_duplicate_layer_registry_fixture() -> OciRegistryFixture {
+    let mut fixture = duplicate_layer_registry_fixture();
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fixture.manifest).unwrap();
+    manifest["layers"][1]["size"] = serde_json::json!(fixture.layer.len() + 1);
+    fixture.manifest = serde_json::to_vec(&manifest).unwrap();
+    fixture.manifest_digest = format!("sha256:{}", hex_sha256(&fixture.manifest));
+    fixture.reference = format!(
+        "1.1.1.1/vonkforge/base:ignored-tag@{}",
+        fixture.manifest_digest
+    );
+    fixture
+}
+
 impl ProcessRunner for Runner {
     fn run(
         &self,
@@ -870,6 +897,106 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
         !arguments.iter().any(|value| value == "pull")
             && !arguments.iter().any(|value| value == "--pull")
     }));
+}
+
+#[test]
+fn repeated_identical_base_image_layer_is_materialized_once() {
+    let fixture = duplicate_layer_registry_fixture();
+    let (archive, digest) = bundle_for(&fixture.reference);
+    let mut build_request = request(archive.len(), digest);
+    build_request.base_images = vec![RecipeBuildBaseImage {
+        manifest_digest: fixture.manifest_digest.clone(),
+        reference: fixture.reference.clone(),
+    }];
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: Some(fixture.clone()),
+        substitute_base: false,
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-00000000002a").unwrap(),
+        &archive,
+    )
+    .unwrap();
+
+    let stored = root
+        .path()
+        .join("base-images/sha256")
+        .join(fixture.manifest_digest.strip_prefix("sha256:").unwrap())
+        .join("image.oci.tar");
+    let layer_path = format!(
+        "blobs/sha256/{}",
+        fixture.layer_digest.strip_prefix("sha256:").unwrap()
+    );
+    let layer_entries = tar::Archive::new(fs::File::open(stored).unwrap())
+        .entries()
+        .unwrap()
+        .map(|entry| entry.unwrap().path().unwrap().into_owned())
+        .filter(|path| path == Path::new(&layer_path))
+        .count();
+    assert_eq!(layer_entries, 1);
+    let oras = runner
+        .calls
+        .borrow()
+        .iter()
+        .filter(|(program, _)| *program == Program::Oras)
+        .count();
+    assert_eq!(
+        oras, 3,
+        "manifest, config, and repeated layer are each fetched once"
+    );
+}
+
+#[test]
+fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
+    let fixture = conflicting_duplicate_layer_registry_fixture();
+    let (archive, digest) = bundle_for(&fixture.reference);
+    let mut build_request = request(archive.len(), digest);
+    build_request.base_images = vec![RecipeBuildBaseImage {
+        manifest_digest: fixture.manifest_digest.clone(),
+        reference: fixture.reference.clone(),
+    }];
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: Some(fixture),
+        substitute_base: false,
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-00000000002b").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::Evidence));
+    let oras = runner
+        .calls
+        .borrow()
+        .iter()
+        .filter(|(program, _)| *program == Program::Oras)
+        .count();
+    assert_eq!(oras, 1, "only the conflicting manifest may be fetched");
 }
 
 #[test]
