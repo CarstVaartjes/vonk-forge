@@ -1368,7 +1368,6 @@ def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
                 int(memory["startup_peak_bytes"]),
                 int(memory["steady_state_bytes"]) + int(memory["runtime_growth_bytes"]),
             )
-            + int(memory["system_reserve_bytes"])
         )
     return {
         "execution_harness": str(harness["slug"]),

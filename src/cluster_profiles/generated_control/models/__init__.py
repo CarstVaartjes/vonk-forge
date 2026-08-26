@@ -5,7 +5,9 @@ from .agents_response import AgentsResponse
 from .apply_request import ApplyRequest
 from .bounded_error_response import BoundedErrorResponse
 from .build_plan_response import BuildPlanResponse
+from .build_preview_input import BuildPreviewInput
 from .build_preview_request import BuildPreviewRequest
+from .build_preview_target import BuildPreviewTarget
 from .build_request import BuildRequest
 from .capacity_reservations import CapacityReservations
 from .catalog_entity_list_response import CatalogEntityListResponse
@@ -41,6 +43,10 @@ from .global_revision_response_document import GlobalRevisionResponseDocument
 from .grant_request import GrantRequest
 from .grant_request_purpose import GrantRequestPurpose
 from .http_validation_error import HTTPValidationError
+from .image_distribution_plan_response import ImageDistributionPlanResponse
+from .image_distribution_preview_input import ImageDistributionPreviewInput
+from .image_distribution_preview_request import ImageDistributionPreviewRequest
+from .image_distribution_preview_target import ImageDistributionPreviewTarget
 from .image_distribution_request import ImageDistributionRequest
 from .install_node_plan_response import InstallNodePlanResponse
 from .install_plan_response import InstallPlanResponse
@@ -249,7 +255,9 @@ __all__ = (
     "ApplyRequest",
     "BoundedErrorResponse",
     "BuildPlanResponse",
+    "BuildPreviewInput",
     "BuildPreviewRequest",
+    "BuildPreviewTarget",
     "BuildRequest",
     "CapacityReservations",
     "CatalogEntityListResponse",
@@ -285,6 +293,10 @@ __all__ = (
     "GrantRequest",
     "GrantRequestPurpose",
     "HTTPValidationError",
+    "ImageDistributionPlanResponse",
+    "ImageDistributionPreviewInput",
+    "ImageDistributionPreviewRequest",
+    "ImageDistributionPreviewTarget",
     "ImageDistributionRequest",
     "InstallNodePlanResponse",
     "InstallPlanResponse",

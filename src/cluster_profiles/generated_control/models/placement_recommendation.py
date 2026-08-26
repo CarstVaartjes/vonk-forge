@@ -18,10 +18,12 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.placement_node import PlacementNode
+  from ..models.image_distribution_preview_target import ImageDistributionPreviewTarget
+  from ..models.build_preview_target import BuildPreviewTarget
   from ..models.mapping_preview_target import MappingPreviewTarget
   from ..models.placement_score import PlacementScore
-  from ..models.run_preview_target import RunPreviewTarget
   from ..models.install_preview_target import InstallPreviewTarget
+  from ..models.run_preview_target import RunPreviewTarget
   from ..models.library_projection_reason import LibraryProjectionReason
 
 
@@ -43,7 +45,8 @@ class PlacementRecommendation:
             mapping_id (Union[None, str]):
             node_ids (list[str]):
             nodes (list['PlacementNode']):
-            preview_targets (list[Union['InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']]):
+            preview_targets (list[Union['BuildPreviewTarget', 'ImageDistributionPreviewTarget', 'InstallPreviewTarget',
+                'MappingPreviewTarget', 'RunPreviewTarget']]):
             reasons (list['LibraryProjectionReason']):
             recipe_build_id (Union[None, str]):
             recipe_revision_id (str):
@@ -61,7 +64,7 @@ class PlacementRecommendation:
     mapping_id: Union[None, str]
     node_ids: list[str]
     nodes: list['PlacementNode']
-    preview_targets: list[Union['InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']]
+    preview_targets: list[Union['BuildPreviewTarget', 'ImageDistributionPreviewTarget', 'InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']]
     reasons: list['LibraryProjectionReason']
     recipe_build_id: Union[None, str]
     recipe_revision_id: str
@@ -77,10 +80,12 @@ class PlacementRecommendation:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.placement_node import PlacementNode
+        from ..models.image_distribution_preview_target import ImageDistributionPreviewTarget
+        from ..models.build_preview_target import BuildPreviewTarget
         from ..models.mapping_preview_target import MappingPreviewTarget
         from ..models.placement_score import PlacementScore
-        from ..models.run_preview_target import RunPreviewTarget
         from ..models.install_preview_target import InstallPreviewTarget
+        from ..models.run_preview_target import RunPreviewTarget
         from ..models.library_projection_reason import LibraryProjectionReason
         eligible = self.eligible
 
@@ -109,7 +114,11 @@ class PlacementRecommendation:
         preview_targets = []
         for preview_targets_item_data in self.preview_targets:
             preview_targets_item: dict[str, Any]
-            if isinstance(preview_targets_item_data, MappingPreviewTarget):
+            if isinstance(preview_targets_item_data, BuildPreviewTarget):
+                preview_targets_item = preview_targets_item_data.to_dict()
+            elif isinstance(preview_targets_item_data, MappingPreviewTarget):
+                preview_targets_item = preview_targets_item_data.to_dict()
+            elif isinstance(preview_targets_item_data, ImageDistributionPreviewTarget):
                 preview_targets_item = preview_targets_item_data.to_dict()
             elif isinstance(preview_targets_item_data, InstallPreviewTarget):
                 preview_targets_item = preview_targets_item_data.to_dict()
@@ -175,10 +184,12 @@ class PlacementRecommendation:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.placement_node import PlacementNode
+        from ..models.image_distribution_preview_target import ImageDistributionPreviewTarget
+        from ..models.build_preview_target import BuildPreviewTarget
         from ..models.mapping_preview_target import MappingPreviewTarget
         from ..models.placement_score import PlacementScore
-        from ..models.run_preview_target import RunPreviewTarget
         from ..models.install_preview_target import InstallPreviewTarget
+        from ..models.run_preview_target import RunPreviewTarget
         from ..models.library_projection_reason import LibraryProjectionReason
         d = dict(src_dict)
         eligible = d.pop("eligible")
@@ -220,11 +231,11 @@ class PlacementRecommendation:
         preview_targets = []
         _preview_targets = d.pop("preview_targets")
         for preview_targets_item_data in (_preview_targets):
-            def _parse_preview_targets_item(data: object) -> Union['InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']:
+            def _parse_preview_targets_item(data: object) -> Union['BuildPreviewTarget', 'ImageDistributionPreviewTarget', 'InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
-                    preview_targets_item_type_0 = MappingPreviewTarget.from_dict(data)
+                    preview_targets_item_type_0 = BuildPreviewTarget.from_dict(data)
 
 
 
@@ -234,20 +245,40 @@ class PlacementRecommendation:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
-                    preview_targets_item_type_1 = InstallPreviewTarget.from_dict(data)
+                    preview_targets_item_type_1 = MappingPreviewTarget.from_dict(data)
 
 
 
                     return preview_targets_item_type_1
                 except: # noqa: E722
                     pass
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    preview_targets_item_type_2 = ImageDistributionPreviewTarget.from_dict(data)
+
+
+
+                    return preview_targets_item_type_2
+                except: # noqa: E722
+                    pass
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    preview_targets_item_type_3 = InstallPreviewTarget.from_dict(data)
+
+
+
+                    return preview_targets_item_type_3
+                except: # noqa: E722
+                    pass
                 if not isinstance(data, dict):
                     raise TypeError()
-                preview_targets_item_type_2 = RunPreviewTarget.from_dict(data)
+                preview_targets_item_type_4 = RunPreviewTarget.from_dict(data)
 
 
 
-                return preview_targets_item_type_2
+                return preview_targets_item_type_4
 
             preview_targets_item = _parse_preview_targets_item(preview_targets_item_data)
 

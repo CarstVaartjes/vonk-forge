@@ -823,6 +823,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/image-distribution-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Image Distribution */
+        post: operations["previewRecipeImageDistribution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recipes/image-distributions": {
         parameters: {
             query?: never;
@@ -1156,12 +1173,28 @@ export interface components {
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
         };
+        /** BuildPreviewInput */
+        BuildPreviewInput: {
+            /** Builder Node Id */
+            builder_node_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+        };
         /** BuildPreviewRequest */
         BuildPreviewRequest: {
             /** Builder Node Id */
             builder_node_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+        };
+        /** BuildPreviewTarget */
+        BuildPreviewTarget: {
+            input: components["schemas"]["BuildPreviewInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "build";
         };
         /** BuildRequest */
         BuildRequest: {
@@ -1487,12 +1520,56 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImageDistributionPlanResponse */
+        ImageDistributionPlanResponse: {
+            /** Image Digest */
+            image_digest: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Build Id */
+            recipe_build_id: string;
+        };
+        /** ImageDistributionPreviewInput */
+        ImageDistributionPreviewInput: {
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Recipe Build Id */
+            recipe_build_id: string;
+        };
+        /** ImageDistributionPreviewRequest */
+        ImageDistributionPreviewRequest: {
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Recipe Build Id */
+            recipe_build_id: string;
+        };
+        /** ImageDistributionPreviewTarget */
+        ImageDistributionPreviewTarget: {
+            input: components["schemas"]["ImageDistributionPreviewInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "image_distribution";
+        };
         /** ImageDistributionRequest */
         ImageDistributionRequest: {
             /** Mapping Generation */
             mapping_generation: number;
             /** Mapping Id */
             mapping_id: string;
+            /** Plan Digest */
+            plan_digest: string;
             /** Recipe Build Id */
             recipe_build_id: string;
             /** Request Key */
@@ -2367,7 +2444,7 @@ export interface components {
             /** Nodes */
             nodes: components["schemas"]["PlacementNode"][];
             /** Preview Targets */
-            preview_targets: (components["schemas"]["MappingPreviewTarget"] | components["schemas"]["InstallPreviewTarget"] | components["schemas"]["RunPreviewTarget"])[];
+            preview_targets: (components["schemas"]["BuildPreviewTarget"] | components["schemas"]["MappingPreviewTarget"] | components["schemas"]["ImageDistributionPreviewTarget"] | components["schemas"]["InstallPreviewTarget"] | components["schemas"]["RunPreviewTarget"])[];
             /**
              * Ranking Scope
              * @default bounded-advisory
@@ -6082,6 +6159,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewRecipeImageDistribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageDistributionPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageDistributionPlanResponse"];
                 };
             };
             /** @description Validation Error */

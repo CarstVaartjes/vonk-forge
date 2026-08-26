@@ -422,7 +422,7 @@ def test_summary_uses_source_bundle_and_exact_topology(
     assert summaries[0].topology_mode == "single"
     assert summaries[0].node_count == 1
     assert summaries[0].maximum_installed_bytes_per_node == 7_000_001_024
-    assert summaries[0].maximum_runtime_memory_bytes_per_node == 88_000_000_000
+    assert summaries[0].maximum_runtime_memory_bytes_per_node == 80_000_000_000
 
 
 def test_recipe_resolution_never_falls_back_to_latest(

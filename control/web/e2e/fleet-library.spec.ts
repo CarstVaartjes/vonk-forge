@@ -591,6 +591,37 @@ test("Library exposes a versioned catalog update and opens its changelog review"
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test("Library separates installation capacity from load memory admission", async ({page}, testInfo) => {
+  const blocked = structuredClone(fullLibraryDetail);
+  const group = blocked.placement[0].recommendations[0];
+  group.eligible = false;
+  group.reasons = [
+    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-alpha, below the 4000000000-byte floor.", severity: "error"},
+    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-beta, below the 4000000000-byte floor.", severity: "error"},
+  ];
+  blocked.placement[0].rejected_groups = [];
+  blocked.placement[0].rejected_nodes = [];
+  await page.unroute("**/api/v1/library/recipes/recipe-chat");
+  await page.route("**/api/v1/library/recipes/recipe-chat", route => route.fulfill({json: blocked}));
+  await page.setViewportSize({width: 1280, height: 900});
+
+  await page.goto("/library/recipes/recipe-chat");
+
+  const placement = page.getByRole("region", {name: "Complete placement groups"});
+  await expect(placement.getByText("2 Sparks · 1 installable")).toBeVisible();
+  const blocker = placement.locator(".placement-load-blocked-summary");
+  await expect(blocker).toContainText("Installable, but cannot be loaded");
+  await expect(blocker).toContainText("1.0 GiB");
+  await expect(blocker).not.toContainText("run.insufficient_memory");
+  await expect(placement.getByText("Unavailable placement evidence").locator("..")).not.toHaveAttribute("open");
+  const selector = placement.getByRole("button", {name: "Select complete group Spark node and Spark node"});
+  await selector.click();
+  await expect(placement.getByRole("button", {name: "Review Load"})).toHaveCount(0);
+  await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
+  await expectNoSeriousAccessibilityViolations(page);
+  await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
+});
+
 test("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/recipes/recipe-chat");

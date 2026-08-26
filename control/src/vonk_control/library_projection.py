@@ -24,7 +24,11 @@ from .library_contract import (
     _MAX_RECOMMENDATIONS,
     _MAX_REJECTED_GROUPS,
     _MAX_REJECTED_NODES,
+    BuildPreviewInput,
+    BuildPreviewTarget,
     FreshnessPolicy,
+    ImageDistributionPreviewInput,
+    ImageDistributionPreviewTarget,
     InstallPreviewInput,
     InstallPreviewTarget,
     LibraryInstallationSummary,
@@ -2169,14 +2173,15 @@ class LibraryProjection:
                 if memory_kind == "host"
                 else evidence.inventory.gpu_memory_free_bytes
             )
-            memory_required = _saturating_nonnegative_sum(
-                max(
-                    role.memory.startup_peak_bytes,
-                    _saturating_nonnegative_sum(
-                        role.memory.steady_state_bytes,
-                        role.memory.runtime_growth_bytes,
-                    ),
+            memory_required = max(
+                role.memory.startup_peak_bytes,
+                _saturating_nonnegative_sum(
+                    role.memory.steady_state_bytes,
+                    role.memory.runtime_growth_bytes,
                 ),
+            )
+            memory_floor = max(
+                _saturating_nonnegative(self._memory_floor_bytes),
                 role.memory.system_reserve_bytes,
             )
             memory_after = _saturating_headroom(
@@ -2184,11 +2189,11 @@ class LibraryProjection:
                 memory_reserved,
                 memory_required,
             )
-            if memory_after < self._memory_floor_bytes:
+            if memory_after < memory_floor:
                 reasons.append(
                     _reason(
                         "run.insufficient_memory",
-                        f"Run would leave {memory_after} bytes on {node_id}, below the {self._memory_floor_bytes}-byte floor.",
+                        f"Run would leave {memory_after} bytes on {node_id}, below the {memory_floor}-byte floor.",
                         "error",
                     )
                 )
@@ -2304,6 +2309,15 @@ class LibraryProjection:
         eligible = not any(reason.severity == "error" for reason in reasons)
         installation_ids = [item.id for item in matching_installations]
         preview_targets: list[PreviewTarget] = []
+        if revision_operable and usable_build is None:
+            preview_targets.append(
+                BuildPreviewTarget(
+                    input=BuildPreviewInput(
+                        recipe_revision_id=revision.id,
+                        builder_node_id=ordered[0].agent.node_id,
+                    )
+                )
+            )
         if revision_operable:
             preview_targets.append(
                 MappingPreviewTarget(
@@ -2314,10 +2328,46 @@ class LibraryProjection:
                     )
                 )
             )
+        exact_image_present = exact_complete or (
+            usable_build is not None
+            and usable_build.image_digest is not None
+            and usable_build.image_bytes is not None
+            and not operational_evidence_truncated
+            and not any(
+                item.agent.node_id in artifact_truncated_node_ids for item in ordered
+            )
+            and all(
+                any(
+                    artifact.kind == "image"
+                    and artifact.digest
+                    == usable_build.image_digest.removeprefix("sha256:")
+                    and artifact.size_bytes == usable_build.image_bytes
+                    and artifact.state == "verified"
+                    for artifact in artifacts_by_node.get(item.agent.node_id, ())
+                )
+                for item in ordered
+            )
+        )
         if (
             revision_operable
             and persisted_mapping is not None
             and usable_build is not None
+            and not exact_image_present
+        ):
+            preview_targets.append(
+                ImageDistributionPreviewTarget(
+                    input=ImageDistributionPreviewInput(
+                        recipe_build_id=usable_build.id,
+                        mapping_id=persisted_mapping.id,
+                        mapping_generation=persisted_mapping.generation,
+                    )
+                )
+            )
+        if (
+            revision_operable
+            and persisted_mapping is not None
+            and usable_build is not None
+            and exact_image_present
         ):
             preview_targets.append(
                 InstallPreviewTarget(

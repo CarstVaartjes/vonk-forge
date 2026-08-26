@@ -374,6 +374,7 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(within(topology).getByText("Rank 1 · Worker")).toBeVisible();
   expect(within(topology).getByText("144.0 GiB startup memory total")).toBeVisible();
   expect(within(topology).getByText("140.0 GiB disk envelope total")).toBeVisible();
+  expect(within(topology).getByRole("list", {name: "Topology ranks"})).toHaveAttribute("tabindex", "0");
   const lifecycle = within(detail).getByRole("list", {name: "Recipe lifecycle stages"});
   expect(within(lifecycle).getByRole("listitem", {name: "Build: Complete. Succeeded"})).toBeVisible();
   expect(within(lifecycle).getByRole("listitem", {name: "Map: Complete. Ready"})).toBeVisible();
@@ -428,6 +429,62 @@ test("shows visual recipe truth and selects only one complete placement group on
   const actions = within(selected).getByRole("region", {name: "Selected group actions"});
   const evidence = selected.querySelector(".placement-evidence")!;
   expect(actions.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("keeps a low-memory group installable and explains why it cannot load", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const detail = structuredClone(fullLibraryDetail);
+  const rejected = detail.placement[0].recommendations[0];
+  rejected.eligible = false;
+  rejected.preview_targets = [];
+  rejected.reasons = [
+    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-alpha, below the 4000000000-byte floor.", severity: "error"},
+    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-beta, below the 4000000000-byte floor.", severity: "error"},
+  ];
+  detail.placement[0].rejected_groups = [];
+  detail.placement[0].rejected_nodes = [];
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => detail,
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
+  } as unknown as ControlApi;
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  expect(within(placement).getByText("2 Sparks · 1 installable")).toBeVisible();
+  const blocker = within(placement).getByText("Installable, but cannot be loaded").closest("aside")!;
+  expect(blocker).toHaveTextContent("MIA Alpha does not have enough free memory: loading would leave 1.0 GiB, below the required 3.7 GiB safety reserve.");
+  expect(blocker).toHaveTextContent("MIA Beta does not have enough free memory: loading would leave 1.0 GiB, below the required 3.7 GiB safety reserve.");
+  expect(blocker).not.toHaveTextContent("run.insufficient_memory");
+  expect(within(placement).queryByRole("alert")).not.toBeInTheDocument();
+  expect(within(placement).getByText("Unavailable placement evidence").closest("details")).not.toHaveAttribute("open");
+});
+
+test("explains an installation disk blocker before collapsed evidence", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const detail = structuredClone(fullLibraryDetail);
+  const rejected = detail.placement[0].recommendations[0];
+  rejected.eligible = false;
+  rejected.preview_targets = [];
+  rejected.reasons = [
+    {code: "install.insufficient_disk", detail: "Installation would leave 1073741824 bytes on node-alpha, below the 20000000000-byte floor.", severity: "error"},
+  ];
+  detail.placement[0].rejected_groups = [];
+  detail.placement[0].rejected_nodes = [];
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => detail,
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}]}),
+  } as unknown as ControlApi;
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  expect(within(placement).getByText("2 Sparks · 0 installable")).toBeVisible();
+  const blocker = within(placement).getByRole("alert");
+  expect(blocker).toHaveTextContent("Why this recipe cannot be installed");
+  expect(blocker).toHaveTextContent("The required 2-Spark topology exists, but no complete group passes installation admission.");
+  expect(blocker).toHaveTextContent("MIA Alpha does not have enough free disk space: installation would leave 1.0 GiB, below the required 18.6 GiB safety reserve.");
+  expect(blocker).not.toHaveTextContent("install.insufficient_disk");
 });
 
 test("uses the Fleet hostname policy when a node display name is its technical ID", async () => {

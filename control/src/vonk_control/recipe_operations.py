@@ -81,6 +81,16 @@ class RecipeOperationView:
 
 
 @dataclass(frozen=True, slots=True)
+class ImageDistributionPreview:
+    recipe_build_id: str
+    mapping_id: str
+    mapping_generation: int
+    image_digest: str
+    node_ids: tuple[str, ...]
+    plan_digest: str
+
+
+@dataclass(frozen=True, slots=True)
 class RecipeRunRankStatus:
     node_id: str
     rank: int
@@ -317,12 +327,45 @@ class RecipeOperationService:
             mapping_id, recipe_build_id, now=self._clock()
         )
 
+    def preview_image_distribution(
+        self,
+        recipe_build_id: str,
+        mapping_id: str,
+        *,
+        mapping_generation: int,
+    ) -> ImageDistributionPreview:
+        if self._builds is None:
+            raise RecipeOperationConflict("recipe build service is unavailable")
+        try:
+            plan = self._builds.plan_distribution(
+                recipe_build_id, mapping_id, generation=mapping_generation
+            )
+        except (KeyError, RuntimeError, ValueError) as error:
+            raise RecipeOperationConflict(str(error)) from error
+        identity = {
+            "schema_version": 1,
+            "build_id": plan.build_id,
+            "mapping_id": plan.mapping_id,
+            "mapping_generation": plan.mapping_generation,
+            "image_digest": plan.image_digest,
+            "targets": [node_id for node_id, _payload in plan.targets],
+        }
+        return ImageDistributionPreview(
+            recipe_build_id=plan.build_id,
+            mapping_id=plan.mapping_id,
+            mapping_generation=plan.mapping_generation,
+            image_digest=plan.image_digest,
+            node_ids=tuple(node_id for node_id, _payload in plan.targets),
+            plan_digest=hashlib.sha256(canonical_message(identity)).hexdigest(),
+        )
+
     def distribute_image(
         self,
         recipe_build_id: str,
         mapping_id: str,
         *,
         mapping_generation: int,
+        plan_digest: str,
         actor: str,
         request_id: str,
     ) -> RecipeOperationView:
@@ -342,7 +385,11 @@ class RecipeOperationService:
             "image_digest": plan.image_digest,
             "targets": [node_id for node_id, _payload in plan.targets],
         }
-        plan_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
+        actual_plan_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
+        if plan_digest != actual_plan_digest:
+            raise RecipeOperationConflict(
+                "submitted image distribution plan does not match preview"
+            )
         existing = self._idempotent(request_id, "recipe.image.import.v1", plan_digest)
         if existing is not None:
             return existing

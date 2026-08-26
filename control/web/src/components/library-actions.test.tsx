@@ -2,6 +2,8 @@ import {act, fireEvent, render, screen, waitFor, within} from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import type {
   ControlApi,
+  LibraryBuildPlan,
+  LibraryImageDistributionPlan,
   LibraryInstallPlan,
   LibraryLoadPlan,
   LibraryMappingPlan,
@@ -14,6 +16,24 @@ import {fullLibraryDetail, librarySnapshot} from "../test-fixtures/library";
 import {LibraryOperationProgress} from "./library-operation-progress";
 
 const GIB = 1024 ** 3;
+
+const buildPlan: LibraryBuildPlan = {
+  build_id: "build-chat",
+  build_input_sha256: "b".repeat(64),
+  builder_node_id: "node-alpha",
+  recipe_content_sha256: "a".repeat(64),
+  recipe_revision_id: "revision-chat",
+  source_bundle_sha256: "c".repeat(64),
+};
+
+const distributionPlan: LibraryImageDistributionPlan = {
+  image_digest: `sha256:${"d".repeat(64)}`,
+  mapping_generation: 4,
+  mapping_id: "mapping-chat",
+  node_ids: ["node-alpha", "node-beta"],
+  plan_digest: "distribution-plan-digest",
+  recipe_build_id: "build-chat",
+};
 
 function loadPlan(warnings: {code: string; detail: string}[] = []): LibraryLoadPlan {
   return {
@@ -120,6 +140,62 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
 
   await user.click(within(progress).getByRole("button", {name: "Retry incomplete operation"}));
   expect(retryLibraryOperation).toHaveBeenCalledWith("operation-load", expect.any(AbortSignal));
+});
+
+test("previews and applies Build and image Distribution as explicit lifecycle stages", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const detail = structuredClone(fullLibraryDetail);
+  detail.placement[0].recommendations[0].preview_targets = [
+    {kind: "build", input: {recipe_revision_id: "revision-chat", builder_node_id: "node-alpha"}},
+    {kind: "image_distribution", input: {recipe_build_id: "build-chat", mapping_id: "mapping-chat", mapping_generation: 4}},
+  ];
+  const applyLibraryBuild = vi.fn(async () => ({...operation("succeeded"), id: "operation-build", kind: "recipe.build.v1", plan_digest: buildPlan.build_input_sha256}));
+  const applyLibraryImageDistribution = vi.fn(async () => ({...operation("succeeded"), id: "operation-distribute", kind: "recipe.image.import.v1", plan_digest: distributionPlan.plan_digest}));
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: vi.fn(async () => detail),
+    visualFleet: async () => ({nodes: [{id: "node-alpha", display_name: "MIA Alpha", hostname: "mia-alpha.internal", labels: {}}, {id: "node-beta", display_name: "MIA Beta", hostname: "mia-beta.internal", labels: {}}]}),
+    previewLibraryBuild: vi.fn(async () => buildPlan),
+    applyLibraryBuild,
+    previewLibraryImageDistribution: vi.fn(async () => distributionPlan),
+    applyLibraryImageDistribution,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  const selector = within(placement).getByRole("button", {name: /Select complete group/});
+  await user.click(selector);
+  const group = selector.closest("article")!;
+
+  await user.click(within(group).getByRole("button", {name: "Review Build"}));
+  const build = await screen.findByRole("dialog", {name: "Review Build"});
+  expect(within(build).getByText("Build the recipe image on MIA Alpha")).toBeVisible();
+  await user.click(within(build).getAllByText("Technical details")[0]);
+  expect(within(build).getByText(buildPlan.build_input_sha256)).toBeVisible();
+  await user.click(within(build).getByRole("button", {name: "Build recipe image"}));
+  expect(applyLibraryBuild).toHaveBeenCalledWith({
+    recipe_revision_id: "revision-chat",
+    builder_node_id: "node-alpha",
+    build_input_sha256: buildPlan.build_input_sha256,
+    request_key: expect.any(String),
+  }, expect.any(AbortSignal));
+  expect(await screen.findByRole("region", {name: "Build operation progress"})).toHaveTextContent("Operation complete");
+
+  await user.click(within(group).getByRole("button", {name: "Review Distribute"}));
+  const distribution = await screen.findByRole("dialog", {name: "Review Distribute"});
+  expect(within(distribution).getByText("Copy the exact built image to 2 mapped Sparks")).toBeVisible();
+  expect(within(distribution).getByText("MIA Alpha")).toBeVisible();
+  expect(within(distribution).getByText("MIA Beta")).toBeVisible();
+  await user.click(within(distribution).getByRole("button", {name: "Distribute image to selected nodes"}));
+  expect(applyLibraryImageDistribution).toHaveBeenCalledWith({
+    recipe_build_id: "build-chat",
+    mapping_id: "mapping-chat",
+    mapping_generation: 4,
+    plan_digest: distributionPlan.plan_digest,
+    request_key: expect.any(String),
+  }, expect.any(AbortSignal));
+  expect(await screen.findByRole("region", {name: "Distribute operation progress"})).toHaveTextContent("Operation complete");
 });
 
 test("locks global navigation and browser departure for the full Library apply and refresh", async () => {

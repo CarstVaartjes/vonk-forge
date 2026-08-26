@@ -218,7 +218,11 @@ class RunAdmissionService:
             required = max(
                 int(memory["startup_peak_bytes"]),
                 int(memory["steady_state_bytes"]) + int(memory["runtime_growth_bytes"]),
-            ) + int(memory["system_reserve_bytes"])
+            )
+            memory_floor = max(
+                self._floor,
+                int(memory["system_reserve_bytes"]),
+            )
             memory_kind = str(memory["kind"])
             reservation_kind = {
                 "unified": "unified-memory",
@@ -305,11 +309,11 @@ class RunAdmissionService:
                 else snapshot.gpu_memory_free_bytes
             )
             free_after = None if available is None else available - reserved - required
-            if free_after is not None and free_after < self._floor:
+            if free_after is not None and free_after < memory_floor:
                 blockers.append(
                     AdmissionReason(
                         "run.insufficient_memory",
-                        f"Run would leave {free_after} bytes, below the {self._floor}-byte memory floor.",
+                        f"Run would leave {free_after} bytes, below the {memory_floor}-byte memory floor.",
                     )
                 )
             plans.append(
@@ -326,7 +330,7 @@ class RunAdmissionService:
                     available,
                     reserved,
                     free_after,
-                    self._floor,
+                    memory_floor,
                     snapshot.fabric_address if snapshot else None,
                     snapshot.fabric_bandwidth_mbps if snapshot else None,
                     rendezvous_port,

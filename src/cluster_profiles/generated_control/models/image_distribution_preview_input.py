@@ -12,26 +12,22 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="ImageDistributionRequest")
+T = TypeVar("T", bound="ImageDistributionPreviewInput")
 
 
 
 @_attrs_define
-class ImageDistributionRequest:
+class ImageDistributionPreviewInput:
     """
         Attributes:
             mapping_generation (int):
             mapping_id (str):
-            plan_digest (str):
             recipe_build_id (str):
-            request_key (str):
      """
 
     mapping_generation: int
     mapping_id: str
-    plan_digest: str
     recipe_build_id: str
-    request_key: str
 
 
 
@@ -42,11 +38,7 @@ class ImageDistributionRequest:
 
         mapping_id = self.mapping_id
 
-        plan_digest = self.plan_digest
-
         recipe_build_id = self.recipe_build_id
-
-        request_key = self.request_key
 
 
         field_dict: dict[str, Any] = {}
@@ -54,9 +46,7 @@ class ImageDistributionRequest:
         field_dict.update({
             "mapping_generation": mapping_generation,
             "mapping_id": mapping_id,
-            "plan_digest": plan_digest,
             "recipe_build_id": recipe_build_id,
-            "request_key": request_key,
         })
 
         return field_dict
@@ -70,18 +60,12 @@ class ImageDistributionRequest:
 
         mapping_id = d.pop("mapping_id")
 
-        plan_digest = d.pop("plan_digest")
-
         recipe_build_id = d.pop("recipe_build_id")
 
-        request_key = d.pop("request_key")
-
-        image_distribution_request = cls(
+        image_distribution_preview_input = cls(
             mapping_generation=mapping_generation,
             mapping_id=mapping_id,
-            plan_digest=plan_digest,
             recipe_build_id=recipe_build_id,
-            request_key=request_key,
         )
 
-        return image_distribution_request
+        return image_distribution_preview_input

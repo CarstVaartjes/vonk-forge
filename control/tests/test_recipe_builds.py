@@ -41,6 +41,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_operations import (
+    RecipeOperationConflict,
     RecipeOperationService,
     _record_build_evidence,
 )
@@ -845,3 +846,107 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
         "sha256:" + "b" * 64
     }
     assert distribution.targets[0][1]["kind"] == "recipe.image.import.v1"
+
+
+def test_image_distribution_requires_the_previewed_plan_digest(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, builder, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    build_plan = builds.plan(revision.id, builder, now=now)
+    builds.record_success(
+        build_plan.build_id,
+        build_input_sha256=build_plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    target = "spk_" + "2" * 32
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=target,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=["recipe.image.import.v1"],
+            )
+        )
+        mapping = ClusterMapping(
+            recipe_revision_id=revision.id,
+            topology_name="synthetic-test",
+            generation=1,
+            node_count=2,
+            state="ready",
+            parameters={},
+            placement_digest="d" * 64,
+            endpoint_owner_node_id=builder,
+            created_by="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(mapping)
+        session.flush()
+        session.add_all(
+            (
+                ClusterMappingNode(
+                    mapping_id=mapping.id,
+                    node_id=builder,
+                    rank=0,
+                    role="entrypoint",
+                    endpoint_owner=True,
+                    created_at=now,
+                ),
+                ClusterMappingNode(
+                    mapping_id=mapping.id,
+                    node_id=target,
+                    rank=1,
+                    role="worker",
+                    endpoint_owner=False,
+                    created_at=now,
+                ),
+            )
+        )
+        mapping_id = mapping.id
+
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    preview = operations.preview_image_distribution(
+        build_plan.build_id,
+        mapping_id,
+        mapping_generation=1,
+    )
+
+    assert preview.image_digest == "sha256:" + "b" * 64
+    assert preview.node_ids == (builder, target)
+    assert len(preview.plan_digest) == 64
+    with pytest.raises(
+        RecipeOperationConflict,
+        match="submitted image distribution plan does not match preview",
+    ):
+        operations.distribute_image(
+            build_plan.build_id,
+            mapping_id,
+            mapping_generation=1,
+            plan_digest="0" * 64,
+            actor="admin",
+            request_id="stale-distribution",
+        )
+
+    operation = operations.distribute_image(
+        build_plan.build_id,
+        mapping_id,
+        mapping_generation=1,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="accepted-distribution",
+    )
+    assert operation.kind == "recipe.image.import.v1"
+    assert operation.plan_digest == preview.plan_digest
+    assert operation.nodes == (builder, target)
