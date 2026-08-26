@@ -383,11 +383,7 @@ fn produce_archive<R: ProcessRunner>(
     }
     let manifest: Manifest =
         serde_json::from_slice(&manifest_bytes).map_err(|_| BaseImageError::Invalid)?;
-    validate_manifest(&manifest)?;
-    let descriptors = std::iter::once(&manifest.config)
-        .chain(manifest.layers.iter())
-        .cloned()
-        .collect::<Vec<_>>();
+    let descriptors = validate_manifest(&manifest)?;
     if descriptors
         .iter()
         .any(|descriptor| descriptor.size > maximum_temporary_bytes)
@@ -503,7 +499,7 @@ fn oras_arguments(command: &[&str], source: &RegistrySource, reference: &str) ->
         .collect()
 }
 
-fn validate_manifest(manifest: &Manifest) -> Result<(), BaseImageError> {
+fn validate_manifest(manifest: &Manifest) -> Result<Vec<Descriptor>, BaseImageError> {
     if manifest.schema_version != 2
         || !matches!(manifest.media_type.as_str(), OCI_MANIFEST | DOCKER_MANIFEST)
         || !matches!(
@@ -516,16 +512,23 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), BaseImageError> {
     {
         return Err(BaseImageError::Invalid);
     }
-    let mut digests = BTreeSet::new();
+    let mut descriptors = Vec::new();
+    let mut digest_indexes = BTreeMap::new();
     for descriptor in std::iter::once(&manifest.config).chain(manifest.layers.iter()) {
-        if descriptor.size == 0
-            || digest_hex(&descriptor.digest).is_none()
-            || !digests.insert(&descriptor.digest)
-        {
+        if descriptor.size == 0 || digest_hex(&descriptor.digest).is_none() {
             return Err(BaseImageError::Invalid);
         }
+        if let Some(index) = digest_indexes.get(&descriptor.digest) {
+            let existing: &Descriptor = &descriptors[*index];
+            if existing.size != descriptor.size || existing.media_type != descriptor.media_type {
+                return Err(BaseImageError::Invalid);
+            }
+            continue;
+        }
+        digest_indexes.insert(descriptor.digest.clone(), descriptors.len());
+        descriptors.push(descriptor.clone());
     }
-    Ok(())
+    Ok(descriptors)
 }
 
 fn validate_platform(config: &[u8], platform: &str) -> Result<(), BaseImageError> {
