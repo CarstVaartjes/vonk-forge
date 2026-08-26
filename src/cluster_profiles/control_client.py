@@ -47,6 +47,8 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
 )
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/@\s]+@")
+
+
 class ControlClientError(RuntimeError):
     pass
 
@@ -453,9 +455,12 @@ class ControlClient:
         payload: Mapping[str, object] | None = None,
         *,
         extra_headers: Mapping[str, str] | None = None,
+        query: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         if not path.startswith("/api/v1/") or ".." in path:
             raise ControlClientError("control API path is invalid")
+        if query:
+            path = f"{path}?{urllib.parse.urlencode(query, doseq=True)}"
         data = None
         headers = {
             "Authorization": f"Bearer {self._token}",
@@ -473,14 +478,32 @@ class ControlClient:
             with self._opener(request, timeout=self._timeout) as response:
                 content = response.read(_MAX_RESPONSE + 1)
                 status = response.status
-        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+                response_headers = response.headers
+        except urllib.error.HTTPError as error:
+            content = error.read(_MAX_RESPONSE + 1)
+            status = error.code
+            response_headers = error.headers
+        except (OSError, urllib.error.URLError) as error:
             raise ControlClientError(
                 f"control API request failed: {type(error).__name__}"
             ) from None
         if len(content) > _MAX_RESPONSE:
-            raise ControlClientError("control API response exceeds safety limit")
+            raise ControlResponseTooLarge("control API response exceeds safety limit")
         if not 200 <= status < 300:
-            raise ControlClientError(f"control API returned HTTP {status}")
+            try:
+                problem = json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                problem = None
+            detail = problem.get("detail") if isinstance(problem, dict) else None
+            error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+            raise error_type(
+                status,
+                detail if isinstance(detail, str) else "control API request failed",
+                _bounded_retry_after(response_headers.get("retry-after")),
+                sensitive_values=(self._token,),
+            )
+        if status == 204 or not content:
+            return {}
         try:
             decoded = json.loads(content)
         except (UnicodeDecodeError, json.JSONDecodeError):

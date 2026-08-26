@@ -55,6 +55,8 @@ generated deployment's configurator logs the exact URL after startup.
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
+- [`vonkctl` local controller CLI](runbooks/vonkctl.md) — the Fleet, Library,
+  public catalog, and Activity workflows with plan-first mutations
 - [PostgreSQL authority administration](runbooks/authority-administration.md) —
   immutable revisions, proposals, and the runtime authority boundary
 - [Model and recipe identities](operators/model-catalog.md) — model identity, recipes,

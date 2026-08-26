@@ -11,6 +11,9 @@ API and `vonkctl` expose the same persisted projections for diagnostics and
 automation. Every view identifies the immutable PostgreSQL authority revision
 from which it was resolved.
 
+See the [`vonkctl` local controller CLI](vonkctl.md) for connection setup and
+the complete Fleet, Library, public catalog, and Activity command hierarchy.
+
 ## Change authority state
 
 Changes are plan-first:
