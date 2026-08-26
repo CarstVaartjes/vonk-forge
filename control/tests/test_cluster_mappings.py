@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +11,10 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import AgentNode, Base, ClusterMapping, ClusterMappingNode
 
 from .test_catalog_service import _seed_recipe_dependencies
@@ -28,9 +32,31 @@ def setup(tmp_path: Path):
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1", "fabric.full_mesh.mbps.10000"],
+                capabilities=["agent.runtime.rust.v1", "runtime.vonk.v1"],
             )
             for node_id in node_ids
+        )
+    inventory = InventoryRepository(sessions, clock=lambda: now)
+    for index, node_id in enumerate(node_ids, start=1):
+        inventory.record(
+            InventorySnapshotInput(
+                node_id=node_id,
+                observed_at=now,
+                disk_total_bytes=1_000,
+                disk_free_bytes=900,
+                host_memory_total_bytes=1_000,
+                host_memory_free_bytes=900,
+                gpu_memory_total_bytes=1_000,
+                gpu_memory_free_bytes=900,
+                gpu_count=1,
+                artifact_store_read_only=False,
+                capabilities=(
+                    "runtime.vonk.v1",
+                    "fabric.full_mesh.mbps.10000",
+                ),
+                fabric_address=f"192.168.100.{index}",
+                fabric_bandwidth_mbps=10_000,
+            )
         )
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
@@ -165,13 +191,55 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
         service.preview(revision.id, node_ids[:2], {}, "admin")
     assert caught.value.code == "mapping.node_count"
 
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_ids[0])
-        assert node is not None
-        node.capabilities = ["runtime.vonk.v1"]
+    InventoryRepository(sessions, clock=lambda: _now + timedelta(seconds=1)).record(
+        InventorySnapshotInput(
+            node_id=node_ids[0],
+            observed_at=_now + timedelta(seconds=1),
+            disk_total_bytes=1_000,
+            disk_free_bytes=900,
+            host_memory_total_bytes=1_000,
+            host_memory_free_bytes=900,
+            gpu_memory_total_bytes=1_000,
+            gpu_memory_free_bytes=900,
+            gpu_count=1,
+            artifact_store_read_only=False,
+            capabilities=("runtime.vonk.v1",),
+        )
+    )
 
     with pytest.raises(ClusterMappingError) as caught:
         service.preview(revision.id, node_ids, {}, "admin")
+    assert caught.value.code == "topology.fabric_insufficient"
+
+
+def test_mapping_does_not_trust_fabric_from_claim_capabilities(tmp_path: Path) -> None:
+    sessions, now, node_ids, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_ids[0])
+        assert node is not None
+        node.capabilities = [
+            "runtime.vonk.v1",
+            "fabric.full_mesh.mbps.1000000",
+        ]
+    InventoryRepository(sessions, clock=lambda: now + timedelta(seconds=1)).record(
+        InventorySnapshotInput(
+            node_id=node_ids[0],
+            observed_at=now + timedelta(seconds=1),
+            disk_total_bytes=1_000,
+            disk_free_bytes=900,
+            host_memory_total_bytes=1_000,
+            host_memory_free_bytes=900,
+            gpu_memory_total_bytes=1_000,
+            gpu_memory_free_bytes=900,
+            gpu_count=1,
+            artifact_store_read_only=False,
+            capabilities=("runtime.vonk.v1",),
+        )
+    )
+
+    with pytest.raises(ClusterMappingError) as caught:
+        ClusterMappingService(sessions).preview(revision.id, node_ids, {}, "admin")
+
     assert caught.value.code == "topology.fabric_insufficient"
 
 
