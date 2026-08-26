@@ -1,4 +1,6 @@
 import type {
+  LibraryBuildPlan,
+  LibraryImageDistributionPlan,
   LibraryInstallPlan,
   LibraryLoadPlan,
   LibraryMappingPlan,
@@ -13,7 +15,39 @@ import type {LibraryPlacementGroup} from "./library-action-types";
 import {useLibraryNodeName} from "./library-node-names";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
-export type LibraryActionPlan = LibraryMappingPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
+export type LibraryActionPlan = LibraryBuildPlan | LibraryMappingPlan | LibraryImageDistributionPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
+
+export function BuildPreview({plan}: {plan: LibraryBuildPlan}) {
+  const nodeName = useLibraryNodeName();
+  return <div className="action-preview">
+    <p><strong>Build the recipe image on {nodeName(plan.builder_node_id)}</strong></p>
+    <p>The immutable source bundle and recipe revision below are the complete build inputs.</p>
+    <TechnicalDetails items={[
+      {label: "Builder node ID", value: plan.builder_node_id},
+      {label: "Recipe revision ID", value: plan.recipe_revision_id},
+      {label: "Recipe content SHA-256", value: plan.recipe_content_sha256},
+      {label: "Source bundle SHA-256", value: plan.source_bundle_sha256},
+      {label: "Build input SHA-256", value: plan.build_input_sha256},
+    ]}/>
+  </div>;
+}
+
+export function ImageDistributionPreview({plan}: {plan: LibraryImageDistributionPlan}) {
+  const nodeName = useLibraryNodeName();
+  return <div className="action-preview">
+    <p><strong>Copy the exact built image to {plan.node_ids.length} mapped Spark{plan.node_ids.length === 1 ? "" : "s"}</strong></p>
+    <p>Mapping generation {plan.mapping_generation}</p>
+    <ol className="action-node-plans">{plan.node_ids.map(nodeId => <li key={nodeId}>
+      <strong>{nodeName(nodeId)}</strong>
+      <TechnicalDetails compact items={[{label: "Node ID", value: nodeId}]}/>
+    </li>)}</ol>
+    <TechnicalDetails items={[
+      {label: "Image digest", value: plan.image_digest},
+      {label: "Recipe build ID", value: plan.recipe_build_id},
+      {label: "Mapping ID", value: plan.mapping_id},
+    ]}/>
+  </div>;
+}
 
 function reasonSets(nodes: Array<{blockers: {code: string; detail: string}[]; warnings: {code: string; detail: string}[]}>) {
   return {

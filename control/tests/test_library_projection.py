@@ -327,6 +327,55 @@ def _projection(sessions: sessionmaker[Session]) -> LibraryProjection:
     )
 
 
+def test_runtime_memory_excludes_the_separate_system_reserve() -> None:
+    _engine, sessions = _database()
+    document = _document(family="reserve-floor", title="Reserve floor")
+    document["topology"]["roles"][0]["resources"]["memory"][
+        "system_reserve_bytes"
+    ] = 80
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            91,
+            slug="reserve-floor",
+            title="Reserve floor catalog title",
+            document=document,
+        )
+        _node(session, 91, memory_free=180)
+
+    group = _projection(sessions).detail(_uuid(91)).placement[0].recommendations[0]
+
+    assert group.nodes[0].memory_required_bytes == 100
+    assert group.nodes[0].memory_free_after_bytes == 80
+    assert "run.insufficient_memory" not in {reason.code for reason in group.reasons}
+
+
+def test_low_memory_blocks_load_but_retains_mapping_preview() -> None:
+    _engine, sessions = _database()
+    document = _document(family="load-only-blocker", title="Load only blocker")
+    document["topology"]["roles"][0]["resources"]["memory"][
+        "system_reserve_bytes"
+    ] = 80
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            92,
+            slug="load-only-blocker",
+            title="Load blocker catalog title",
+            document=document,
+        )
+        _node(session, 92, memory_free=170)
+
+    group = _projection(sessions).detail(_uuid(92)).placement[0].rejected_groups[0]
+    codes = {reason.code for reason in group.reasons}
+
+    assert group.nodes[0].memory_required_bytes == 100
+    assert group.nodes[0].memory_free_after_bytes == 70
+    assert "run.insufficient_memory" in codes
+    assert "install.insufficient_disk" not in codes
+    assert any(target.kind == "mapping" for target in group.preview_targets)
+
+
 def _run_status_service(
     sessions: sessionmaker[Session],
 ) -> RecipeOperationService:
@@ -783,7 +832,10 @@ def test_detail_selects_latest_revision_but_keeps_older_active_state_exact() -> 
     assert recommendation.recipe_build_id is None
     assert recommendation.installation_ids == []
     assert recommendation.run_ids == []
-    assert [target.kind for target in recommendation.preview_targets] == ["mapping"]
+    assert [target.kind for target in recommendation.preview_targets] == [
+        "build",
+        "mapping",
+    ]
     assert recommendation.preview_targets[0].input.recipe_revision_id == (
         detail.selected_revision.id
     )
@@ -1398,7 +1450,7 @@ def test_uninstalled_installation_is_not_present_and_has_no_run_preview() -> Non
     assert recommendation.installation_ids == []
     assert [item.kind for item in recommendation.preview_targets] == [
         "mapping",
-        "install",
+        "image_distribution",
     ]
 
 
@@ -2314,7 +2366,7 @@ def test_more_than_512_active_exact_runs_fail_closed_for_placement_inputs() -> N
     assert group.load_state == "unknown"
     assert group.installation_ids == []
     assert group.run_ids == []
-    assert {target.kind for target in group.preview_targets} == {"mapping"}
+    assert {target.kind for target in group.preview_targets} == {"build", "mapping"}
     assert "projection.evidence_truncated" in codes
     assert "install.complete" not in codes
     assert "run.loaded" not in codes

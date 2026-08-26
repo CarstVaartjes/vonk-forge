@@ -37,6 +37,7 @@ def setup(
     free_memory=300,
     capabilities=("runtime.vonk.v1",),
     port_reserved=False,
+    system_reserve=0,
     engine=None,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
@@ -53,7 +54,7 @@ def setup(
             "startup_peak_bytes": 225,
             "steady_state_bytes": 200,
             "runtime_growth_bytes": 25,
-            "system_reserve_bytes": 0,
+            "system_reserve_bytes": system_reserve,
         }
     )
     catalog = CatalogService(
@@ -183,6 +184,7 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         plan.allowed is True
         and plan.nodes[0].required_memory_bytes == 225
         and plan.nodes[0].free_after_bytes == 75
+        and plan.nodes[0].memory_floor_bytes == 50
     )
     assert plan.alias == "qwen"
     assert alternate.alias == "qwen-alt"
@@ -194,6 +196,43 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert run.alias == plan.alias == run.plan["alias"]
+
+
+def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:
+    sessions, now, _node, installation = setup(
+        tmp_path,
+        free_memory=300,
+        system_reserve=75,
+    )
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+
+    plan = service.plan_run(installation, alias="qwen", now=now)
+
+    assert plan.allowed is True
+    assert plan.nodes[0].required_memory_bytes == 225
+    assert plan.nodes[0].free_after_bytes == 75
+    assert plan.nodes[0].memory_floor_bytes == 75
+
+
+def test_system_reserve_still_blocks_a_run_without_headroom(tmp_path) -> None:
+    sessions, now, _node, installation = setup(
+        tmp_path,
+        free_memory=299,
+        system_reserve=75,
+    )
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    ).plan_run(installation, alias="qwen", now=now)
+
+    assert plan.allowed is False
+    assert plan.nodes[0].required_memory_bytes == 225
+    assert plan.nodes[0].free_after_bytes == 74
+    assert plan.nodes[0].memory_floor_bytes == 75
+    assert "run.insufficient_memory" in {
+        reason.code for reason in plan.nodes[0].blockers
+    }
 
 
 def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:

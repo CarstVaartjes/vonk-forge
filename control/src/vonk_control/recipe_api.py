@@ -28,6 +28,10 @@ RECIPE_OPERATION_IDS = {
     ("post", "/api/v1/recipes/build-plans/preview"): "previewRecipeBuild",
     ("post", "/api/v1/recipes/source-checks"): "checkRecipeBuildSource",
     ("post", "/api/v1/recipes/builds"): "buildRecipe",
+    (
+        "post",
+        "/api/v1/recipes/image-distribution-plans/preview",
+    ): "previewRecipeImageDistribution",
     ("post", "/api/v1/recipes/image-distributions"): "distributeRecipeImage",
     ("post", "/api/v1/recipes/install-plans/preview"): "previewRecipeInstall",
     ("post", "/api/v1/recipes/installations"): "installRecipe",
@@ -92,6 +96,15 @@ class BuildPlanResponse(StrictModel):
     builder_node_id: str
     source_bundle_sha256: str
     build_input_sha256: str
+
+
+class ImageDistributionPlanResponse(StrictModel):
+    recipe_build_id: str = Field(pattern=_UUID)
+    mapping_id: str = Field(pattern=_UUID)
+    mapping_generation: int = Field(ge=1)
+    image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    node_ids: list[str] = Field(min_length=1, max_length=1024)
+    plan_digest: str = Field(pattern=_DIGEST)
 
 
 class SourcePolicyFindingResponse(StrictModel):
@@ -298,10 +311,14 @@ class BuildRequest(BuildPreviewRequest):
     request_key: str = Field(pattern=_UUID)
 
 
-class ImageDistributionRequest(StrictModel):
+class ImageDistributionPreviewRequest(StrictModel):
     recipe_build_id: str = Field(pattern=_UUID)
     mapping_id: str = Field(pattern=_UUID)
     mapping_generation: int = Field(ge=1)
+
+
+class ImageDistributionRequest(ImageDistributionPreviewRequest):
+    plan_digest: str = Field(pattern=_DIGEST)
     request_key: str = Field(pattern=_UUID)
 
 
@@ -503,6 +520,26 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
+        "/api/v1/recipes/image-distribution-plans/preview",
+        response_model=ImageDistributionPlanResponse,
+        operation_id="previewRecipeImageDistribution",
+    )
+    def preview_image_distribution(
+        body: ImageDistributionPreviewRequest,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            value = recipes().preview_image_distribution(
+                body.recipe_build_id,
+                body.mapping_id,
+                mapping_generation=body.mapping_generation,
+            )
+        except RecipeOperationConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+        return asdict(value)
+
+    @app.post(
         "/api/v1/recipes/image-distributions",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
@@ -519,6 +556,7 @@ def install_recipe_operation_routes(
                 body.recipe_build_id,
                 body.mapping_id,
                 mapping_generation=body.mapping_generation,
+                plan_digest=body.plan_digest,
                 actor=actor.subject,
                 request_id=body.request_key,
             )

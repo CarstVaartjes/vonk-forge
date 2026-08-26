@@ -246,6 +246,27 @@
         "title": "BuildPlanResponse",
         "type": "object"
       },
+      "BuildPreviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "builder_node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Builder Node Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_id",
+          "builder_node_id"
+        ],
+        "title": "BuildPreviewInput",
+        "type": "object"
+      },
       "BuildPreviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -265,6 +286,25 @@
           "builder_node_id"
         ],
         "title": "BuildPreviewRequest",
+        "type": "object"
+      },
+      "BuildPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/BuildPreviewInput"
+          },
+          "kind": {
+            "const": "build",
+            "default": "build",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "BuildPreviewTarget",
         "type": "object"
       },
       "BuildRequest": {
@@ -1251,6 +1291,129 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImageDistributionPlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_build_id",
+          "mapping_id",
+          "mapping_generation",
+          "image_digest",
+          "node_ids",
+          "plan_digest"
+        ],
+        "title": "ImageDistributionPlanResponse",
+        "type": "object"
+      },
+      "ImageDistributionPreviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "mapping_generation": {
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_build_id",
+          "mapping_id",
+          "mapping_generation"
+        ],
+        "title": "ImageDistributionPreviewInput",
+        "type": "object"
+      },
+      "ImageDistributionPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mapping_generation": {
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_build_id",
+          "mapping_id",
+          "mapping_generation"
+        ],
+        "title": "ImageDistributionPreviewRequest",
+        "type": "object"
+      },
+      "ImageDistributionPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/ImageDistributionPreviewInput"
+          },
+          "kind": {
+            "const": "image_distribution",
+            "default": "image_distribution",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "ImageDistributionPreviewTarget",
+        "type": "object"
+      },
       "ImageDistributionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1262,6 +1425,11 @@
           "mapping_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Mapping Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
             "type": "string"
           },
           "recipe_build_id": {
@@ -1279,6 +1447,7 @@
           "recipe_build_id",
           "mapping_id",
           "mapping_generation",
+          "plan_digest",
           "request_key"
         ],
         "title": "ImageDistributionRequest",
@@ -3922,6 +4091,8 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "build": "#/components/schemas/BuildPreviewTarget",
+                  "image_distribution": "#/components/schemas/ImageDistributionPreviewTarget",
                   "install": "#/components/schemas/InstallPreviewTarget",
                   "mapping": "#/components/schemas/MappingPreviewTarget",
                   "run": "#/components/schemas/RunPreviewTarget"
@@ -3930,7 +4101,13 @@
               },
               "oneOf": [
                 {
+                  "$ref": "#/components/schemas/BuildPreviewTarget"
+                },
+                {
                   "$ref": "#/components/schemas/MappingPreviewTarget"
+                },
+                {
+                  "$ref": "#/components/schemas/ImageDistributionPreviewTarget"
                 },
                 {
                   "$ref": "#/components/schemas/InstallPreviewTarget"
@@ -3940,7 +4117,7 @@
                 }
               ]
             },
-            "maxItems": 3,
+            "maxItems": 5,
             "title": "Preview Targets",
             "type": "array"
           },
@@ -11730,6 +11907,49 @@
           }
         ],
         "summary": "Build"
+      }
+    },
+    "/api/v1/recipes/image-distribution-plans/preview": {
+      "post": {
+        "operationId": "previewRecipeImageDistribution",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageDistributionPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageDistributionPlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Image Distribution"
       }
     },
     "/api/v1/recipes/image-distributions": {

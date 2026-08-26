@@ -18,6 +18,7 @@ from vonk_control.recipe_action_plans import (
 )
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
+    ImageDistributionPreview,
     RecipeOperationView,
     RecipeRunRankStatus,
     RecipeRunStatus,
@@ -206,6 +207,19 @@ class Recipes:
             "2" * 64,
             (NODE,),
             None,
+        )
+
+    def preview_image_distribution(self, build_id, mapping_id, **kwargs):
+        self.calls.append(
+            ("preview_image_distribution", (build_id, mapping_id, kwargs))
+        )
+        return ImageDistributionPreview(
+            recipe_build_id=BUILD,
+            mapping_id=MAPPING,
+            mapping_generation=1,
+            image_digest="sha256:" + "d" * 64,
+            node_ids=(NODE,),
+            plan_digest="2" * 64,
         )
 
     def preview_install(self, mapping, build):
@@ -418,6 +432,15 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
             "request_key": "10000000-0000-4000-8000-000000000011",
         },
     )
+    distribution_preview = client.post(
+        "/api/v1/recipes/image-distribution-plans/preview",
+        headers=headers(),
+        json={
+            "recipe_build_id": BUILD,
+            "mapping_id": MAPPING,
+            "mapping_generation": 1,
+        },
+    )
     distributed = client.post(
         "/api/v1/recipes/image-distributions",
         headers=headers(),
@@ -425,6 +448,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
             "recipe_build_id": BUILD,
             "mapping_id": MAPPING,
             "mapping_generation": 1,
+            "plan_digest": "2" * 64,
             "request_key": "10000000-0000-4000-8000-000000000012",
         },
     )
@@ -434,6 +458,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
     assert mapping_preview.json()["nodes"][0]["rank"] == 0
     assert mapping.status_code == 201
     assert build_preview.json()["build_input_sha256"] == "1" * 64
+    assert distribution_preview.json()["node_ids"] == [NODE]
     assert built.status_code == distributed.status_code == 202
     assert {event.action for event in audits.list()} >= {
         "recipe.mapping.create",
@@ -448,6 +473,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         "preview_build",
         "preview_build",
         "build",
+        "preview_image_distribution",
         "distribute_image",
     ]
 

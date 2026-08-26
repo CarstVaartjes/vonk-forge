@@ -11,6 +11,8 @@ import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details"
 type Placement = LibraryRecipeDetail["placement"][number];
 type Group = Placement["recommendations"][number];
 type FreshnessPolicy = LibrarySnapshot["freshness_policy"];
+type Reason = LibraryRecipeDetail["reasons"][number];
+type PlacementBlocker = {nodeIds: string[]; reason: Reason};
 
 function title(value: string): string {
   return value.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
@@ -34,6 +36,58 @@ function groupName(group: Group, nodeName: (nodeId: string) => string): string {
   return group.node_ids.map(nodeName).join(" and ");
 }
 
+function isLoadBlocker(reason: Reason): boolean {
+  return reason.severity === "error" && (reason.code.startsWith("run.") || reason.code === "topology.fabric_insufficient");
+}
+
+function groupInstallable(group: Group): boolean {
+  return !group.reasons.some(reason => reason.severity === "error" && !isLoadBlocker(reason));
+}
+
+function blockingReasons(topology: Placement, phase: "install" | "load"): PlacementBlocker[] {
+  const candidates: PlacementBlocker[] = [
+    ...topology.reasons.map(reason => ({nodeIds: [], reason})),
+    ...topology.recommendations.filter(group => !group.eligible).flatMap(group => group.reasons.map(reason => ({nodeIds: group.node_ids, reason}))),
+    ...topology.rejected_groups.flatMap(group => group.reasons.map(reason => ({nodeIds: group.node_ids, reason}))),
+    ...topology.rejected_nodes.flatMap(node => node.reasons.map(reason => ({nodeIds: [node.node_id], reason}))),
+  ];
+  const errors = candidates.filter(candidate => candidate.reason.severity === "error" && (phase === "load" ? isLoadBlocker(candidate.reason) : !isLoadBlocker(candidate.reason)));
+  const relevant = errors.length > 0 ? errors : candidates.filter(candidate => candidate.reason.severity === "warning");
+  return relevant.filter((candidate, index) => relevant.findIndex(other => other.reason.code === candidate.reason.code && other.reason.detail === candidate.reason.detail && other.nodeIds.join(":") === candidate.nodeIds.join(":")) === index);
+}
+
+function blockerDetail(blocker: PlacementBlocker, nodeName: (nodeId: string) => string, nodeCount: number): string {
+  const memory = blocker.reason.detail.match(/^Run would leave (\d+) bytes on ([^,]+), below the (\d+)-byte (?:memory )?floor\.?$/);
+  if (memory) return `${nodeName(memory[2])} does not have enough free memory: loading would leave ${formatBytes(Number(memory[1]))}, below the required ${formatBytes(Number(memory[3]))} safety reserve.`;
+  const disk = blocker.reason.detail.match(/^Installation would leave (-?\d+) bytes on ([^,]+), below the (\d+)-byte floor\.?$/);
+  if (disk) return `${nodeName(disk[2])} does not have enough free disk space: installation would leave ${formatBytes(Number(disk[1]))}, below the required ${formatBytes(Number(disk[3]))} safety reserve.`;
+  if (blocker.reason.code === "node.offline" && blocker.nodeIds[0]) return `${nodeName(blocker.nodeIds[0])} is offline. Every Spark in this ${nodeCount}-Spark group must be live.`;
+  if (blocker.reason.code === "inventory.missing" && blocker.nodeIds[0]) return `${nodeName(blocker.nodeIds[0])} has not reported the inventory required for admission.`;
+  return blocker.nodeIds.reduce((detail, nodeId) => detail.replaceAll(nodeId, nodeName(nodeId)), blocker.reason.detail);
+}
+
+function PlacementBlockedSummary({blockers, nodeCount}: {blockers: PlacementBlocker[]; nodeCount: number}) {
+  const nodeName = useLibraryNodeName();
+  return <aside className="placement-blocked-summary" role="alert">
+    <strong>Why this recipe cannot be installed</strong>
+    <p>The required {nodeCount}-Spark topology exists, but no complete group passes installation admission.</p>
+    {blockers.length > 0
+      ? <ul>{blockers.map((blocker, index) => <li key={`${blocker.reason.code}:${blocker.reason.detail}:${index}`}>{blockerDetail(blocker, nodeName, nodeCount)}</li>)}</ul>
+      : <p>No eligible complete group is currently available. Open the evidence below for the latest node and capacity details.</p>}
+    <small>Full capacity and technical evidence remains available below.</small>
+  </aside>;
+}
+
+function LoadBlockedSummary({group, nodeCount}: {group: Group; nodeCount: number}) {
+  const nodeName = useLibraryNodeName();
+  const blockers = group.reasons.filter(isLoadBlocker).map(reason => ({nodeIds: group.node_ids, reason}));
+  if (blockers.length === 0) return null;
+  return <aside className="placement-load-blocked-summary" role="status">
+    <strong>Installable, but cannot be loaded</strong>
+    <ul>{blockers.map((blocker, index) => <li key={`${blocker.reason.code}:${blocker.reason.detail}:${index}`}>{blockerDetail(blocker, nodeName, nodeCount)}</li>)}</ul>
+  </aside>;
+}
+
 function CapacityBar({after, label, required, reserved}: {after: number; label: string; required: number; reserved: number}) {
   const parts = [Math.max(0, required), Math.max(0, reserved), Math.max(0, after)];
   const total = Math.max(1, parts.reduce((sum, value) => sum + value, 0));
@@ -48,7 +102,7 @@ function CapacityBar({after, label, required, reserved}: {after: number; label: 
   </div>;
 }
 
-function GroupEvidence({group, policy, selected}: {group: Group; policy: FreshnessPolicy; selected: boolean}) {
+function GroupEvidence({group, hideLoadBlockers = false, policy, selected}: {group: Group; hideLoadBlockers?: boolean; policy: FreshnessPolicy; selected: boolean}) {
   const nodeName = useLibraryNodeName();
   return <div className={`placement-evidence${selected ? " is-selected" : ""}`}>
     <p className="placement-state">Complete group · {title(group.install_state === "complete" ? "installed" : group.install_state)} · {title(group.load_state === "not_loaded" ? "not loaded" : group.load_state)}</p>
@@ -68,7 +122,7 @@ function GroupEvidence({group, policy, selected}: {group: Group; policy: Freshne
         <CapacityBar label={`${title(node.memory_kind)} memory`} required={node.memory_required_bytes} reserved={node.memory_reserved_bytes} after={node.memory_free_after_bytes}/>
       </div>
     </li>)}</ol>
-    <LibraryReasons reasons={group.reasons}/>
+    <LibraryReasons reasons={hideLoadBlockers ? group.reasons.filter(reason => !isLoadBlocker(reason)) : group.reasons}/>
   </div>;
 }
 
@@ -91,22 +145,29 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
   if (detail.placement.length === 0) return <section className="library-section"><h4>Placement</h4><p className="library-placeholder">No valid complete topology placement is available.</p></section>;
   return <section className="library-section placement-section" aria-label="Complete placement groups">
     <div className="section-heading"><div><p className="fleet-kicker">One atomic group</p><h4>Complete placement groups</h4></div><small>Select all ranks together</small></div>
-    {detail.placement.map(topology => <section key={topology.topology_name} className="placement-profile" aria-label={`${topology.topology_name} placement`}>
-      <div className="placement-profile-heading"><h5>{humanizeIdentifier(topology.topology_name)}</h5><span>{topology.node_count} Sparks · {topology.recommendations.length} available</span></div>
+    {detail.placement.map(topology => {
+      const installableGroups = [...topology.recommendations, ...topology.rejected_groups]
+        .filter(groupInstallable)
+        .filter((group, index, groups) => groups.findIndex(candidate => groupKey(topology.topology_name, candidate) === groupKey(topology.topology_name, group)) === index);
+      return <section key={topology.topology_name} className="placement-profile" aria-label={`${topology.topology_name} placement`}>
+      <div className="placement-profile-heading"><h5>{humanizeIdentifier(topology.topology_name)}</h5><span>{topology.node_count} Sparks · {installableGroups.length} installable</span></div>
       {!topology.search_complete && <div className="bounded-search-notice" role="note">
         <strong>Bounded search is incomplete</strong>
         <p>{topology.reasons.find(reason => reason.code.includes("truncated"))?.detail ?? `The bounded search evaluated ${topology.evaluated_group_count} complete groups.`} This is bounded advisory evidence, not a globally optimal placement.</p>
       </div>}
       <LibraryReasons reasons={topology.reasons}/>
-      <div className="placement-groups">{topology.recommendations.filter(group => group.eligible).map(group => {
+      <div className="placement-groups">{installableGroups.map(group => {
         const key = groupKey(topology.topology_name, group);
         const selected = selectedGroup === key;
+        const loadBlocked = group.reasons.some(isLoadBlocker);
+        const actions = group.preview_targets.filter(target => !loadBlocked || target.kind !== "run");
         return <article key={key} className={`placement-group${selected ? " is-selected" : ""}`}>
           <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${groupName(group, nodeName)}`}>
-            <span>{group.node_ids.map(nodeName).join(" + ")}</span><small>{group.nodes.length} ranks · eligible complete group</small>
+            <span>{group.node_ids.map(nodeName).join(" + ")}</span><small>{group.nodes.length} ranks · {loadBlocked ? "installable · load blocked" : "installable and loadable"}</small>
           </button>
-          {selected && group.preview_targets.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">
-            {group.preview_targets.map((target, index) => <button
+          <LoadBlockedSummary group={group} nodeCount={topology.node_count}/>
+          {selected && actions.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">
+            {actions.map((target, index) => <button
               type="button"
               className="button"
               disabled={actionsDisabled}
@@ -114,10 +175,10 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
               onClick={(event: MouseEvent<HTMLButtonElement>) => onReview?.(target, event.currentTarget, group)}
             >Review {actionName(target)}</button>)}
           </div>}
-          <GroupEvidence group={group} policy={policy} selected={selected}/>
+          <GroupEvidence group={group} hideLoadBlockers={loadBlocked} policy={policy} selected={selected}/>
         </article>;
       })}</div>
-      {topology.recommendations.every(group => !group.eligible) && <p className="library-placeholder">No eligible Spark group is available for this topology. Review unavailable placement evidence below.</p>}
+      {installableGroups.length === 0 && <PlacementBlockedSummary blockers={blockingReasons(topology, "install")} nodeCount={topology.node_count}/>}
       {(topology.rejected_groups.length > 0 || topology.rejected_nodes.length > 0 || topology.recommendations.some(group => !group.eligible)) && <details className="placement-rejections">
         <summary>Unavailable placement evidence</summary>
         {topology.recommendations.filter(group => !group.eligible).map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>) }
@@ -125,5 +186,5 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
         {topology.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{nodeName(node.node_id)}</strong><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/><LibraryReasons reasons={node.reasons}/></div>)}
         {topology.rejected_evidence_truncated && <p className="bounded-copy">Rejected evidence is also truncated at the published server limit.</p>}
       </details>}
-    </section>)}</section>;
+    </section>})}</section>;
 }

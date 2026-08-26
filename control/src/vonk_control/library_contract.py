@@ -348,6 +348,17 @@ class MappingPreviewInput(_StrictModel):
     parameters: dict[Text64, Scalar] = Field(max_length=128)
 
 
+class BuildPreviewInput(_StrictModel):
+    recipe_revision_id: UuidId
+    builder_node_id: NodeId
+
+
+class ImageDistributionPreviewInput(_StrictModel):
+    recipe_build_id: UuidId
+    mapping_id: UuidId
+    mapping_generation: int = Field(ge=1, le=2_147_483_647)
+
+
 class InstallPreviewInput(_StrictModel):
     mapping_id: UuidId
     recipe_build_id: UuidId
@@ -362,6 +373,16 @@ class MappingPreviewTarget(_StrictModel):
     input: MappingPreviewInput
 
 
+class BuildPreviewTarget(_StrictModel):
+    kind: Literal["build"] = "build"
+    input: BuildPreviewInput
+
+
+class ImageDistributionPreviewTarget(_StrictModel):
+    kind: Literal["image_distribution"] = "image_distribution"
+    input: ImageDistributionPreviewInput
+
+
 class InstallPreviewTarget(_StrictModel):
     kind: Literal["install"] = "install"
     input: InstallPreviewInput
@@ -373,7 +394,11 @@ class RunPreviewTarget(_StrictModel):
 
 
 PreviewTarget = Annotated[
-    MappingPreviewTarget | InstallPreviewTarget | RunPreviewTarget,
+    BuildPreviewTarget
+    | MappingPreviewTarget
+    | ImageDistributionPreviewTarget
+    | InstallPreviewTarget
+    | RunPreviewTarget,
     Field(discriminator="kind"),
 ]
 
@@ -463,7 +488,7 @@ class PlacementRecommendation(_StrictModel):
     recipe_build_id: UuidId | None
     installation_ids: list[UuidId] = Field(max_length=16)
     run_ids: list[UuidId] = Field(max_length=16)
-    preview_targets: list[PreviewTarget] = Field(max_length=3)
+    preview_targets: list[PreviewTarget] = Field(max_length=5)
     reasons: list[ProjectionReason] = Field(max_length=64)
 
 

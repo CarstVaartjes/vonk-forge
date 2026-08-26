@@ -150,7 +150,7 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
           <div className="resource-totals"><strong>{formatBytes(topologyMemory(detail.topology))} startup memory total</strong><strong>{formatBytes(topologyDisk(detail.topology))} disk envelope total</strong></div>
           <figure className="topology-diagram" aria-label={`${detail.topology.node_count}-Spark ${humanizeIdentifier(detail.topology.mode)} topology over ${humanizeIdentifier(detail.topology.fabric.connectivity)} fabric`}>
             <figcaption><span className="topology-fabric-badge">{humanizeIdentifier(detail.topology.fabric.connectivity)} fabric</span><span>{detail.topology.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {humanizeIdentifier(detail.topology.parallelism.backend)}</span></figcaption>
-            <ol className="topology-rank-diagram" aria-label="Topology ranks">{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}>
+            <ol className="topology-rank-diagram" aria-label="Topology ranks" tabIndex={0}>{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}>
               <span className="topology-rank-node" aria-hidden="true">{role.rank}</span><div><strong>Rank {role.rank} · {humanizeIdentifier(role.name)}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></div>
             </li>)}</ol>
           </figure>

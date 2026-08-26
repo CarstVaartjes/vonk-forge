@@ -130,8 +130,12 @@ it("uses distinct digest-bound Library action operations", async () => {
 
   await api.librarySnapshot("cursor-1");
   await api.libraryRecipe("recipe/one");
+  await api.previewLibraryBuild({recipe_revision_id: "revision-1", builder_node_id: "node-a"}, controller.signal);
+  await api.applyLibraryBuild({recipe_revision_id: "revision-1", builder_node_id: "node-a", build_input_sha256: "build-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
   await api.applyLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryImageDistribution({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2});
+  await api.applyLibraryImageDistribution({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2, plan_digest: "distribution-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
   await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryLoad({installation_id: "installation-1", alias: "chat"});
@@ -149,8 +153,12 @@ it("uses distinct digest-bound Library action operations", async () => {
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["GET", "/api/v1/library"],
     ["GET", "/api/v1/library/recipes/recipe%2Fone"],
+    ["POST", "/api/v1/recipes/build-plans/preview"],
+    ["POST", "/api/v1/recipes/builds"],
     ["POST", "/api/v1/recipes/mapping-plans/preview"],
     ["POST", "/api/v1/recipes/mappings"],
+    ["POST", "/api/v1/recipes/image-distribution-plans/preview"],
+    ["POST", "/api/v1/recipes/image-distributions"],
     ["POST", "/api/v1/recipes/install-plans/preview"],
     ["POST", "/api/v1/recipes/installations"],
     ["POST", "/api/v1/recipes/run-plans/preview"],
@@ -165,15 +173,16 @@ it("uses distinct digest-bound Library action operations", async () => {
     ["GET", "/api/v1/jobs/job-1"],
   ]);
   expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
-  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[5].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[6].clone().json()).toEqual({installation_id: "installation-1", alias: "chat"});
-  expect(await requests[7].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[9].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[11].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", builder_node_id: "node-a", build_input_sha256: "build-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[5].clone().json()).toEqual({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[7].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2, plan_digest: "distribution-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[9].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[10].clone().json()).toEqual({installation_id: "installation-1", alias: "chat"});
+  expect(await requests[11].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[13].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[15].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(requests[2].signal.aborted).toBe(true);
-  expect(requests[12].signal.aborted).toBe(true);
-  expect(requests[15].signal.aborted).toBe(true);
+  expect(requests[16].signal.aborted).toBe(true);
 });
 
 it("requests bounded node telemetry history through the generated operation", async () => {

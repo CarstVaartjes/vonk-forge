@@ -33,6 +33,10 @@ import type {
   RecipeBuildPlan,
   RecipeMappingPlan,
   RecipeOperation,
+  LibraryBuildApplyInput,
+  LibraryBuildPreviewInput,
+  LibraryImageDistributionApplyInput,
+  LibraryImageDistributionPreviewInput,
   LibraryInstallApplyInput,
   LibraryInstallPreviewInput,
   LibraryLoadApplyInput,
@@ -299,6 +303,14 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/build-plans/preview", {body: input, signal}));
+  }
+
+  async applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/builds", {body: input, signal}));
+  }
+
   async previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/v1/recipes/mapping-plans/preview", {body: input, signal}));
   }
@@ -308,6 +320,14 @@ export class ApiClient implements ControlApi {
       body: input,
       signal,
     }));
+  }
+
+  async previewLibraryImageDistribution(input: LibraryImageDistributionPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/image-distribution-plans/preview", {body: input, signal}));
+  }
+
+  async applyLibraryImageDistribution(input: LibraryImageDistributionApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/image-distributions", {body: input, signal}));
   }
 
   async previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal) {

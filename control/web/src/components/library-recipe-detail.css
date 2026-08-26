@@ -219,6 +219,54 @@
   gap: 0.8rem;
 }
 
+.placement-blocked-summary {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+  padding: 0.75rem 0.85rem;
+}
+
+.placement-blocked-summary > strong {
+  color: var(--text);
+}
+
+.placement-blocked-summary p,
+.placement-blocked-summary ul {
+  margin: 0;
+}
+
+.placement-blocked-summary ul {
+  display: grid;
+  gap: 0.3rem;
+  padding-left: 1.1rem;
+}
+
+.placement-blocked-summary li,
+.placement-blocked-summary small {
+  color: var(--text-muted);
+}
+
+.placement-load-blocked-summary {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-left: 3px solid var(--warning);
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.placement-load-blocked-summary ul {
+  color: var(--text-muted);
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
 .placement-group {
   border: 1px solid var(--border);
   border-radius: 0.75rem;

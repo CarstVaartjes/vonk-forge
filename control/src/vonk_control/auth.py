@@ -72,6 +72,9 @@ MUTATION_ROLES = {
     ("PUT", "/api/v1/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/source-checks"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/build-plans/preview"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/image-distribution-plans/preview"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/recipes/builds"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/mapping-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/mappings"): frozenset({"administrator"}),

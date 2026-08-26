@@ -2,6 +2,8 @@ import {useEffect, useId, useRef, useState} from "react";
 import type {KeyboardEvent} from "react";
 import type {
   LibraryApi,
+  LibraryBuildPlan,
+  LibraryImageDistributionPlan,
   LibraryInstallPlan,
   LibraryLoadPlan,
   LibraryMappingPlan,
@@ -11,6 +13,8 @@ import type {
   LibrarySnapshot,
 } from "../api/types";
 import {
+  BuildPreview,
+  ImageDistributionPreview,
   InstallPreview,
   LoadPreview,
   MappingPreview,
@@ -28,7 +32,9 @@ function message(value: unknown): string {
 }
 
 function preview(api: LibraryApi, target: LibraryActionTarget, alias: string, signal: AbortSignal): Promise<LibraryActionPlan> {
+  if (target.kind === "build") return api.previewLibraryBuild(target.input, signal);
   if (target.kind === "mapping") return api.previewLibraryMapping(target.input, signal);
+  if (target.kind === "image_distribution") return api.previewLibraryImageDistribution(target.input, signal);
   if (target.kind === "install") return api.previewLibraryInstall(target.input, signal);
   if (target.kind === "run") return api.previewLibraryLoad({...target.input, alias}, signal);
   if (target.kind === "stop") return api.previewLibraryStop(target.runId, signal);
@@ -40,7 +46,9 @@ function allowed(plan: LibraryActionPlan): boolean {
 }
 
 function applyLabel(target: LibraryActionTarget): string {
+  if (target.kind === "build") return "Build recipe image";
   if (target.kind === "mapping") return "Create selected mapping";
+  if (target.kind === "image_distribution") return "Distribute image to selected nodes";
   if (target.kind === "install") return "Install on selected nodes";
   if (target.kind === "run") return "Load selected installation";
   if (target.kind === "stop") return "Stop selected run";
@@ -54,7 +62,9 @@ function Plan({evidence, plan, policy, previewReceivedAt, target}: {
   previewReceivedAt: number;
   target: LibraryActionTarget;
 }) {
+  if (target.kind === "build") return <BuildPreview plan={plan as LibraryBuildPlan}/>;
   if (target.kind === "mapping") return <MappingPreview evidence={evidence} plan={plan as LibraryMappingPlan} policy={policy}/>;
+  if (target.kind === "image_distribution") return <ImageDistributionPreview plan={plan as LibraryImageDistributionPlan}/>;
   if (target.kind === "install") return <InstallPreview plan={plan as LibraryInstallPlan} policy={policy} previewReceivedAt={previewReceivedAt}/>;
   if (target.kind === "run") return <LoadPreview plan={plan as LibraryLoadPlan}/>;
   if (target.kind === "stop") return <StopPreview plan={plan as LibraryStopPlan}/>;
@@ -62,10 +72,18 @@ function Plan({evidence, plan, policy, previewReceivedAt, target}: {
 }
 
 async function apply(api: LibraryApi, target: LibraryActionTarget, plan: LibraryActionPlan, requestKey: string, signal: AbortSignal): Promise<LibraryOperation | null> {
+  if (target.kind === "build") {
+    const build = plan as LibraryBuildPlan;
+    return api.applyLibraryBuild({...target.input, build_input_sha256: build.build_input_sha256, request_key: requestKey}, signal);
+  }
   if (target.kind === "mapping") {
     const mapping = plan as LibraryMappingPlan;
     await api.applyLibraryMapping({...target.input, placement_digest: mapping.placement_digest, request_key: requestKey}, signal);
     return null;
+  }
+  if (target.kind === "image_distribution") {
+    const distribution = plan as LibraryImageDistributionPlan;
+    return api.applyLibraryImageDistribution({...target.input, plan_digest: distribution.plan_digest, request_key: requestKey}, signal);
   }
   if (target.kind === "install") {
     const install = plan as LibraryInstallPlan;
@@ -197,7 +215,13 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onBusyChan
     }
   }
 
-  const digest = plan && "plan_digest" in plan ? plan.plan_digest : plan && "placement_digest" in plan ? plan.placement_digest : undefined;
+  const digest = plan && "plan_digest" in plan
+    ? plan.plan_digest
+    : plan && "placement_digest" in plan
+      ? plan.placement_digest
+      : plan && "build_input_sha256" in plan
+        ? plan.build_input_sha256
+        : undefined;
   return <div className="library-dialog-backdrop" onMouseDown={event => { if (!applying && event.target === event.currentTarget) onClose(); }}>
     <div className="library-action-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
       <header><div><p className="fleet-kicker">Server authority preview</p><h3 id={titleId}>Review {name}</h3></div><button ref={close} type="button" className="icon-button" disabled={applying} onClick={onClose} aria-label="Close review">×</button></header>
