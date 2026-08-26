@@ -675,6 +675,24 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
+        elif path == "/api/v1/recipes/image-distribution-plans/preview":
+            expected = {
+                "recipe_build_id": "20000000-0000-4000-8000-000000000001",
+                "mapping_id": "30000000-0000-4000-8000-000000000001",
+                "mapping_generation": 1,
+            }
+            if payload != expected:
+                self._json(422, {"detail": "distribution preview input is invalid"})
+                return
+            self._json(
+                200,
+                {
+                    **expected,
+                    "image_digest": "sha256:" + "9" * 64,
+                    "node_ids": self.server.nodes,
+                    "plan_digest": "c" * 64,
+                },
+            )
         elif path == "/api/v1/recipes/install-plans/preview":
             blocker = (
                 self.server.install_preview_blockers.pop(0)
@@ -835,6 +853,15 @@ class SliceHandler(BaseHTTPRequestHandler):
                 state=self.server.retry_operation_state,
             )
         else:
+            if (
+                path == "/api/v1/recipes/image-distributions"
+                and payload.get("plan_digest") != "c" * 64
+            ):
+                self._json(
+                    409,
+                    {"detail": "submitted distribution plan does not match preview"},
+                )
+                return
             owner = {
                 "/api/v1/recipes/builds": "20000000-0000-4000-8000-000000000001",
                 "/api/v1/recipes/image-distributions": "20000000-0000-4000-8000-000000000002",
@@ -1449,6 +1476,20 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     assert evidence["outputs"]["oci_layout_sha256"] == "8" * 64
     assert evidence["outputs"]["artifact_set_digest"] == "7" * 64
     assert evidence["outputs"]["distribution_nodes"] == [NODE]
+    assert evidence["outputs"]["distribution_plan_digest"] == "c" * 64
+    distribution_paths = [
+        path
+        for _method, path, _authorization in server.requests
+        if path
+        in {
+            "/api/v1/recipes/image-distribution-plans/preview",
+            "/api/v1/recipes/image-distributions",
+        }
+    ]
+    assert distribution_paths == [
+        "/api/v1/recipes/image-distribution-plans/preview",
+        "/api/v1/recipes/image-distributions",
+    ]
     assert any(
         path == "/api/v1/recipes/image-distributions"
         for _method, path, _authorization in server.requests

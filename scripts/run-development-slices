@@ -1239,14 +1239,40 @@ class Runner:
         distribution_nodes = list(self.targets)
         operation_id: str | None = None
         distribution_evidence: dict[str, object] = {}
+        distribution_plan_digest: str | None = None
         if distribution_nodes:
+            distribution_request = {
+                "recipe_build_id": self.outputs["recipe_build_id"],
+                "mapping_id": mapping_id,
+                "mapping_generation": generation,
+            }
+            _, distribution_preview_payload = self.control.request(
+                "POST",
+                "/api/v1/recipes/image-distribution-plans/preview",
+                distribution_request,
+            )
+            distribution_preview = _object(
+                distribution_preview_payload, "image distribution preview"
+            )
+            distribution_plan_digest = distribution_preview.get("plan_digest")
+            if (
+                distribution_preview.get("recipe_build_id")
+                != self.outputs["recipe_build_id"]
+                or distribution_preview.get("mapping_id") != mapping_id
+                or distribution_preview.get("mapping_generation") != generation
+                or distribution_preview.get("image_digest")
+                != self.outputs["image_digest"]
+                or distribution_preview.get("node_ids") != distribution_nodes
+                or not isinstance(distribution_plan_digest, str)
+                or SHA256.fullmatch(distribution_plan_digest) is None
+            ):
+                raise SliceError("image distribution preview response is invalid")
             _, response = self.control.request(
                 "POST",
                 "/api/v1/recipes/image-distributions",
                 {
-                    "recipe_build_id": self.outputs["recipe_build_id"],
-                    "mapping_id": mapping_id,
-                    "mapping_generation": generation,
+                    **distribution_request,
+                    "plan_digest": distribution_plan_digest,
                     "request_key": self.request_key(
                         "image-distributed", "distribution"
                     ),
@@ -1276,6 +1302,7 @@ class Runner:
             {
                 "mapping_id": mapping_id,
                 "mapping_generation": generation,
+                "distribution_plan_digest": distribution_plan_digest,
                 "distribution_operation_id": operation_id,
                 "distribution_nodes": distribution_nodes,
                 "distribution_evidence_sha256": hashlib.sha256(
