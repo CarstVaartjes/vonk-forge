@@ -208,7 +208,7 @@ def build_agent_services(
         service_hostnames=settings.agent_service_hostnames,
         installer_url=(
             "https://install.vonkforge.ai/dev/spark"
-            if settings.install_channel == "dev"
+            if getattr(settings, "install_channel", "stable") == "dev"
             else "https://install.vonkforge.ai/spark"
         ),
     )

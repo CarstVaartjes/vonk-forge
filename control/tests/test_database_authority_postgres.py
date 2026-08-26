@@ -80,7 +80,10 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
     with sessions() as session:
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
-        assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == revision
+        assert (
+            session.get(ControlAuthorityProposal, preview.digest).applied_revision
+            == revision
+        )
 
 
 def test_postgres_preview_survives_service_restart_and_apply_is_idempotent(authority):
@@ -104,7 +107,10 @@ def test_postgres_preview_survives_service_restart_and_apply_is_idempotent(autho
     assert service.apply(persisted) == changed
     assert service.head() == changed
     with sessions() as session:
-        assert session.get(ControlAuthorityProposal, preview.digest).applied_revision == changed
+        assert (
+            session.get(ControlAuthorityProposal, preview.digest).applied_revision
+            == changed
+        )
 
 
 def test_postgres_compare_and_swap_rejects_stale_proposal(authority):
@@ -159,20 +165,32 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
 
     assert revisions[0] == revisions[1]
     with postgres_engine.connect() as connection:
-        assert connection.exec_driver_sql(
-            "SELECT version_num FROM alembic_version"
-        ).scalar_one() == "0002_fleet_node_profile_events"
-        assert connection.exec_driver_sql(
-            "SELECT count(*) FROM control_authority_revisions"
-        ).scalar_one() == 1
-        assert connection.exec_driver_sql(
-            "SELECT count(*) FROM control_authority_heads"
-        ).scalar_one() == 1
-        assert connection.exec_driver_sql(
-            """
+        assert (
+            connection.exec_driver_sql(
+                "SELECT version_num FROM alembic_version"
+            ).scalar_one()
+            == "0003_agent_reenrollment_grants"
+        )
+        assert (
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM control_authority_revisions"
+            ).scalar_one()
+            == 1
+        )
+        assert (
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM control_authority_heads"
+            ).scalar_one()
+            == 1
+        )
+        assert (
+            connection.exec_driver_sql(
+                """
             SELECT count(*)
             FROM control_authority_heads AS head
             JOIN control_authority_revisions AS revision
               ON revision.revision_id = head.revision_id
             """
-        ).scalar_one() == 1
+            ).scalar_one()
+            == 1
+        )
