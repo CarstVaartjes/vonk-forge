@@ -93,8 +93,7 @@ function countLabel(count: number, singular: string): string {
 function bootstrapCommand(grant: EnrollmentGrantResponse): string {
   const address = grant.controller_address;
   const environment = address ? `VONK_CONTROLLER_ADDRESS=${address} ` : "";
-  const arguments_ = grant.purpose === "re-enroll" ? " -s -- --re-enroll" : "";
-  return `curl -fsSL ${grant.installer_url} | ${environment}sh${arguments_}`;
+  return `curl -fsSL ${grant.installer_url} | ${environment}sh -s -- --enroll`;
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {

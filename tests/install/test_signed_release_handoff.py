@@ -111,7 +111,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     curl.chmod(0o700)
 
     result = subprocess.run(
-        ["sh", rendered, "--re-enroll"],
+        ["sh", rendered, "--enroll"],
         cwd=tmp_path,
         env={
             **os.environ,
@@ -131,5 +131,5 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         + signature.read_bytes()
         + f"https://install.example.test/{prefix}\n".encode()
         + b"192.168.1.231\n"
-        + b"arguments=--re-enroll\n"
+        + b"arguments=--enroll\n"
     )

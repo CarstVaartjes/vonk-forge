@@ -226,6 +226,36 @@ impl CommandRunner for RecordingRunner {
     fn sleep(&mut self, _duration: std::time::Duration) {}
 }
 
+#[derive(Default)]
+struct FailingReadinessRunner {
+    commands: Vec<Command>,
+}
+
+impl CommandRunner for FailingReadinessRunner {
+    fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+        let output = if command
+            .args
+            .iter()
+            .any(|argument| argument == "verify-readiness")
+        {
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            }
+        } else if command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args.first().map(String::as_str) == Some("show")
+        {
+            CommandOutput::success(b"4242\n".to_vec())
+        } else {
+            CommandOutput::success_empty()
+        };
+        self.commands.push(command);
+        Ok(output)
+    }
+
+    fn sleep(&mut self, _duration: std::time::Duration) {}
+}
+
 struct FreshAnswers {
     values: VecDeque<String>,
 }
@@ -939,7 +969,7 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
     let mut prompt = TokenOnlyPrompt { secrets: 0 };
     let mut prepare_runner = RecordingRunner::default();
     let prepared = prepare_setup(
-        &request(temporary.path()).with_reenroll(true),
+        &request(temporary.path()).with_enroll(true),
         &install_paths,
         &mut prompt,
         &mut prepare_runner,
@@ -968,6 +998,20 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
         .find(|command| command.args.iter().any(|argument| argument == "pair"))
         .unwrap();
     assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+    let pair_position = apply_runner
+        .commands
+        .iter()
+        .position(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    let stop_position = apply_runner
+        .commands
+        .iter()
+        .position(|command| command.args == ["stop", "vonk-forge-agent.service"])
+        .unwrap();
+    assert!(
+        pair_position < stop_position,
+        "a rejected grant must not stop a healthy agent"
+    );
     assert!(apply_runner.commands.iter().any(|command| {
         command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args == ["stop", "vonk-forge-agent.service"]
@@ -987,6 +1031,88 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
                     "vonk-forge-agent.service",
                 ]
     }));
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "paired-v1\n"
+    );
+}
+
+#[test]
+fn failed_post_pair_readiness_is_resumed_without_another_token() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()).with_enroll(true),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let mut failing_runner = FailingReadinessRunner::default();
+
+    let result = apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut failing_runner,
+        CallerIdentity::sudo_root(1000),
+    );
+
+    assert!(
+        matches!(result, Err(SetupError::Command(message)) if message == "controller readiness was not sustained")
+    );
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "recovering-v1\n"
+    );
+
+    let mut retry_prompt = NoPrompt;
+    let mut retry_prepare_runner = RecordingRunner::default();
+    let retry = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut retry_prompt,
+        &mut retry_prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut retry_handoff_runner = RecordingRunner::default();
+    handoff_to_root(&retry, &mut retry_handoff_runner).unwrap();
+    assert!(
+        !retry_handoff_runner.commands[0]
+            .stdin
+            .windows(TOKEN.len())
+            .any(|value| value == TOKEN.as_bytes())
+    );
+    let mut retry_apply_runner = RecordingRunner::default();
+    apply_setup_from(
+        retry_handoff_runner.commands[0].stdin.as_slice(),
+        retry.package_path(),
+        retry.executable_path(),
+        &install_paths,
+        &mut retry_apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    assert!(
+        retry_apply_runner
+            .commands
+            .iter()
+            .all(|command| !command.args.iter().any(|argument| argument == "pair"))
+    );
+    assert_eq!(
+        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+        "paired-v1\n"
+    );
 }
 
 #[test]
@@ -1390,7 +1516,7 @@ fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
 }
 
 #[test]
-fn successful_pairing_is_recorded_before_later_service_recovery_is_needed() {
+fn successful_pairing_enters_recovery_before_later_service_startup() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
@@ -1420,8 +1546,8 @@ fn successful_pairing_is_recorded_before_later_service_recovery_is_needed() {
     assert!(result.is_err());
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
-        "paired-v1\n",
-        "a retry must upgrade/restart without asking for an already consumed token"
+        "recovering-v1\n",
+        "a retry must resume readiness without asking for an already consumed token"
     );
 }
 

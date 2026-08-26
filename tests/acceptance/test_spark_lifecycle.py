@@ -161,7 +161,7 @@ def _run_spark_bootstrap(
     )
     forbidden = [str(pairing_token)] if pairing else []
     return interactive(
-        bootstrap_command(url),
+        bootstrap_command(url, *(("--enroll",) if pairing else ())),
         cwd=cwd,
         environment=environment,
         responses=responses,
@@ -180,10 +180,9 @@ def _configure_acceptance_renewal(
         raise LifecycleError("acceptance agent source address is invalid") from error
     if lifetime_seconds != CERTIFICATE_LIFETIME_SECONDS:
         raise LifecycleError("acceptance certificate lifetime is invalid")
-    if (
-        not isinstance(parsed_agent_source, ipaddress.IPv4Address)
-        or parsed_agent_source not in ipaddress.ip_network("172.16.0.0/12")
-    ):
+    if not isinstance(
+        parsed_agent_source, ipaddress.IPv4Address
+    ) or parsed_agent_source not in ipaddress.ip_network("172.16.0.0/12"):
         raise LifecycleError("acceptance agent source address is invalid")
     ca_path = bundle / "secrets/step-ca/ca.json"
     ca = _read_document(ca_path, "Step CA configuration")
@@ -236,11 +235,11 @@ def _configure_acceptance_renewal(
         raise LifecycleError("Compose browser boundary is invalid") from error
     except StopIteration as error:
         raise LifecycleError("Caddy acceptance boundary is invalid") from error
-    if (
-        re.fullmatch(r"vonk_runtime_[0-9a-f]{16}", caddy_source) is None
-        or caddy_definition
-        != {"file": f"./secrets/runtime-configs/{caddy_source}"}
-    ):
+    if re.fullmatch(
+        r"vonk_runtime_[0-9a-f]{16}", caddy_source
+    ) is None or caddy_definition != {
+        "file": f"./secrets/runtime-configs/{caddy_source}"
+    }:
         raise LifecycleError("Caddy acceptance boundary is invalid")
     caddy_path = bundle / "secrets/runtime-configs" / caddy_source
     try:
@@ -1096,9 +1095,7 @@ class SparkLifecycle:
                 cwd=self.bundle,
             )
         except LifecycleError as error:
-            raise LifecycleError(
-                "native Docker CDI support is unavailable"
-            ) from error
+            raise LifecycleError("native Docker CDI support is unavailable") from error
 
     def _prepare_synthetic_firewall_environment(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
@@ -1566,7 +1563,10 @@ class SparkLifecycle:
                 metadata = json.loads(identity.read_bytes())
             except (OSError, json.JSONDecodeError) as error:
                 raise LifecycleError("retired agent identity is invalid") from error
-            if not isinstance(metadata, dict) or metadata.get("serial") != serial_before:
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("serial") != serial_before
+            ):
                 raise LifecycleError("retired agent identity serial changed")
             bundle.write_bytes(leaf.read_bytes() + chain.read_bytes())
             key_v1.write_bytes(

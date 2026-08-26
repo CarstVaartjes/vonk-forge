@@ -21,18 +21,20 @@ class AcceptanceError(RuntimeError):
     pass
 
 
-def bootstrap_command(url: str) -> list[str]:
+def bootstrap_command(url: str, *arguments: str) -> list[str]:
     """Download a public bootstrap robustly before executing it interactively."""
     script = """\
 set -eu
+url=$1
+shift
 bootstrap=$(mktemp "${TMPDIR:-/tmp}/vonk-bootstrap.XXXXXX")
 trap 'rm -f -- "$bootstrap"' 0 1 2 15
 curl --fail --location --silent --show-error \\
   --retry 30 --retry-all-errors --retry-delay 2 --retry-max-time 90 \\
-  --connect-timeout 10 "$1" --output "$bootstrap"
-/bin/sh "$bootstrap"
+  --connect-timeout 10 "$url" --output "$bootstrap"
+/bin/sh "$bootstrap" "$@"
 """
-    return ["/bin/sh", "-c", script, "vonk-bootstrap", url]
+    return ["/bin/sh", "-c", script, "vonk-bootstrap", url, *arguments]
 
 
 def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
@@ -472,8 +474,7 @@ def https_over_command(
         return bytes(response)
     except (BrokenPipeError, ConnectionError, OSError, ssl.SSLError) as error:
         raise AcceptanceError(
-            "tailnet HTTPS endpoint is unavailable "
-            f"({type(error).__name__}: {error})"
+            f"tailnet HTTPS endpoint is unavailable ({type(error).__name__}: {error})"
         ) from error
     finally:
         try:

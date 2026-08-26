@@ -491,7 +491,7 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   expect(document.querySelector(".grant-success")).toHaveFocus();
   const command = document.querySelector<HTMLElement>(".onboarding-command")!;
   expect(command).toBeVisible();
-  expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
+  expect(command).toHaveTextContent("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll");
   expect(command).not.toHaveTextContent("sudo");
   expect(command).not.toHaveTextContent("vonk-agent pair");
   expect(screen.getByText("Expires in 15m 00s")).toBeVisible();
@@ -504,13 +504,13 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   expect(screen.getAllByRole("button", {name: /^Copy /})).toHaveLength(6);
   fireEvent.click(screen.getByRole("button", {name: "Copy installer command"}));
   await flush();
-  expect(writeText).toHaveBeenCalledWith("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh");
+  expect(writeText).toHaveBeenCalledWith("curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll");
   expect(screen.getAllByRole("status").some(status => status.textContent === "Copied")).toBe(true);
   fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
   expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
 });
 
-test("re-enrollment uses the controller channel and explicit resilient mode", async () => {
+test("re-enrollment uses the controller channel and generic enrollment mode", async () => {
   const nodeId = "spk_0123456789abcdef0123456789abcdef";
   const alpha = node(nodeId, "Spark Alpha", "2026-08-15T11:59:58Z");
   const api = control(async () => snapshot([alpha])) as ControlApi;
@@ -537,7 +537,7 @@ test("re-enrollment uses the controller channel and explicit resilient mode", as
 
   expect(api.createReenrollmentGrant).toHaveBeenCalledWith(nodeId, ENROLLMENT_GRANT_TTL_SECONDS);
   expect(document.querySelector(".onboarding-command")).toHaveTextContent(
-    "curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --re-enroll",
+    "curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll",
   );
 });
 
@@ -562,6 +562,6 @@ test("offers unbound re-enrollment after the controller has lost its node rows",
 
   expect(api.createReenrollmentGrant).toHaveBeenCalledWith(undefined, ENROLLMENT_GRANT_TTL_SECONDS);
   expect(document.querySelector(".onboarding-command")).toHaveTextContent(
-    "curl -fsSL https://install.vonkforge.ai/dev/spark | sh -s -- --re-enroll",
+    "curl -fsSL https://install.vonkforge.ai/dev/spark | sh -s -- --enroll",
   );
 });
