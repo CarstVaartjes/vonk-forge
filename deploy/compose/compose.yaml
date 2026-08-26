@@ -24,6 +24,7 @@ x-api-environment: &api-environment
   VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
   VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
   VONK_AGENT_CONTROLLER_ADDRESS: ${NAS_LAN_IP:?set reserved NAS LAN IP}
+  VONK_INSTALL_CHANNEL: ${VONK_INSTALL_CHANNEL:-stable}
   VONK_AGENT_SERVICE_HOSTNAMES: ${VONK_CONTROL_HOSTNAME:?set Caddy control hostname},${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname},${VONK_AGENT_HOSTNAME:?set Caddy agent hostname},${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
   VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata

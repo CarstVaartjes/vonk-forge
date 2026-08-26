@@ -1,4 +1,5 @@
 import {useEffect, useId, useRef, useState} from "react";
+import type {MouseEvent as ReactMouseEvent} from "react";
 import type {ControlApi, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, VisualFleetNode} from "../api/types";
 import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
 import {CopyButton} from "./copy-button";
@@ -71,11 +72,13 @@ export function NodeDetail({
   node,
   now,
   onClose,
+  onReenroll,
 }: {
   api: ControlApi;
   node: VisualFleetNode;
   now: Date;
   onClose(): void;
+  onReenroll?(event: ReactMouseEvent<HTMLButtonElement>): void;
 }) {
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -133,7 +136,7 @@ export function NodeDetail({
         <h3 id={headingId}>{name} details</h3>
         {secondaryName && <p>{secondaryName}</p>}
       </div>
-      <button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button>
+      <div>{onReenroll && <><button type="button" className="secondary-button" onClick={onReenroll}>Re-enroll</button>{" "}</>}<button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button></div>
     </header>
 
     <section aria-labelledby={`${headingId}-overview`}>

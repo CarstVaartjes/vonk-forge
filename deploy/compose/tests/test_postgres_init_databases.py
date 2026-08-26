@@ -32,9 +32,7 @@ def test_database_initializer_passes_a_validated_secret_to_psql(tmp_path: Path) 
     fake_bin.mkdir()
     psql = fake_bin / "psql"
     psql.write_text(
-        "#!/bin/sh\n"
-        "printf '%s\\n' \"$*\" >\"$CALLS\"\n"
-        "cat >>\"$CALLS\"\n",
+        '#!/bin/sh\nprintf \'%s\\n\' "$*" >"$CALLS"\ncat >>"$CALLS"\n',
         encoding="ascii",
     )
     psql.chmod(0o755)
@@ -64,6 +62,8 @@ def test_database_initializer_passes_a_validated_secret_to_psql(tmp_path: Path) 
     assert "--set=litellm_password=" + "a" * 64 in invocation
     assert "CREATE ROLE litellm" in invocation
     assert "CREATE DATABASE litellm OWNER litellm" in invocation
+    assert "ALTER ROLE litellm LOGIN PASSWORD" in invocation
+    assert "ALTER DATABASE litellm OWNER TO litellm" in invocation
 
 
 def test_database_initializer_rejects_an_invalid_password(tmp_path: Path) -> None:
@@ -134,7 +134,9 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
             timeout=60,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise AssertionError(f"disposable PostgreSQL failed to start: {error}") from error
+        raise AssertionError(
+            f"disposable PostgreSQL failed to start: {error}"
+        ) from error
     try:
         for _ in range(120):
             logs = subprocess.run(
@@ -220,6 +222,77 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
             timeout=10,
         ).splitlines()
         assert roles == ["control", "litellm"]
+
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                container,
+                "psql",
+                "-U",
+                "control",
+                "-d",
+                "control",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "DROP DATABASE litellm;",
+                "-c",
+                "DROP ROLE litellm;",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        subprocess.run(
+            ["docker", "restart", container],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        for _ in range(120):
+            repaired = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "psql",
+                    "-U",
+                    "control",
+                    "-d",
+                    "control",
+                    "-tAc",
+                    "SELECT count(*) FROM pg_roles WHERE rolname = 'litellm'",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if repaired.returncode == 0 and repaired.stdout.strip() == "1":
+                break
+            time.sleep(0.25)
+        else:
+            raise AssertionError("PostgreSQL restart did not restore LiteLLM objects")
+        repaired_database = subprocess.check_output(
+            [
+                "docker",
+                "exec",
+                container,
+                "psql",
+                "-U",
+                "control",
+                "-d",
+                "control",
+                "-tAc",
+                "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'litellm'",
+            ],
+            text=True,
+            timeout=10,
+        ).strip()
+        assert repaired_database == "litellm"
     finally:
         subprocess.run(
             ["docker", "rm", "--force", container],

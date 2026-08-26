@@ -127,6 +127,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
     assert sorted(path.name for path in versions.glob("*.py")) == [
         "0001_fleet_library_baseline.py",
         "0002_fleet_node_profile_events.py",
+        "0003_agent_reenrollment_grants.py",
     ]
 
 
@@ -159,7 +160,38 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0002_fleet_node_profile_events"
+            == "0003_agent_reenrollment_grants"
+        )
+
+
+def test_existing_database_is_upgraded_to_accept_reenrollment_grants(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'reenrollment-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0002_fleet_node_profile_events")
+    engine = create_engine(url)
+    statement = text(
+        """
+        INSERT INTO agent_enrollment_grants
+          (id, node_id, purpose, token_digest, created_by, created_at, expires_at)
+        VALUES
+          ('grant', NULL, 're-enroll', :digest, 'admin',
+           '2026-08-25 12:00:00', '2026-08-25 12:10:00')
+        """
+    )
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(statement, {"digest": "a" * 64})
+
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        connection.execute(statement, {"digest": "a" * 64})
+        assert (
+            connection.execute(
+                text("SELECT purpose FROM agent_enrollment_grants WHERE id = 'grant'")
+            ).scalar_one()
+            == "re-enroll"
         )
 
 

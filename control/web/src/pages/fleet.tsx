@@ -92,9 +92,9 @@ function countLabel(count: number, singular: string): string {
 
 function bootstrapCommand(grant: EnrollmentGrantResponse): string {
   const address = grant.controller_address;
-  return address
-    ? `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=${address} sh`
-    : "curl -fsSL https://install.vonkforge.ai/spark | sh";
+  const environment = address ? `VONK_CONTROLLER_ADDRESS=${address} ` : "";
+  const arguments_ = grant.purpose === "re-enroll" ? " -s -- --re-enroll" : "";
+  return `curl -fsSL ${grant.installer_url} | ${environment}sh${arguments_}`;
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {
@@ -134,7 +134,7 @@ function CopyField({label, value, code = false}: {label: string; value: string; 
   </span>;
 }
 
-function SparkOnboarding({api, onBusyChange, onClose}: {api: ControlApi; onBusyChange?(busy: boolean): void; onClose(): void}) {
+function SparkOnboarding({api, mode, nodeId, onBusyChange, onClose}: {api: ControlApi; mode: "new-node" | "re-enroll"; nodeId?: string; onBusyChange?(busy: boolean): void; onClose(): void}) {
   const [grant, setGrant] = useState<EnrollmentGrantResponse>();
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -214,7 +214,9 @@ function SparkOnboarding({api, onBusyChange, onClose}: {api: ControlApi; onBusyC
     setCreating(true);
     setError("");
     try {
-      setGrant(await api.createEnrollmentGrant(ENROLLMENT_GRANT_TTL_SECONDS));
+      setGrant(mode === "re-enroll"
+        ? await api.createReenrollmentGrant(nodeId, ENROLLMENT_GRANT_TTL_SECONDS)
+        : await api.createEnrollmentGrant(ENROLLMENT_GRANT_TTL_SECONDS));
     } catch (value) {
       setError(value instanceof Error ? value.message : "The enrollment grant could not be created.");
     } finally {
@@ -225,11 +227,11 @@ function SparkOnboarding({api, onBusyChange, onClose}: {api: ControlApi; onBusyC
 
   return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}>
     <div ref={dialog} className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title" aria-busy={creating || undefined} onKeyDown={handleKeyDown}>
-      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button ref={closeButton} type="button" className="icon-button" disabled={creating} onClick={requestClose} aria-label="Close Add Spark">×</button></header>
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">{mode === "re-enroll" ? "Re-enroll Spark" : "Add Spark"}</h3><p className="dialog-subtitle">Issue a short-lived pairing authorization.</p></div><button ref={closeButton} type="button" className="icon-button" disabled={creating} onClick={requestClose} aria-label={`Close ${mode === "re-enroll" ? "Re-enroll Spark" : "Add Spark"}`}>×</button></header>
       <div className="library-action-dialog-body">
         {!grant && <>
           <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><span className="onboarding-step-number" aria-hidden="true">1</span><div><strong>Create grant</strong><span>Generate a one-time authorization here.</span></div></li><li><span className="onboarding-step-number" aria-hidden="true">2</span><div><strong>Run installer</strong><span>Run the public installer on the Spark.</span></div></li><li><span className="onboarding-step-number" aria-hidden="true">3</span><div><strong>Enter credentials</strong><span>Provide the values shown when prompted.</span></div></li></ol>
-          <p className="onboarding-guidance">Use a descriptive hostname on the Spark; Fleet uses it as the friendly fallback name. The Spark generates its immutable <code>spk_…</code> identity locally. The installer verifies the release before requesting sudo and pins the controller CA.</p>
+          <p className="onboarding-guidance">{mode === "re-enroll" ? <>This explicitly replaces the certificate for {nodeId ? <code>{nodeId}</code> : "the Spark's locally held node identity"}. The installer retires stale local credential pointers automatically and preserves the node identity.</> : <>Use a descriptive hostname on the Spark; Fleet uses it as the friendly fallback name. The Spark generates its immutable <code>spk_…</code> identity locally. The installer verifies the release before requesting sudo and pins the controller CA.</>}</p>
           {error && <p role="alert" className="dialog-error">{error}</p>}
           {creating && <p id="grant-creation-status" role="status" className="onboarding-locked-note"><strong>Creating the one-time authorization…</strong> Keep this window open until the setup values appear.</p>}
         </>}
@@ -256,6 +258,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [editingNodeId, setEditingNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
+  const [onboardingMode, setOnboardingMode] = useState<"new-node" | "re-enroll">("new-node");
+  const [reenrollNodeId, setReenrollNodeId] = useState<string>();
   const [viewMode, setViewMode] = useState<FleetViewMode>(storedFleetView);
   const [query, setQuery] = useState("");
   const [healthFilters, setHealthFilters] = useState<FleetHealthFilter[]>([]);
@@ -354,6 +358,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
 
   function closeOnboarding() {
     setOnboarding(false);
+    setOnboardingMode("new-node");
+    setReenrollNodeId(undefined);
     queueMicrotask(() => onboardingTrigger.current?.focus());
   }
 
@@ -390,14 +396,15 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         <p className="fleet-introduction">A live view of PostgreSQL-registered nodes, their capacity, and what is actually installed and running.</p>
       </div>
       <div className="fleet-hero-actions">
-        <button type="button" className="button" aria-label="Add Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboarding(true); }}>+ Add Spark</button>
+        <button type="button" className="button secondary" aria-label="Re-enroll Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("re-enroll"); setOnboarding(true); }}>Re-enroll Spark</button>
+        <button type="button" className="button" aria-label="Add Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("new-node"); setOnboarding(true); }}>+ Add Spark</button>
         <div className="connection-state" aria-label="Fleet stream state">
           <StatusPill tone={connection.tone}>{connection.label}</StatusPill>
           {fleet.snapshot && <small>Event {fleet.snapshot.event_cursor} · authority {fleet.snapshot.authority_revision.slice(0, 8)}</small>}
         </div>
       </div>
     </header>
-    {onboarding && <SparkOnboarding api={api} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
+    {onboarding && <SparkOnboarding api={api} mode={onboardingMode} nodeId={reenrollNodeId} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
     {editingNode && <NodeProfileDialog api={api} node={editingNode} onClose={closeEditor} onSaved={displayName => fleet.updateNodeProfile(editingNode.id, displayName)}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
@@ -492,7 +499,18 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         </section>}
         {visibleNodes.length > 0 && viewMode === "compact" && <FleetCompactView nodes={visibleNodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
         {visibleNodes.length > 0 && viewMode === "topology" && <FleetTopologyView nodes={visibleNodes} now={fleet.now} onSelect={selectNode} selectedNodeId={selectedNodeId}/>}
-        {selectedNode && <NodeDetail api={api} node={selectedNode} now={fleet.now} onClose={closeDetail}/>}
+        {selectedNode && <NodeDetail
+          api={api}
+          node={selectedNode}
+          now={fleet.now}
+          onClose={closeDetail}
+          onReenroll={event => {
+            onboardingTrigger.current = event.currentTarget;
+            setOnboardingMode("re-enroll");
+            setReenrollNodeId(selectedNode.id);
+            setOnboarding(true);
+          }}
+        />}
       </div>
     </>}
   </div>;

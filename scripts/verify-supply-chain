@@ -55,7 +55,9 @@ def uv_lock_packages(lock: bytes) -> list[dict[str, str]]:
 
 
 def packages_python(lock: bytes) -> list[tuple[str, str]]:
-    return sorted({(package["name"], package["version"]) for package in uv_lock_packages(lock)})
+    return sorted(
+        {(package["name"], package["version"]) for package in uv_lock_packages(lock)}
+    )
 
 
 def packages_cargo(lock: bytes) -> list[tuple[str, str]]:
@@ -148,6 +150,7 @@ def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/models.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
+        "control/migrations/versions/0003_agent_reenrollment_grants.py",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",
@@ -180,8 +183,14 @@ def protocol_wheel(root: Path) -> bytes:
         output = Path(directory)
         subprocess.run(
             [
-                "uv", "build", "--offline", "--project", str(root / "agent_protocol"),
-                "--wheel", "--out-dir", str(output),
+                "uv",
+                "build",
+                "--offline",
+                "--project",
+                str(root / "agent_protocol"),
+                "--wheel",
+                "--out-dir",
+                str(output),
             ],
             check=True,
             capture_output=True,
@@ -195,7 +204,8 @@ def protocol_wheel(root: Path) -> bytes:
 
 def protocol_version(lock: bytes) -> str:
     packages = [
-        package for package in uv_lock_packages(lock)
+        package
+        for package in uv_lock_packages(lock)
         if package["name"] == "vonk-agent-protocol"
     ]
     expected_source = (
@@ -209,7 +219,8 @@ def protocol_version(lock: bytes) -> str:
 
 def protocol_wheel_hash(lock: bytes) -> str:
     packages = [
-        package for package in uv_lock_packages(lock)
+        package
+        for package in uv_lock_packages(lock)
         if package["name"] == "vonk-agent-protocol"
     ]
     if len(packages) != 1:
@@ -236,7 +247,9 @@ def spdx(
     described = []
     relationships = []
     for package_name, version in packages:
-        identity = hashlib.sha256(f"{package_name}\0{version}".encode()).hexdigest()[:16]
+        identity = hashlib.sha256(f"{package_name}\0{version}".encode()).hexdigest()[
+            :16
+        ]
         spdx_id = f"SPDXRef-Package-{identity}"
         package = {
             "SPDXID": spdx_id,
@@ -249,38 +262,56 @@ def spdx(
             "supplier": "NOASSERTION",
         }
         if package_name == "vonk-agent-protocol" and protocol_wheel_sha256 is not None:
-            package["checksums"] = [{"algorithm": "SHA256", "checksumValue": protocol_wheel_sha256}]
+            package["checksums"] = [
+                {"algorithm": "SHA256", "checksumValue": protocol_wheel_sha256}
+            ]
         described.append(package)
-        relationships.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": spdx_id})
+        relationships.append(
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": spdx_id,
+            }
+        )
     document = {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": name,
         "documentNamespace": f"https://vonk-forge.invalid/sbom/{name}/{lock_digest}",
-        "creationInfo": {"created": "1970-01-01T00:00:00Z", "creators": ["Tool: Vonk Forge verify-supply-chain"]},
+        "creationInfo": {
+            "created": "1970-01-01T00:00:00Z",
+            "creators": ["Tool: Vonk Forge verify-supply-chain"],
+        },
         "packages": described,
         "relationships": relationships,
     }
     if protocol_wheel_sha256 is not None:
         wheel_id = "SPDXRef-File-AgentProtocolWheel"
-        document["files"] = [{
-            "SPDXID": wheel_id,
-            "fileName": PROTOCOL_WHEEL,
-            "checksums": [{"algorithm": "SHA256", "checksumValue": protocol_wheel_sha256}],
-            "fileTypes": ["BINARY"],
-            "licenseConcluded": "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-        }]
+        document["files"] = [
+            {
+                "SPDXID": wheel_id,
+                "fileName": PROTOCOL_WHEEL,
+                "checksums": [
+                    {"algorithm": "SHA256", "checksumValue": protocol_wheel_sha256}
+                ],
+                "fileTypes": ["BINARY"],
+                "licenseConcluded": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+            }
+        ]
         protocol_id = next(
-            package["SPDXID"] for package in described
+            package["SPDXID"]
+            for package in described
             if package["name"] == "vonk-agent-protocol"
         )
-        relationships.append({
-            "spdxElementId": protocol_id,
-            "relationshipType": "GENERATED_FROM",
-            "relatedSpdxElement": wheel_id,
-        })
+        relationships.append(
+            {
+                "spdxElementId": protocol_id,
+                "relationshipType": "GENERATED_FROM",
+                "relatedSpdxElement": wheel_id,
+            }
+        )
     return canonical(document)
 
 
@@ -289,7 +320,9 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     cargo_lock = (root / "Cargo.lock").read_bytes()
     protocol_lock = (root / "agent_protocol/uv.lock").read_bytes()
     web_lock = (root / "control/web/package-lock.json").read_bytes()
-    protocol_project = tomllib.loads((root / "agent_protocol/pyproject.toml").read_text())
+    protocol_project = tomllib.loads(
+        (root / "agent_protocol/pyproject.toml").read_text()
+    )
     version = protocol_project["project"]["version"]
     if not isinstance(version, str) or protocol_version(control_lock) != version:
         raise ValueError("control must resolve the exact protocol version")
@@ -298,10 +331,24 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     if protocol_wheel_hash(control_lock) != wheel_sha256:
         raise ValueError("control lock hash must match the verified protocol wheel")
     sboms = {
-        "inventory/sbom/control-python.spdx.json": spdx("control-python", control_lock, packages_python(control_lock), protocol_wheel_sha256=wheel_sha256),
-        "inventory/sbom/agent-rust.spdx.json": spdx("agent-rust", cargo_lock, packages_cargo(cargo_lock)),
-        "inventory/sbom/agent-protocol.spdx.json": spdx("agent-protocol", protocol_lock, packages_python(protocol_lock), protocol_wheel_sha256=wheel_sha256),
-        "inventory/sbom/control-web.spdx.json": spdx("control-web", web_lock, packages_web(web_lock)),
+        "inventory/sbom/control-python.spdx.json": spdx(
+            "control-python",
+            control_lock,
+            packages_python(control_lock),
+            protocol_wheel_sha256=wheel_sha256,
+        ),
+        "inventory/sbom/agent-rust.spdx.json": spdx(
+            "agent-rust", cargo_lock, packages_cargo(cargo_lock)
+        ),
+        "inventory/sbom/agent-protocol.spdx.json": spdx(
+            "agent-protocol",
+            protocol_lock,
+            packages_python(protocol_lock),
+            protocol_wheel_sha256=wheel_sha256,
+        ),
+        "inventory/sbom/control-web.spdx.json": spdx(
+            "control-web", web_lock, packages_web(web_lock)
+        ),
     }
     input_paths = (
         "pyproject.toml",
@@ -318,10 +365,16 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "agent_protocol/pyproject.toml",
-        "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
-        ".dockerignore", "control/web/package-lock.json", "control/Dockerfile",
-        "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
-        "deploy/compose/Caddyfile", "deploy/compose/caddy/entrypoint.sh",
+        "agent_protocol/uv.lock",
+        "control/pyproject.toml",
+        "control/uv.lock",
+        ".dockerignore",
+        "control/web/package-lock.json",
+        "control/Dockerfile",
+        "deploy/compose/compose.yaml",
+        "deploy/compose/images.lock.json",
+        "deploy/compose/Caddyfile",
+        "deploy/compose/caddy/entrypoint.sh",
         "deploy/compose/postgres/entrypoint.sh",
         "deploy/compose/postgres/init-databases.sh",
         "deploy/compose/grafana/dashboards/fleet.json",
@@ -370,8 +423,12 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "inputs": {path: digest((root / path).read_bytes()) for path in input_paths},
         "sboms": {path: digest(content) for path, content in sboms.items()},
         "protocol_wheel_sha256": wheel_sha256,
-        "image_lock_sha256": digest((root / "deploy/compose/images.lock.json").read_bytes()),
-        "signature_key_sha256": digest((root / "deploy/compose/trust/litellm-cosign.pub").read_bytes()),
+        "image_lock_sha256": digest(
+            (root / "deploy/compose/images.lock.json").read_bytes()
+        ),
+        "signature_key_sha256": digest(
+            (root / "deploy/compose/trust/litellm-cosign.pub").read_bytes()
+        ),
     }
     return sboms, wheel, manifest
 
@@ -406,7 +463,9 @@ def image_errors(root: Path) -> list[str]:
         if IMAGE.fullmatch(reference) is None:
             errors.append(f"{name} image is not pinned by digest")
         if name in images and reference not in compose:
-            errors.append(f"{name} Compose default is not the locked digest-pinned image")
+            errors.append(
+                f"{name} Compose default is not the locked digest-pinned image"
+            )
     if re.search(r"(?m)^\s*image:\s*[^$\n]*(?::latest|:main|:edge)(?:\s|$)", compose):
         errors.append("Compose contains a floating image tag without digest")
     releases = lock.get("release_images", [])
@@ -442,12 +501,15 @@ def image_errors(root: Path) -> list[str]:
         and "HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required"
         in compose
     )
-    if releases != expected_releases or any(
-        f"${{{release['environment']}:?" not in compose
-        for release in required_deployment_releases
-    ) or not (
-        f"${{{expected_releases[2]['environment']}:?" in compose
-        or hermes_is_opt_in
+    if (
+        releases != expected_releases
+        or any(
+            f"${{{release['environment']}:?" not in compose
+            for release in required_deployment_releases
+        )
+        or not (
+            f"${{{expected_releases[2]['environment']}:?" in compose or hermes_is_opt_in
+        )
     ):
         errors.append(
             "API and worker release images must be explicitly digest-pinned; "
@@ -467,22 +529,31 @@ def image_errors(root: Path) -> list[str]:
         if not isinstance(reference, str):
             errors.append(f"{name} digest-pinned build base is missing or invalid")
         elif reference not in dockerfile:
-            errors.append(f"{name} digest-pinned build base is absent from control Dockerfile")
+            errors.append(
+                f"{name} digest-pinned build base is absent from control Dockerfile"
+            )
     hermes_reference = build_bases.get("hermes")
     if not isinstance(hermes_reference, str):
         errors.append("hermes digest-pinned build base is missing or invalid")
     elif hermes_reference not in hermes_dockerfile:
-        errors.append("hermes digest-pinned build base is absent from Hermes Dockerfile")
+        errors.append(
+            "hermes digest-pinned build base is absent from Hermes Dockerfile"
+        )
     if "ARG NODE_IMAGE" not in dockerfile or "ARG PYTHON_IMAGE" not in dockerfile:
         errors.append("control build bases are not explicit locked arguments")
-    if "FROM scratch AS worker" not in dockerfile or "FROM scratch AS api" not in dockerfile:
+    if (
+        "FROM scratch AS worker" not in dockerfile
+        or "FROM scratch AS api" not in dockerfile
+    ):
         errors.append("control API and worker image targets are not isolated")
     if (
         "COPY control/pyproject.toml ./" not in dockerfile
         or f"COPY {PROTOCOL_WHEEL} /wheels/" not in dockerfile
         or not docker_installs_protocol_wheel(dockerfile)
     ):
-        errors.append("control image does not install the standalone protocol wheel from root context")
+        errors.append(
+            "control image does not install the standalone protocol wheel from root context"
+        )
     hermes_base = re.search(r"(?m)^ARG HERMES_IMAGE=(\S+)$", hermes_dockerfile)
     locked_hermes = build_bases.get("hermes")
     if (
@@ -511,7 +582,7 @@ def docker_installs_protocol_wheel(dockerfile: str) -> bool:
         lexer.whitespace_split = True
         tokens = list(lexer)
         for pip_index in range(len(tokens) - 3):
-            if tokens[pip_index:pip_index + 4] != ["python", "-m", "pip", "install"]:
+            if tokens[pip_index : pip_index + 4] != ["python", "-m", "pip", "install"]:
                 continue
             try:
                 command_end = next(
@@ -521,7 +592,7 @@ def docker_installs_protocol_wheel(dockerfile: str) -> bool:
                 )
             except StopIteration:
                 command_end = len(tokens)
-            installed = tokens[pip_index + 4:command_end]
+            installed = tokens[pip_index + 4 : command_end]
             if wheel in installed and "." in installed:
                 return True
     return False
@@ -531,8 +602,19 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
     errors = image_errors(root)
     try:
         sboms, wheel, manifest = expected(root)
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, subprocess.CalledProcessError, tomllib.TOMLDecodeError) as error:
-        return [*errors, f"could not generate expected supply-chain evidence: {type(error).__name__}: {error}"], {}
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+        tomllib.TOMLDecodeError,
+    ) as error:
+        return [
+            *errors,
+            f"could not generate expected supply-chain evidence: {type(error).__name__}: {error}",
+        ], {}
     manifest_path = root / "inventory/sbom/manifest.json"
     if generate:
         for path in RETIRED_SBOMS:
@@ -556,15 +638,28 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
         wheel_path = root / PROTOCOL_WHEEL
         if not wheel_path.is_file() or wheel_path.read_bytes() != wheel:
             errors.append("protocol wheel is missing or stale")
-        if not manifest_path.is_file() or manifest_path.read_bytes() != canonical(manifest):
+        if not manifest_path.is_file() or manifest_path.read_bytes() != canonical(
+            manifest
+        ):
             errors.append("supply-chain manifest is missing or stale")
-    result = {"ok": not errors, "images": len(json.loads((root / "deploy/compose/images.lock.json").read_bytes()).get("images", {})), "sboms": sorted(sboms), "manifest_sha256": digest(canonical(manifest))}
+    result = {
+        "ok": not errors,
+        "images": len(
+            json.loads((root / "deploy/compose/images.lock.json").read_bytes()).get(
+                "images", {}
+            )
+        ),
+        "sboms": sorted(sboms),
+        "manifest_sha256": digest(canonical(manifest)),
+    }
     return errors, result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     parser.add_argument(
         "--generate",
         "--write-manifest",

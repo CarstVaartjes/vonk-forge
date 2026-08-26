@@ -423,7 +423,14 @@ export class ApiClient implements ControlApi {
 
   async createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
     return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
-      body: {ttl_seconds: ttlSeconds},
+      body: {ttl_seconds: ttlSeconds, purpose: "new-node"},
+      signal,
+    }));
+  }
+
+  async createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
+    return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
+      body: {ttl_seconds: ttlSeconds, purpose: "re-enroll", ...(nodeId ? {node_id: nodeId} : {})},
       signal,
     }));
   }

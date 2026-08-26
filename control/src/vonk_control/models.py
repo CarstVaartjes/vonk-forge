@@ -516,12 +516,21 @@ class LoginSession(Base):
 
 class AgentProfile(Base):
     __tablename__ = "agent_profiles"
-    node_id: Mapped[str] = mapped_column(ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True)
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
+    )
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, default="managed")
-    labels: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lifecycle: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="managed"
+    )
+    labels: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
 
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
@@ -713,7 +722,7 @@ class AgentEnrollmentGrant(Base):
     __tablename__ = "agent_enrollment_grants"
     __table_args__ = (
         CheckConstraint(
-            "purpose = 'new-node'",
+            "purpose IN ('new-node', 're-enroll')",
             name="ck_agent_enrollment_grants_purpose",
         ),
     )
@@ -1523,9 +1532,7 @@ class NodeTelemetryRollupBucket(Base):
             "node_id",
         ),
     )
-    resolution_seconds: Mapped[int] = mapped_column(
-        SmallInteger, primary_key=True
-    )
+    resolution_seconds: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     node_id: Mapped[str] = mapped_column(
         ForeignKey(
             "agent_nodes.node_id",
@@ -1574,9 +1581,7 @@ class NodeTelemetryRollupMetric(Base):
             name="ck_telemetry_rollup_metrics_values",
         ),
     )
-    resolution_seconds: Mapped[int] = mapped_column(
-        SmallInteger, primary_key=True
-    )
+    resolution_seconds: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     bucket_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), primary_key=True
@@ -1602,9 +1607,7 @@ class NodeTelemetryRollupDirty(Base):
             "node_id",
         ),
     )
-    resolution_seconds: Mapped[int] = mapped_column(
-        SmallInteger, primary_key=True
-    )
+    resolution_seconds: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
     node_id: Mapped[str] = mapped_column(
         ForeignKey(
             "agent_nodes.node_id",
@@ -1648,9 +1651,7 @@ def _seed_telemetry_maintenance_state(_target, connection, **_kw) -> None:
 class FleetEventCursor(Base):
     __tablename__ = "fleet_event_cursor"
     __table_args__ = (
-        CheckConstraint(
-            "singleton_id = 1", name="ck_fleet_event_cursor_singleton"
-        ),
+        CheckConstraint("singleton_id = 1", name="ck_fleet_event_cursor_singleton"),
         CheckConstraint("last_id >= 0", name="ck_fleet_event_cursor_last_id"),
     )
     singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
@@ -1941,6 +1942,7 @@ class ResourceReservation(Base):
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+
 class Recipe(Base):
     """Greenfield Library recipe identity owned by PostgreSQL."""
 
@@ -1950,8 +1952,12 @@ class Recipe(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class RecipeRevision(Base):
@@ -1959,8 +1965,12 @@ class RecipeRevision(Base):
 
     __tablename__ = "recipe_revisions"
     __table_args__ = (
-        UniqueConstraint("recipe_id", "revision_number", name="uq_recipe_revision_number"),
-        UniqueConstraint("recipe_id", "content_digest", name="uq_recipe_revision_digest"),
+        UniqueConstraint(
+            "recipe_id", "revision_number", name="uq_recipe_revision_number"
+        ),
+        UniqueConstraint(
+            "recipe_id", "content_digest", name="uq_recipe_revision_digest"
+        ),
         CheckConstraint("revision_number >= 1", name="ck_recipe_revision_number"),
     )
     revision_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -1971,7 +1981,9 @@ class RecipeRevision(Base):
     content: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 @event.listens_for(RecipeRevision, "before_update")

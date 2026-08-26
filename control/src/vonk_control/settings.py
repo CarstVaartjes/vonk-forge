@@ -79,7 +79,9 @@ def _agent_proxy_auth_secret(name: str, *, production: bool) -> bytes:
         value = (raw or "").encode("ascii", errors="strict")
     normalized = value.rstrip(b"\r\n")
     if _AGENT_PROXY_AUTH_PATTERN.fullmatch(normalized) is None:
-        raise SettingsError(f"{name} must contain one base64url-like token of at least 32 characters")
+        raise SettingsError(
+            f"{name} must contain one base64url-like token of at least 32 characters"
+        )
     return normalized
 
 
@@ -107,7 +109,8 @@ def _fixed_https_origin(name: str, value: str) -> str:
         or parsed.fragment
         or parsed.username is not None
         or parsed.password is not None
-        or port is not None and not 1 <= port <= 65535
+        or port is not None
+        and not 1 <= port <= 65535
     ):
         raise SettingsError(f"{name} must be a fixed HTTPS origin")
     return value.rstrip("/")
@@ -150,6 +153,7 @@ class Settings:
     recipe_library_api_url: str = "https://api.github.com"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
+    install_channel: str = "stable"
 
     @property
     def database_host(self) -> str | None:
@@ -166,17 +170,20 @@ class Settings:
         )
         if agent_runtime not in {"enabled", "disabled"}:
             raise SettingsError("VONK_AGENT_RUNTIME is invalid")
-        agent_enabled = agent_runtime == "enabled" and mode in {"development", "production"}
-        database_url = _secret("VONK_DATABASE_URL_FILE", production=mode == "production")
+        agent_enabled = agent_runtime == "enabled" and mode in {
+            "development",
+            "production",
+        }
+        database_url = _secret(
+            "VONK_DATABASE_URL_FILE", production=mode == "production"
+        )
         if urlsplit(database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
             raise SettingsError("database URL must use PostgreSQL")
         management_cidrs = _secret_or_file(
             "VONK_MANAGEMENT_CIDRS",
             "VONK_MANAGEMENT_CIDRS_FILE",
         )
-        direct_fabric_cidrs = os.environ.get(
-            "VONK_DIRECT_FABRIC_CIDRS", ""
-        ).strip()
+        direct_fabric_cidrs = os.environ.get("VONK_DIRECT_FABRIC_CIDRS", "").strip()
         if (mode == "production" or agent_enabled) and not management_cidrs:
             raise SettingsError("VONK_MANAGEMENT_CIDRS is required in production")
         if not management_cidrs and direct_fabric_cidrs:
@@ -195,10 +202,14 @@ class Settings:
         if signing_file:
             signing_path = Path(signing_file)
             if signing_path.is_symlink() or not signing_path.is_file():
-                raise SettingsError("token signing key must be a regular non-symlink file")
+                raise SettingsError(
+                    "token signing key must be a regular non-symlink file"
+                )
             signing_key = signing_path.read_bytes().strip()
         elif mode == "production" or (mode == "development" and agent_enabled):
-            raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required when the agent runtime is enabled")
+            raise SettingsError(
+                "VONK_TOKEN_SIGNING_KEY_FILE is required when the agent runtime is enabled"
+            )
         else:
             signing_key = _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY
         if len(signing_key) < 32:
@@ -213,7 +224,9 @@ class Settings:
             raise SettingsError("VONK_METRICS_TOKEN_FILE is required in production")
         else:
             metrics_token = "development-metrics-token"
-        if len(metrics_token) < 16 or any(character.isspace() for character in metrics_token):
+        if len(metrics_token) < 16 or any(
+            character.isspace() for character in metrics_token
+        ):
             raise SettingsError("metrics token is invalid")
         agent_controller_origin = (
             _fixed_https_origin(
@@ -239,55 +252,98 @@ class Settings:
         agent_service_hostnames = (
             tuple(
                 value.strip()
-                for value in os.environ.get(
-                    "VONK_AGENT_SERVICE_HOSTNAMES", ""
-                ).split(",")
+                for value in os.environ.get("VONK_AGENT_SERVICE_HOSTNAMES", "").split(
+                    ","
+                )
                 if value.strip()
             )
             if agent_enabled
             else ()
         )
+        install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "stable")
+        if install_channel not in {"dev", "stable"}:
+            raise SettingsError("VONK_INSTALL_CHANNEL is invalid")
         controller_ca_path = (
             _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
         )
-        agent_client_ca = _secret("VONK_AGENT_CLIENT_CA_FILE", production=True).encode() if agent_enabled else b""
+        agent_client_ca = (
+            _secret("VONK_AGENT_CLIENT_CA_FILE", production=True).encode()
+            if agent_enabled
+            else b""
+        )
         agent_intermediate_certificate_path = (
-            _secret_path("VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE") if agent_enabled else None
+            _secret_path("VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE")
+            if agent_enabled
+            else None
         )
         agent_intermediate_certificate = (
-            agent_intermediate_certificate_path.read_bytes() if agent_intermediate_certificate_path else b""
+            agent_intermediate_certificate_path.read_bytes()
+            if agent_intermediate_certificate_path
+            else b""
         )
         step_ca_enabled = agent_enabled
-        agent_ca_credential_path = _secret_path("VONK_AGENT_CA_CREDENTIAL_FILE") if step_ca_enabled else None
-        agent_ca_provisioner_public_jwk_path = (
-            _secret_path("VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE") if step_ca_enabled else None
+        agent_ca_credential_path = (
+            _secret_path("VONK_AGENT_CA_CREDENTIAL_FILE") if step_ca_enabled else None
         )
-        agent_ca_root_path = _secret_path("VONK_AGENT_CA_ROOT_FILE") if step_ca_enabled else None
-        agent_ca_url = os.environ.get("VONK_AGENT_CA_URL", "") if step_ca_enabled else ""
+        agent_ca_provisioner_public_jwk_path = (
+            _secret_path("VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE")
+            if step_ca_enabled
+            else None
+        )
+        agent_ca_root_path = (
+            _secret_path("VONK_AGENT_CA_ROOT_FILE") if step_ca_enabled else None
+        )
+        agent_ca_url = (
+            os.environ.get("VONK_AGENT_CA_URL", "") if step_ca_enabled else ""
+        )
         parsed_ca_url = urlsplit(agent_ca_url)
         if step_ca_enabled and (
-            parsed_ca_url.scheme != "https" or not parsed_ca_url.hostname
-            or parsed_ca_url.path not in {"", "/"} or parsed_ca_url.query or parsed_ca_url.fragment
-            or parsed_ca_url.username is not None or parsed_ca_url.password is not None
+            parsed_ca_url.scheme != "https"
+            or not parsed_ca_url.hostname
+            or parsed_ca_url.path not in {"", "/"}
+            or parsed_ca_url.query
+            or parsed_ca_url.fragment
+            or parsed_ca_url.username is not None
+            or parsed_ca_url.password is not None
         ):
             raise SettingsError("VONK_AGENT_CA_URL must be a fixed HTTPS origin")
-        agent_ca_provisioner_name = os.environ.get("VONK_AGENT_CA_PROVISIONER_NAME", "") if step_ca_enabled else ""
-        agent_ca_provisioner_kid = os.environ.get("VONK_AGENT_CA_PROVISIONER_KID", "") if step_ca_enabled else ""
-        if step_ca_enabled and (not agent_ca_provisioner_name or not agent_ca_provisioner_kid):
+        agent_ca_provisioner_name = (
+            os.environ.get("VONK_AGENT_CA_PROVISIONER_NAME", "")
+            if step_ca_enabled
+            else ""
+        )
+        agent_ca_provisioner_kid = (
+            os.environ.get("VONK_AGENT_CA_PROVISIONER_KID", "")
+            if step_ca_enabled
+            else ""
+        )
+        if step_ca_enabled and (
+            not agent_ca_provisioner_name or not agent_ca_provisioner_kid
+        ):
             raise SettingsError("Smallstep provisioner name and key ID are required")
         try:
-            agent_ca_timeout_seconds = float(os.environ.get("VONK_AGENT_CA_TIMEOUT_SECONDS", "3"))
-            agent_ca_max_response_bytes = int(os.environ.get("VONK_AGENT_CA_MAX_RESPONSE_BYTES", str(64 * 1024)))
+            agent_ca_timeout_seconds = float(
+                os.environ.get("VONK_AGENT_CA_TIMEOUT_SECONDS", "3")
+            )
+            agent_ca_max_response_bytes = int(
+                os.environ.get("VONK_AGENT_CA_MAX_RESPONSE_BYTES", str(64 * 1024))
+            )
         except ValueError as error:
-            raise SettingsError("Smallstep timeout and response limit must be numeric") from error
+            raise SettingsError(
+                "Smallstep timeout and response limit must be numeric"
+            ) from error
         if not 0 < agent_ca_timeout_seconds <= 30:
             raise SettingsError("Smallstep timeout must be between zero and 30 seconds")
         if not 1024 <= agent_ca_max_response_bytes <= 1024 * 1024:
-            raise SettingsError("Smallstep response limit must be between 1024 bytes and one MiB")
+            raise SettingsError(
+                "Smallstep response limit must be between 1024 bytes and one MiB"
+            )
         if step_ca_enabled:
             try:
                 agent_ca_certificate_lifetime_seconds = int(
-                    os.environ.get("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "86400")
+                    os.environ.get(
+                        "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "86400"
+                    )
                 )
             except ValueError as error:
                 raise SettingsError(
@@ -301,11 +357,13 @@ class Settings:
             agent_ca_certificate_lifetime_seconds = 86400
         agent_proxy_auth = (
             _agent_proxy_auth_secret("VONK_AGENT_PROXY_AUTH_FILE", production=True)
-            if agent_enabled else b""
+            if agent_enabled
+            else b""
         )
         worker_api_token = (
             _agent_proxy_auth_secret("VONK_WORKER_API_TOKEN_FILE", production=True)
-            if agent_enabled else b""
+            if agent_enabled
+            else b""
         )
         agent_artifact_root = _absolute_root(
             "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
@@ -322,9 +380,7 @@ class Settings:
             workload_tuf_target_root,
         )
         if any(
-            left == right
-            or left.is_relative_to(right)
-            or right.is_relative_to(left)
+            left == right or left.is_relative_to(right) or right.is_relative_to(left)
             for index, left in enumerate(agent_roots)
             for right in agent_roots[index + 1 :]
         ):
@@ -350,13 +406,12 @@ class Settings:
             "VONK_GLOBAL_CATALOG_URL", "https://vonkforge.ai"
         ).rstrip("/")
         parsed_catalog = urlsplit(global_catalog_url)
-        catalog_loopback = parsed_catalog.hostname in {
-            "localhost", "127.0.0.1", "::1"
-        }
+        catalog_loopback = parsed_catalog.hostname in {"localhost", "127.0.0.1", "::1"}
         if (
-            (parsed_catalog.scheme != "https" and not (
-                parsed_catalog.scheme == "http" and catalog_loopback
-            ))
+            (
+                parsed_catalog.scheme != "https"
+                and not (parsed_catalog.scheme == "http" and catalog_loopback)
+            )
             or not parsed_catalog.hostname
             or parsed_catalog.path not in {"", "/"}
             or parsed_catalog.query
@@ -411,6 +466,7 @@ class Settings:
             recipe_library_api_url=recipe_library_api_url,
             agent_controller_address=agent_controller_address,
             agent_service_hostnames=agent_service_hostnames,
+            install_channel=install_channel,
         )
 
 
@@ -465,7 +521,9 @@ class WorkerSettings:
         except ValueError as error:
             raise SettingsError("internal API timeout must be numeric") from error
         if not 0 < timeout <= 30:
-            raise SettingsError("internal API timeout must be between zero and 30 seconds")
+            raise SettingsError(
+                "internal API timeout must be between zero and 30 seconds"
+            )
         management_cidrs = _secret_or_file(
             "VONK_MANAGEMENT_CIDRS",
             "VONK_MANAGEMENT_CIDRS_FILE",

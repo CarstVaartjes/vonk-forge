@@ -11,7 +11,14 @@ fail() {
     exit 1
 }
 
-[ "$#" -eq 0 ] || fail "this installer does not accept arguments"
+case "$kind:$#:${1:-}" in
+    nas:0:|spark:0:) ;;
+    nas:1:--enable-hermes|nas:1:--disable-hermes) ;;
+    spark:1:--re-enroll) ;;
+    nas:*) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
+    spark:*) fail "this installer accepts only --re-enroll" ;;
+    *) fail "the installer kind is invalid" ;;
+esac
 case "$origin" in https://*) ;; *) fail "the installer origin is invalid" ;; esac
 for required in curl openssl sed head tail date mktemp awk; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required"
@@ -130,4 +137,4 @@ curl -fsSL --proto '=https' --tlsv1.2 "$origin/$selected_path" -o "$bootstrap" |
 VONK_INSTALL_BASE_URL="$origin/$release_prefix" \
 VONK_INSTALL_RELEASE_MANIFEST="$release" \
 VONK_INSTALL_RELEASE_SIGNATURE="$release_signature" \
-    /bin/sh "$bootstrap"
+    /bin/sh "$bootstrap" "$@"

@@ -1948,7 +1948,9 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert "PRIVATE KEY" not in response.text
 
 
-def test_setup_schema_two_adds_only_the_host_helper_public_authority(agent_system) -> None:
+def test_setup_schema_two_adds_only_the_host_helper_public_authority(
+    agent_system,
+) -> None:
     client, services, _, _ = agent_system
 
     class PublicAuthority:
@@ -1970,7 +1972,9 @@ def test_setup_schema_two_adds_only_the_host_helper_public_authority(agent_syste
     assert "PRIVATE KEY" not in setup.text
 
 
-def test_setup_schema_two_fails_closed_without_a_host_helper_authority(agent_system) -> None:
+def test_setup_schema_two_fails_closed_without_a_host_helper_authority(
+    agent_system,
+) -> None:
     client, _, _, _ = agent_system
 
     response = client.get("/agent/v1/bootstrap?setup_schema=2")
@@ -2043,6 +2047,7 @@ def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerpri
             "ca_fingerprint",
             "controller_address",
             "service_hostnames",
+            "installer_url",
         )
     } == {
         "controller_endpoint": "https://agents.example.test:8443",
@@ -2055,7 +2060,34 @@ def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerpri
             "agents.example.test",
             "registry.example.test",
         ],
+        "installer_url": "https://install.vonkforge.ai/spark",
     }
+
+
+def test_reenrollment_grant_is_explicit_and_bound_to_the_selected_node(
+    agent_system,
+) -> None:
+    client, services, codec, _ = agent_system
+    response = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 60, "purpose": "re-enroll", "node_id": NODE_A},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["purpose"] == "re-enroll"
+    with services.sessions() as session:
+        grant = session.get(AgentEnrollmentGrant, response.json()["id"])
+        assert grant is not None
+        assert grant.node_id == NODE_A
+        assert grant.purpose == "re-enroll"
+
+    invalid = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 60, "purpose": "new-node", "node_id": NODE_A},
+    )
+    assert invalid.status_code == 422
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(

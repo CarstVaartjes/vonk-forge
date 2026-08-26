@@ -45,6 +45,12 @@ identity, replaces the Debian package directly, restarts the service, and
 requires sustained readiness. There is no separate upgrade command, A/B slot,
 supervisor, rollback state, migration command, or follow-up setup step.
 
+An ordinary rerun is only an upgrade. Certificate recovery is deliberately
+explicit: create a **Re-enroll Spark** grant in Fleet and run its command, which
+passes `--re-enroll` through the signed channel bootstrap. This replaces stale
+credentials and resets a failed systemd start limit automatically. The generated
+URL is `/dev/spark` for a development NAS and `/spark` for a stable NAS.
+
 If the command fails, read its final error and rerun the same command after
 correcting that condition. It fails before privilege escalation when release
 verification does not pass.
