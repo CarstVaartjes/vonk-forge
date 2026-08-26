@@ -68,6 +68,11 @@ async function flush(): Promise<void> {
   await act(async () => { await Promise.resolve(); });
 }
 
+function openFleetControls(): void {
+  const summary = screen.getByText("Controls", {selector: "summary"});
+  if (!summary.parentElement?.hasAttribute("open")) fireEvent.click(summary);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -103,9 +108,9 @@ test("shows truthful cluster counts and live connection state", async () => {
     expect(within(within(summary).getByText(label).parentElement!).getByText("1")).toBeVisible();
   }
   expect(within(summary).getByText("70.0 GiB")).toBeVisible();
-  expect(within(summary).getByText("1 installed recipe")).toBeVisible();
-  expect(within(summary).getByText("1 loaded recipe")).toBeVisible();
-  expect(within(summary).getByText("3 active warnings")).toBeVisible();
+  expect(within(summary).getByText("1 installed recipe")).toBeInTheDocument();
+  expect(within(summary).getByText("1 loaded recipe")).toBeInTheDocument();
+  expect(within(summary).getByRole("button", {name: "3 active warnings"})).toBeVisible();
   expect(screen.getAllByRole("article")).toHaveLength(4);
 
   act(() => FakeEventSource.instances[0].emit("open"));
@@ -122,7 +127,7 @@ test("labels partial and unknown unified capacity instead of implying a measured
 
   let summary = screen.getByRole("region", {name: "Fleet summary"});
   expect(within(summary).getByText("70.0 GiB known")).toBeVisible();
-  expect(within(summary).getByText("Partial · 1 of 2 live nodes reporting")).toBeVisible();
+  expect(within(summary).getByText("Partial · 1 of 2 live nodes reporting")).toBeInTheDocument();
 
   view.unmount();
   const unknown = node("node-c", "Gamma", "2026-08-15T11:59:58Z");
@@ -133,7 +138,7 @@ test("labels partial and unknown unified capacity instead of implying a measured
 
   summary = screen.getByRole("region", {name: "Fleet summary"});
   expect(within(summary).getByText("Not reported")).toBeVisible();
-  expect(within(summary).getByText("No live node reports both host and GPU free memory")).toBeVisible();
+  expect(within(summary).getByText("No live node reports both host and GPU free memory")).toBeInTheDocument();
   expect(within(summary).queryByText("0 B")).not.toBeInTheDocument();
 });
 
@@ -149,6 +154,7 @@ test("switches between persisted compact and graphical topology views without ex
   expect(screen.getByRole("article", {name: "Mia Lab West — Live"})).toBeVisible();
   expect(screen.queryByText(identity)).not.toBeInTheDocument();
 
+  openFleetControls();
   fireEvent.click(screen.getByRole("button", {name: "Compact"}));
   expect(screen.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
   expect(localStorage.getItem(FLEET_VIEW_STORAGE_KEY)).toBe("compact");
@@ -162,6 +168,7 @@ test("switches between persisted compact and graphical topology views without ex
   view.unmount();
   render(<FleetPage api={api}/>);
   await flush();
+  openFleetControls();
   expect(screen.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("region", {name: "Fleet topology"})).toBeVisible();
 });
@@ -171,6 +178,7 @@ test("accepts the legacy cards preference while naming and persisting the view a
   render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:58Z")]))}/>);
   await flush();
 
+  openFleetControls();
   expect(screen.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
   expect(screen.queryByRole("button", {name: "Cards"})).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "Compact"}));
@@ -186,6 +194,7 @@ test("sorts attention first and combines friendly-name search with multi-select 
   render(<FleetPage api={control(async () => snapshot([live, delayed, stale, offline]))}/>);
   await flush();
 
+  openFleetControls();
   const detailed = screen.getByRole("region", {name: "Fleet nodes detailed"});
   expect(within(detailed).getAllByRole("article").map(article => article.getAttribute("aria-label"))).toEqual([
     "Delta Rack — Offline",
@@ -227,6 +236,7 @@ test("keeps selected details across views and clears them with safe focus when f
   ]))}/>);
   await flush();
 
+  openFleetControls();
   fireEvent.click(screen.getByRole("button", {name: "View Alpha details"}));
   await flush();
   fireEvent.click(screen.getByRole("button", {name: "Compact"}));
@@ -260,6 +270,7 @@ test("defaults card trends to 24h, supports the four bounded ranges, and appends
   };
   render(<FleetPage api={control(async () => snapshot([alpha]), telemetryHistory)}/>);
   await flush();
+  openFleetControls();
   const range = screen.getByRole("combobox", {name: "Card trend range"});
   expect(range).toHaveValue("24h");
   expect(within(range).getAllByRole("option").map(option => option.textContent)).toEqual(["1h", "24h", "7d", "31d"]);

@@ -33,6 +33,11 @@ function capacity(free: number | null, total: number | null, freeLabel: string):
   return `${formatBytes(free)} ${freeLabel} / ${formatBytes(total)}`;
 }
 
+function throughput(receive: number | null, transmit: number | null): string {
+  if (receive === null && transmit === null) return "Not reported";
+  return `↓ ${receive === null ? "—" : `${formatBytes(receive)}/s`} · ↑ ${transmit === null ? "—" : `${formatBytes(transmit)}/s`}`;
+}
+
 function utilizationTone(percent: number): "danger" | "healthy" | "warning" {
   if (percent >= 90) return "danger";
   if (percent >= 75) return "warning";
@@ -82,14 +87,20 @@ function CardTrend({
 }
 
 function WorkloadSummary({node, name}: {node: VisualFleetNode; name: string}) {
-  const loaded = node.loaded.filter(run => run.healthy);
-  const installed = node.installed.filter(item => item.complete);
-  const degraded = node.loaded.filter(run => !run.healthy).length + node.installed.filter(item => !item.complete).length;
-  return <div className="node-workload-summary" aria-label={`Workloads on ${name}`}>
-    <div><span>Loaded now</span><strong>{loaded.length}</strong><small>{loaded[0]?.title ?? "No active model"}</small></div>
-    <div><span>Installed</span><strong>{installed.length}</strong><small>{installed[0]?.title ?? "No complete install"}</small></div>
-    {degraded > 0 && <p><strong>{degraded}</strong> workload {degraded === 1 ? "state needs" : "states need"} attention</p>}
-  </div>;
+  return <section className="node-workload-summary" aria-label={`Workloads on ${name}`}>
+    <div>
+      <header><span>Loaded now</span><strong>{node.loaded.length}</strong></header>
+      {node.loaded.length > 0
+        ? <ul>{node.loaded.map(run => <li key={run.run_id} className={run.healthy ? "is-healthy" : "is-degraded"}><span>{run.title}</span><small>{run.alias ? `${run.alias} · ` : ""}{run.healthy ? "healthy" : run.group_state}</small></li>)}</ul>
+        : <small className="node-model-empty">No active model</small>}
+    </div>
+    <div>
+      <header><span>Installed</span><strong>{node.installed.length}</strong></header>
+      {node.installed.length > 0
+        ? <ul>{node.installed.map(item => <li key={item.installation_id} className={item.complete ? "is-healthy" : "is-degraded"}><span>{item.title}</span><small>{item.complete ? "ready" : item.group_state}</small></li>)}</ul>
+        : <small className="node-model-empty">No complete install</small>}
+    </div>
+  </section>;
 }
 
 export function NodeCard({
@@ -129,22 +140,18 @@ export function NodeCard({
   const observedAt = sample?.observed_at;
   const timestamp = timestampPresentation(observedAt, now);
   const warnings = nodeWarningsAt(node, now);
+  const networkReceive = finite(sample?.network_receive_bytes_per_second);
+  const networkTransmit = finite(sample?.network_transmit_bytes_per_second);
 
   return <article className={`node-card state-${state}${selected ? " is-selected" : ""}`} aria-label={`${name} — ${label}`}>
     <header className="node-card-heading">
       <div>
-        <p className="node-eyebrow">{node.labels.role ?? node.lifecycle}</p>
-        <h3>{name}</h3>
-        {secondaryName && <p className="node-host">{secondaryName}</p>}
+        <div className="node-title-line"><h3>{name}</h3><span>{node.labels.role ?? node.lifecycle}</span></div>
+        <p className="node-host">{secondaryName ?? node.lifecycle}{timestamp && <> · <time dateTime={timestamp.dateTime} title={timestamp.exact} aria-label={`${timestamp.relative}; exact time ${timestamp.exact}`}>{timestamp.relative}</time></>}</p>
       </div>
       <div className="node-card-heading-actions"><StatusPill tone={statusTone(state)}>{label}</StatusPill><button type="button" className="node-edit-button" aria-label={`Edit ${name}`} onClick={onEdit}>Edit</button></div>
     </header>
-    <div className="node-freshness">
-      {timestamp
-        ? <time dateTime={timestamp.dateTime} title={timestamp.exact} aria-label={`${timestamp.relative}; exact time ${timestamp.exact}`}>{timestamp.relative}</time>
-        : <span>Update time not reported</span>}
-      {state === "offline" && <strong>{offlineReasonLabel(node.connection.offline_reason)}</strong>}
-    </div>
+    {state === "offline" && <p className="node-offline-reason">{offlineReasonLabel(node.connection.offline_reason)}</p>}
 
     <div className="node-capacity-visual">
       {unified
@@ -163,14 +170,15 @@ export function NodeCard({
 
     <dl className="node-metrics">
       <div className="metric metric-featured"><dt>Accelerator</dt><dd>{accelerator}</dd></div>
-      <div className="metric"><dt>Disk</dt><dd>{capacity(diskFree, diskTotal, "free")}</dd></div>
       <div className="metric"><dt>CPU / load</dt><dd>{cpu === "Not reported" && load === "Not reported" ? "Not reported" : `${cpu} · load ${load}`}</dd></div>
+      <div className="metric"><dt>Disk</dt><dd>{capacity(diskFree, diskTotal, "free")}</dd></div>
+      <div className="metric"><dt>Network</dt><dd>{throughput(networkReceive, networkTransmit)}</dd></div>
       <div className="metric"><dt>Power</dt><dd>{formatMetric(sample?.power_watts, value => `${value.toFixed(1)} W`)}</dd></div>
     </dl>
 
     <WorkloadSummary node={node} name={name}/>
-    {warnings.length > 0 && <ul className="node-warnings" aria-label={`Warnings for ${name}`}>
-      {warnings.map((warning, index) => <li key={`${warning.code}:${index}`} className={`severity-${warning.severity}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}
+    {warnings.length > 0 && <ul className="node-warnings" aria-label={`Warnings for ${name}: ${warnings.map(warning => warning.detail).join(" ")}`} title={warnings.map(warning => `${warning.severity}: ${warning.detail}`).join("\n")}>
+      <li className={`severity-${warnings[0]!.severity}`}><strong>{warnings[0]!.severity}</strong> {warnings[0]!.detail}{warnings.length > 1 && <span className="node-warning-overflow">+{warnings.length - 1} more</span>}</li>
     </ul>}
     <button type="button" className="node-detail-trigger" aria-expanded={selected} onClick={onSelect}>View {name} details</button>
   </article>;

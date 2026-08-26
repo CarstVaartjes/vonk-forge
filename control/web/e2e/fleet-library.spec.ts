@@ -40,6 +40,11 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
   expect(results.violations, results.violations.map(value => `${value.id}: ${value.help}`).join("\n")).toEqual([]);
 }
 
+async function openFleetControls(page: Page) {
+  const controls = page.locator(".fleet-controls-menu");
+  if (!(await controls.getAttribute("open"))) await controls.locator("summary").click();
+}
+
 function libraryLoadPlan() {
   return {
     alias: "qwen-chat", allowed: true, installation_id: "installation-chat", mapping_generation: 4, mapping_id: "mapping-chat",
@@ -237,7 +242,7 @@ test.afterEach(async ({page}) => {
   expect(browserProblems.get(page)).toEqual([]);
 });
 
-test("Fleet Detailed view and bounded history are keyboard-accessible with local evidence", async ({page}) => {
+test("Fleet Detailed view and bounded history are keyboard-accessible with local evidence", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/fleet");
 
@@ -251,7 +256,8 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   const borealis = page.getByRole("article", {name: "Borealis — Offline"});
   await expect(borealis).toContainText("Certificate expired");
   await expect(borealis.locator(".node-workload-summary")).toContainText("Qwen pair");
-  await expect(borealis).toContainText("The Qwen pair has an unhealthy member rank.");
+  await expect(borealis.getByRole("list", {name: /The Qwen pair has an unhealthy member rank/})).toBeVisible();
+  await page.screenshot({path: testInfo.outputPath("fleet-detailed-desktop.png"), fullPage: true});
 
   const detailButton = aurora.getByRole("button", {name: "View Aurora details"});
   await detailButton.focus();
@@ -267,6 +273,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
 test("Fleet cards default to 24h trends and expose editable friendly identity", async ({page}) => {
   await page.goto("/fleet");
 
+  await openFleetControls(page);
   const range = page.getByRole("combobox", {name: "Card trend range"});
   await expect(range).toHaveValue("24h");
   await expect(range.getByRole("option")).toHaveText(["1h", "24h", "7d", "31d"]);
@@ -284,6 +291,7 @@ test("Fleet cards default to 24h trends and expose editable friendly identity", 
 
 test("Fleet discovery searches friendly names and combines actionable health filters", async ({page}) => {
   await page.goto("/fleet");
+  await openFleetControls(page);
   await expect(page.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
 
   const search = page.getByRole("searchbox", {name: "Find a Spark"});
@@ -347,6 +355,7 @@ test("Fleet has no document overflow from phone through large desktop", async ({
 test("Fleet compact and topology views persist, reflow, and keep technical IDs out of browse views", async ({page}, testInfo) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/fleet");
+  await openFleetControls(page);
   await page.getByRole("button", {name: "Topology"}).click();
 
   await expect(page.getByRole("region", {name: "Fleet topology"})).toBeVisible();
@@ -357,6 +366,7 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await page.screenshot({path: testInfo.outputPath("fleet-topology-desktop.png"), fullPage: true});
 
   await page.reload();
+  await openFleetControls(page);
   await expect(page.getByRole("button", {name: "Topology"})).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", {name: "Compact"}).click();
   await expect(page.getByRole("region", {name: "Fleet nodes compact table"})).toBeVisible();
