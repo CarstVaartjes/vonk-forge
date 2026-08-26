@@ -46,6 +46,14 @@ directly, restarts the service, and requires sustained readiness. There is no
 separate upgrade command, A/B slot, supervisor, rollback state, migration
 command, or follow-up setup step.
 
+Healthy connected agents rotate their 24-hour client certificate before it
+expires; operators should not normally need to re-enroll them. A package upgrade
+never mints a replacement identity on its own. If an agent missed rotation during
+an outage, or an issued staged generation expired before activation, use Fleet's
+**Re-enroll Spark** action and run its generated `--enroll` command. Package
+configuration remains local and recoverable even while the expired identity is
+offline; sustained readiness still fails until re-enrollment succeeds.
+
 An ordinary rerun is only an upgrade. Enrollment commands use the generic
 `--enroll` intent through the signed channel bootstrap. On a fresh Spark that
 creates the identity; on an existing Spark the controller-authorized grant

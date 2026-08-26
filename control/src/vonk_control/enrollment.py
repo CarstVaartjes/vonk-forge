@@ -481,11 +481,16 @@ class EnrollmentService:
                 None,
             )
             if staged is not None:
-                if staged.csr_public_key_fingerprint != csr_fingerprint:
-                    raise EnrollmentDenied(
-                        "a different certificate rotation is already staged"
-                    )
-                return _certificate_issued(staged)
+                if _stored_utc(staged.not_after) <= now:
+                    staged.state = "revoked"
+                    staged.revoked_at = staged.revoked_at or now
+                    session.flush()
+                else:
+                    if staged.csr_public_key_fingerprint != csr_fingerprint:
+                        raise EnrollmentDenied(
+                            "a different certificate rotation is already staged"
+                        )
+                    return _certificate_issued(staged)
             intent = session.scalar(
                 select(AgentCertificateRotation)
                 .where(AgentCertificateRotation.node_id == node_id)

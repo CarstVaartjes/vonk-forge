@@ -224,7 +224,6 @@ def _verify_control(control: Path) -> None:
         "install -o root -g vonk-agent -m 0640",
         "deb-systemd-helper enable vonk-forge-agent.service",
         "deb-systemd-invoke restart vonk-forge-agent.service",
-        "--config /etc/vonk-forge-agent/agent.toml self-test",
         "daemon-reload",
     ):
         if required not in postinst:
@@ -238,6 +237,8 @@ def _verify_control(control: Path) -> None:
             "readiness.json",
             "--property MainPID",
             " is-active ",
+            "self-test",
+            "/run/vonk-forge-agent",
         )
     ):
         raise VerificationError("postinst contains obsolete agent lifecycle state")

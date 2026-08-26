@@ -6,8 +6,8 @@ use crate::{
     config::AgentConfig,
     identity::{
         IdentityError, IdentityMaterial, active_identity_paths, clear_pending, generate_pending,
-        load_pending, persist_pending, publish_staged, renewal_due, stage_identity,
-        staged_identity_paths,
+        identity_expired, load_pending, persist_pending, publish_staged, renewal_due,
+        retire_expired_staged, stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
 };
@@ -24,14 +24,19 @@ pub enum RotationError {
 
 pub async fn rotate_if_due(config: &AgentConfig) -> Result<bool, RotationError> {
     let root = config.data_dir.join("credentials");
+    let now = Utc::now();
     if let Some((generation, paths)) = staged_identity_paths(&root)? {
-        AgentHttpClient::from_identity_paths(config, &paths)?
-            .activate(generation)
-            .await?;
-        publish_staged(&root, generation)?;
-        return Ok(true);
+        if identity_expired(&paths, now)? {
+            retire_expired_staged(&root, generation)?;
+        } else {
+            AgentHttpClient::from_identity_paths(config, &paths)?
+                .activate(generation)
+                .await?;
+            publish_staged(&root, generation)?;
+            return Ok(true);
+        }
     }
-    if !renewal_due(&root, Utc::now())? {
+    if !renewal_due(&root, now)? {
         return Ok(false);
     }
     let pending = match load_pending(&root)? {

@@ -186,6 +186,22 @@ pub fn staged_identity_paths(root: &Path) -> Result<Option<(u64, IdentityPaths)>
         .transpose()
 }
 
+pub fn identity_expired(paths: &IdentityPaths, now: DateTime<Utc>) -> Result<bool, IdentityError> {
+    let (_, not_after) = certificate_validity(&paths.certificate)?;
+    Ok(now >= not_after)
+}
+
+pub fn retire_expired_staged(root: &Path, generation: u64) -> Result<(), IdentityError> {
+    if load_pointer(root, "staged.json")? != Some(generation) {
+        return Err(std::io::Error::other("staged identity generation changed").into());
+    }
+    generation_paths(root, generation)?;
+    archive_pointer(root, "staged.json", "expired-staged.json")?;
+    clear_pending(root)?;
+    File::open(root)?.sync_all()?;
+    Ok(())
+}
+
 pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), IdentityError> {
     ensure_private_directory(root)?;
     if material.generation == 0 {
@@ -237,24 +253,29 @@ pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError>
 
 pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
     let paths = active_identity_paths(root)?;
-    let certificate_pem = read_private(&paths.certificate)?;
-    let (_, pem) = parse_x509_pem(&certificate_pem)
-        .map_err(|_| std::io::Error::other("active certificate PEM is invalid"))?;
-    let (_, certificate) = parse_x509_certificate(&pem.contents)
-        .map_err(|_| std::io::Error::other("active certificate is invalid"))?;
-    let not_before = Utc
-        .timestamp_opt(certificate.validity().not_before.timestamp(), 0)
-        .single()
-        .ok_or_else(|| std::io::Error::other("active certificate validity is invalid"))?;
-    let not_after = Utc
-        .timestamp_opt(certificate.validity().not_after.timestamp(), 0)
-        .single()
-        .ok_or_else(|| std::io::Error::other("active certificate validity is invalid"))?;
+    let (not_before, not_after) = certificate_validity(&paths.certificate)?;
     let lifetime = not_after - not_before;
     if lifetime <= chrono::Duration::zero() {
         return Err(std::io::Error::other("active certificate validity is invalid").into());
     }
     Ok(now >= not_after - lifetime / 3)
+}
+
+fn certificate_validity(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), IdentityError> {
+    let certificate_pem = read_private(path)?;
+    let (_, pem) = parse_x509_pem(&certificate_pem)
+        .map_err(|_| std::io::Error::other("identity certificate PEM is invalid"))?;
+    let (_, certificate) = parse_x509_certificate(&pem.contents)
+        .map_err(|_| std::io::Error::other("identity certificate is invalid"))?;
+    let not_before = Utc
+        .timestamp_opt(certificate.validity().not_before.timestamp(), 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
+    let not_after = Utc
+        .timestamp_opt(certificate.validity().not_after.timestamp(), 0)
+        .single()
+        .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
+    Ok((not_before, not_after))
 }
 
 fn load_pointer(root: &Path, name: &str) -> Result<Option<u64>, IdentityError> {
@@ -372,6 +393,7 @@ fn valid_node_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcgen::{CertificateParams, KeyPair, PKCS_ED25519, date_time_ymd};
     use tempfile::tempdir;
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
@@ -386,6 +408,50 @@ mod tests {
             fingerprint: format!("fingerprint-{generation}"),
             generation,
         }
+    }
+
+    fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
+        let key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
+        let mut parameters = CertificateParams::default();
+        parameters.not_before = date_time_ymd(2026, 8, 1);
+        parameters.not_after = if expired {
+            date_time_ymd(2026, 8, 2)
+        } else {
+            date_time_ymd(2026, 8, 4)
+        };
+        let certificate = parameters.self_signed(&key).unwrap();
+        IdentityMaterial {
+            node_id: NODE_ID.to_owned(),
+            private_key_pem: key.serialize_pem().into_bytes(),
+            certificate_pem: certificate.pem().into_bytes(),
+            chain_pem: certificate.pem().into_bytes(),
+            serial: format!("serial-{generation}"),
+            fingerprint: format!("fingerprint-{generation}"),
+            generation,
+        }
+    }
+
+    #[test]
+    fn expired_staged_identity_is_retired_without_changing_the_active_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_identity(&root, &certificate_material(1, false)).unwrap();
+        stage_identity(&root, &certificate_material(2, true)).unwrap();
+        persist_pending(&root, &generate_pending(NODE_ID).unwrap()).unwrap();
+        let (generation, paths) = staged_identity_paths(&root).unwrap().unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+
+        assert!(identity_expired(&paths, now).unwrap());
+        retire_expired_staged(&root, generation).unwrap();
+
+        assert!(staged_identity_paths(&root).unwrap().is_none());
+        assert!(root.join("expired-staged.json").is_file());
+        assert!(!root.join("pending-key.pem").exists());
+        assert!(!root.join("pending-csr.pem").exists());
+        assert_eq!(
+            active_identity_paths(&root).unwrap(),
+            flat_paths(&root).unwrap(),
+        );
     }
 
     #[test]
