@@ -10,10 +10,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import AgentNode, ClusterMapping, ClusterMappingNode, LocalRecipeRevision
+from .models import (
+    AgentNode,
+    ClusterMapping,
+    ClusterMappingNode,
+    LocalRecipeRevision,
+    NodeInventorySnapshot,
+)
 from .recipe_contract import RecipeContractError, recipe_topology
 from .topology import Placement, TopologyError, validate_topology
 
@@ -65,6 +71,7 @@ class ClusterMappingService:
                 )
             document = copy.deepcopy(revision.document)
             nodes = _active_nodes(session, node_ids)
+            capabilities = _topology_capabilities(session, nodes)
         try:
             topology = recipe_topology(document)
         except RecipeContractError as error:
@@ -110,7 +117,7 @@ class ClusterMappingService:
                     )
                     for item in placements
                 ),
-                {node.node_id: tuple(node.capabilities) for node in nodes},
+                capabilities,
             )
         except TopologyError as error:
             raise ClusterMappingError(error.code, str(error)) from error
@@ -151,6 +158,7 @@ class ClusterMappingService:
             nodes = _active_nodes(
                 session, tuple(item.node_id for item in plan.nodes), lock=True
             )
+            capabilities = _topology_capabilities(session, nodes)
             document = copy.deepcopy(revision.document)
             try:
                 validate_topology(
@@ -164,7 +172,7 @@ class ClusterMappingService:
                         )
                         for item in plan.nodes
                     ),
-                    {node.node_id: tuple(node.capabilities) for node in nodes},
+                    capabilities,
                 )
             except TopologyError as error:
                 raise ClusterMappingError(error.code, str(error)) from error
@@ -252,6 +260,59 @@ def _active_nodes(
             "a selected GPU node is inactive or incompatible",
         )
     return rows
+
+
+def _topology_capabilities(
+    session: Session, nodes: tuple[AgentNode, ...]
+) -> dict[str, tuple[str, ...]]:
+    """Combine negotiated runtime support with latest inventory fabric evidence.
+
+    ``AgentNode.capabilities`` is refreshed by the claim lane and therefore only
+    contains protocol and operation capabilities accepted by the control plane.
+    Fabric capabilities are reported independently in authenticated inventory
+    snapshots.  Treating the claim row as hardware authority makes every real
+    distributed mapping fail even while Library correctly ranks the same nodes
+    from inventory evidence.
+    """
+
+    node_ids = tuple(node.node_id for node in nodes)
+    ranked = (
+        select(
+            NodeInventorySnapshot.id.label("inventory_id"),
+            func.row_number()
+            .over(
+                partition_by=NodeInventorySnapshot.node_id,
+                order_by=(
+                    NodeInventorySnapshot.observed_at.desc(),
+                    NodeInventorySnapshot.received_at.desc(),
+                    NodeInventorySnapshot.id.desc(),
+                ),
+            )
+            .label("inventory_rank"),
+        )
+        .where(NodeInventorySnapshot.node_id.in_(node_ids))
+        .subquery()
+    )
+    inventories = {
+        item.node_id: item
+        for item in session.scalars(
+            select(NodeInventorySnapshot)
+            .join(ranked, ranked.c.inventory_id == NodeInventorySnapshot.id)
+            .where(ranked.c.inventory_rank == 1)
+        )
+    }
+    result: dict[str, tuple[str, ...]] = {}
+    for node in nodes:
+        negotiated = {
+            capability
+            for capability in node.capabilities
+            if not capability.startswith("fabric.")
+        }
+        inventory = inventories.get(node.node_id)
+        if inventory is not None:
+            negotiated.update(inventory.capabilities)
+        result[node.node_id] = tuple(sorted(negotiated))
+    return result
 
 
 def _mapping_actor(actor: str) -> str:
