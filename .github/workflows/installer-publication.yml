@@ -336,6 +336,7 @@ jobs:
           payload=$RUNNER_TEMP/payload.json
           scripts/build-nas-compose-bundle \
             --compose "$compose" \
+            --channel "$CHANNEL" \
             --output "$payload"
 
           image_value() {

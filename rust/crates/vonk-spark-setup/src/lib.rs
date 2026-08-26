@@ -127,6 +127,7 @@ pub struct SetupRequest {
     setup_signature: PathBuf,
     executable: PathBuf,
     controller_address: Option<Ipv4Addr>,
+    reenroll: bool,
     firewall_inputs: FirewallInputs,
 }
 
@@ -347,6 +348,11 @@ enum ApplyOperation {
         ca_sha256: String,
         pairing_token: String,
     },
+    Reenroll {
+        enrollment_url: Url,
+        ca_sha256: String,
+        pairing_token: String,
+    },
     Upgrade,
 }
 
@@ -466,6 +472,7 @@ impl SetupRequest {
             setup_signature,
             executable,
             controller_address: None,
+            reenroll: false,
             firewall_inputs: FirewallInputs::default(),
         })
     }
@@ -483,6 +490,11 @@ impl SetupRequest {
 
     pub fn with_firewall_inputs(mut self, inputs: FirewallInputs) -> Self {
         self.firewall_inputs = inputs;
+        self
+    }
+
+    pub fn with_reenroll(mut self, reenroll: bool) -> Self {
+        self.reenroll = reenroll;
         self
     }
 }
@@ -905,8 +917,11 @@ pub fn prepare_setup_with_authority(
         &release.architecture,
         true,
     )?;
-    let plan = match install_state(paths, StateValidation::MetadataOnly)? {
-        InstallState::Fresh => {
+    let plan = match (
+        install_state(paths, StateValidation::MetadataOnly)?,
+        request.reenroll,
+    ) {
+        (InstallState::Fresh, false) => {
             let enrollment_url = required_origin(prompt, "Enrollment URL")?;
             let ca_sha256 = required_sha256(prompt, "Controller CA SHA-256")?;
             let pairing_token = prompt
@@ -938,7 +953,8 @@ pub fn prepare_setup_with_authority(
                 helper_authority: discovery.helper_authority,
             }
         }
-        InstallState::ConfiguredUnpaired => {
+        (InstallState::Fresh, true) => return Err(SetupError::ExistingInstall),
+        (InstallState::ConfiguredUnpaired, _) => {
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
@@ -954,7 +970,23 @@ pub fn prepare_setup_with_authority(
                 pairing_token,
             }
         }
-        InstallState::Existing => ApplyOperation::Upgrade,
+        (InstallState::Existing, false) => ApplyOperation::Upgrade,
+        (InstallState::Existing, true) => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            let pairing_token = prompt
+                .secret("Pairing token")
+                .map_err(|_| SetupError::Prompt)?;
+            if !valid_token(&pairing_token) {
+                return Err(SetupError::UnsafeInput("pairing token"));
+            }
+            ApplyOperation::Reenroll {
+                enrollment_url: config.enrollment_url,
+                ca_sha256: config.ca_sha256,
+                pairing_token,
+            }
+        }
     };
     let envelope = ApplyEnvelope {
         schema_version: 1,
@@ -1206,6 +1238,7 @@ pub fn apply_setup_from_with_authority(
                 ApplyOperation::Pair { .. },
                 InstallState::ConfiguredUnpaired
             )
+            | (ApplyOperation::Reenroll { .. }, InstallState::Existing)
             | (ApplyOperation::Upgrade, InstallState::Existing)
     ) {
         return Err(SetupError::PrivilegedInput);
@@ -1287,6 +1320,23 @@ pub fn apply_setup_from_with_authority(
             write_setup_state(paths, b"paired-v1\n", owner)?;
             start_and_verify(paths, runner)
         }
+        ApplyOperation::Reenroll {
+            enrollment_url,
+            ca_sha256,
+            pairing_token,
+        } => {
+            let config = paired_configuration(&paths.config, paths)?;
+            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
+            verify_ca(&ca, &config.ca_sha256)?;
+            if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
+                return Err(SetupError::PrivilegedInput);
+            }
+            install_package(runner, &staged)?;
+            prepare_reenrollment(paths, runner)?;
+            pair_agent(paths, runner, &enrollment_url, &ca_sha256, pairing_token)?;
+            write_setup_state(paths, b"paired-v1\n", owner)?;
+            start_and_verify(paths, runner)
+        }
         ApplyOperation::Upgrade => {
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
@@ -1303,6 +1353,11 @@ fn validate_plan_against_installation(
     match plan {
         ApplyOperation::Fresh { .. } => Ok(()),
         ApplyOperation::Pair {
+            enrollment_url,
+            ca_sha256,
+            ..
+        }
+        | ApplyOperation::Reenroll {
             enrollment_url,
             ca_sha256,
             ..
@@ -1359,6 +1414,11 @@ fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
             verify_ca(ca_pem, ca_sha256).map_err(|_| SetupError::PrivilegedInput)
         }
         ApplyOperation::Pair {
+            enrollment_url,
+            ca_sha256,
+            pairing_token,
+        }
+        | ApplyOperation::Reenroll {
             enrollment_url,
             ca_sha256,
             pairing_token,
@@ -1517,6 +1577,21 @@ fn start_and_verify(
 ) -> Result<(), SetupError> {
     enable_runtime_units(paths, runner)?;
     verify_sustained_readiness(paths, runner)
+}
+
+fn prepare_reenrollment(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+) -> Result<(), SetupError> {
+    run_checked(
+        runner,
+        Command::new("/usr/bin/systemctl", ["stop", &paths.service]),
+    )?;
+    run_checked(
+        runner,
+        Command::new("/usr/bin/systemctl", ["reset-failed", &paths.service]),
+    )
+    .map(|_| ())
 }
 
 fn enable_runtime_units(

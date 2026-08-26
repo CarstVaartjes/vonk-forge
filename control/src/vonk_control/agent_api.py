@@ -179,6 +179,14 @@ class EnrollmentRateLimiter:
 class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
+    purpose: Literal["new-node", "re-enroll"] = "new-node"
+    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
+
+    @model_validator(mode="after")
+    def validate_target(self) -> GrantRequest:
+        if self.purpose == "new-node" and self.node_id is not None:
+            raise ValueError("new-node grants cannot target an existing node")
+        return self
 
 
 class EnrollmentSubmitRequest(BaseModel):
@@ -218,13 +226,17 @@ class EnrollmentGrantResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
     expires_at: str = Field(min_length=1, max_length=64)
-    purpose: Literal["new-node"]
+    purpose: Literal["new-node", "re-enroll"]
     token: str = Field(min_length=43, max_length=64)
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     controller_address: str | None = None
     service_hostnames: list[str] = Field(default_factory=list, max_length=16)
+    installer_url: Literal[
+        "https://install.vonkforge.ai/spark",
+        "https://install.vonkforge.ai/dev/spark",
+    ]
 
 
 class EnrollmentBootstrapResponse(BaseModel):
@@ -1123,9 +1135,14 @@ def install_agent_routes(
                 detail="agent enrollment bootstrap is unavailable",
             )
         try:
-            grant = required.enrollment.create(
-                None, authenticated.subject, body.ttl_seconds
-            )
+            if body.purpose == "re-enroll":
+                grant = required.enrollment.create_reenrollment(
+                    body.node_id, authenticated.subject, body.ttl_seconds
+                )
+            else:
+                grant = required.enrollment.create(
+                    None, authenticated.subject, body.ttl_seconds
+                )
         except (TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         audits.append(
@@ -1133,7 +1150,7 @@ def install_agent_routes(
                 request.state.request_id,
                 authenticated.subject,
                 "agent.enrollment.grant.create",
-                None,
+                body.node_id,
                 (),
             )
         )
@@ -1147,6 +1164,7 @@ def install_agent_routes(
             ca_fingerprint=required.bootstrap.ca_fingerprint,
             controller_address=required.bootstrap.controller_address,
             service_hostnames=list(required.bootstrap.service_hostnames),
+            installer_url=required.bootstrap.installer_url,
         )
 
     @human.get(

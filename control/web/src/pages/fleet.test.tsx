@@ -405,6 +405,7 @@ test("protects an in-flight or revealed enrollment grant from accidental dismiss
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "b".repeat(64),
+    installer_url: "https://install.vonkforge.ai/spark",
     controller_address: "192.168.1.231",
     service_hostnames: ["controller.example.test", "enrollment.example.test"],
   }));
@@ -453,6 +454,7 @@ test("blocks primary and browser-history navigation while enrollment credentials
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "c".repeat(64),
+    installer_url: "https://install.vonkforge.ai/spark",
     controller_address: null,
     service_hostnames: ["controller.example.test", "enrollment.example.test"],
   }));
@@ -474,6 +476,7 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
     controller_endpoint: "https://controller.example.test:9443",
     enrollment_endpoint: "https://enrollment.example.test:9444",
     ca_fingerprint: "a".repeat(64),
+    installer_url: "https://install.vonkforge.ai/spark",
     controller_address: "192.168.1.231",
     service_hostnames: ["controller.example.test", "enrollment.example.test"],
   });
@@ -505,4 +508,60 @@ test("renders the one-command Spark installer with enrollment inputs", async () 
   expect(screen.getAllByRole("status").some(status => status.textContent === "Copied")).toBe(true);
   fireEvent.click(screen.getByRole("button", {name: "I saved these values — Done"}));
   expect(screen.queryByRole("dialog", {name: "Add Spark"})).not.toBeInTheDocument();
+});
+
+test("re-enrollment uses the controller channel and explicit resilient mode", async () => {
+  const nodeId = "spk_0123456789abcdef0123456789abcdef";
+  const alpha = node(nodeId, "Spark Alpha", "2026-08-15T11:59:58Z");
+  const api = control(async () => snapshot([alpha])) as ControlApi;
+  api.createReenrollmentGrant = vi.fn().mockResolvedValue({
+    id: "grant-reenroll", purpose: "re-enroll", token: "replacement-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "d".repeat(64),
+    installer_url: "https://install.vonkforge.ai/dev/spark",
+    controller_address: "192.168.1.231",
+    service_hostnames: ["controller.example.test", "enrollment.example.test"],
+  });
+  render(<FleetPage api={api}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "View Spark Alpha details"}));
+  await flush();
+  fireEvent.click(screen.getByRole("button", {name: "Re-enroll"}));
+  expect(
+    screen.getByText(/retires stale local credential pointers automatically/i),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
+  await flush();
+
+  expect(api.createReenrollmentGrant).toHaveBeenCalledWith(nodeId, ENROLLMENT_GRANT_TTL_SECONDS);
+  expect(document.querySelector(".onboarding-command")).toHaveTextContent(
+    "curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --re-enroll",
+  );
+});
+
+test("offers unbound re-enrollment after the controller has lost its node rows", async () => {
+  const api = control(async () => snapshot([])) as ControlApi;
+  api.createReenrollmentGrant = vi.fn().mockResolvedValue({
+    id: "grant-recovery", purpose: "re-enroll", token: "recovery-secret", expires_at: "2026-08-15T12:15:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "e".repeat(64),
+    installer_url: "https://install.vonkforge.ai/dev/spark",
+    controller_address: null,
+    service_hostnames: [],
+  });
+  render(<FleetPage api={api}/>);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", {name: "Re-enroll Spark"}));
+  expect(screen.getByText(/Spark's locally held node identity/i)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
+  await flush();
+
+  expect(api.createReenrollmentGrant).toHaveBeenCalledWith(undefined, ENROLLMENT_GRANT_TTL_SECONDS);
+  expect(document.querySelector(".onboarding-command")).toHaveTextContent(
+    "curl -fsSL https://install.vonkforge.ai/dev/spark | sh -s -- --re-enroll",
+  );
 });

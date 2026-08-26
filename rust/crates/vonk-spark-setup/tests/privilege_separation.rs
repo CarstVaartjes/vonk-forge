@@ -931,6 +931,65 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
 }
 
 #[test]
+fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()).with_reenroll(true),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+
+    assert_eq!(prompt.secrets, 1);
+    assert!(prepare_runner.commands.is_empty());
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let mut apply_runner = RecordingRunner::default();
+    apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    let pair = apply_runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args == ["stop", "vonk-forge-agent.service"]
+    }));
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args == ["reset-failed", "vonk-forge-agent.service"]
+    }));
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args
+                == [
+                    "enable",
+                    "--now",
+                    "vonk-forge-docker-firewall.service",
+                    "vonk-forge-package-helper.socket",
+                    "vonk-forge-agent.service",
+                ]
+    }));
+}
+
+#[test]
 fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());

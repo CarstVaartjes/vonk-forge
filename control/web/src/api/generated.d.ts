@@ -1298,10 +1298,15 @@ export interface components {
             /** Id */
             id: string;
             /**
-             * Purpose
-             * @constant
+             * Installer Url
+             * @enum {string}
              */
-            purpose: "new-node";
+            installer_url: "https://install.vonkforge.ai/spark" | "https://install.vonkforge.ai/dev/spark";
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "new-node" | "re-enroll";
             /** Service Hostnames */
             service_hostnames?: string[];
             /** Token */
@@ -1466,6 +1471,14 @@ export interface components {
         };
         /** GrantRequest */
         GrantRequest: {
+            /** Node Id */
+            node_id?: string | null;
+            /**
+             * Purpose
+             * @default new-node
+             * @enum {string}
+             */
+            purpose: "new-node" | "re-enroll";
             /** Ttl Seconds */
             ttl_seconds: number;
         };

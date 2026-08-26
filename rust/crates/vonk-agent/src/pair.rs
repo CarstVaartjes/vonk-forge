@@ -17,8 +17,8 @@ use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x5
 use crate::{
     config::AgentConfig,
     identity::{
-        IdentityMaterial, PendingIdentity, clear_pending, generate_pending, load_pending,
-        persist_identity, persist_pending,
+        IdentityMaterial, PendingIdentity, generate_pending, load_pending, persist_paired_identity,
+        persist_pending,
     },
 };
 
@@ -192,7 +192,7 @@ pub async fn pair(
         let issued: IssuedResponse =
             serde_json::from_slice(&body).map_err(|_| PairingError::Response)?;
         validate_issued(&issued, &pending, &config.node_id)?;
-        persist_identity(
+        persist_paired_identity(
             &credential_root,
             &IdentityMaterial {
                 node_id: issued.node_id,
@@ -204,7 +204,6 @@ pub async fn pair(
                 generation: issued.generation,
             },
         )?;
-        clear_pending(&credential_root)?;
     }
     Ok(parsed)
 }

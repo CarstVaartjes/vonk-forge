@@ -56,6 +56,7 @@ class EnrollmentBootstrapConfig:
     ca_pem: str
     controller_address: str | None = None
     service_hostnames: tuple[str, ...] = ()
+    installer_url: str = "https://install.vonkforge.ai/spark"
 
     def __post_init__(self) -> None:
         controller_endpoint = _fixed_https_origin(
@@ -64,6 +65,12 @@ class EnrollmentBootstrapConfig:
         enrollment_endpoint = _fixed_https_origin(
             self.enrollment_endpoint, name="enrollment endpoint"
         )
+        expected_installer_urls = {
+            "https://install.vonkforge.ai/spark",
+            "https://install.vonkforge.ai/dev/spark",
+        }
+        if self.installer_url not in expected_installer_urls:
+            raise ValueError("installer URL is not an accepted publication channel")
         certificate, canonical_pem = _public_ca(self.ca_pem.encode("ascii"))
         fingerprint = certificate.fingerprint(hashes.SHA256()).hex()
         if self.ca_fingerprint != fingerprint:
@@ -113,6 +120,7 @@ class EnrollmentBootstrapConfig:
         controller_ca_path: Path,
         controller_address: str | None = None,
         service_hostnames: tuple[str, ...] = (),
+        installer_url: str = "https://install.vonkforge.ai/spark",
     ) -> EnrollmentBootstrapConfig:
         pem = _read_public_ca(Path(controller_ca_path))
         certificate, canonical_pem = _public_ca(pem)
@@ -129,6 +137,7 @@ class EnrollmentBootstrapConfig:
             ca_pem=canonical_pem.decode("ascii"),
             controller_address=controller_address,
             service_hostnames=service_hostnames,
+            installer_url=installer_url,
         )
 
 

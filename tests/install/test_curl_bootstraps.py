@@ -249,8 +249,23 @@ def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "does not accept arguments" in result.stderr
+    assert "accepts only --re-enroll" in result.stderr
     assert not receipt.exists()
+    assert not forbidden.exists()
+
+
+def test_spark_bootstrap_passes_only_explicit_reenrollment_mode(tmp_path: Path) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path,
+        "spark",
+        system="Linux",
+        machine="x86_64",
+        arguments=("--re-enroll",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
+    assert invocation[-1] == "--re-enroll"
     assert not forbidden.exists()
 
 

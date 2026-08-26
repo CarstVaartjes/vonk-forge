@@ -108,6 +108,29 @@ def test_private_controller_route_fails_closed(
             service_hostnames=hostnames,
         )
 
+
+def test_installer_url_is_limited_to_published_spark_channels() -> None:
+    certificate, pem = _controller_ca()
+
+    accepted = EnrollmentBootstrapConfig(
+        controller_endpoint="https://agents.example.test:8443",
+        enrollment_endpoint="https://enroll.example.test:8443",
+        ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        ca_pem=pem.decode("ascii"),
+        installer_url="https://install.vonkforge.ai/dev/spark",
+    )
+    assert accepted.installer_url.endswith("/dev/spark")
+
+    with pytest.raises(ValueError, match="publication channel"):
+        EnrollmentBootstrapConfig(
+            controller_endpoint="https://agents.example.test:8443",
+            enrollment_endpoint="https://enroll.example.test:8443",
+            ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+            ca_pem=pem.decode("ascii"),
+            installer_url="https://attacker.invalid/spark",
+        )
+
+
 def test_from_paths_rejects_a_non_ca_certificate(tmp_path: Path) -> None:
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name(

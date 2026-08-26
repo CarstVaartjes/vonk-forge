@@ -65,6 +65,8 @@ def _build(compose: Path, output: Path) -> subprocess.CompletedProcess[str]:
             str(compose),
             "--output",
             str(output),
+            "--channel",
+            "stable",
         ],
         cwd=ROOT,
         text=True,
@@ -85,7 +87,8 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
     assert payload["internal_values"] == [
-        {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
+        {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
+        {"env": "VONK_INSTALL_CHANNEL", "value": "stable"},
     ]
     assert {item["env"] for item in payload["required_values"]} == {
         "NAS_LAN_IP",
@@ -183,9 +186,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     installer_environment.update(
         item["env"] for item in payload["hermes"]["required_values"]
     )
-    installer_secret_files.update(
-        item["file"] for item in payload["hermes"]["secrets"]
-    )
+    installer_secret_files.update(item["file"] for item in payload["hermes"]["secrets"])
 
     compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)

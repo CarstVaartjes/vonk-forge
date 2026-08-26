@@ -111,6 +111,24 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
     Ok(())
 }
 
+/// Persist a newly paired identity and select it even when a previous
+/// certificate rotation left an active generation pointer behind.
+///
+/// Pointer retirement is deliberately last. If the process is interrupted
+/// before that switch, the previous identity remains selected and enrollment
+/// replay can safely finish the replacement.
+pub fn persist_paired_identity(
+    root: &Path,
+    material: &IdentityMaterial,
+) -> Result<(), IdentityError> {
+    persist_identity(root, material)?;
+    archive_pointer(root, "staged.json", "pre-reenroll-staged.json")?;
+    archive_pointer(root, "active.json", "pre-reenroll-active.json")?;
+    clear_pending(root)?;
+    File::open(root)?.sync_all()?;
+    Ok(())
+}
+
 pub fn persist_pending(root: &Path, pending: &PendingIdentity) -> Result<(), IdentityError> {
     ensure_private_directory(root)?;
     atomic_private_write(root, "pending-key.pem", &pending.private_key_pem)?;
@@ -252,6 +270,24 @@ fn load_pointer(root: &Path, name: &str) -> Result<Option<u64>, IdentityError> {
     Ok(Some(pointer.generation))
 }
 
+fn archive_pointer(root: &Path, name: &str, archive: &str) -> Result<(), IdentityError> {
+    let path = root.join(name);
+    match path.try_exists() {
+        Ok(false) => return Ok(()),
+        Ok(true) => {}
+        Err(error) => return Err(error.into()),
+    }
+    let raw = read_private(&path)?;
+    let pointer: GenerationPointer = serde_json::from_slice(&raw)?;
+    if pointer.generation == 0 {
+        return Err(std::io::Error::other("identity generation pointer is invalid").into());
+    }
+    atomic_private_write(root, archive, &raw)?;
+    fs::remove_file(path)?;
+    File::open(root)?.sync_all()?;
+    Ok(())
+}
+
 fn generation_paths(root: &Path, generation: u64) -> Result<IdentityPaths, IdentityError> {
     let directory = root.join(generation_name(generation));
     let metadata = fs::symlink_metadata(&directory)?;
@@ -331,4 +367,73 @@ fn valid_node_id(value: &str) -> bool {
         && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    fn material(generation: u64, marker: u8) -> IdentityMaterial {
+        IdentityMaterial {
+            node_id: NODE_ID.to_owned(),
+            private_key_pem: vec![marker, b'k'],
+            certificate_pem: vec![marker, b'c'],
+            chain_pem: vec![marker, b'h'],
+            serial: format!("serial-{generation}"),
+            fingerprint: format!("fingerprint-{generation}"),
+            generation,
+        }
+    }
+
+    #[test]
+    fn paired_identity_retires_stale_rotation_pointers_only_after_replacement_exists() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(3, b'o')).unwrap();
+        publish_staged(&root, 3).unwrap();
+
+        persist_identity(&root, &material(1, b'n')).unwrap();
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+            "writing replacement material alone must not bypass the active pointer",
+        );
+
+        persist_paired_identity(&root, &material(1, b'n')).unwrap();
+
+        assert!(!root.join("active.json").exists());
+        assert_eq!(
+            fs::read(root.join("pre-reenroll-active.json")).unwrap(),
+            br#"{"generation":3}"#,
+        );
+        assert!(root.join(generation_name(3)).is_dir());
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'n', b'c'],
+        );
+    }
+
+    #[test]
+    fn paired_identity_archives_staged_pointer_before_switching_active_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'o')).unwrap();
+        publish_staged(&root, 2).unwrap();
+        stage_identity(&root, &material(3, b's')).unwrap();
+
+        persist_paired_identity(&root, &material(1, b'n')).unwrap();
+
+        assert!(!root.join("staged.json").exists());
+        assert_eq!(
+            fs::read(root.join("pre-reenroll-staged.json")).unwrap(),
+            br#"{"generation":3}"#,
+        );
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'n', b'c'],
+        );
+    }
 }

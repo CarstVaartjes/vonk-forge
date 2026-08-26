@@ -23,3 +23,22 @@ later to upgrade. Routine operation is outbound mTLS and never uses SSH.
 
 Repeat this flow independently for every Spark; the product has no fixed fleet
 size or repository-owned node list.
+
+## Re-enroll an installed Spark
+
+Use **Re-enroll Spark** in Fleet when the controller database was restored or
+reset, or when an installed Spark needs a replacement certificate. Run the
+generated command; it uses the NAS installation's own publication channel and
+ends with the explicit recovery mode:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --re-enroll
+```
+
+The re-enrollment flow preserves the locally generated node ID, replaces its
+controller certificate atomically, retires stale local rotation pointers, clears
+systemd's failed-start limit, and verifies sustained readiness. When the node row
+still exists, start the flow from that node's details so the grant is bound to
+its ID. After a complete controller database reset, use the Fleet-header action;
+the grant is then bound to the node ID in the Spark's signed CSR. Do not rename
+credential files, edit `setup-state`, or manually restart the service.

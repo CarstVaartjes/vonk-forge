@@ -386,6 +386,7 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
       controller_endpoint: "https://controller.fixture.invalid:9443",
       enrollment_endpoint: "https://enrollment.fixture.invalid:9444",
       ca_fingerprint: "d".repeat(64),
+      installer_url: "https://install.vonkforge.ai/dev/spark",
       controller_address: "192.168.1.231",
       service_hostnames: ["controller.fixture.invalid", "enrollment.fixture.invalid"],
     }});

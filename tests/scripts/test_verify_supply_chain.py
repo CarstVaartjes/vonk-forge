@@ -47,6 +47,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/models.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
+        "control/migrations/versions/0003_agent_reenrollment_grants.py",
         "control/web/package-lock.json",
         "control/Dockerfile",
         "deploy/compose/compose.yaml",
@@ -299,6 +300,7 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "control/src/vonk_control/models.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
+        "control/migrations/versions/0003_agent_reenrollment_grants.py",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",
@@ -317,6 +319,7 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "control/src/vonk_control/models.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
+        "control/migrations/versions/0003_agent_reenrollment_grants.py",
     ),
 )
 def test_supply_chain_manifest_binds_recipe_authority_edges(

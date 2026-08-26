@@ -206,6 +206,11 @@ def build_agent_services(
         controller_ca_path=settings.controller_ca_path,
         controller_address=settings.agent_controller_address,
         service_hostnames=settings.agent_service_hostnames,
+        installer_url=(
+            "https://install.vonkforge.ai/dev/spark"
+            if settings.install_channel == "dev"
+            else "https://install.vonkforge.ai/spark"
+        ),
     )
     if (
         settings.agent_ca_root_path is None
@@ -269,7 +274,9 @@ def build_agent_services(
     if grant_key_path is not None and receipt_key_path is not None:
         helper_authority = WorkloadHelperAuthorityService(
             sessions,
-            WorkloadHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
+            WorkloadHelperGrantIssuer.from_private_key_file(
+                grant_key_path, clock=clock
+            ),
             WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
             workload_target_root=workload_tuf_target_root,
             clock=clock,
@@ -786,11 +793,11 @@ def create_app(
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="Fleet projection unavailable")
         try:
-            identity = fleet_projection.update_display_name(
-                node_id, body.display_name
-            )
+            identity = fleet_projection.update_display_name(node_id, body.display_name)
         except KeyError:
-            raise HTTPException(status_code=404, detail="Fleet node not found") from None
+            raise HTTPException(
+                status_code=404, detail="Fleet node not found"
+            ) from None
         except (OSError, RuntimeError, SQLAlchemyError, TypeError):
             raise HTTPException(
                 status_code=503, detail="Fleet profile update unavailable"
@@ -885,9 +892,7 @@ def create_app(
         revision: str | None = None, _actor: Actor = authenticated_actor
     ) -> dict[str, object]:
         if admin is None:
-            raise HTTPException(
-                status_code=503, detail="authority unavailable"
-            )
+            raise HTTPException(status_code=503, detail="authority unavailable")
         resolved = revision or admin.authority.head()
         snapshot = admin.authority.inspect(resolved)
         return {
@@ -902,9 +907,7 @@ def create_app(
     ) -> dict[str, object]:
         require_mutation_role(authenticated, "/api/v1/proposals")
         if admin is None:
-            raise HTTPException(
-                status_code=503, detail="authority unavailable"
-            )
+            raise HTTPException(status_code=503, detail="authority unavailable")
         preview = admin.proposals.preview(
             authenticated.subject,
             body.base_revision,
@@ -1041,6 +1044,7 @@ def create_app(
                 for event in audits.list()
             ]
         }
+
     @app.get("/api/v1/identity-history", operation_id="listIdentityHistory")
     def identity_history_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
         return {

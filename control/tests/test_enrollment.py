@@ -317,6 +317,100 @@ def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:
     assert result.node_id == NODE_ID
 
 
+def test_reenrollment_replaces_existing_active_identity_and_replay_is_idempotent(
+    service,
+) -> None:
+    enrollment, sessions, clock, authority = service
+    original = enroll(enrollment)
+    request = csr()
+    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+
+    replaced = enrollment.submit(grant.token, request, evidence(request))
+    replayed = enrollment.submit(grant.token, request, evidence(request))
+
+    assert replaced == replayed
+    assert replaced.generation == original.generation + 1
+    assert len(authority.calls) == 2
+    with sessions() as session:
+        previous = session.get(AgentCertificate, original.serial)
+        active = session.get(AgentCertificate, replaced.serial)
+        assert previous is not None
+        assert previous.state == "revoked"
+        assert previous.revoked_at is not None
+        assert previous.revoked_at.replace(tzinfo=UTC) == clock.now
+        assert active is not None
+        assert active.state == "active"
+        assert active.revoked_at is None
+        assert active.generation == 2
+        assert session.get(AgentNodeProfile, NODE_ID) is not None
+
+
+def test_unbound_reenrollment_recreates_identity_after_controller_reset(
+    service,
+) -> None:
+    enrollment, sessions, _, _ = service
+    request = csr()
+    grant = enrollment.create_reenrollment(None, "admin", 600)
+
+    issued = enrollment.submit(grant.token, request, evidence(request))
+
+    assert issued.node_id == NODE_ID
+    assert issued.generation == 1
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_ID)
+        certificate = session.get(AgentCertificate, issued.serial)
+        assert node is not None and node.state == "active"
+        assert certificate is not None and certificate.state == "active"
+
+
+def test_new_node_grant_still_rejects_existing_identity(service) -> None:
+    enrollment, _, _, _ = service
+    enroll(enrollment)
+    request = csr()
+    grant = enrollment.create(None, "admin", 600)
+
+    with pytest.raises(EnrollmentDenied, match="already exists"):
+        enrollment.submit(grant.token, request, evidence(request))
+
+
+def test_reenrollment_refuses_intentionally_retired_identity(service) -> None:
+    enrollment, sessions, _, _ = service
+    enroll(enrollment)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        assert node is not None
+        node.state = "retired"
+    request = csr()
+    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+
+    with pytest.raises(EnrollmentDenied, match="retired or revoked"):
+        enrollment.submit(grant.token, request, evidence(request))
+
+
+def test_reenrollment_refuses_to_race_an_in_progress_rotation(service) -> None:
+    enrollment, sessions, clock, _ = service
+    issued = enroll(enrollment)
+    with sessions.begin() as session:
+        session.add(
+            AgentCertificateRotation(
+                node_id=NODE_ID,
+                source_serial=issued.serial,
+                generation=2,
+                csr_pem=csr().decode("ascii"),
+                csr_public_key_fingerprint="c" * 64,
+                provider_request_id="provider-request",
+                state="issuing",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+    request = csr()
+    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+
+    with pytest.raises(EnrollmentDenied, match="rotation is in progress"):
+        enrollment.submit(grant.token, request, evidence(request))
+
+
 def test_submit_rejects_expired_malformed_and_evidence_mismatched_grants_without_leaking_token(
     service,
 ) -> None:

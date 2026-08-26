@@ -54,7 +54,9 @@ def test_management_networks_are_explicit_and_policy_validated(monkeypatch) -> N
         Settings.from_env_and_secrets()
 
 
-def test_management_networks_load_from_a_protected_file(tmp_path: Path, monkeypatch) -> None:
+def test_management_networks_load_from_a_protected_file(
+    tmp_path: Path, monkeypatch
+) -> None:
     management = tmp_path / "management-cidrs"
     management.write_text("10.0.0.0/24,2001:db8:42::/64\n")
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
@@ -174,6 +176,7 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
         "control.example.test,enroll.example.test,agents.example.test,registry.example.test",
     )
     monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
+    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "dev")
 
     settings = Settings.from_env_and_secrets()
 
@@ -188,6 +191,15 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
         "agents.example.test",
         "registry.example.test",
     )
+    assert settings.install_channel == "dev"
+
+
+def test_install_channel_rejects_unpublished_values(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")
+
+    with pytest.raises(SettingsError, match="VONK_INSTALL_CHANNEL"):
+        Settings.from_env_and_secrets()
 
 
 def test_enabled_agent_runtime_rejects_non_https_controller_origin(
@@ -242,9 +254,7 @@ def _configure_agent_authority(
     monkeypatch.setenv(
         "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
     )
-    monkeypatch.setenv(
-        "VONK_CONTROLLER_CA_FILE", str(paths["VONK_CONTROLLER_CA_FILE"])
-    )
+    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(paths["VONK_CONTROLLER_CA_FILE"]))
     if mode == "production":
         for name in (
             "VONK_DATABASE_URL_FILE",
@@ -315,7 +325,9 @@ def test_agent_certificate_lifetime_defaults_and_is_bounded(
     _configure_agent_authority(tmp_path, monkeypatch, mode="development")
     monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
 
-    assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 86400
+    assert (
+        Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 86400
+    )
 
     monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "90")
     assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 90
@@ -416,7 +428,9 @@ def _configure_enrollment_bootstrap_environment(
     monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
 
 
-def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: Path, monkeypatch) -> None:
+def test_production_agent_boundary_requires_secret_files_and_step_ca(
+    tmp_path: Path, monkeypatch
+) -> None:
     values = {
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
@@ -494,7 +508,9 @@ def test_agent_proxy_auth_defaults_empty(monkeypatch) -> None:
     assert settings.agent_proxy_auth == b""
 
 
-def test_production_worker_settings_can_explicitly_disable_agent_runtime(tmp_path: Path, monkeypatch) -> None:
+def test_production_worker_settings_can_explicitly_disable_agent_runtime(
+    tmp_path: Path, monkeypatch
+) -> None:
     values = {
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
         "VONK_WORKER_API_TOKEN_FILE": "w" * 32,

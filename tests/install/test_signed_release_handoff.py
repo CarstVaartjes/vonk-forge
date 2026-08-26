@@ -62,6 +62,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         'cat "$VONK_INSTALL_RELEASE_SIGNATURE" >> "$VONK_TEST_RECEIPT"\n'
         'printf "%s\\n" "$VONK_INSTALL_BASE_URL" >> "$VONK_TEST_RECEIPT"\n'
         'printf "%s\\n" "$VONK_CONTROLLER_ADDRESS" >> "$VONK_TEST_RECEIPT"\n'
+        'printf "arguments=%s\\n" "$*" >> "$VONK_TEST_RECEIPT"\n'
     )
     nas.write_text("unused\n")
     claims = public / "artifacts/stable/current.claims"
@@ -110,7 +111,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     curl.chmod(0o700)
 
     result = subprocess.run(
-        ["sh", rendered],
+        ["sh", rendered, "--re-enroll"],
         cwd=tmp_path,
         env={
             **os.environ,
@@ -130,4 +131,5 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         + signature.read_bytes()
         + f"https://install.example.test/{prefix}\n".encode()
         + b"192.168.1.231\n"
+        + b"arguments=--re-enroll\n"
     )

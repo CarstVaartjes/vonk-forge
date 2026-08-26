@@ -657,8 +657,19 @@
             "title": "Id",
             "type": "string"
           },
+          "installer_url": {
+            "enum": [
+              "https://install.vonkforge.ai/spark",
+              "https://install.vonkforge.ai/dev/spark"
+            ],
+            "title": "Installer Url",
+            "type": "string"
+          },
           "purpose": {
-            "const": "new-node",
+            "enum": [
+              "new-node",
+              "re-enroll"
+            ],
             "title": "Purpose",
             "type": "string"
           },
@@ -684,7 +695,8 @@
           "token",
           "controller_endpoint",
           "enrollment_endpoint",
-          "ca_fingerprint"
+          "ca_fingerprint",
+          "installer_url"
         ],
         "title": "EnrollmentGrantResponse",
         "type": "object"
@@ -1192,6 +1204,27 @@
       "GrantRequest": {
         "additionalProperties": false,
         "properties": {
+          "node_id": {
+            "anyOf": [
+              {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "purpose": {
+            "default": "new-node",
+            "enum": [
+              "new-node",
+              "re-enroll"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
           "ttl_seconds": {
             "maximum": 900.0,
             "minimum": 1.0,

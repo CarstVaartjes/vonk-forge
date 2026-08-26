@@ -21,6 +21,14 @@ psql \
   --set="litellm_password=$password" \
   --username "$POSTGRES_USER" \
   --dbname "$POSTGRES_DB" <<'SQL'
-CREATE ROLE litellm LOGIN PASSWORD :'litellm_password';
-CREATE DATABASE litellm OWNER litellm;
+SELECT format('CREATE ROLE litellm LOGIN PASSWORD %L', :'litellm_password')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm')\gexec
+ALTER ROLE litellm LOGIN PASSWORD :'litellm_password';
+SELECT 'CREATE DATABASE litellm OWNER litellm'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'litellm')\gexec
+ALTER DATABASE litellm OWNER TO litellm;
 SQL
+
+if [ -n "${VONK_POSTGRES_INIT_SENTINEL:-}" ]; then
+  : >"$VONK_POSTGRES_INIT_SENTINEL"
+fi

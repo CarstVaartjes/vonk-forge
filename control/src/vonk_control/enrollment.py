@@ -136,6 +136,17 @@ class EnrollmentService:
     ) -> EnrollmentGrant:
         return self._create(node_id, actor, ttl_seconds, purpose="new-node")
 
+    def create_reenrollment(
+        self, node_id: str | None, actor: str, ttl_seconds: int
+    ) -> EnrollmentGrant:
+        """Authorize an explicit replacement of a Spark identity.
+
+        An unbound grant deliberately supports controller database recovery:
+        the CSR-derived node identity remains cryptographically bound to the
+        one-time grant when the former node row no longer exists.
+        """
+        return self._create(node_id, actor, ttl_seconds, purpose="re-enroll")
+
     def _create(
         self, node_id: str | None, actor: str, ttl_seconds: int, *, purpose: str
     ) -> EnrollmentGrant:
@@ -238,8 +249,37 @@ class EnrollmentService:
                         created_at=now,
                     )
                     _lock_node_issuance(session, node_id)
-                    if session.get(AgentNode, node_id) is not None:
+                    existing_node = session.scalar(
+                        select(AgentNode)
+                        .where(AgentNode.node_id == node_id)
+                        .with_for_update(of=AgentNode)
+                    )
+                    if grant.purpose == "new-node" and existing_node is not None:
                         failure = "node identity already exists"
+                    elif grant.purpose == "re-enroll" and existing_node is not None:
+                        if (
+                            existing_node.state != "active"
+                            or existing_node.revoked_at is not None
+                        ):
+                            failure = "node identity is retired or revoked"
+                        elif (
+                            session.scalar(
+                                select(AgentCertificate.serial)
+                                .where(AgentCertificate.node_id == node_id)
+                                .limit(1)
+                            )
+                            is None
+                        ):
+                            failure = "node identity has no certificate history"
+                        elif (
+                            session.scalar(
+                                select(AgentCertificateRotation)
+                                .where(AgentCertificateRotation.node_id == node_id)
+                                .with_for_update(of=AgentCertificateRotation)
+                            )
+                            is not None
+                        ):
+                            failure = "certificate rotation is in progress"
                     competing = session.scalar(
                         select(AgentEnrollment.id)
                         .where(
@@ -298,6 +338,7 @@ class EnrollmentService:
                         enrollment,
                         issued,
                         purpose=claim.purpose,
+                        now=now,
                     )
                     if enrollment.certificate_generation is None:
                         raise EnrollmentDenied(
@@ -879,6 +920,7 @@ def _persist_issued_enrollment(
     issued: IssuedCertificate,
     *,
     purpose: str,
+    now: datetime,
 ) -> None:
     try:
         certificate_pem = issued.certificate_pem.decode("ascii")
@@ -887,28 +929,64 @@ def _persist_issued_enrollment(
         raise EnrollmentDenied(
             "certificate authority returned non-PEM certificate material"
         ) from error
-    node = session.get(AgentNode, enrollment.node_id)
-    if purpose != "new-node" or node is not None:
+    node = session.scalar(
+        select(AgentNode)
+        .where(AgentNode.node_id == enrollment.node_id)
+        .with_for_update(of=AgentNode)
+    )
+    if purpose not in {"new-node", "re-enroll"}:
         raise EnrollmentDenied("enrollment purpose is invalid")
-    node = AgentNode(
-        node_id=enrollment.node_id,
-        state="active",
-        capabilities=[],
-    )
-    session.add(node)
-    # There is no ORM relationship between these operational rows. Flush
-    # the FK parent explicitly for PostgreSQL.
-    session.flush([node])
-    session.add(
-        AgentNodeProfile(
+    if purpose == "new-node" and node is not None:
+        raise EnrollmentDenied("node identity already exists")
+    if node is None:
+        node = AgentNode(
             node_id=enrollment.node_id,
-            display_name=enrollment.node_id,
-            hostname="",
-            lifecycle="ready",
-            labels={},
+            state="active",
+            capabilities=[],
         )
-    )
-    generation = 1
+        session.add(node)
+        # There is no ORM relationship between these operational rows. Flush
+        # the FK parent explicitly for PostgreSQL.
+        session.flush([node])
+        session.add(
+            AgentNodeProfile(
+                node_id=enrollment.node_id,
+                display_name=enrollment.node_id,
+                hostname="",
+                lifecycle="ready",
+                labels={},
+            )
+        )
+        generation = 1
+    else:
+        if purpose != "re-enroll":
+            raise EnrollmentDenied("enrollment purpose is invalid")
+        if node.state != "active" or node.revoked_at is not None:
+            raise EnrollmentDenied("node identity is retired or revoked")
+        certificates = list(
+            session.scalars(
+                select(AgentCertificate)
+                .where(AgentCertificate.node_id == enrollment.node_id)
+                .order_by(AgentCertificate.generation, AgentCertificate.serial)
+                .with_for_update(of=AgentCertificate)
+            )
+        )
+        if (
+            session.scalar(
+                select(AgentCertificateRotation)
+                .where(AgentCertificateRotation.node_id == enrollment.node_id)
+                .with_for_update(of=AgentCertificateRotation)
+            )
+            is not None
+        ):
+            raise EnrollmentDenied("certificate rotation is in progress")
+        if not certificates:
+            raise EnrollmentDenied("node identity has no certificate history")
+        generation = max(certificate.generation for certificate in certificates) + 1
+        for certificate in certificates:
+            if certificate.state in {"active", "staged"}:
+                certificate.state = "revoked"
+                certificate.revoked_at = certificate.revoked_at or now
     session.add(
         AgentCertificate(
             serial=issued.serial,
@@ -920,6 +998,7 @@ def _persist_issued_enrollment(
             generation=generation,
             certificate_pem=certificate_pem,
             chain_pem=chain_pem,
+            csr_public_key_fingerprint=enrollment.csr_public_key_fingerprint,
         )
     )
     enrollment.state = "certificate_issued"

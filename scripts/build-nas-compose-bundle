@@ -135,9 +135,8 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
             raise BundleError(f"Compose service {name} volumes are invalid")
         for volume in volumes:
             source = _volume_source(volume)
-            if (
-                source is not None
-                and (source.startswith((".", "/", "~")) or "/" in source)
+            if source is not None and (
+                source.startswith((".", "/", "~")) or "/" in source
             ):
                 raise BundleError(
                     f"Compose service {name} still contains a host bind mount"
@@ -193,9 +192,7 @@ def _materialize_embedded_configs(
             raise BundleError(f"Compose config {name} is not embedded")
         content = config["content"]
         if "\0" in content or re.search(r"(?<!\$)\$(?!\$)", content):
-            raise BundleError(
-                f"Compose config {name} contains unsafe interpolation"
-            )
+            raise BundleError(f"Compose config {name} contains unsafe interpolation")
         if len(modes[name]) != 1:
             raise BundleError(f"Compose config {name} has inconsistent file modes")
         relative = f"runtime-configs/{name}"
@@ -226,7 +223,9 @@ def _required_value(
     }
 
 
-def _payload(document: dict[str, Any]) -> dict[str, object]:
+def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
+    if channel not in {"dev", "stable"}:
+        raise BundleError("installer channel must be dev or stable")
     _validate_services(document)
     runtime_files = _materialize_embedded_configs(document)
     _materialize_relative_secret_paths(document)
@@ -235,12 +234,11 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
         "schema_version": 2,
         "docker_compose_yaml": compose,
         "internal_values": [
-            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
+            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
+            {"env": "VONK_INSTALL_CHANNEL", "value": channel},
         ],
         "required_values": [
-            _required_value(
-                "NAS_LAN_IP", "Reserved NAS LAN IP", validation="ipv4"
-            ),
+            _required_value("NAS_LAN_IP", "Reserved NAS LAN IP", validation="ipv4"),
             _required_value(
                 "VONK_MANAGEMENT_CIDRS",
                 "Trusted Spark management CIDRs",
@@ -394,12 +392,13 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def build(compose: Path, output: Path) -> str:
+def build(compose: Path, output: Path, channel: str) -> str:
     if not output.parent.is_dir() or output.exists() or output.is_symlink():
         raise BundleError("output must be a new file in an existing directory")
     document = _read_compose(compose)
     content = (
-        json.dumps(_payload(document), sort_keys=True, separators=(",", ":")) + "\n"
+        json.dumps(_payload(document, channel), sort_keys=True, separators=(",", ":"))
+        + "\n"
     ).encode("utf-8")
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.", dir=output.parent
@@ -428,13 +427,14 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compose", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--channel", required=True, choices=("dev", "stable"))
     return parser.parse_args()
 
 
 def main() -> None:
     arguments = _arguments()
     try:
-        digest = build(arguments.compose, arguments.output)
+        digest = build(arguments.compose, arguments.output, arguments.channel)
     except (BundleError, OSError) as error:
         print(f"build-nas-compose-bundle: {error}", file=sys.stderr)
         raise SystemExit(2) from error

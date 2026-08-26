@@ -21,6 +21,8 @@ from .create_recipe_request import CreateRecipeRequest
 from .create_recipe_request_document import CreateRecipeRequestDocument
 from .endpoint_response import EndpointResponse
 from .enrollment_grant_response import EnrollmentGrantResponse
+from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
+from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .fleet_node import FleetNode
@@ -37,6 +39,7 @@ from .global_import_request import GlobalImportRequest
 from .global_revision_response import GlobalRevisionResponse
 from .global_revision_response_document import GlobalRevisionResponseDocument
 from .grant_request import GrantRequest
+from .grant_request_purpose import GrantRequestPurpose
 from .http_validation_error import HTTPValidationError
 from .image_distribution_request import ImageDistributionRequest
 from .install_node_plan_response import InstallNodePlanResponse
@@ -262,6 +265,8 @@ __all__ = (
     "CreateRecipeRequestDocument",
     "EndpointResponse",
     "EnrollmentGrantResponse",
+    "EnrollmentGrantResponseInstallerUrl",
+    "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "FleetNode",
@@ -278,6 +283,7 @@ __all__ = (
     "GlobalRevisionResponse",
     "GlobalRevisionResponseDocument",
     "GrantRequest",
+    "GrantRequestPurpose",
     "HTTPValidationError",
     "ImageDistributionRequest",
     "InstallNodePlanResponse",

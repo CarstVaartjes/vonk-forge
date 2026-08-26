@@ -6,10 +6,13 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.enrollment_grant_response_installer_url import check_enrollment_grant_response_installer_url
+from ..models.enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
+from ..models.enrollment_grant_response_purpose import check_enrollment_grant_response_purpose
+from ..models.enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
-from typing import Literal, cast
 from typing import Union
 
 
@@ -30,7 +33,8 @@ class EnrollmentGrantResponse:
             enrollment_endpoint (str):
             expires_at (str):
             id (str):
-            purpose (Literal['new-node']):
+            installer_url (EnrollmentGrantResponseInstallerUrl):
+            purpose (EnrollmentGrantResponsePurpose):
             token (str):
             controller_address (Union[None, Unset, str]):
             service_hostnames (Union[Unset, list[str]]):
@@ -41,7 +45,8 @@ class EnrollmentGrantResponse:
     enrollment_endpoint: str
     expires_at: str
     id: str
-    purpose: Literal['new-node']
+    installer_url: EnrollmentGrantResponseInstallerUrl
+    purpose: EnrollmentGrantResponsePurpose
     token: str
     controller_address: Union[None, Unset, str] = UNSET
     service_hostnames: Union[Unset, list[str]] = UNSET
@@ -61,7 +66,9 @@ class EnrollmentGrantResponse:
 
         id = self.id
 
-        purpose = self.purpose
+        installer_url: str = self.installer_url
+
+        purpose: str = self.purpose
 
         token = self.token
 
@@ -86,6 +93,7 @@ class EnrollmentGrantResponse:
             "enrollment_endpoint": enrollment_endpoint,
             "expires_at": expires_at,
             "id": id,
+            "installer_url": installer_url,
             "purpose": purpose,
             "token": token,
         })
@@ -111,9 +119,15 @@ class EnrollmentGrantResponse:
 
         id = d.pop("id")
 
-        purpose = cast(Literal['new-node'] , d.pop("purpose"))
-        if purpose != 'new-node':
-            raise ValueError(f"purpose must match const 'new-node', got '{purpose}'")
+        installer_url = check_enrollment_grant_response_installer_url(d.pop("installer_url"))
+
+
+
+
+        purpose = check_enrollment_grant_response_purpose(d.pop("purpose"))
+
+
+
 
         token = d.pop("token")
 
@@ -136,6 +150,7 @@ class EnrollmentGrantResponse:
             enrollment_endpoint=enrollment_endpoint,
             expires_at=expires_at,
             id=id,
+            installer_url=installer_url,
             purpose=purpose,
             token=token,
             controller_address=controller_address,
