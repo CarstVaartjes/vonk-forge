@@ -1121,6 +1121,8 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
         assert published.is_file()
         assert hashlib.sha256(published.read_bytes()).hexdigest() == entry["sha256"]
 
+    (object_root / "nas").write_bytes(b"legacy NAS endpoint\n")
+    (object_root / "spark").write_bytes(b"legacy Spark endpoint\n")
     receipt, signature, public_key = _acceptance_receipt(tmp_path, publication)
     encoded_public_key = subprocess.run(
         ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
@@ -1153,8 +1155,12 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
     )
 
     assert promoted.returncode == 0, promoted.stderr
-    assert (object_root / "nas").is_file()
-    assert (object_root / "spark").is_file()
+    assert (object_root / "nas").read_bytes() == (
+        publication / "objects/nas"
+    ).read_bytes()
+    assert (object_root / "spark").read_bytes() == (
+        publication / "objects/spark"
+    ).read_bytes()
     assert (object_root / "artifacts/stable/current.manifest").is_file()
 
 

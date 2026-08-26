@@ -1169,7 +1169,7 @@ def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
 def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
     key = entry["key"]
     expected = entry["sha256"]
-    immutable = entry["phase"] != "pointer"
+    immutable = entry["phase"] not in {"endpoint", "pointer"}
     observed = _rclone_digest(remote, key)
     if immutable and observed is not None:
         if observed != expected:
@@ -1211,7 +1211,7 @@ def _copy_publication_entry(
         _atomic_local_copy(
             source,
             filesystem / entry["key"],
-            entry["phase"] != "pointer",
+            entry["phase"] not in {"endpoint", "pointer"},
         )
     else:
         assert remote is not None
