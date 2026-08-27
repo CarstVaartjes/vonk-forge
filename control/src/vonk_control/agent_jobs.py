@@ -93,13 +93,10 @@ _REQUIRED_CAPABILITIES = frozenset(
     }
 )
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
-_NEXT_CAPABILITIES = (
-    _REQUIRED_CAPABILITIES
-    | _RUNTIME_CAPABILITIES
-    | _RECIPE_CAPABILITIES
-    | frozenset({AgentOperation.AGENT_UPGRADE.value})
-)
-_CONTROL_OPERATIONS = _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
+_NEXT_CAPABILITIES = _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
+_OPTIONAL_CAPABILITIES = frozenset({AgentOperation.AGENT_UPGRADE.value})
+_KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
+_CONTROL_OPERATIONS = (_NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES) | _OPTIONAL_CAPABILITIES
 
 
 class StaleAgentAttempt(RuntimeError):
@@ -785,7 +782,7 @@ class AgentJobService:
             or not isinstance(node.capabilities, list)
             or not _REQUIRED_CAPABILITIES
             <= set(node.capabilities)
-            <= _NEXT_CAPABILITIES
+            <= _KNOWN_CAPABILITIES
             for node in nodes
         ):
             return "reconciliation target agent is incompatible"
@@ -1119,7 +1116,7 @@ class AgentJobService:
         if (
             not values
             or len(values) != len(set(values))
-            or not set(values) <= _NEXT_CAPABILITIES
+            or not set(values) <= _KNOWN_CAPABILITIES
         ):
             raise ValueError("agent capabilities are invalid")
         return tuple(sorted(values))
