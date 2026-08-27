@@ -675,14 +675,15 @@
 
 .library-import-upgrade-note,
 .library-import-upgrade-warning {
-  border-left: 3px solid var(--mint);
+  border: 1px solid #7cc64b66;
+  border-radius: 0.6rem;
   margin: 0;
   padding: 0.65rem 0.8rem;
 }
 
 .library-import-upgrade-warning {
   background: #3a281866;
-  border-left-color: #e9b36c;
+  border-color: #e9b36c66;
   color: #ffd8a6;
 }
 
@@ -788,7 +789,7 @@
 }
 
 .library-command-header {
-  align-items: center;
+  align-items: flex-start;
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 1rem;
@@ -800,8 +801,9 @@
 
 .library-command-title {
   align-items: baseline;
-  display: flex;
+  display: grid;
   gap: 0.75rem;
+  grid-template-columns: auto minmax(18rem, 1fr);
   min-width: 0;
 }
 
@@ -811,16 +813,15 @@
 
 .library-command-title h1 {
   font-size: clamp(1.55rem, 3vw, 2.2rem);
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
   line-height: 1;
 }
 
 .library-command-title > p:last-child {
   color: var(--text-muted);
-  font-size: 0.76rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  max-width: 46rem;
 }
 
 .library-command-bar {
@@ -1848,11 +1849,15 @@
   .library-command-header,
   .library-command-title {
     align-items: flex-start;
+  }
+
+  .library-command-header {
     flex-direction: column;
   }
 
   .library-command-title {
     gap: 0.25rem;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .library-command-title > p:last-child {
@@ -1941,19 +1946,19 @@
   .library-overview {
     display: grid;
     gap: 0;
-    grid-auto-columns: minmax(6.5rem, 42vw);
-    grid-auto-flow: column;
-    grid-template-columns: none;
-    margin-inline: -0.25rem;
-    overflow-x: auto;
-    padding: 0.1rem 0.25rem;
-    scroll-snap-type: x proximity;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    overflow: visible;
+    padding: 0;
   }
 
   .library-stat {
     min-height: 2.4rem;
     padding: 0.35rem 0.55rem;
-    scroll-snap-align: start;
+  }
+
+  .library-stat:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 
   .library-stat strong {

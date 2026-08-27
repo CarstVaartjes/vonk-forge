@@ -281,6 +281,20 @@ it("shows explicit candidate evidence and requires a separate confirmation step"
   expect(screen.getByText("Import this candidate?")).toBeVisible();
 });
 
+it("hands an already imported recipe off to its local build and install controls", async () => {
+  const current = recipe("Current", {local: {status: "current", recipe_id: "local/recipe", revision_number: 1, content_sha256: "1".repeat(64), release_version: "1.1.0"}});
+  render(<Harness api={apiFor([current])} initialUrl={publicRecipeImportUrl(EMPTY_FILTERS, {recipe: current.uri, step: "review"})}/>);
+
+  expect(await screen.findByText("Already in your local Library")).toBeVisible();
+  expect(screen.getByText("Imported · current")).toBeVisible();
+  const versionSummary = screen.getByLabelText("Version summary");
+  expect(within(versionSummary).getByText("Local recipe")).toBeVisible();
+  expect(within(versionSummary).getByText("Catalog release")).toBeVisible();
+  expect(screen.getByText(/Build, map, install, and run/)).toBeVisible();
+  expect(screen.getByRole("link", {name: "Open build & install controls"})).toHaveAttribute("href", "/library/recipes/local%2Frecipe");
+  expect(screen.queryByRole("button", {name: "Already current"})).not.toBeInTheDocument();
+});
+
 it("keeps confirmation context after an import failure and retries the import operation", async () => {
   const candidate = recipe("Candidate");
   const firstImport = deferred<Awaited<ReturnType<CatalogApi["importPublicRecipe"]>>>();
@@ -385,6 +399,7 @@ it("locks catalog navigation while an import is pending", async () => {
   importResult.resolve({recipe_id: "alpha-local", revision_number: 1, lifecycle: "draft", slug: "alpha"} as Awaited<ReturnType<CatalogApi["importPublicRecipe"]>>);
   expect(await screen.findByText("Import complete")).toBeVisible();
   expect(screen.getByText(/saved in your local Library/)).toBeVisible();
+  expect(screen.getByRole("link", {name: "Open build & install controls"})).toHaveAttribute("href", "/library/recipes/alpha-local");
   expect(screen.queryByText(/revision is ready/)).not.toBeInTheDocument();
 });
 
@@ -515,7 +530,7 @@ it("treats a stopped or timed-out import as unknown until status is rechecked", 
     await Promise.resolve();
   });
   expect(previewPublicRecipe).toHaveBeenCalledTimes(2);
-  expect(screen.getByRole("button", {name: "Already current"})).toBeDisabled();
+  expect(screen.getByRole("link", {name: "Open build & install controls"})).toHaveAttribute("href", "/library/recipes/alpha-local");
   expect(importPublicRecipe).toHaveBeenCalledTimes(1);
 });
 

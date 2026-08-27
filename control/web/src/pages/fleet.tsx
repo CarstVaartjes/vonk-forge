@@ -430,6 +430,14 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>
           <div className="fleet-controls-popover">
+            <div className="fleet-controls-popover-heading">
+              <strong>Fleet controls</strong>
+              <button type="button" aria-label="Close Fleet controls" onClick={event => {
+                const menu = event.currentTarget.closest("details");
+                menu?.removeAttribute("open");
+                menu?.querySelector<HTMLElement>("summary")?.focus();
+              }}>Close</button>
+            </div>
             <section className="fleet-discovery" aria-label="Fleet discovery">
               <label className="fleet-search"><span>Find a Spark</span><input ref={discoverySearch} type="search" value={query} placeholder="Search friendly name or hostname" onChange={event => setQuery(event.currentTarget.value)}/></label>
               <fieldset className="fleet-health-filters"><legend>Health</legend><div>

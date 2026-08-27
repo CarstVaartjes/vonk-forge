@@ -114,8 +114,11 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = await within(placement).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
-  await user.click(selector);
-  const review = within(selector.closest("article")!).getByRole("button", {name: "Review Load"});
+  expect(selector).toHaveAttribute("aria-pressed", "true");
+  const nextAction = screen.getByRole("region", {name: "Recommended next action"});
+  expect(nextAction).toHaveTextContent("Load and publish the model");
+  expect(within(placement).getByRole("group", {name: "Capacity and placement evidence"})).not.toHaveAttribute("open");
+  const review = within(nextAction).getByRole("button", {name: "Review Load"});
   await user.click(review);
 
   const dialog = await screen.findByRole("dialog", {name: "Review Load"});

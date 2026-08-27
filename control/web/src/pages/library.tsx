@@ -284,7 +284,6 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   return <div className="library-page">
     <header className="library-command-header">
       <div className="library-command-title">
-        <p className="fleet-kicker">Model control</p>
         <h1 ref={heading} tabIndex={-1}>Library</h1>
         <p>Exact models, installable recipes, placement, and release state in one command surface.</p>
       </div>

@@ -118,7 +118,8 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   expect(screen.getByText("Time not recorded")).toBeVisible();
   expect(screen.getByText(/Mia Lab Spark/)).toBeVisible();
   expect(screen.getByText(/Unnamed Spark/)).toBeVisible();
-  expect(screen.getByText("Unavailable object")).toBeVisible();
+  expect(screen.getByText("1 historical target")).toBeVisible();
+  expect(screen.queryByText("Unavailable object")).not.toBeInTheDocument();
 
   const hiddenId = screen.getByText(REQUEST_ID);
   expect(hiddenId).not.toBeVisible();
