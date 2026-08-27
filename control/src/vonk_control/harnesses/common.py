@@ -42,7 +42,7 @@ def structured_command(value: object) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise HarnessCompileError("harness command must be a structured argv")
     command = tuple(value)
-    if not command or len(command) > 64:
+    if not command or len(command) > 256:
         raise HarnessCompileError("harness command size is invalid")
     if any(
         type(item) is not str or _SAFE_ARGUMENT.fullmatch(item) is None
