@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::BTreeMap,
     fs::{self, File},
     io::{Cursor, Read, Seek, SeekFrom},
@@ -29,6 +29,46 @@ struct Runner {
     oversize_base: bool,
     registry: Option<OciRegistryFixture>,
     substitute_base: bool,
+}
+
+struct RetryManifestRunner {
+    inner: Runner,
+    remaining_failures: Cell<usize>,
+}
+
+impl ProcessRunner for RetryManifestRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.inner.run(program, arguments, timeout)
+    }
+
+    fn run_to_file(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        sink: &mut File,
+        maximum_bytes: u64,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if program == Program::Oras
+            && arguments.iter().any(|argument| argument == "manifest")
+            && self.remaining_failures.get() > 0
+        {
+            self.remaining_failures
+                .set(self.remaining_failures.get() - 1);
+            return Ok(ProcessOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"bounded registry failure".to_vec(),
+            });
+        }
+        self.inner
+            .run_to_file(program, arguments, timeout, sink, maximum_bytes)
+    }
 }
 
 #[derive(Clone)]
@@ -630,6 +670,79 @@ fn faithful_oci_layout_imports_into_a_real_private_content_store() {
 }
 
 #[test]
+fn faithful_untagged_oci_layout_loads_with_spark_podman() {
+    if !Path::new("/usr/bin/podman").is_file() {
+        eprintln!("skipping local Podman OCI integration fixture: podman unavailable");
+        return;
+    }
+    let mut fixture = registry_fixture();
+    let fixture_id = format!("{}-podman", std::process::id());
+    fixture.reference = format!(
+        "localhost/vonk/round5-{fixture_id}@{}",
+        fixture.manifest_digest
+    );
+    let archive_root = tempdir().unwrap();
+    let archive = archive_root.path().join("image.oci.tar");
+    fs::write(&archive, oci_archive(&fixture)).unwrap();
+    let podman_arguments = |storage: &Path, runroot: &Path| {
+        vec![
+            "--cgroup-manager=systemd".to_owned(),
+            "--root".to_owned(),
+            storage.display().to_string(),
+            "--runroot".to_owned(),
+            runroot.display().to_string(),
+            "--storage-opt".to_owned(),
+            "overlay.ignore_chown_errors=true".to_owned(),
+            "--storage-opt".to_owned(),
+            "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
+            "--storage-opt".to_owned(),
+            "overlay.force_mask=shared".to_owned(),
+        ]
+    };
+
+    let storage = archive_root.path().join("storage");
+    let runroot = archive_root.path().join("run");
+    fs::create_dir_all(&storage).unwrap();
+    fs::create_dir_all(&runroot).unwrap();
+    let storage_arguments = podman_arguments(&storage, &runroot);
+    let mut load_arguments = storage_arguments.clone();
+    load_arguments.push("load".to_owned());
+    let loaded = Command::new("/usr/bin/podman")
+        .args(&load_arguments)
+        .stdin(Stdio::from(File::open(&archive).unwrap()))
+        .output()
+        .unwrap();
+    assert!(
+        loaded.status.success(),
+        "real rootless Podman OCI load failed: {}",
+        String::from_utf8_lossy(&loaded.stderr)
+    );
+
+    let mut inspect_arguments = storage_arguments;
+    inspect_arguments.extend([
+        "image".to_owned(),
+        "inspect".to_owned(),
+        "--format".to_owned(),
+        "{{.Digest}}\t{{.Os}}\t{{.Architecture}}".to_owned(),
+        fixture.reference.clone(),
+    ]);
+    let inspected = Command::new("/usr/bin/podman")
+        .args(&inspect_arguments)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        inspected.status.success(),
+        "real rootless Podman exact-reference inspect failed: {}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&inspected.stdout).trim(),
+        format!("{}\tlinux\tarm64", fixture.manifest_digest)
+    );
+}
+
+#[test]
 fn real_private_content_store_rejects_absent_and_substituted_oci_content() {
     if !local_oci_integration_fixture_available() {
         eprintln!("skipping local OCI integration fixture: containerd/ctr/docker unavailable");
@@ -900,6 +1013,81 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
 }
 
 #[test]
+fn fresh_node_retries_a_failed_manifest_transfer() {
+    let fixture = registry_fixture();
+    let (archive, digest) = bundle_for(&fixture.reference);
+    let mut build_request = request(archive.len(), digest);
+    build_request.base_images = vec![RecipeBuildBaseImage {
+        manifest_digest: fixture.manifest_digest.clone(),
+        reference: fixture.reference.clone(),
+    }];
+    let runner = RetryManifestRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: Some(fixture),
+            substitute_base: false,
+        },
+        remaining_failures: Cell::new(1),
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-00000000002c").unwrap(),
+        &archive,
+    )
+    .unwrap();
+
+    assert_eq!(runner.remaining_failures.get(), 0);
+}
+
+#[test]
+fn fresh_node_reports_manifest_stage_after_bounded_retries() {
+    let fixture = registry_fixture();
+    let (archive, digest) = bundle_for(&fixture.reference);
+    let mut build_request = request(archive.len(), digest);
+    build_request.base_images = vec![RecipeBuildBaseImage {
+        manifest_digest: fixture.manifest_digest.clone(),
+        reference: fixture.reference.clone(),
+    }];
+    let runner = RetryManifestRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: Some(fixture),
+            substitute_base: false,
+        },
+        remaining_failures: Cell::new(3),
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-00000000002d").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
+    assert_eq!(runner.remaining_failures.get(), 0);
+}
+
+#[test]
 fn repeated_identical_base_image_layer_is_materialized_once() {
     let fixture = duplicate_layer_registry_fixture();
     let (archive, digest) = bundle_for(&fixture.reference);
@@ -989,7 +1177,7 @@ fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
     let oras = runner
         .calls
         .borrow()
@@ -1066,7 +1254,7 @@ fn base_image_storage_rejects_symlinked_data_and_supply_roots() {
         &archive,
     )
     .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageContent));
     assert!(runner.calls.borrow().is_empty());
 
     let data = tempdir().unwrap();
@@ -1095,7 +1283,7 @@ fn base_image_storage_rejects_symlinked_data_and_supply_roots() {
         &archive,
     )
     .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageContent));
     assert!(runner.calls.borrow().is_empty());
 }
 
@@ -1139,7 +1327,7 @@ fn base_image_storage_rejects_symlinked_digest_directory_and_archive() {
         &archive,
     )
     .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageContent));
 
     let data = tempdir().unwrap();
     let external_archive = data.path().join("external.oci.tar");
@@ -1165,7 +1353,7 @@ fn base_image_storage_rejects_symlinked_digest_directory_and_archive() {
         &archive,
     )
     .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageContent));
 }
 
 #[test]
@@ -1195,7 +1383,7 @@ fn base_image_storage_rejects_digest_path_escape_before_registry_or_podman() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageContent));
     assert!(runner.calls.borrow().is_empty());
 }
 
@@ -1305,7 +1493,7 @@ fn base_image_archive_rejects_a_layer_substituted_under_the_exact_manifest() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageArchive));
     assert!(
         !runner
             .calls
@@ -1338,7 +1526,7 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
     .build(&request(archive.len(), digest), operation, &archive)
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::ImageBuild));
     assert_eq!(
         fs::read_dir(root.path().join("build-staging"))
             .unwrap()
@@ -1432,7 +1620,7 @@ fn build_fails_closed_when_declared_base_archive_is_absent() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
     assert!(
         runner
             .calls
@@ -1475,7 +1663,7 @@ fn build_rejects_substituted_base_before_offline_build() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert!(matches!(error, RecipeBuildError::BaseImageInspect));
     let calls = runner.calls.borrow();
     assert!(calls.iter().any(|call| call.1.contains(&"load".to_owned())));
     assert!(

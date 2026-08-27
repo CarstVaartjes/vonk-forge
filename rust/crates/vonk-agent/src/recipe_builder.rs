@@ -32,6 +32,24 @@ pub enum RecipeBuildError {
     Process(#[from] ProcessError),
     #[error("build evidence is invalid")]
     Evidence,
+    #[error("base image registry content is invalid")]
+    BaseImageContent,
+    #[error("base image manifest transfer or evidence failed")]
+    BaseImageManifest,
+    #[error("base image blob transfer or evidence failed")]
+    BaseImageBlob,
+    #[error("base image OCI archive verification failed")]
+    BaseImageArchive,
+    #[error("Podman could not import the verified base image")]
+    BaseImageImport,
+    #[error("Podman imported base image evidence is invalid")]
+    BaseImageInspect,
+    #[error("Podman recipe image build failed")]
+    ImageBuild,
+    #[error("built recipe image evidence is invalid")]
+    ImageInspect,
+    #[error("Podman could not export the built recipe image")]
+    ImageExport,
     #[error("build output exceeded its declared limit")]
     OutputLimit,
     #[error(
@@ -177,7 +195,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             request.limits.output_bytes,
         )?;
         if !output.success {
-            return Err(RecipeBuildError::Evidence);
+            return Err(RecipeBuildError::ImageBuild);
         }
         let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
         inspect_arguments.extend([
@@ -190,7 +208,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         let inspected =
             self.runner
                 .run(Program::Podman, &inspect_arguments, Duration::from_secs(60))?;
-        inspect_image(&inspected.stdout)?;
+        inspect_image(&inspected.stdout).map_err(|_| RecipeBuildError::ImageInspect)?;
         let build_root = self.data_root.join("builds");
         fs::create_dir_all(&build_root)?;
         let operation_root = build_root.join(operation_id.to_string());
@@ -217,7 +235,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             request.limits.output_bytes,
         )?;
         if !saved.success {
-            return Err(RecipeBuildError::Evidence);
+            return Err(RecipeBuildError::ImageExport);
         }
         let image_digest = fs::read_to_string(&digest_file)?.trim().to_owned();
         if image_digest.strip_prefix("sha256:").is_none_or(|digest| {
@@ -298,7 +316,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 request.base_image_storage_bytes,
             )?;
             if !loaded.success {
-                return Err(RecipeBuildError::Evidence);
+                return Err(RecipeBuildError::BaseImageImport);
             }
             let mut inspect_arguments = podman_storage_arguments(storage, runroot);
             inspect_arguments.extend([
@@ -311,7 +329,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             let inspected =
                 self.runner
                     .run(Program::Podman, &inspect_arguments, Duration::from_secs(60))?;
-            inspect_base_image(&inspected, &image.manifest_digest)?;
+            inspect_base_image(&inspected, &image.manifest_digest)
+                .map_err(|_| RecipeBuildError::BaseImageInspect)?;
         }
         Ok(())
     }
@@ -319,10 +338,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
 
 fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
     match error {
-        BaseImageError::Invalid => RecipeBuildError::Evidence,
+        BaseImageError::Invalid => RecipeBuildError::BaseImageContent,
         BaseImageError::Limit => RecipeBuildError::OutputLimit,
+        BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence => RecipeBuildError::BaseImageManifest,
+        BaseImageError::BlobTransfer
+        | BaseImageError::BlobProcess(_)
+        | BaseImageError::BlobEvidence => RecipeBuildError::BaseImageBlob,
+        BaseImageError::ArchiveEvidence => RecipeBuildError::BaseImageArchive,
         BaseImageError::Io(error) => RecipeBuildError::Io(error),
-        BaseImageError::Process(error) => RecipeBuildError::Process(error),
     }
 }
 

@@ -29,6 +29,7 @@ const OCI_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
 const DOCKER_CONFIG: &str = "application/vnd.docker.container.image.v1+json";
 const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_LAYERS: usize = 256;
+const REGISTRY_TRANSFER_ATTEMPTS: usize = 3;
 const ORAS_AUTH: &str = "/var/lib/vonk-forge-agent/registry-auth.json";
 const SAFE_RESOLUTION: ResolveFlags = ResolveFlags::BENEATH
     .union(ResolveFlags::NO_MAGICLINKS)
@@ -41,10 +42,22 @@ pub(crate) enum BaseImageError {
     Invalid,
     #[error("base-image storage exceeded its signed bound")]
     Limit,
+    #[error("base-image manifest transfer failed")]
+    ManifestTransfer,
+    #[error("base-image manifest transfer failed")]
+    ManifestProcess(#[source] ProcessError),
+    #[error("base-image manifest evidence is invalid")]
+    ManifestEvidence,
+    #[error("base-image blob transfer failed")]
+    BlobTransfer,
+    #[error("base-image blob transfer failed")]
+    BlobProcess(#[source] ProcessError),
+    #[error("base-image blob evidence is invalid")]
+    BlobEvidence,
+    #[error("base-image OCI archive evidence is invalid")]
+    ArchiveEvidence,
     #[error("base-image storage is unavailable")]
     Io(#[from] std::io::Error),
-    #[error("base-image registry operation failed")]
-    Process(#[from] ProcessError),
 }
 
 pub(crate) struct StoredBaseImage {
@@ -98,7 +111,8 @@ impl BaseImageStore {
         let digest = exact_manifest_digest(image)?;
         let digest_root = open_or_create_directory(&self.sha256_root, digest)?;
         if let Some(file) = open_regular_at(&digest_root, "image.oci.tar")? {
-            return verified_stored_image(file, image, platform, maximum_archive_bytes);
+            return verified_stored_image(file, image, platform, maximum_archive_bytes)
+                .map_err(base_archive_error);
         }
         produce_archive(
             runner,
@@ -111,6 +125,7 @@ impl BaseImageStore {
         let file =
             open_regular_at(&digest_root, "image.oci.tar")?.ok_or(BaseImageError::Invalid)?;
         verified_stored_image(file, image, platform, maximum_archive_bytes)
+            .map_err(base_archive_error)
     }
 }
 
@@ -366,24 +381,34 @@ fn produce_archive<R: ProcessRunner>(
     let mut manifest_file = TemporaryAt::create(digest_root, "manifest")?;
     let manifest_arguments =
         oras_arguments(&["manifest", "fetch"], &source, &source.exact_reference);
-    let manifest_output = runner.run_to_file(
-        Program::Oras,
-        &manifest_arguments,
-        Duration::from_secs(900),
-        &mut manifest_file.file,
-        MAX_JSON_BYTES.min(maximum_temporary_bytes),
-    )?;
-    if !manifest_output.success {
-        return Err(BaseImageError::Invalid);
+    let mut manifest_transferred = false;
+    for _ in 0..REGISTRY_TRANSFER_ATTEMPTS {
+        let manifest_output = runner
+            .run_to_file(
+                Program::Oras,
+                &manifest_arguments,
+                Duration::from_secs(900),
+                &mut manifest_file.file,
+                MAX_JSON_BYTES.min(maximum_temporary_bytes),
+            )
+            .map_err(BaseImageError::ManifestProcess)?;
+        if manifest_output.success {
+            manifest_transferred = true;
+            break;
+        }
     }
-    let manifest_bytes = read_bounded(&manifest_file.file, MAX_JSON_BYTES)?;
+    if !manifest_transferred {
+        return Err(BaseImageError::ManifestTransfer);
+    }
+    let manifest_bytes =
+        read_bounded(&manifest_file.file, MAX_JSON_BYTES).map_err(manifest_evidence_error)?;
     drop(manifest_file);
     if format!("sha256:{}", hex_digest(&manifest_bytes)) != image.manifest_digest {
-        return Err(BaseImageError::Invalid);
+        return Err(BaseImageError::ManifestEvidence);
     }
     let manifest: Manifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|_| BaseImageError::Invalid)?;
-    let descriptors = validate_manifest(&manifest)?;
+        serde_json::from_slice(&manifest_bytes).map_err(|_| BaseImageError::ManifestEvidence)?;
+    let descriptors = validate_manifest(&manifest).map_err(manifest_evidence_error)?;
     if descriptors
         .iter()
         .any(|descriptor| descriptor.size > maximum_temporary_bytes)
@@ -433,22 +458,34 @@ fn produce_archive<R: ProcessRunner>(
             let mut blob = TemporaryAt::create(digest_root, "blob")?;
             let reference = format!("{}@{}", source.repository, descriptor.digest);
             let arguments = oras_arguments(&["blob", "fetch"], &source, &reference);
-            let fetched = runner.run_to_file(
-                Program::Oras,
-                &arguments,
-                Duration::from_secs(3600),
-                &mut blob.file,
-                descriptor.size,
-            )?;
-            if !fetched.success
-                || blob.file.metadata()?.len() != descriptor.size
+            let mut blob_transferred = false;
+            for _ in 0..REGISTRY_TRANSFER_ATTEMPTS {
+                let fetched = runner
+                    .run_to_file(
+                        Program::Oras,
+                        &arguments,
+                        Duration::from_secs(3600),
+                        &mut blob.file,
+                        descriptor.size,
+                    )
+                    .map_err(BaseImageError::BlobProcess)?;
+                if fetched.success {
+                    blob_transferred = true;
+                    break;
+                }
+            }
+            if !blob_transferred {
+                return Err(BaseImageError::BlobTransfer);
+            }
+            if blob.file.metadata()?.len() != descriptor.size
                 || sha256_file(&blob.file)? != descriptor.digest
             {
-                return Err(BaseImageError::Invalid);
+                return Err(BaseImageError::BlobEvidence);
             }
             if descriptor.digest == manifest.config.digest {
-                let config = read_bounded(&blob.file, MAX_JSON_BYTES)?;
-                validate_platform(&config, platform)?;
+                let config =
+                    read_bounded(&blob.file, MAX_JSON_BYTES).map_err(blob_evidence_error)?;
+                validate_platform(&config, platform).map_err(blob_evidence_error)?;
             }
             blob.file.seek(SeekFrom::Start(0))?;
             append_file(
@@ -463,12 +500,13 @@ fn produce_archive<R: ProcessRunner>(
     output.file.sync_all()?;
     let stored_bytes = output.file.metadata()?.len();
     if stored_bytes != archive_bytes {
-        return Err(BaseImageError::Invalid);
+        return Err(BaseImageError::ArchiveEvidence);
     }
     if stored_bytes > maximum_archive_bytes {
         return Err(BaseImageError::Limit);
     }
-    verify_archive(&output.file, image, platform, maximum_archive_bytes)?;
+    verify_archive(&output.file, image, platform, maximum_archive_bytes)
+        .map_err(base_archive_error)?;
     match renameat_with(
         digest_root,
         output.name.as_str(),
@@ -483,6 +521,30 @@ fn produce_archive<R: ProcessRunner>(
         }
         Err(error) if error == rustix::io::Errno::EXIST => Ok(()),
         Err(error) => Err(BaseImageError::Io(std::io::Error::from(error))),
+    }
+}
+
+fn manifest_evidence_error(error: BaseImageError) -> BaseImageError {
+    match error {
+        BaseImageError::Limit => BaseImageError::Limit,
+        BaseImageError::Io(error) => BaseImageError::Io(error),
+        _ => BaseImageError::ManifestEvidence,
+    }
+}
+
+fn blob_evidence_error(error: BaseImageError) -> BaseImageError {
+    match error {
+        BaseImageError::Limit => BaseImageError::Limit,
+        BaseImageError::Io(error) => BaseImageError::Io(error),
+        _ => BaseImageError::BlobEvidence,
+    }
+}
+
+fn base_archive_error(error: BaseImageError) -> BaseImageError {
+    match error {
+        BaseImageError::Limit => BaseImageError::Limit,
+        BaseImageError::Io(error) => BaseImageError::Io(error),
+        _ => BaseImageError::ArchiveEvidence,
     }
 }
 
