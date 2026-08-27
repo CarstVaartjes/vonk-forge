@@ -118,6 +118,163 @@
         "title": "AgentSummary",
         "type": "object"
       },
+      "AgentUpgradeApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Ids"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentUpgradePackageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "strategy": {
+            "default": "one-at-a-time",
+            "enum": [
+              "one-at-a-time",
+              "all-at-once"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest"
+        ],
+        "title": "AgentUpgradeApplyRequest",
+        "type": "object"
+      },
+      "AgentUpgradePackageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "package_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Package Bytes",
+            "type": "integer"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_signature": {
+            "pattern": "^[0-9a-f]{128}$",
+            "title": "Package Signature",
+            "type": "string"
+          },
+          "package_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Package Url",
+            "type": "string"
+          },
+          "package_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$",
+            "title": "Package Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "target_binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Target Binary Digest",
+            "type": "string"
+          },
+          "target_build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Target Build Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "architecture",
+          "package_bytes",
+          "package_sha256",
+          "package_signature",
+          "package_url",
+          "package_version",
+          "schema_version",
+          "target_binary_digest",
+          "target_build_digest"
+        ],
+        "title": "AgentUpgradePackageRequest",
+        "type": "object"
+      },
+      "AgentUpgradePreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Ids"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentUpgradePackageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy": {
+            "default": "one-at-a-time",
+            "enum": [
+              "one-at-a-time",
+              "all-at-once"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "title": "AgentUpgradePreviewRequest",
+        "type": "object"
+      },
       "AgentsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -8895,6 +9052,121 @@
           }
         ],
         "summary": "Revoke"
+      }
+    },
+    "/api/v1/agents/upgrades": {
+      "post": {
+        "operationId": "applyAgentUpgrade",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentUpgradeApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Apply Agent Upgrade Api V1 Agents Upgrades Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Apply Agent Upgrade"
+      }
+    },
+    "/api/v1/agents/upgrades/candidate": {
+      "get": {
+        "operationId": "getAgentUpgradeCandidate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Current Agent Upgrade Api V1 Agents Upgrades Candidate Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Current Agent Upgrade"
+      }
+    },
+    "/api/v1/agents/upgrades/preview": {
+      "post": {
+        "operationId": "previewAgentUpgrade",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentUpgradePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Agent Upgrade Api V1 Agents Upgrades Preview Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Agent Upgrade"
       }
     },
     "/api/v1/audit": {

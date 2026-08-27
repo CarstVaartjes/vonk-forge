@@ -73,12 +73,14 @@ export function NodeDetail({
   now,
   onClose,
   onReenroll,
+  onUpgrade,
 }: {
   api: ControlApi;
   node: VisualFleetNode;
   now: Date;
   onClose(): void;
   onReenroll?(event: ReactMouseEvent<HTMLButtonElement>): void;
+  onUpgrade?(event: ReactMouseEvent<HTMLButtonElement>): void;
 }) {
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -136,7 +138,7 @@ export function NodeDetail({
         <h3 id={headingId}>{name} details</h3>
         {secondaryName && <p>{secondaryName}</p>}
       </div>
-      <div>{onReenroll && <><button type="button" className="secondary-button" onClick={onReenroll}>Re-enroll</button>{" "}</>}<button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button></div>
+      <div>{onUpgrade && <><button type="button" className="secondary-button" onClick={onUpgrade}>Upgrade agent</button>{" "}</>}{onReenroll && <><button type="button" className="secondary-button" onClick={onReenroll}>Re-enroll</button>{" "}</>}<button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button></div>
     </header>
 
     <section aria-labelledby={`${headingId}-overview`}>

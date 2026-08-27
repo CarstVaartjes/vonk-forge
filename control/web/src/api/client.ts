@@ -3,6 +3,8 @@ import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
   AuthSession,
+  AgentUpgradePlan,
+  AgentUpgradeStrategy,
   AgentsResponse,
   AuditResponse,
   AuditSummary,
@@ -460,6 +462,27 @@ export class ApiClient implements ControlApi {
       params: {path: {node_id: nodeId}},
     });
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
+  }
+
+  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, signal?: AbortSignal): Promise<AgentUpgradePlan> {
+    return this.request("/api/v1/agents/upgrades/preview", {
+      method: "POST",
+      body: JSON.stringify({node_ids: nodeIds, strategy}),
+      signal,
+    });
+  }
+
+  applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<{id: string; state: string}> {
+    return this.request("/api/v1/agents/upgrades", {
+      method: "POST",
+      body: JSON.stringify({
+        node_ids: plan.node_ids,
+        package: plan.package,
+        plan_digest: plan.plan_digest,
+        strategy: plan.strategy,
+      }),
+      signal,
+    });
   }
 
   async jobs(cursor?: string): Promise<JobsResponse> {

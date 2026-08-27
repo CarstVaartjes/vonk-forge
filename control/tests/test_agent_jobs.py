@@ -188,6 +188,83 @@ def test_agent_can_claim_only_its_node_operation(service) -> None:
     assert claim.node_id == NODE_A
 
 
+def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(service) -> None:
+    jobs, sessions, clock = service
+    target = {
+        "architecture": "linux-arm64",
+        "package_bytes": 1234,
+        "package_sha256": "d" * 64,
+        "package_signature": "e" * 128,
+        "package_url": (
+            "https://install.vonkforge.ai/dev/releases/example/"
+            "spark/current/linux-arm64/vonk-forge-agent.deb"
+        ),
+        "package_version": "0.1.0~dev.330+g0123456789ab",
+        "schema_version": 1,
+        "target_binary_digest": "a" * 64,
+        "target_build_digest": "sha256:" + "b" * 64,
+    }
+    job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        job.id, NODE_A, "agent.upgrade.v1", COMMIT, target
+    )
+    old_identity = {
+        "architecture": "linux-arm64",
+        "binary_digest": "f" * 64,
+        "build_digest": "sha256:" + "f" * 64,
+        "semantic_version": "0.1.0",
+        "self_test_passed": True,
+    }
+    claim = claim_agent(
+        jobs,
+        NODE_A,
+        "serial-a",
+        30,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity=old_identity,
+    )
+    assert claim is not None
+    assert claim.operation_id == operation.id
+    assert job_state(sessions, job.id).state == "queued"
+
+    new_identity = {
+        **old_identity,
+        "binary_digest": target["target_binary_digest"],
+        "build_digest": target["target_build_digest"],
+    }
+    assert (
+        claim_agent(
+            jobs,
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=new_identity,
+        )
+        is None
+    )
+
+    assert job_state(sessions, job.id).state == "succeeded"
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None and stored.state == "succeeded"
+        assert attempt is not None and attempt.state == "succeeded"
+        assert attempt.result == {
+            "architecture": "linux-arm64",
+            "binary_digest": "a" * 64,
+            "build_digest": "sha256:" + "b" * 64,
+            "package_sha256": "d" * 64,
+            "package_version": "0.1.0~dev.330+g0123456789ab",
+            "self_test_passed": True,
+            "status": "upgraded",
+        }
+
+
 def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)

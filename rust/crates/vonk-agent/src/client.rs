@@ -114,6 +114,19 @@ struct HostRuntimeGrantRequest<'a> {
     expires_in_seconds: u16,
 }
 
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct AgentUpgradeGrantRequest<'a> {
+    node_id: &'a str,
+    job_id: uuid::Uuid,
+    operation_id: uuid::Uuid,
+    attempt: u32,
+    fence: uuid::Uuid,
+    package_sha256: &'a str,
+    package_signature: &'a str,
+    expires_in_seconds: u16,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostRuntimeGrantResponse {
@@ -267,6 +280,50 @@ impl AgentHttpClient {
         let response = self
             .client
             .post(self.endpoint("/agent/v1/host-runtime/grant")?)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let response: HostRuntimeGrantResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        if !response.grant.is_object() {
+            return Err(ClientError::Protocol);
+        }
+        Ok(response.grant)
+    }
+
+    pub async fn agent_upgrade_grant(
+        &self,
+        claim: &AgentClaim,
+        package_sha256: &str,
+        package_signature: &str,
+    ) -> Result<serde_json::Value, ClientError> {
+        if claim.node_id != self.node_id
+            || !valid_sha256(package_sha256)
+            || package_signature.len() != 128
+            || !package_signature
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            || claim.attempt == 0
+        {
+            return Err(ClientError::Protocol);
+        }
+        let body = canonical_json(&AgentUpgradeGrantRequest {
+            node_id: &self.node_id,
+            job_id: claim.job_id,
+            operation_id: claim.operation_id,
+            attempt: claim.attempt,
+            fence: claim.fence,
+            package_sha256,
+            package_signature,
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+        })
+        .map_err(|_| ClientError::Protocol)?;
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/agent-upgrade/grant")?)
             .header("content-type", "application/json")
             .body(body)
             .send()

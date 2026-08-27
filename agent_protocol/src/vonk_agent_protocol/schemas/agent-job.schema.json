@@ -11,15 +11,29 @@
     "attempt": {"type": "integer", "minimum": 1},
     "fence": {"type": "string", "format": "uuid"},
     "node_id": {"type": "string", "pattern": "^spk_[0-9a-f]{32}$"},
-    "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
+    "operation": {"enum": ["agent.upgrade.v1", "node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
     "authority_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "payload": {
-      "$ref": "#/$defs/safe-object"
-    },
+    "payload": {"anyOf": [{"$ref": "#/$defs/safe-object"}, {"$ref": "#/$defs/agent-upgrade"}]},
     "deadline": {"type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$"}
   },
   "$defs": {
+    "agent-upgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "package_bytes", "package_sha256", "package_signature", "package_url", "package_version", "schema_version", "target_binary_digest", "target_build_digest"],
+      "properties": {
+        "architecture": {"const": "linux-arm64"},
+        "package_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "package_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "package_signature": {"type": "string", "pattern": "^[0-9a-f]{128}$"},
+        "package_url": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^https://install\\.vonkforge\\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\\.deb$"},
+        "package_version": {"type": "string", "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$"},
+        "schema_version": {"const": 1},
+        "target_binary_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "target_build_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
     "safe-object": {
       "type": "object",
       "propertyNames": {

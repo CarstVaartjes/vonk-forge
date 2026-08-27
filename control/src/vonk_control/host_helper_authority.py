@@ -224,6 +224,69 @@ class HostRuntimeAuthorityService:
             )
         return grant
 
+    def issue_agent_upgrade_grant(
+        self,
+        *,
+        node_id: str,
+        job_id: str,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        package_sha256: str,
+        package_signature: str,
+        certificate_serial: str,
+        expires_in_seconds: int = 30,
+    ) -> SignedHostHelperGrant:
+        now = self._clock()
+        with self._sessions() as session:
+            operation = session.get(StoredAgentOperation, operation_id)
+            current = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation_id,
+                    AgentOperationAttempt.attempt == attempt,
+                )
+            )
+            lease_deadline = (
+                None
+                if current is None
+                else current.lease_deadline
+                if current.lease_deadline.tzinfo is not None
+                else current.lease_deadline.replace(tzinfo=UTC)
+            )
+            if (
+                operation is None
+                or current is None
+                or operation.node_id != node_id
+                or operation.parent_job_id != job_id
+                or operation.kind != "agent.upgrade.v1"
+                or operation.payload.get("package_sha256") != package_sha256
+                or operation.payload.get("package_signature") != package_signature
+                or operation.state != "running"
+                or operation.current_attempt != attempt
+                or current.state != "running"
+                or current.fence != fence
+                or current.agent_certificate_serial != certificate_serial
+                or lease_deadline is None
+                or lease_deadline <= now
+            ):
+                raise HostHelperAuthorityError("agent upgrade authority is stale")
+        grant = self._issuer.issue_grant(
+            node_id=node_id,
+            operation=HostHelperOperation(
+                HostOperationKind.INSTALL_VONK_DEB,
+                {
+                    "package_sha256": package_sha256,
+                    "package_signature": package_signature,
+                },
+            ),
+            expires_in_seconds=expires_in_seconds,
+        )
+        if grant.claims.expires_at > int(lease_deadline.timestamp()):
+            raise HostHelperAuthorityError(
+                "agent upgrade grant exceeds the active attempt lease"
+            )
+        return grant
+
     def _check_attempt(
         self,
         *,

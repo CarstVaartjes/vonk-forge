@@ -447,6 +447,7 @@ def create_app(
     recipe_library: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
 ) -> FastAPI:
     app = FastAPI(
@@ -645,6 +646,7 @@ def create_app(
         actor_dependency=actor,
         audits=audits,
         services=agent,
+        upgrades=agent_upgrades,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
     if worker_authority is not None:
@@ -1188,6 +1190,7 @@ def production_app() -> FastAPI:
         bind_reconciliation_result_consumer,
         load_reconciliation_authority_input,
     )
+    from .agent_upgrades import AgentUpgradeService
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .catalog_seeds import seed_builtin_harnesses
@@ -1349,6 +1352,23 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
+    agent_upgrades = AgentUpgradeService(
+        sessions,
+        agent_services.operations,
+        clock=clock,
+        current_revision=current_revision,
+        channel=(
+            "dev"
+            if agent_services.bootstrap is not None
+            and "/dev/" in agent_services.bootstrap.installer_url
+            else "stable"
+        ),
+    )
+
+    def consume_agent_result(session, operation, attempt, message) -> None:
+        recipe_operations.consume_agent_result(session, operation, attempt, message)
+        agent_upgrades.consume_agent_result(session, operation, attempt, message)
+
     bind_reconciliation_result_consumer(
         sessions,
         operations=agent_services.operations,
@@ -1356,7 +1376,7 @@ def production_app() -> FastAPI:
         clock=clock,
         revision_eligible=revision_eligible,
         current_revision=current_revision,
-        additional_result_consumer=recipe_operations.consume_agent_result,
+        additional_result_consumer=consume_agent_result,
     )
 
     def refresh_metrics() -> None:
@@ -1432,6 +1452,7 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         recipe_operations=recipe_operations,
+        agent_upgrades=agent_upgrades,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
@@ -1441,6 +1462,7 @@ def production_app() -> FastAPI:
     def close_global_catalog() -> None:
         global_catalog.close()
         recipe_library.close()
+        agent_upgrades.close()
 
     return app
 

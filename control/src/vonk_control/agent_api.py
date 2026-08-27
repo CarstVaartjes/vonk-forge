@@ -37,6 +37,7 @@ from vonk_agent_protocol.workload_packages import (
 )
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
+from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .audit import AuditRecord
 from .auth import (
     Actor,
@@ -301,6 +302,30 @@ class ClaimRequest(BaseModel):
     capabilities: list[str] | None = Field(default=None, max_length=32)
     runtime_identity: AgentRuntimeIdentityRequest
     wait_seconds: int = Field(default=0, ge=0, le=60)
+
+
+class AgentUpgradePackageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    architecture: Literal["linux-arm64"]
+    package_bytes: int = Field(ge=1, le=1024**3, strict=True)
+    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+    package_url: str = Field(min_length=1, max_length=2048)
+    package_version: str = Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
+    schema_version: Literal[1]
+    target_binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class AgentUpgradePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
+    package: AgentUpgradePackageRequest | None = None
+    strategy: Literal["one-at-a-time", "all-at-once"] = "one-at-a-time"
+
+
+class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class InventoryRequest(BaseModel):
@@ -1107,12 +1132,90 @@ def install_agent_routes(
     actor_dependency: _ActorDependency,
     audits: _AuditSink,
     services: AgentApiServices | None,
+    upgrades: AgentUpgradeService | None = None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
     human = APIRouter(prefix="/api/v1/agents")
     agent = APIRouter(prefix="/agent/v1")
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
+
+    @human.post("/upgrades/preview")
+    def preview_agent_upgrade(
+        body: AgentUpgradePreviewRequest,
+        authenticated: Actor = authenticated_actor,
+    ) -> dict[str, object]:
+        _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
+        if upgrades is None:
+            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
+        try:
+            package = (
+                upgrades.current_package()
+                if body.package is None
+                else body.package.model_dump()
+            )
+            plan = upgrades.preview(
+                body.node_ids,
+                package,
+                strategy=body.strategy,
+            )
+        except AgentUpgradeConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        return {
+            "authority_revision": plan.authority_revision,
+            "node_ids": list(plan.node_ids),
+            "package": plan.package,
+            "plan_digest": plan.plan_digest,
+            "strategy": plan.strategy,
+        }
+
+    @human.get("/upgrades/candidate")
+    def current_agent_upgrade(
+        authenticated: Actor = authenticated_actor,
+    ) -> dict[str, object]:
+        _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
+        if upgrades is None:
+            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
+        try:
+            return upgrades.current_package()
+        except AgentUpgradeConflict as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+
+    @human.post("/upgrades", status_code=status.HTTP_202_ACCEPTED)
+    def apply_agent_upgrade(
+        body: AgentUpgradeApplyRequest,
+        request: Request,
+        authenticated: Actor = authenticated_actor,
+    ) -> dict[str, object]:
+        _require_administrator(authenticated, "/api/v1/agents/upgrades")
+        if upgrades is None:
+            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
+        try:
+            package = (
+                upgrades.current_package()
+                if body.package is None
+                else body.package.model_dump()
+            )
+            job = upgrades.apply(
+                body.node_ids,
+                package,
+                plan_digest=body.plan_digest,
+                actor=authenticated.subject,
+                request_id=request.state.request_id,
+                strategy=body.strategy,
+            )
+        except AgentUpgradeConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                authenticated.subject,
+                "agent.upgrade.apply",
+                job.authority_revision,
+                tuple(job.targets),
+            )
+        )
+        return {"id": job.id, "state": job.state}
 
     @human.post(
         "/enrollments/grants",
@@ -1713,6 +1816,28 @@ def install_agent_routes(
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
+            ) from None
+
+    @agent.post("/agent-upgrade/grant")
+    def agent_upgrade_grant(body: dict[str, object], request: Request) -> Response:
+        identity = workload_helper_identity(request)
+        required = host_runtime_service()
+        try:
+            grant = required.issue_agent_upgrade_grant(
+                node_id=body["node_id"],
+                job_id=body["job_id"],
+                operation_id=body["operation_id"],
+                attempt=body["attempt"],
+                fence=body["fence"],
+                package_sha256=body["package_sha256"],
+                package_signature=body["package_signature"],
+                certificate_serial=identity.certificate_serial,
+                expires_in_seconds=body.get("expires_in_seconds", 30),
+            )
+            return _json_response({"grant": grant.to_mapping()})
+        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
+            raise HTTPException(
+                status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
     @agent.post("/package-helper/receipts")

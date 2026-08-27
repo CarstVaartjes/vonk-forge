@@ -92,6 +92,18 @@ test("loads bounded history ranges and renders accessible summaries", async () =
   expect(calls[1].signal?.aborted).toBe(true);
 });
 
+test("offers an individual agent upgrade from Spark detail", async () => {
+  const onUpgrade = vi.fn();
+  const control = {
+    nodeTelemetryHistory: async () => history(),
+  } as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined} onUpgrade={onUpgrade}/>);
+
+  await userEvent.click(screen.getByRole("button", {name: "Upgrade agent"}));
+
+  expect(onUpgrade).toHaveBeenCalledOnce();
+});
+
 test("shows structured node evidence and a retryable history error", async () => {
   let fail = true;
   const control = {

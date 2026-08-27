@@ -94,6 +94,20 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
         check=True,
         capture_output=True,
     )
+    Path(f"{package}.host.sig").write_text("e" * 128 + "\n")
+    _canonical(
+        package.with_suffix(".provenance.json"),
+        {
+            "predicate": {
+                "buildDefinition": {
+                    "externalParameters": {"build_digest": "sha256:" + "c" * 64}
+                }
+            },
+            "subject": [
+                {"digest": {"sha256": "d" * 64}, "name": "vonk-agent"}
+            ],
+        },
+    )
     return package
 
 

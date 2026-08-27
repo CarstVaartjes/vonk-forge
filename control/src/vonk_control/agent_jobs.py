@@ -63,6 +63,7 @@ _RECIPE_CAPABILITIES = frozenset(
 )
 _MUTATING_OPERATIONS = frozenset(
     {
+        AgentOperation.AGENT_UPGRADE.value,
         AgentOperation.RELEASE_INSTALL.value,
         AgentOperation.WORKLOAD_PREPARE.value,
         AgentOperation.WORKLOAD_START.value,
@@ -93,7 +94,10 @@ _REQUIRED_CAPABILITIES = frozenset(
 )
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
 _NEXT_CAPABILITIES = (
-    _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
+    _REQUIRED_CAPABILITIES
+    | _RUNTIME_CAPABILITIES
+    | _RECIPE_CAPABILITIES
+    | frozenset({AgentOperation.AGENT_UPGRADE.value})
 )
 _CONTROL_OPERATIONS = _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
 
@@ -391,6 +395,12 @@ class AgentJobService:
                 runtime_identity,
                 hostname,
             )
+            self._reconcile_agent_upgrade(
+                session,
+                node_id,
+                now,
+                runtime_identity,
+            )
             expired_attempt = (
                 select(AgentOperationAttempt.id)
                 .where(
@@ -512,6 +522,78 @@ class AgentJobService:
                 payload=operation.payload,
                 deadline=deadline,
             )
+
+    def _reconcile_agent_upgrade(
+        self,
+        session: Session,
+        node_id: str,
+        now: datetime,
+        runtime_identity: Mapping[str, object],
+    ) -> None:
+        operation = session.scalar(
+            select(StoredOperation)
+            .where(
+                StoredOperation.node_id == node_id,
+                StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+            )
+            .order_by(StoredOperation.created_at, StoredOperation.id)
+            .with_for_update(of=StoredOperation)
+            .limit(1)
+        )
+        if operation is None or (
+            runtime_identity.get("build_digest")
+            != operation.payload.get("target_build_digest")
+            or runtime_identity.get("binary_digest")
+            != operation.payload.get("target_binary_digest")
+            or runtime_identity.get("architecture")
+            != operation.payload.get("architecture")
+            or runtime_identity.get("self_test_passed") is not True
+        ):
+            return
+        attempt = session.scalar(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+            .with_for_update(of=AgentOperationAttempt)
+        )
+        if attempt is None or attempt.state not in {
+            "running",
+            "waiting-for-operator",
+            "expired",
+        }:
+            return
+        evidence = {
+            "architecture": runtime_identity["architecture"],
+            "binary_digest": runtime_identity["binary_digest"],
+            "build_digest": runtime_identity["build_digest"],
+            "package_sha256": operation.payload["package_sha256"],
+            "package_version": operation.payload["package_version"],
+            "self_test_passed": True,
+            "status": "upgraded",
+        }
+        message = AgentResult(
+            schema_version=1,
+            job_id=operation.parent_job_id,
+            operation_id=operation.id,
+            attempt=attempt.attempt,
+            fence=attempt.fence,
+            node_id=operation.node_id,
+            deadline=max(_aware(attempt.lease_deadline), _aware(now)),
+            state="succeeded",
+            result=evidence,
+        )
+        attempt.state = "succeeded"
+        attempt.result = _document(evidence)
+        operation.state = "succeeded"
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        operation.updated_at = now
+        if self._result_consumer is not None:
+            self._result_consumer(session, operation, attempt, message)
+        self._aggregate_parent(session, operation.parent_job_id)
 
     @staticmethod
     def _recipe_build_runtime_matches(

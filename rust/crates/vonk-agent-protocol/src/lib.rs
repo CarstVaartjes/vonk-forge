@@ -83,7 +83,8 @@ impl AgentClaim {
         }
         if !matches!(
             self.operation.as_str(),
-            "recipe.build.v1"
+            "agent.upgrade.v1"
+                | "recipe.build.v1"
                 | "recipe.image.import.v1"
                 | "recipe.install"
                 | "recipe.start"
@@ -100,6 +101,65 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim payload digest"));
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentUpgradeRequest {
+    pub architecture: String,
+    pub package_bytes: u64,
+    pub package_sha256: String,
+    pub package_signature: String,
+    pub package_url: String,
+    pub package_version: String,
+    pub schema_version: u8,
+    pub target_binary_digest: String,
+    pub target_build_digest: String,
+}
+
+impl AgentUpgradeRequest {
+    pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
+        if claim.operation != "agent.upgrade.v1" {
+            return Err(ProtocolError::Identity("agent upgrade operation"));
+        }
+        let value: Self = serde_json::from_value(claim.payload.clone())?;
+        let url = url::Url::parse(&value.package_url)
+            .map_err(|_| ProtocolError::Identity("agent upgrade URL"))?;
+        if value.schema_version != 1
+            || value.architecture != "linux-arm64"
+            || !(1..=1024 * 1024 * 1024).contains(&value.package_bytes)
+            || !lower_hex(&value.package_sha256, 64)
+            || !lower_hex(&value.package_signature, 128)
+            || !lower_hex(&value.target_binary_digest, 64)
+            || !value.target_build_digest.starts_with("sha256:")
+            || !lower_hex(&value.target_build_digest[7..], 64)
+            || value.package_version.is_empty()
+            || value.package_version.len() > 128
+            || !value
+                .package_version
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            || value
+                .package_version
+                .bytes()
+                .any(|byte| !byte.is_ascii_alphanumeric() && !b".+~-".contains(&byte))
+            || !value
+                .package_url
+                .starts_with("https://install.vonkforge.ai/")
+            || url.scheme() != "https"
+            || url.host_str() != Some("install.vonkforge.ai")
+            || url.port().is_some()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || !url.path().ends_with("/vonk-forge-agent.deb")
+        {
+            return Err(ProtocolError::Identity("agent upgrade payload"));
+        }
+        Ok(value)
     }
 }
 

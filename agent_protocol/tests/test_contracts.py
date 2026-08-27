@@ -397,6 +397,28 @@ def test_recipe_build_claim_rejects_untyped_filesystem_values(
         AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
 
 
+def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> None:
+    payload = {
+        "architecture": "linux-arm64",
+        "package_bytes": 5_000_000,
+        "package_sha256": "b" * 64,
+        "package_signature": "c" * 128,
+        "package_url": (
+            "https://install.vonkforge.ai/artifacts/dev/releases/example/"
+            "spark/current/linux-arm64/vonk-forge-agent.deb"
+        ),
+        "package_version": "0.1.0~dev.330+g0123456789ab",
+        "schema_version": 1,
+        "target_binary_digest": "d" * 64,
+        "target_build_digest": "sha256:" + "e" * 64,
+    }
+    raw = claim_for_operation("agent.upgrade.v1", payload)
+
+    assert AgentClaim.parse(raw)
+    assert schema("agent-job.schema.json").is_valid(raw)
+    assert validate_schema_message("agent-job.schema.json", raw)
+
+
 def protocol_message_with_document(
     name: str,
     document: dict[str, str],
@@ -479,6 +501,7 @@ def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
 
 def test_operation_enum_contains_only_supported_operations() -> None:
     assert {member.value for member in AgentOperation} == {
+        "agent.upgrade.v1",
         "node.probe",
         "release.install",
         "workload.prepare",

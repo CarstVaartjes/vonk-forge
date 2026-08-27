@@ -58,6 +58,7 @@ PACKAGE_VERSION = re.compile(
     rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
 ARCHITECTURES = {"arm64": 183, "amd64": 62}
+PACKAGE_SIGNATURE_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
 
 
 class VerificationError(RuntimeError):
@@ -92,6 +93,7 @@ def verify(deb: Path) -> dict[str, object]:
         or metadata.st_mode & 0o022
     ):
         raise VerificationError("Debian package path is unsafe")
+    package_sha256 = hashlib.sha256(deb.read_bytes()).hexdigest()
     fields = {
         name: command(["/usr/bin/dpkg-deb", "--field", str(deb), name])
         .decode("utf-8")
@@ -127,6 +129,7 @@ def verify(deb: Path) -> dict[str, object]:
         _verify_control(control)
         _verify_payload(payload, control, fields["Architecture"])
         _verify_agent_signature(payload)
+        _verify_package_signature(payload, deb, package_sha256)
         _verify_evidence(payload, fields["Version"], fields["Architecture"])
 
     checksum_path = deb.with_suffix(deb.suffix + ".sha256")
@@ -142,13 +145,12 @@ def verify(deb: Path) -> dict[str, object]:
     ):
         raise VerificationError("release SHA-256 sidecar is missing")
     expected = checksum_path.read_text(encoding="ascii").strip().split()
-    actual = hashlib.sha256(deb.read_bytes()).hexdigest()
-    if expected != [actual, deb.name]:
+    if expected != [package_sha256, deb.name]:
         raise VerificationError("release SHA-256 sidecar is invalid")
     return {
         "architecture": fields["Architecture"],
         "package": PACKAGE,
-        "sha256": actual,
+        "sha256": package_sha256,
         "version": fields["Version"],
     }
 
@@ -301,6 +303,8 @@ def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
         or "ProtectHome=no" not in units["vonk-forge-agent.service"]
         or "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK"
         not in units["vonk-forge-agent.service"]
+        or "ReadWritePaths=/var/lib/vonk-forge-agent /var/lib/vonk-forge/incoming /run/vonk-forge-agent"
+        not in units["vonk-forge-agent.service"]
         or "/dev/infiniband" in units["vonk-forge-agent.service"]
         or "Delegate=yes" not in units["vonk-forge-agent.service"]
         or "RestrictSUIDSGID=yes" in units["vonk-forge-agent.service"]
@@ -416,6 +420,55 @@ def _verify_agent_signature(payload: Path) -> None:
                 str(artifact_signing_path),
                 "-sigfile",
                 str(artifact_signature_path),
+            ]
+        )
+
+
+def _verify_package_signature(payload: Path, deb: Path, digest: str) -> None:
+    signature_path = deb.with_suffix(deb.suffix + ".host.sig")
+    try:
+        metadata = signature_path.lstat()
+    except FileNotFoundError as error:
+        raise VerificationError("release host signature is missing") from error
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or not 1 <= metadata.st_size <= 256
+        or metadata.st_mode & 0o022
+    ):
+        raise VerificationError("release host signature is unsafe")
+    signature_text = signature_path.read_text(encoding="ascii").strip()
+    if re.fullmatch(r"[0-9a-f]{128}", signature_text) is None:
+        raise VerificationError("release host signature is invalid")
+    public_key = bytes.fromhex(
+        (payload / "usr/share/keyrings/vonk-forge-release.pub")
+        .read_text(encoding="ascii")
+        .strip()
+    )
+    prefix = bytes.fromhex("302a300506032b6570032100")
+    with tempfile.TemporaryDirectory(prefix="vonk-package-key-") as temporary:
+        root = Path(temporary)
+        key_path = root / "release.der"
+        claims_path = root / "package.claims"
+        detached_path = root / "package.sig"
+        key_path.write_bytes(prefix + public_key)
+        claims_path.write_bytes(PACKAGE_SIGNATURE_DOMAIN + bytes.fromhex(digest))
+        detached_path.write_bytes(bytes.fromhex(signature_text))
+        command(
+            [
+                "/usr/bin/openssl",
+                "pkeyutl",
+                "-verify",
+                "-pubin",
+                "-inkey",
+                str(key_path),
+                "-keyform",
+                "DER",
+                "-rawin",
+                "-in",
+                str(claims_path),
+                "-sigfile",
+                str(detached_path),
             ]
         )
 

@@ -295,6 +295,9 @@ runs:
           "dist/vonk-forge-agent_${VERSION}_amd64.deb" \
           "reproducible/vonk-forge-agent_${VERSION}_amd64.deb"
         for architecture in arm64 amd64; do
+          cmp --silent \
+            "dist/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig" \
+            "reproducible/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig"
           scripts/verify-agent-deb --json \
             "dist/vonk-forge-agent_${VERSION}_${architecture}.deb"
         done

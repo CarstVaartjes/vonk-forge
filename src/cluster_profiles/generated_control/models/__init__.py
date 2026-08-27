@@ -1,7 +1,13 @@
 """ Contains all the data models used in inputs/outputs """
 
 from .agent_summary import AgentSummary
+from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
+from .agent_upgrade_apply_request_strategy import AgentUpgradeApplyRequestStrategy
+from .agent_upgrade_package_request import AgentUpgradePackageRequest
+from .agent_upgrade_preview_request import AgentUpgradePreviewRequest
+from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestStrategy
 from .agents_response import AgentsResponse
+from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
 from .apply_request import ApplyRequest
 from .bounded_error_response import BoundedErrorResponse
 from .build_plan_response import BuildPlanResponse
@@ -34,6 +40,7 @@ from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
 from .freshness_policy import FreshnessPolicy
+from .get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
 from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .global_import_preview_request import GlobalImportPreviewRequest
@@ -123,6 +130,7 @@ from .placement_recommendation_install_state import PlacementRecommendationInsta
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
 from .plan_reason import PlanReason
+from .preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post import PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
 from .projection_reason import ProjectionReason
@@ -252,6 +260,12 @@ from .visual_validation import VisualValidation
 __all__ = (
     "AgentsResponse",
     "AgentSummary",
+    "AgentUpgradeApplyRequest",
+    "AgentUpgradeApplyRequestStrategy",
+    "AgentUpgradePackageRequest",
+    "AgentUpgradePreviewRequest",
+    "AgentUpgradePreviewRequestStrategy",
+    "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
     "ApplyRequest",
     "BoundedErrorResponse",
     "BuildPlanResponse",
@@ -284,6 +298,7 @@ __all__ = (
     "FleetStatusResponse",
     "ForkRecipeRequest",
     "FreshnessPolicy",
+    "GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet",
     "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
     "GlobalImportPreviewRequest",
@@ -373,6 +388,7 @@ __all__ = (
     "PlacementRecommendationLoadState",
     "PlacementScore",
     "PlanReason",
+    "PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
     "ProjectionReason",
