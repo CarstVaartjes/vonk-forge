@@ -982,6 +982,38 @@ def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
     }
 
 
+def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "block-size", "value": 2304},
+            {"name": "kv-cache-memory", "value": 9_663_676_416},
+            {"name": "kv-cache-dtype", "value": "fp8_e4m3"},
+            {"name": "enforce-eager", "value": True},
+            {"name": "skip-mm-profiling", "value": True},
+            {
+                "name": "chat-template",
+                "value": "/opt/vonk/templates/glm53-chat-template-mm.jinja",
+            },
+            {"name": "limit-mm-per-prompt", "value": '{"image":4,"video":1}'},
+            {"name": "speculative-config", "value": '{"method":"mtp","num_speculative_tokens":4}'},
+            {"name": "tool-call-parser", "value": "glm47"},
+            {"name": "reasoning-parser", "value": "glm45"},
+            {"name": "enable-auto-tool-choice", "value": True},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--block-size") + 1] == "2304"
+    assert projection.command[projection.command.index("--kv-cache-memory") + 1] == "9663676416"
+    assert "--enforce-eager" in projection.command
+    assert "--skip-mm-profiling" in projection.command
+    assert projection.command[projection.command.index("--chat-template") + 1] == (
+        "/opt/vonk/templates/glm53-chat-template-mm.jinja"
+    )
+
+
 @pytest.mark.parametrize(
     "name",
     ["hf-overrides", "compilation-config"],
@@ -1111,6 +1143,57 @@ def test_sglang_projects_verified_native_distributed_inkling_contract() -> None:
     assert "--enable-multimodal" in projection.command
     assert ("SGLANG_ENABLE_UNIFIED_RADIX_TREE", "1") in projection.environment
     assert ("NCCL_IB_GID_INDEX", "3") in projection.environment
+
+
+def test_sglang_accepts_qwen38_flash_next_profile() -> None:
+    recipe, distribution = _distributed_sglang_inputs()
+    replacements = {
+        "attention-backend": "flashinfer",
+        "fp4-gemm-backend": "flashinfer_cutlass",
+        "reasoning-parser": "qwen3",
+        "tool-call-parser": "qwen3_coder",
+    }
+    for argument in recipe["runtime"]["arguments"]:
+        if argument["name"] in replacements:
+            argument["value"] = replacements[argument["name"]]
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "mamba-ssm-dtype", "value": "bfloat16"},
+            {"name": "mamba-track-interval", "value": 64},
+            {"name": "chunked-prefill-size", "value": 4096},
+            {"name": "max-running-requests", "value": 6},
+            {"name": "max-total-tokens", "value": 600000},
+            {"name": "speculative-algorithm", "value": "NEXTN"},
+            {"name": "speculative-num-steps", "value": 3},
+            {"name": "speculative-eagle-topk", "value": 1},
+            {"name": "speculative-num-draft-tokens", "value": 4},
+            {"name": "enable-linear-replayssm-spec", "value": True},
+            {"name": "allow-auto-truncate", "value": True},
+            {"name": "ple-offload-embedding", "value": True},
+            {"name": "cuda-graph-max-bs", "value": 8},
+            {"name": "disable-cuda-graph-padding", "value": True},
+            {"name": "disable-radix-cache", "value": True},
+            {"name": "sampling-backend", "value": "pytorch"},
+            {"name": "default-chat-template-kwargs", "value": '{"enable_thinking":false}'},
+            {"name": "enable-metrics", "value": True},
+            {"name": "enable-cache-report", "value": True},
+        ]
+    )
+
+    projection = SglangHarnessCompiler().compile(
+        recipe,
+        distribution,
+        {},
+        {},
+        recipe["topology"],
+        "entrypoint",
+        0,
+    )
+
+    assert projection.command[projection.command.index("--speculative-num-steps") + 1] == "3"
+    assert "--enable-linear-replayssm-spec" in projection.command
+    assert "--ple-offload-embedding" in projection.command
+    assert projection.command[projection.command.index("--tool-call-parser") + 1] == "qwen3_coder"
 
 
 @pytest.mark.parametrize("missing", ["patch", "capability", "profile"])

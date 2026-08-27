@@ -31,14 +31,33 @@ _ARGUMENTS = {
         "--quantization",
         validate=one_of("awq", "gptq", "fp8", "modelopt_fp4", "bitsandbytes"),
     ),
-    "attention-backend": ArgumentSpec("--attention-backend", validate=one_of("triton")),
+    "attention-backend": ArgumentSpec(
+        "--attention-backend", validate=one_of("triton", "flashinfer")
+    ),
     "page-size": ArgumentSpec("--page-size", validate=integer(1, 1024)),
-    "fp4-gemm-backend": ArgumentSpec("--fp4-gemm-backend", validate=one_of("marlin")),
+    "fp4-gemm-backend": ArgumentSpec(
+        "--fp4-gemm-backend", validate=one_of("marlin", "flashinfer_cutlass")
+    ),
     "moe-runner-backend": ArgumentSpec(
         "--moe-runner-backend", validate=one_of("marlin")
     ),
     "mamba-radix-cache-strategy": ArgumentSpec(
         "--mamba-radix-cache-strategy", validate=one_of("extra_buffer")
+    ),
+    "mamba-ssm-dtype": ArgumentSpec(
+        "--mamba-ssm-dtype", validate=one_of("bfloat16")
+    ),
+    "mamba-track-interval": ArgumentSpec(
+        "--mamba-track-interval", validate=integer(1, 1_000_000)
+    ),
+    "chunked-prefill-size": ArgumentSpec(
+        "--chunked-prefill-size", validate=integer(1, 10_000_000)
+    ),
+    "max-running-requests": ArgumentSpec(
+        "--max-running-requests", validate=integer(1, 65_536)
+    ),
+    "max-total-tokens": ArgumentSpec(
+        "--max-total-tokens", validate=integer(1, 10_000_000)
     ),
     "mem-fraction-static": ArgumentSpec(
         "--mem-fraction-static", validate=decimal(0.01, 1.0)
@@ -53,8 +72,47 @@ _ARGUMENTS = {
     "disable-prefill-cuda-graph": ArgumentSpec(
         "--disable-prefill-cuda-graph", takes_value=False
     ),
-    "reasoning-parser": ArgumentSpec("--reasoning-parser", validate=one_of("inkling")),
-    "tool-call-parser": ArgumentSpec("--tool-call-parser", validate=one_of("inkling")),
+    "speculative-algorithm": ArgumentSpec(
+        "--speculative-algorithm", validate=one_of("NEXTN")
+    ),
+    "speculative-num-steps": ArgumentSpec(
+        "--speculative-num-steps", validate=integer(1, 16)
+    ),
+    "speculative-eagle-topk": ArgumentSpec(
+        "--speculative-eagle-topk", validate=integer(1, 64)
+    ),
+    "speculative-num-draft-tokens": ArgumentSpec(
+        "--speculative-num-draft-tokens", validate=integer(1, 64)
+    ),
+    "enable-linear-replayssm-spec": ArgumentSpec(
+        "--enable-linear-replayssm-spec", takes_value=False
+    ),
+    "allow-auto-truncate": ArgumentSpec("--allow-auto-truncate", takes_value=False),
+    "ple-offload-embedding": ArgumentSpec(
+        "--ple-offload-embedding", takes_value=False
+    ),
+    "cuda-graph-max-bs": ArgumentSpec(
+        "--cuda-graph-max-bs", validate=integer(1, 65_536)
+    ),
+    "disable-cuda-graph-padding": ArgumentSpec(
+        "--disable-cuda-graph-padding", takes_value=False
+    ),
+    "disable-radix-cache": ArgumentSpec("--disable-radix-cache", takes_value=False),
+    "sampling-backend": ArgumentSpec(
+        "--sampling-backend", validate=one_of("pytorch")
+    ),
+    "default-chat-template-kwargs": ArgumentSpec(
+        "--default-chat-template-kwargs",
+        validate=one_of('{"enable_thinking":false}'),
+    ),
+    "enable-metrics": ArgumentSpec("--enable-metrics", takes_value=False),
+    "enable-cache-report": ArgumentSpec("--enable-cache-report", takes_value=False),
+    "reasoning-parser": ArgumentSpec(
+        "--reasoning-parser", validate=one_of("inkling", "qwen3", "auto")
+    ),
+    "tool-call-parser": ArgumentSpec(
+        "--tool-call-parser", validate=one_of("inkling", "qwen3_coder", "auto")
+    ),
     "served-model-name": ArgumentSpec("--served-model-name"),
     "trust-remote-code": ArgumentSpec("--trust-remote-code", takes_value=False),
     "host": ArgumentSpec("--host", emit=False, validate=one_of("0.0.0.0")),

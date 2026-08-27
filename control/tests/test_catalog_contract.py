@@ -123,6 +123,29 @@ def test_model_version_accepts_exact_zero_byte_files_but_rejects_negative_sizes(
         validate_catalog_document(document)
 
 
+def test_model_version_has_no_artificial_artifact_count_limit() -> None:
+    document = json.loads(MODEL_VERSION_FIXTURE.read_text())
+    template = document["artifacts"][0]
+    document["artifacts"] = [
+        {
+            **template,
+            "id": f"weight-{index:04d}",
+            "path": f"weights/model-{index:05d}.safetensors",
+            "sha256": f"{index + 1:064x}",
+            "download_bytes": index + 1,
+            "installed_bytes": index + 1,
+        }
+        for index in range(419)
+    ]
+    total_bytes = sum(range(1, 420))
+    document["sizes"] = {
+        "download_bytes": total_bytes,
+        "installed_bytes": total_bytes,
+    }
+
+    validate_catalog_document(document)
+
+
 def test_harness_source_bundle_is_an_exact_build_input_not_a_catalog_reference() -> (
     None
 ):

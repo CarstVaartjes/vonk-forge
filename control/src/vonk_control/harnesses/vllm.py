@@ -44,13 +44,16 @@ _ARGUMENTS = {
     "kv-cache-memory-bytes": ArgumentSpec(
         "--kv-cache-memory-bytes", validate=integer(1, 128_000_000_000)
     ),
+    "kv-cache-memory": ArgumentSpec(
+        "--kv-cache-memory", validate=integer(1, 128_000_000_000)
+    ),
     "compilation-config": ArgumentSpec(
         "--compilation-config", validate=lambda value: _json_object(value)
     ),
     "long-prefill-token-threshold": ArgumentSpec(
         "--long-prefill-token-threshold", validate=integer(1, 10_000_000)
     ),
-    "block-size": ArgumentSpec("--block-size", validate=integer(1, 1024)),
+    "block-size": ArgumentSpec("--block-size", validate=integer(1, 4096)),
     "quantization": ArgumentSpec(
         "--quantization",
         validate=one_of("awq", "gptq", "fp8", "modelopt_fp4", "bitsandbytes"),
@@ -89,6 +92,8 @@ _ARGUMENTS = {
     "enable-chunked-prefill": ArgumentSpec(
         "--enable-chunked-prefill", takes_value=False
     ),
+    "enforce-eager": ArgumentSpec("--enforce-eager", takes_value=False),
+    "skip-mm-profiling": ArgumentSpec("--skip-mm-profiling", takes_value=False),
     "async-scheduling": ArgumentSpec("--async-scheduling", takes_value=False),
     "mamba-backend": ArgumentSpec(
         "--mamba-backend", validate=one_of("triton", "flashinfer")
@@ -141,6 +146,10 @@ _ARGUMENTS = {
     ),
     "limit-mm-per-prompt": ArgumentSpec(
         "--limit-mm-per-prompt", validate=lambda value: _limited_mm_per_prompt(value)
+    ),
+    "chat-template": ArgumentSpec(
+        "--chat-template",
+        validate=one_of("/opt/vonk/templates/glm53-chat-template-mm.jinja"),
     ),
     "chat-template-content-format": ArgumentSpec(
         "--chat-template-content-format", validate=one_of("openai")
