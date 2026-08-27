@@ -186,7 +186,9 @@ def test_controller_selection_excludes_offline_sparks_and_individual_preview_exp
         upgrades.preview([NODE_B], PACKAGE)
 
 
-def test_current_candidate_is_derived_from_the_published_arm64_release(tmp_path) -> None:
+def test_current_candidate_is_derived_from_the_published_arm64_release(
+    tmp_path,
+) -> None:
     generation = "9" * 64
     package_path = (
         f"artifacts/dev/releases/{generation}/spark/current/"
@@ -216,7 +218,10 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(tmp_path)
         "generation": generation,
     }
 
+    request_hosts: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        request_hosts.append(request.url.host)
         if request.url.path == "/artifacts/dev/current.manifest":
             return httpx.Response(
                 200,
@@ -242,6 +247,7 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(tmp_path)
         operations,
         clock=lambda: datetime(2026, 8, 27, tzinfo=UTC),
         current_revision=lambda: REVISION,
+        release_api_url="http://caddy:8084",
         transport=httpx.MockTransport(handler),
     )
 
@@ -249,6 +255,7 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(tmp_path)
         **PACKAGE,
         "package_url": f"https://install.vonkforge.ai/{package_path}",
     }
+    assert request_hosts == ["caddy", "caddy", "caddy"]
 
 
 def _operation_nodes(sessions, job_id: str) -> list[str]:

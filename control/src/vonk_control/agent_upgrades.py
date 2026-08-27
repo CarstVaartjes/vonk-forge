@@ -46,6 +46,7 @@ class AgentUpgradeService:
         clock: Callable[[], datetime],
         current_revision: Callable[[], str],
         channel: str = "dev",
+        release_api_url: str = "https://install.vonkforge.ai",
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._sessions = sessions
@@ -56,7 +57,7 @@ class AgentUpgradeService:
             raise ValueError("agent upgrade channel is invalid")
         self._channel = channel
         self._http = httpx.Client(
-            base_url="https://install.vonkforge.ai",
+            base_url=release_api_url,
             follow_redirects=False,
             timeout=httpx.Timeout(15.0, connect=5.0),
             trust_env=False,
@@ -99,7 +100,9 @@ class AgentUpgradeService:
             signature_response.raise_for_status()
             signature = signature_response.text.strip()
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
-            raise AgentUpgradeConflict("current agent release is unavailable") from error
+            raise AgentUpgradeConflict(
+                "current agent release is unavailable"
+            ) from error
         if (
             release.get("channel") != self._channel
             or release.get("generation") != generation
@@ -164,7 +167,9 @@ class AgentUpgradeService:
                 else requested
             )
             if not targets:
-                raise AgentUpgradeConflict("no outdated upgrade-capable Sparks were found")
+                raise AgentUpgradeConflict(
+                    "no outdated upgrade-capable Sparks were found"
+                )
             if requested is not None and set(nodes) != set(targets):
                 raise AgentUpgradeConflict("agent upgrade target does not exist")
             for node_id in targets:
@@ -262,7 +267,11 @@ class AgentUpgradeService:
             )
         )
         next_node = next(
-            (node_id for node_id in order if isinstance(node_id, str) and node_id not in existing),
+            (
+                node_id
+                for node_id in order
+                if isinstance(node_id, str) and node_id not in existing
+            ),
             None,
         )
         if next_node is None:
@@ -349,9 +358,7 @@ class AgentUpgradeService:
         if last_seen is None:
             return "has never reported online"
         seen = (
-            last_seen
-            if last_seen.tzinfo is not None
-            else last_seen.replace(tzinfo=UTC)
+            last_seen if last_seen.tzinfo is not None else last_seen.replace(tzinfo=UTC)
         )
         if seen > current or current - seen > _ONLINE_WINDOW:
             return "is not currently online"

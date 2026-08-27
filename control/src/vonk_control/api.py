@@ -1363,6 +1363,7 @@ def production_app() -> FastAPI:
             and "/dev/" in agent_services.bootstrap.installer_url
             else "stable"
         ),
+        release_api_url=settings.agent_release_api_url,
     )
 
     def consume_agent_result(session, operation, attempt, message) -> None:
