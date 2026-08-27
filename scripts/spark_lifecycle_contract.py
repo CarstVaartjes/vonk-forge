@@ -196,10 +196,15 @@ def _release_record(
     key: str,
     expected_path: str,
     label: str,
+    expected_fields: set[str] | None = None,
 ) -> tuple[int, str]:
     artifacts = _object(release.get("artifacts"), f"{label} artifacts")
     record = _object(artifacts.get(key), f"{label} {key}")
-    _exact(record, {"path", "sha256", "size"}, f"{label} {key}")
+    _exact(
+        record,
+        expected_fields or {"path", "sha256", "size"},
+        f"{label} {key}",
+    )
     size = record.get("size")
     digest = record.get("sha256")
     if (
@@ -235,7 +240,9 @@ def recompute_publication_graphs(
         Path(os.path.abspath(os.fspath(candidate_release))) != expected_candidate
         or Path(os.path.abspath(os.fspath(baseline_release))) != expected_baseline
     ):
-        raise ContractError("publication release paths do not match the candidate generation")
+        raise ContractError(
+            "publication release paths do not match the candidate generation"
+        )
     candidate = _safe_release_document(
         root, candidate_relative, "candidate release object"
     )
@@ -279,15 +286,20 @@ def recompute_publication_graphs(
     }
     if (
         any(candidate.get(field) != value for field, value in expected_identity.items())
-        or any(baseline.get(field) != value for field, value in expected_identity.items())
+        or any(
+            baseline.get(field) != value for field, value in expected_identity.items()
+        )
         or candidate.get("version") != version
         or baseline.get("acceptance_only") is not True
     ):
-        raise ContractError("publication release identity does not match the acceptance run")
+        raise ContractError(
+            "publication release identity does not match the acceptance run"
+        )
     baseline_version = baseline.get("version")
-    if not isinstance(baseline_version, str) or BASELINE_VERSION.fullmatch(
-        baseline_version
-    ) is None:
+    if (
+        not isinstance(baseline_version, str)
+        or BASELINE_VERSION.fullmatch(baseline_version) is None
+    ):
         raise ContractError("acceptance baseline version is invalid")
     ordered = subprocess.run(
         ["/usr/bin/dpkg", "--compare-versions", baseline_version, "lt", version],
@@ -307,7 +319,10 @@ def recompute_publication_graphs(
             or not name
             or not isinstance(image, str)
             or PINNED_IMAGE.fullmatch(image) is None
-            or any(pointer in image for pointer in (":latest@", ":dev@", ":main@", ":edge@"))
+            or any(
+                pointer in image
+                for pointer in (":latest@", ":dev@", ":main@", ":edge@")
+            )
             for name, image in images.items()
         )
     ):
@@ -327,7 +342,59 @@ def recompute_publication_graphs(
             key=f"agent-package-{platform}",
             expected_path=candidate_path,
             label="candidate release object",
+            expected_fields={
+                "architecture",
+                "host_signature",
+                "package_version",
+                "path",
+                "sha256",
+                "size",
+                "target_binary_digest",
+                "target_build_digest",
+            },
         )
+        candidate_record = _object(
+            _object(
+                candidate.get("artifacts"), "candidate release object artifacts"
+            ).get(f"agent-package-{platform}"),
+            f"candidate release object agent-package-{platform}",
+        )
+        host_signature = candidate_record.get("host_signature")
+        if (
+            candidate_record.get("architecture") != platform
+            or candidate_record.get("package_version") != version
+            or not isinstance(host_signature, str)
+            or re.fullmatch(r"[0-9a-f]{128}", host_signature) is None
+            or not isinstance(candidate_record.get("target_binary_digest"), str)
+            or SHA256.fullmatch(candidate_record["target_binary_digest"]) is None
+            or not isinstance(candidate_record.get("target_build_digest"), str)
+            or re.fullmatch(
+                r"sha256:[0-9a-f]{64}", candidate_record["target_build_digest"]
+            )
+            is None
+        ):
+            raise ContractError(
+                f"candidate release object agent-package-{platform} identity is invalid"
+            )
+        signature_path = f"{candidate_path}.host.sig"
+        signature_size, signature_digest = _release_record(
+            candidate,
+            key=f"agent-package-signature-{platform}",
+            expected_path=signature_path,
+            label="candidate release object",
+        )
+        signature_raw, _ = _safe_object_bytes(
+            root,
+            signature_path,
+            label=f"candidate {platform} package signature object",
+            maximum=1024,
+            expected_size=signature_size,
+            expected_digest=signature_digest,
+        )
+        if signature_raw != f"{host_signature}\n".encode("ascii"):
+            raise ContractError(
+                f"candidate {platform} package signature does not match its release record"
+            )
         baseline_size, baseline_digest = _release_record(
             baseline,
             key=f"agent-package-{platform}",
@@ -381,7 +448,9 @@ def recompute_publication_graphs(
     }
 
 
-def _version_tuple(value: str, pattern: re.Pattern[str], label: str) -> tuple[int, int, int]:
+def _version_tuple(
+    value: str, pattern: re.Pattern[str], label: str
+) -> tuple[int, int, int]:
     match = pattern.fullmatch(value)
     if match is None:
         raise ContractError(f"{label} is invalid")
@@ -473,7 +542,9 @@ def _validate_graph(
 
 def _validate_direct_agent(value: object) -> None:
     health = _object(value, "direct agent health proof")
-    _exact(health, {"healthy", "implementation", "transport"}, "direct agent health proof")
+    _exact(
+        health, {"healthy", "implementation", "transport"}, "direct agent health proof"
+    )
     if health != {
         "healthy": True,
         "implementation": "rust",
@@ -495,7 +566,10 @@ def _validate_install_identity(
         {"binary_sha256", "build_sha256", "package_sha256", "version"},
         label,
     )
-    if identity.get("version") != version or identity.get("package_sha256") != package_digest:
+    if (
+        identity.get("version") != version
+        or identity.get("package_sha256") != package_digest
+    ):
         raise ContractError(f"{label} does not match the publication graph")
     for field in ("binary_sha256", "build_sha256", "package_sha256"):
         _digest(identity.get(field), f"{label} {field}")
@@ -528,7 +602,10 @@ def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         "version": graph["candidate_version"],
     }:
         raise ContractError("AMD64 installation does not match the candidate graph")
-    if not isinstance(proof.get("node_id"), str) or NODE_ID.fullmatch(proof["node_id"]) is None:
+    if (
+        not isinstance(proof.get("node_id"), str)
+        or NODE_ID.fullmatch(proof["node_id"]) is None
+    ):
         raise ContractError("AMD64 node identity proof is invalid")
 
 
@@ -554,7 +631,10 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         proof.get("node_id_after_renewal"),
     ]
     if (
-        not all(isinstance(node_id, str) and NODE_ID.fullmatch(node_id) for node_id in node_ids)
+        not all(
+            isinstance(node_id, str) and NODE_ID.fullmatch(node_id)
+            for node_id in node_ids
+        )
         or len(set(node_ids)) != 1
     ):
         raise ContractError("ARM64 node identity was not preserved")
@@ -608,7 +688,11 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         raise ContractError("ARM64 old certificate was not durably rejected")
 
     canary = _object(proof.get("canary"), "ARM64 canary proof")
-    _exact(canary, {"completed_states", "deterministic_response_sha256"}, "ARM64 canary proof")
+    _exact(
+        canary,
+        {"completed_states", "deterministic_response_sha256"},
+        "ARM64 canary proof",
+    )
     if canary.get("completed_states") != CANARY_STATES:
         raise ContractError("ARM64 canary phases are incomplete")
     _digest(canary.get("deterministic_response_sha256"), "ARM64 canary response")

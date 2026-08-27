@@ -69,7 +69,7 @@ RemoveIPC=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadOnlyPaths=/etc/vonk-forge-agent /usr/lib/vonk-forge
-ReadWritePaths=/var/lib/vonk-forge-agent /run/vonk-forge-agent
+ReadWritePaths=/var/lib/vonk-forge-agent /var/lib/vonk-forge/incoming /run/vonk-forge-agent
 
 [Install]
 WantedBy=multi-user.target

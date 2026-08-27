@@ -655,6 +655,7 @@ def test_tag_release_attaches_agent_package_to_public_release() -> None:
     for asset in (
         '"release-output/agent-package/$ARM64_PACKAGE"',
         '"release-output/agent-package/$AMD64_PACKAGE"',
+        '"release-output/agent-package/${package}.host.sig"',
         '"release-output/agent-package/vonk-forge-systemd-security.json"',
     ):
         assert asset in release

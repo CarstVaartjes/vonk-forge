@@ -11,6 +11,16 @@ export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"]
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type TelemetryResolution = "raw" | "minute" | "fifteen-minute";
 export type TelemetryHistoryPoint = TelemetryHistory["points"][number];
+export type AgentUpgradeStrategy = "one-at-a-time" | "all-at-once";
+export type AgentUpgradePackage = {
+  architecture: "linux-arm64"; package_bytes: number; package_sha256: string;
+  package_signature: string; package_url: string; package_version: string;
+  schema_version: 1; target_binary_digest: string; target_build_digest: string;
+};
+export type AgentUpgradePlan = {
+  authority_revision: string; node_ids: string[]; package: AgentUpgradePackage;
+  plan_digest: string; strategy: AgentUpgradeStrategy;
+};
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];
 export type EnrollmentSummary = components["schemas"]["EnrollmentSummary"];
@@ -155,4 +165,6 @@ export interface ControlApi extends LibraryApi {
   createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;
+  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, signal?: AbortSignal): Promise<AgentUpgradePlan>;
+  applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<{id: string; state: string}>;
 }

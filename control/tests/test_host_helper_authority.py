@@ -107,7 +107,12 @@ def test_controller_refuses_mapping_shaped_or_untyped_operations() -> None:
         )
 
 
-def runtime_service(*, lease_seconds: int = 60) -> HostRuntimeAuthorityService:
+def runtime_service(
+    *,
+    lease_seconds: int = 60,
+    operation_kind: str = "recipe.start",
+    operation_payload: dict[str, object] | None = None,
+) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -130,7 +135,7 @@ def runtime_service(*, lease_seconds: int = 60) -> HostRuntimeAuthorityService:
             Job(
                 id=job_id,
                 request_id="50000000-0000-4000-8000-000000000005",
-                kind="recipe.start",
+                kind=operation_kind,
                 state="running",
                 actor="admin",
                 authority_revision="b"  * 64,
@@ -146,9 +151,9 @@ def runtime_service(*, lease_seconds: int = 60) -> HostRuntimeAuthorityService:
                 id=operation_id,
                 parent_job_id=job_id,
                 node_id=node_id,
-                kind="recipe.start",
+                kind=operation_kind,
                 payload_digest="d" * 64,
-                payload={},
+                payload=operation_payload or {},
                 authority_revision="b"  * 64,
                 state="running",
                 current_attempt=2,
@@ -168,6 +173,43 @@ def runtime_service(*, lease_seconds: int = 60) -> HostRuntimeAuthorityService:
             )
         )
     return HostRuntimeAuthorityService(sessions, issuer(), clock=lambda: NOW)
+
+
+def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package() -> None:
+    package = {"package_sha256": "a" * 64, "package_signature": "b" * 128}
+    service = runtime_service(
+        operation_kind="agent.upgrade.v1",
+        operation_payload=package,
+    )
+
+    grant = service.issue_agent_upgrade_grant(
+        node_id="spk_" + "1" * 32,
+        job_id="20000000-0000-4000-8000-000000000002",
+        operation_id="30000000-0000-4000-8000-000000000003",
+        attempt=2,
+        fence="40000000-0000-4000-8000-000000000004",
+        package_sha256=package["package_sha256"],
+        package_signature=package["package_signature"],
+        certificate_serial="certificate-1",
+        expires_in_seconds=30,
+    )
+
+    assert grant.claims.operation.to_mapping() == {
+        "type": "install-vonk-deb",
+        **package,
+    }
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        service.issue_agent_upgrade_grant(
+            node_id="spk_" + "1" * 32,
+            job_id="20000000-0000-4000-8000-000000000002",
+            operation_id="30000000-0000-4000-8000-000000000003",
+            attempt=2,
+            fence="40000000-0000-4000-8000-000000000004",
+            package_sha256="c" * 64,
+            package_signature=package["package_signature"],
+            certificate_serial="certificate-1",
+            expires_in_seconds=30,
+        )
 
 
 def test_runtime_authority_binds_active_attempt_action_and_request() -> None:

@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -958,13 +958,15 @@ fn artifacts_are_verified_before_package_mutation() {
 #[test]
 fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
     let (_temp, roots, runner, release) = fixture();
+    let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
     let executor = OperationExecutor::new(
         roots.clone(),
         release.public_key().as_ref(),
         runner.clone(),
         None,
     )
-    .unwrap();
+    .unwrap()
+    .with_package_owner(package_owner);
     let package = b"signed deb";
     let digest = vonk_agent_protocol::hex_sha256(package);
     fs::write(roots.incoming.join(format!("{digest}.deb")), package).unwrap();

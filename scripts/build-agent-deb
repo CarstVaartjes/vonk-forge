@@ -49,6 +49,7 @@ BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00agent\x00"
+PACKAGE_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
 ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
 
 
@@ -302,6 +303,27 @@ def sign_agent(
     return signature.hex().encode() + b"\n", public_der[
         len(ED25519_SPKI_PREFIX) :
     ].hex().encode() + b"\n"
+
+
+def sign_package(temporary: Path, private_key: Path, digest: str) -> bytes:
+    claims = temporary / "package.claims"
+    claims.write_bytes(PACKAGE_DOMAIN + bytes.fromhex(digest))
+    signature = run(
+        [
+            "/usr/bin/openssl",
+            "pkeyutl",
+            "-sign",
+            "-inkey",
+            str(private_key),
+            "-rawin",
+            "-in",
+            str(claims),
+        ],
+        cwd=Path("/"),
+    )
+    if len(signature) != 64:
+        raise BuildError("package signature is invalid")
+    return signature.hex().encode() + b"\n"
 
 
 def evidence(
@@ -660,6 +682,10 @@ def build(
         digest = hashlib.sha256(package.read_bytes()).hexdigest()
         atomic_output(
             output / f"{package_name}.sha256", f"{digest}  {package_name}\n".encode()
+        )
+        atomic_output(
+            output / f"{package_name}.host.sig",
+            sign_package(Path(temporary), private_key, digest),
         )
         for name, raw in documents.items():
             atomic_output(

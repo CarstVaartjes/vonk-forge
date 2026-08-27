@@ -952,6 +952,7 @@ jobs:
             architecture=${architecture##*_}
             release_assets+=(
               "release-output/agent-package/${package}.sha256"
+              "release-output/agent-package/${package}.host.sig"
               "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.cdx.json"
               "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.spdx.json"
               "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.provenance.json"

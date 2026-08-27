@@ -10,9 +10,10 @@ use std::{
 use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
+    agent_upgrade::AgentUpgradeExecutor,
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
-    executor::{LoopError, RecipeExecutor, run_once_with_claim_hook},
+    executor::{ControlExecutor, LoopError, RecipeExecutor, run_once_with_claim_hook},
     inventory::InventoryCollector,
     oci::OciRuntime,
     pair::{collect_evidence, complete_pairing_with, pair},
@@ -182,6 +183,7 @@ async fn run_control_lane(
     let capabilities = [
         "agent.runtime.rust.v1",
         "runtime.vonk.v1",
+        "agent.upgrade.v1",
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",
@@ -229,16 +231,22 @@ async fn run_control_lane(
                 Err(error) => return Err(error.into()),
             }
         }
-        let executor = RecipeExecutor {
-            client: &client,
-            runtime_root: Path::new("/run/vonk-forge-agent"),
-            runtime: OciRuntime {
-                runner: &runner,
-                data_root: &config.data_dir,
-                huggingface_curl_config: config.huggingface_curl_config.as_deref(),
+        let executor = ControlExecutor {
+            recipes: RecipeExecutor {
+                client: &client,
+                runtime_root: Path::new("/run/vonk-forge-agent"),
+                runtime: OciRuntime {
+                    runner: &runner,
+                    data_root: &config.data_dir,
+                    huggingface_curl_config: config.huggingface_curl_config.as_deref(),
+                },
+            },
+            upgrades: AgentUpgradeExecutor {
+                client: &client,
+                incoming: Path::new("/var/lib/vonk-forge/incoming"),
             },
         };
-        let observations = executor.runtime.recipe_run_observations()?;
+        let observations = executor.recipes.runtime.recipe_run_observations()?;
         let wait_seconds = claim_wait_seconds(
             config.poll_max_seconds,
             observations.len(),

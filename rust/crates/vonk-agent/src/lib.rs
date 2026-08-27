@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod agent_upgrade;
 mod base_images;
 pub mod build_source;
 pub mod client;

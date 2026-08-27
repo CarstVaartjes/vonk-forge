@@ -17,7 +17,9 @@ if ! getent passwd vonk-agent >/dev/null; then
     adduser --system --ingroup vonk-agent --home /var/lib/vonk-forge-agent \
         --no-create-home --shell /usr/sbin/nologin vonk-agent
 fi
-/usr/bin/loginctl enable-linger vonk-agent >/dev/null
+if [ ! -e /var/lib/systemd/linger/vonk-agent ]; then
+    /usr/bin/loginctl enable-linger vonk-agent >/dev/null
+fi
 
 # Podman needs a standard subordinate range to map both OCI image ownership
 # and the required numeric non-root runtime identity. Allocate the first free
@@ -130,8 +132,8 @@ fi
 install -d -o root -g root -m 0700 \
     /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests \
-    /var/lib/vonk-forge/incoming \
     /var/lib/vonk-forge/runtime-images
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then

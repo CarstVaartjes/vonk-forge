@@ -60,6 +60,10 @@ PATH_KEY = re.compile(
     rf"(?:^|[_-])(?:{PATH_KEY_ANY_CASE})(?:$|[_-]|[A-Z])"
     rf"|[a-z0-9](?:{PATH_KEY_CAMEL_CASE})(?:$|[_-]|[A-Z])"
 )
+AGENT_PACKAGE_URL = re.compile(
+    r"https://install\.vonkforge\.ai/"
+    r"[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb\Z"
+)
 
 
 class AgentProtocolError(ValueError):
@@ -67,6 +71,7 @@ class AgentProtocolError(ValueError):
 
 
 class AgentOperation(StrEnum):
+    AGENT_UPGRADE = "agent.upgrade.v1"
     NODE_PROBE = "node.probe"
     RELEASE_INSTALL = "release.install"
     WORKLOAD_PREPARE = "workload.prepare"
@@ -194,6 +199,10 @@ def _validate_safe_keys(
         elif (
             operation is AgentOperation.RECIPE_BUILD
             and _typed_build_string(path, value)
+        ) or (
+            operation is AgentOperation.AGENT_UPGRADE
+            and path == ("package_url",)
+            and AGENT_PACKAGE_URL.fullmatch(value) is not None
         ) or (
             typed_result_strings
             and ("/" in value or "\\" in value)
@@ -340,6 +349,48 @@ def _validate_bounded_document(
     if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
         raise AgentProtocolError(f"{name} is too large")
     return copied
+
+
+def _validate_agent_upgrade_payload(value: Mapping[str, Any]) -> None:
+    _fields(
+        value,
+        required={
+            "architecture",
+            "package_bytes",
+            "package_sha256",
+            "package_signature",
+            "package_url",
+            "package_version",
+            "schema_version",
+            "target_binary_digest",
+            "target_build_digest",
+        },
+    )
+    if (
+        value["schema_version"] != 1
+        or isinstance(value["schema_version"], bool)
+        or value["architecture"] != "linux-arm64"
+        or not isinstance(value["package_bytes"], int)
+        or isinstance(value["package_bytes"], bool)
+        or not 1 <= value["package_bytes"] <= 1024**3
+        or not isinstance(value["package_sha256"], str)
+        or DIGEST.fullmatch(value["package_sha256"]) is None
+        or not isinstance(value["package_signature"], str)
+        or re.fullmatch(r"[0-9a-f]{128}", value["package_signature"]) is None
+        or not isinstance(value["package_url"], str)
+        or AGENT_PACKAGE_URL.fullmatch(value["package_url"]) is None
+        or not isinstance(value["package_version"], str)
+        or re.fullmatch(
+            r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}", value["package_version"]
+        )
+        is None
+        or not isinstance(value["target_binary_digest"], str)
+        or DIGEST.fullmatch(value["target_binary_digest"]) is None
+        or not isinstance(value["target_build_digest"], str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", value["target_build_digest"])
+        is None
+    ):
+        raise AgentProtocolError("agent upgrade payload is invalid")
 
 
 def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
@@ -667,6 +718,8 @@ class AgentClaim:
             raise AgentProtocolError("payload digest does not match payload")
         if self.operation is AgentOperation.RECIPE_BUILD:
             _validate_recipe_build_payload(payload)
+        elif self.operation is AgentOperation.AGENT_UPGRADE:
+            _validate_agent_upgrade_payload(payload)
         object.__setattr__(self, "payload", payload)
         object.__setattr__(self, "deadline", _deadline(self.deadline))
 

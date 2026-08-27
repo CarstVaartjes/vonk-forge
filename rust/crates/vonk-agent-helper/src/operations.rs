@@ -184,6 +184,7 @@ pub struct OperationExecutor<R> {
     release_public_key: [u8; 32],
     runner: R,
     required_owner_uid: Option<u32>,
+    package_owner_uid: Option<u32>,
     runtime_request_owner_uid: Option<u32>,
 }
 
@@ -214,8 +215,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             release_public_key,
             runner,
             required_owner_uid,
+            package_owner_uid: required_owner_uid,
             runtime_request_owner_uid: required_owner_uid,
         })
+    }
+
+    pub fn with_package_owner(mut self, uid: u32) -> Self {
+        self.package_owner_uid = Some(uid);
+        self
     }
 
     pub fn with_runtime_request_owner(mut self, uid: u32) -> Self {
@@ -330,9 +337,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
         digest: &str,
         detached_signature: &str,
     ) -> Result<(), OperationError> {
-        self.require_directory(&self.roots.incoming)?;
+        require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let package = self.roots.incoming.join(format!("{digest}.deb"));
-        self.verify_artifact(&package, "deb", digest, detached_signature)?;
+        self.verify_artifact(
+            &package,
+            "deb",
+            digest,
+            detached_signature,
+            self.package_owner_uid,
+        )?;
         let package_name = package.to_string_lossy().into_owned();
         self.require_field(&package_name, "Package", "vonk-forge-agent")?;
         self.require_field(&package_name, "Architecture", "arm64")?;
@@ -350,6 +363,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !result.success {
             return Err(OperationError::CommandFailed);
         }
+        fs::remove_file(&package)?;
+        sync_directory(&self.roots.incoming)?;
         Ok(())
     }
 
@@ -957,6 +972,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         kind: &str,
         expected_digest: &str,
         detached_signature: &str,
+        required_owner_uid: Option<u32>,
     ) -> Result<(), OperationError> {
         let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::InvalidArtifact)?;
         if metadata.file_type().is_symlink()
@@ -965,9 +981,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || metadata.len() == 0
             || metadata.len() > MAX_ARTIFACT_BYTES
             || metadata.mode() & 0o022 != 0
-            || self
-                .required_owner_uid
-                .is_some_and(|uid| metadata.uid() != uid)
+            || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
         {
             return Err(OperationError::InvalidArtifact);
         }

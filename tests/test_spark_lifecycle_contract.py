@@ -143,14 +143,28 @@ def _write_canonical(path: Path, document: object) -> None:
 
 def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     objects = tmp_path / "objects"
-    candidate_artifacts = {
-        f"agent-package-{platform}": _record(
-            objects,
-            f"artifacts/dev/releases/{GENERATION}/spark/current/{platform}/vonk-forge-agent.deb",
-            f"candidate-{platform}".encode(),
+    candidate_artifacts: dict[str, dict[str, object]] = {}
+    for platform in ("linux-amd64", "linux-arm64"):
+        package_path = (
+            f"artifacts/dev/releases/{GENERATION}/spark/current/{platform}/"
+            "vonk-forge-agent.deb"
         )
-        for platform in ("linux-amd64", "linux-arm64")
-    }
+        candidate_artifacts[f"agent-package-{platform}"] = _record(
+            objects,
+            package_path,
+            f"candidate-{platform}".encode(),
+        ) | {
+            "architecture": platform,
+            "host_signature": "e" * 128,
+            "package_version": "1.2.3",
+            "target_binary_digest": "f" * 64,
+            "target_build_digest": "sha256:" + "d" * 64,
+        }
+        candidate_artifacts[f"agent-package-signature-{platform}"] = _record(
+            objects,
+            f"{package_path}.host.sig",
+            ("e" * 128 + "\n").encode(),
+        )
     baseline_artifacts = {
         f"agent-package-{platform}": _record(
             objects,

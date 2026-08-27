@@ -55,6 +55,7 @@ fn run() -> Result<(), String> {
         Some(0),
     )
     .map_err(display)?
+    .with_package_owner(agent_uid)
     .with_runtime_request_owner(agent_uid);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;

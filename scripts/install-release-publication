@@ -521,6 +521,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "acceptance baseline agent package",
     )
     source_contents: dict[str, bytes] = {}
+    package_identities: dict[str, dict[str, str]] = {}
     for platform, path in nas.items():
         source_contents[f"nas:{platform}"] = _safe_bytes(path, f"NAS setup {platform}")
     for platform, path in spark.items():
@@ -535,6 +536,46 @@ def assemble(arguments: argparse.Namespace) -> str:
         source_contents[f"package:{platform}"] = _safe_bytes(
             path, f"agent package {platform}"
         )
+        signature = _safe_bytes(
+            Path(f"{path}.host.sig"), f"agent package signature {platform}", 1024
+        )
+        try:
+            signature_text = signature.decode("ascii").strip()
+        except UnicodeDecodeError as error:
+            raise PublicationError("agent package signature is invalid") from error
+        if re.fullmatch(r"[0-9a-f]{128}", signature_text) is None:
+            raise PublicationError("agent package signature is invalid")
+        provenance_raw = _safe_bytes(
+            path.with_suffix(".provenance.json"),
+            f"agent package provenance {platform}",
+            2 * 1024 * 1024,
+        )
+        try:
+            provenance = json.loads(provenance_raw)
+            build_digest = provenance["predicate"]["buildDefinition"][
+                "externalParameters"
+            ]["build_digest"]
+            binary_digest = next(
+                subject["digest"]["sha256"]
+                for subject in provenance["subject"]
+                if subject["name"] == "vonk-agent"
+            )
+        except (KeyError, StopIteration, TypeError, ValueError) as error:
+            raise PublicationError("agent package provenance is invalid") from error
+        if (
+            re.fullmatch(r"sha256:[0-9a-f]{64}", build_digest) is None
+            or SHA256.fullmatch(binary_digest) is None
+        ):
+            raise PublicationError("agent package provenance identity is invalid")
+        source_contents[f"package-signature:{platform}"] = signature
+        source_contents[f"package-provenance:{platform}"] = provenance_raw
+        package_identities[platform] = {
+            "architecture": platform,
+            "host_signature": signature_text,
+            "package_version": version,
+            "target_binary_digest": binary_digest,
+            "target_build_digest": build_digest,
+        }
     baseline_versions: set[str] = set()
     for platform, path in baseline_packages.items():
         architecture = platform.removeprefix("linux-")
@@ -637,7 +678,15 @@ def assemble(arguments: argparse.Namespace) -> str:
             add_immutable(package_key, package_content)
             release_artifacts[f"agent-package-{platform}"] = {
                 "path": package_key,
+                **package_identities[platform],
                 **_record(package_content),
+            }
+            package_signature_key = f"{package_key}.host.sig"
+            package_signature = source_contents[f"package-signature:{platform}"]
+            add_immutable(package_signature_key, package_signature)
+            release_artifacts[f"agent-package-signature-{platform}"] = {
+                "path": package_signature_key,
+                **_record(package_signature),
             }
 
         baseline_prefix = f"{immutable_prefix}/acceptance-baseline"

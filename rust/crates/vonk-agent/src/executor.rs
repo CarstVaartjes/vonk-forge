@@ -5,6 +5,7 @@ use std::{future::Future, path::Path, time::Duration};
 
 use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
+    agent_upgrade::AgentUpgradeExecutor,
     client::{AgentHttpClient, ClientError},
     health::{HealthEvidence, wait_ready},
     host_runtime::HostRuntimeBoundary,
@@ -88,6 +89,34 @@ pub struct RecipeExecutor<'a, R> {
     pub client: &'a AgentHttpClient,
     pub runtime: OciRuntime<'a, R>,
     pub runtime_root: &'a Path,
+}
+
+pub struct ControlExecutor<'a, R> {
+    pub recipes: RecipeExecutor<'a, R>,
+    pub upgrades: AgentUpgradeExecutor<'a>,
+}
+
+#[async_trait(?Send)]
+impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
+    async fn execute(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    ) -> ExecutionResult {
+        if claim.operation == "agent.upgrade.v1" {
+            return match self.upgrades.execute(claim).await {
+                Ok(()) => ExecutionResult {
+                    state: "waiting-for-operator",
+                    body: json!({"reason": "agent upgrade did not restart the service"}),
+                },
+                Err(error) => ExecutionResult {
+                    state: "failed",
+                    body: json!({"reason": error.to_string()}),
+                },
+            };
+        }
+        self.recipes.execute(claim, lease_deadline).await
+    }
 }
 
 impl<R> RecipeExecutor<'_, R> {
@@ -664,6 +693,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .and_then(Value::as_str)
         .unwrap_or("agent operation failed");
     let error_code = match claim.operation.as_str() {
+        "agent.upgrade.v1" => "agent_upgrade_failed",
         "recipe.build.v1" => "recipe_build_failed",
         "recipe.image.import.v1" => "recipe_image_import_failed",
         "recipe.install" => "recipe_install_failed",

@@ -2,6 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {KeyboardEvent as ReactKeyboardEvent} from "react";
 import type {ControlApi, EnrollmentGrantResponse, TelemetryHistory, VisualFleetNode} from "../api/types";
 import {CopyButton} from "../components/copy-button";
+import {AgentUpgradeDialog} from "../components/agent-upgrade-dialog";
 import {FleetCompactView, FleetTopologyView} from "../components/fleet-views";
 import {NodeCard} from "../components/node-card";
 import {NodeDetail} from "../components/node-detail";
@@ -258,6 +259,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   const [onboarding, setOnboarding] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState<"new-node" | "re-enroll">("new-node");
   const [reenrollNodeId, setReenrollNodeId] = useState<string>();
+  const [upgradeTarget, setUpgradeTarget] = useState<"fleet" | {id: string; name: string}>();
   const [viewMode, setViewMode] = useState<FleetViewMode>(storedFleetView);
   const [query, setQuery] = useState("");
   const [healthFilters, setHealthFilters] = useState<FleetHealthFilter[]>([]);
@@ -269,6 +271,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
   const discoverySearch = useRef<HTMLInputElement>(null);
   const onboardingTrigger = useRef<HTMLElement | null>(null);
   const editTrigger = useRef<HTMLElement | null>(null);
+  const upgradeTrigger = useRef<HTMLElement | null>(null);
   const completedCardHistories = useRef(new Set<string>());
 
   const summary = useMemo(
@@ -371,6 +374,11 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     queueMicrotask(() => editTrigger.current?.focus());
   }
 
+  function closeUpgrade() {
+    setUpgradeTarget(undefined);
+    queueMicrotask(() => upgradeTrigger.current?.focus());
+  }
+
   function changeView(next: FleetViewMode) {
     setViewMode(next);
     try { localStorage.setItem(FLEET_VIEW_STORAGE_KEY, next); } catch { /* Preference persistence is optional. */ }
@@ -418,6 +426,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </section>}
 
       <div className="fleet-command-actions">
+        {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>
           <div className="fleet-controls-popover">
@@ -446,6 +455,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     </header>
     {onboarding && <SparkOnboarding api={api} mode={onboardingMode} nodeId={reenrollNodeId} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
     {editingNode && <NodeProfileDialog api={api} node={editingNode} onClose={closeEditor} onSaved={displayName => fleet.updateNodeProfile(editingNode.id, displayName)}/>}
+    {upgradeTarget && <AgentUpgradeDialog api={api} node={upgradeTarget === "fleet" ? undefined : upgradeTarget} onBusyChange={onBusyChange} onClose={closeUpgrade}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
@@ -498,6 +508,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
             setReenrollNodeId(selectedNode.id);
             setOnboarding(true);
           }}
+          onUpgrade={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget({id: selectedNode.id, name: nodeDisplayName(selectedNode)}); }}
         />}
       </div>
     </>}

@@ -220,6 +220,7 @@ def test_package_manages_the_rootless_podman_user_manager() -> None:
     prerm = PRERM.read_text()
 
     assert "/usr/bin/loginctl enable-linger vonk-agent" in postinst
+    assert "if [ ! -e /var/lib/systemd/linger/vonk-agent ]; then" in postinst
     assert "/usr/bin/loginctl disable-linger vonk-agent" in prerm
 
 
@@ -308,6 +309,40 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         sidecar
         == f"{hashlib.sha256(first_deb.read_bytes()).hexdigest()}  {package_name}"
     )
+    package_signature = (first / f"{package_name}.host.sig").read_text().strip()
+    assert len(package_signature) == 128
+    assert all(character in "0123456789abcdef" for character in package_signature)
+    public_key = tmp_path / "release.pub"
+    signature = tmp_path / "package.sig"
+    claims = tmp_path / "package.claims"
+    subprocess.run(
+        ["/usr/bin/openssl", "pkey", "-in", key, "-pubout", "-out", public_key],
+        check=True,
+    )
+    signature.write_bytes(bytes.fromhex(package_signature))
+    claims.write_bytes(
+        b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
+        + hashlib.sha256(first_deb.read_bytes()).digest()
+    )
+    verified_signature = subprocess.run(
+        [
+            "/usr/bin/openssl",
+            "pkeyutl",
+            "-verify",
+            "-pubin",
+            "-inkey",
+            public_key,
+            "-rawin",
+            "-in",
+            claims,
+            "-sigfile",
+            signature,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert verified_signature.returncode == 0, verified_signature.stderr
 
     verified = subprocess.run(
         [VERIFY, "--json", first_deb],
@@ -400,6 +435,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "InaccessiblePaths=/home /root -/run/docker.sock" in unit
     assert "BindReadOnlyPaths=/run/user" not in unit
     assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in unit
+    assert (
+        "ReadWritePaths=/var/lib/vonk-forge-agent /var/lib/vonk-forge/incoming "
+        "/run/vonk-forge-agent"
+    ) in unit
     assert "RestrictNamespaces=user mnt pid ipc uts cgroup net" in unit
     assert "ProtectProc=default" in unit
     assert "ProcSubset=all" in unit
@@ -736,6 +775,31 @@ def test_verifier_rejects_tampered_release_sidecar(tmp_path: Path) -> None:
 
     assert verified.returncode == 1
     assert "sidecar is invalid" in verified.stdout
+
+
+def test_verifier_rejects_tampered_host_package_signature(tmp_path: Path) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    output = tmp_path / "dist"
+    result = _build(output, binaries, key)
+    assert result.returncode == 0, result.stderr
+    deb = output / "vonk-forge-agent_0.1.0_arm64.deb"
+    (output / f"{deb.name}.host.sig").write_text(f"{'0' * 128}\n")
+
+    verified = subprocess.run(
+        [VERIFY, "--json", deb],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert verified.returncode == 1
+    assert "required command rejected input" in verified.stdout
 
 
 def test_builder_accepts_cargo_hardlinked_release_binary(tmp_path: Path) -> None:

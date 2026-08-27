@@ -72,6 +72,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/upgrades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Agent Upgrade */
+        post: operations["applyAgentUpgrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/upgrades/candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Agent Upgrade */
+        get: operations["getAgentUpgradeCandidate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/upgrades/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Agent Upgrade */
+        post: operations["previewAgentUpgrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -1123,6 +1174,59 @@ export interface components {
             stale: boolean;
             /** State */
             state: string;
+        };
+        /** AgentUpgradeApplyRequest */
+        AgentUpgradeApplyRequest: {
+            /** Node Ids */
+            node_ids?: string[] | null;
+            package?: components["schemas"]["AgentUpgradePackageRequest"] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Strategy
+             * @default one-at-a-time
+             * @enum {string}
+             */
+            strategy: "one-at-a-time" | "all-at-once";
+        };
+        /** AgentUpgradePackageRequest */
+        AgentUpgradePackageRequest: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Package Bytes */
+            package_bytes: number;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Signature */
+            package_signature: string;
+            /** Package Url */
+            package_url: string;
+            /** Package Version */
+            package_version: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Target Binary Digest */
+            target_binary_digest: string;
+            /** Target Build Digest */
+            target_build_digest: string;
+        };
+        /** AgentUpgradePreviewRequest */
+        AgentUpgradePreviewRequest: {
+            /** Node Ids */
+            node_ids?: string[] | null;
+            package?: components["schemas"]["AgentUpgradePackageRequest"] | null;
+            /**
+             * Strategy
+             * @default one-at-a-time
+             * @enum {string}
+             */
+            strategy: "one-at-a-time" | "all-at-once";
         };
         /** AgentsResponse */
         AgentsResponse: {
@@ -4026,6 +4130,98 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    applyAgentUpgrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUpgradeApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAgentUpgradeCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    previewAgentUpgrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUpgradePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
