@@ -426,6 +426,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </section>}
 
       <div className="fleet-command-actions">
+        {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>
           <div className="fleet-controls-popover">
@@ -449,7 +450,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
           </div>
         </details>}
         <button type="button" className="button secondary fleet-reenroll-button" aria-label="Re-enroll Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("re-enroll"); setOnboarding(true); }}>Re-enroll</button>
-        {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
         <button type="button" className="button fleet-add-button" aria-label="Add Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("new-node"); setOnboarding(true); }}>+ Spark</button>
       </div>
     </header>
