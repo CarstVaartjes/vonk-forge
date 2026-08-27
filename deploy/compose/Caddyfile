@@ -93,6 +93,23 @@ http://:8083 {
 	respond 404
 }
 
+# Relay only the immutable documents needed to select the current signed agent
+# package. The package URL returned to Sparks remains the public HTTPS origin.
+http://:8084 {
+	@agent_release_api {
+		method GET
+		path /artifacts/dev/current.manifest /artifacts/stable/current.manifest /artifacts/dev/releases/*/release.json /artifacts/stable/releases/*/release.json /artifacts/dev/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig /artifacts/stable/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig
+	}
+	handle @agent_release_api {
+		reverse_proxy https://install.vonkforge.ai {
+			header_up Host install.vonkforge.ai
+			header_up -Authorization
+			header_up -Cookie
+		}
+	}
+	respond 404
+}
+
 # Browser and operator traffic arrives only from the Tailscale gateway over the
 # private tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
 # listener; Docker does not publish port 8080.

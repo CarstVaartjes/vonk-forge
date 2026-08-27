@@ -151,6 +151,7 @@ class Settings:
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
     recipe_library_api_url: str = "https://api.github.com"
+    agent_release_api_url: str = "https://install.vonkforge.ai"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
     install_channel: str = "stable"
@@ -430,6 +431,16 @@ class Settings:
             raise SettingsError(
                 "recipe library API URL must be GitHub or the fixed internal relay"
             )
+        agent_release_api_url = os.environ.get(
+            "VONK_AGENT_RELEASE_API_URL", "https://install.vonkforge.ai"
+        ).rstrip("/")
+        if agent_release_api_url not in {
+            "https://install.vonkforge.ai",
+            "http://caddy:8084",
+        }:
+            raise SettingsError(
+                "agent release API URL must be the public origin or fixed internal relay"
+            )
         return cls(
             database_url=database_url,
             state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
@@ -464,6 +475,7 @@ class Settings:
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             global_catalog_url=global_catalog_url,
             recipe_library_api_url=recipe_library_api_url,
+            agent_release_api_url=agent_release_api_url,
             agent_controller_address=agent_controller_address,
             agent_service_hostnames=agent_service_hostnames,
             install_channel=install_channel,
