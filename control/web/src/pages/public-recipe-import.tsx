@@ -28,6 +28,7 @@ type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d"
 type ImportStep = "catalog" | "review" | "confirm";
 type CatalogView = "cards" | "compact";
 type Facet = "modelType" | "model" | "sourceOwner" | "repository" | "sparks" | "runtime" | "precision" | "topology" | "qualification" | "readiness" | "local" | "capability";
+type ImportCompletion = {recipeId: string; title: string};
 
 const MODEL_TYPE_OPTIONS: Array<{value: Exclude<ModelType, "">; label: string}> = [
   {value: "language", label: "Language / chat"},
@@ -234,13 +235,17 @@ function sparkLabel(count: number): string {
   return `${count} Spark${count === 1 ? "" : "s"}`;
 }
 
+function localRecipePath(recipeId: string): string {
+  return `/library/recipes/${encodeURIComponent(recipeId)}`;
+}
+
 function localStatusLabel(recipe: PublicRecipe): string {
-  if (recipe.local.status === "current") return "Installed · current";
+  if (recipe.local.status === "current") return "Imported · current";
   if (recipe.local.status === "update-available") return `Update from v${recipe.local.release_version ?? "?"}`;
   if (recipe.local.status === "local-ahead") return "Local version is newer";
   if (recipe.local.status === "different-revision") return "Different local revision";
   if (recipe.local.status === "conflict") return "Local identity conflict";
-  return "Not installed";
+  return "Not imported";
 }
 
 function upgradeEffectLabel(value: "metadata-only" | "restart" | "reinstall" | "rebuild"): string {
@@ -394,21 +399,27 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   return items;
 }
 
-function Preview({preview, saving, importError, importOutcomeUnknown, status, onBack, onConfirm, onImport, onRecheckImport}: {
+function Preview({preview, saving, importError, importOutcomeUnknown, status, onBack, onConfirm, onImport, onOpenLocal, onRecheckImport}: {
   preview: PublicRecipePreview;
   saving: boolean;
   importError: string;
   importOutcomeUnknown: boolean;
-  status: string;
+  status: ImportStep;
   onBack(): void;
   onConfirm(): void;
   onImport(): void;
+  onOpenLocal(): void;
   onRecheckImport(): void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { queueMicrotask(() => heading.current?.focus()); }, [preview.uri, status]);
   const requiredEffect = strongestUpgradeEffect(preview.changes_since_local);
   const executable = preview.execution_readiness === "executable";
+  const localPath = preview.local.recipe_id ? localRecipePath(preview.local.recipe_id) : "";
+  const actions = <footer className="public-import-preview-actions">
+    <button type="button" className="button secondary" disabled={saving} onClick={onBack}>{status === "confirm" ? "Back to review" : "Choose another recipe"}</button>
+    {preview.local.status === "current" && localPath ? <a className="button" href={localPath} onClick={event => { event.preventDefault(); onOpenLocal(); }}>Open build &amp; install controls</a> : executable && (status === "confirm" && !importError && !importOutcomeUnknown ? <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onImport}>{saving ? "Importing…" : preview.local.status === "update-available" || preview.local.status === "different-revision" ? `Import${preview.release_version ? ` v${preview.release_version}` : " catalog revision"}` : preview.qualification === "candidate" ? "Import candidate" : "Import recipe"}</button> : status !== "confirm" && <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onConfirm}>{preview.local.status === "current" ? "Already current" : "Continue to confirm"}</button>)}
+  </footer>;
   return <section className={`public-import-preview${status === "confirm" ? " is-confirming" : ""}`} aria-labelledby="public-import-preview-title" aria-busy={saving}>
     <button type="button" className="button secondary public-import-mobile-back" disabled={saving} onClick={onBack}>Back to catalog</button>
     <header className="public-import-preview-header">
@@ -418,16 +429,19 @@ function Preview({preview, saving, importError, importOutcomeUnknown, status, on
     <div className={`public-import-trust qualification-${preview.qualification}`}><strong>{qualificationLabel(preview)} qualification</strong><p>{preview.qualification_detail}</p></div>
     <div className={`public-import-trust readiness-${preview.execution_readiness}`}><strong>{readinessLabel(preview.execution_readiness)}</strong><p>{preview.execution_readiness_detail}</p></div>
     <div className="public-import-version-summary" aria-label="Version summary">
-      <div><span>Installed</span><strong>{preview.local.release_version ? `v${preview.local.release_version}` : preview.local.status === "not-imported" ? "Not installed" : "Unknown revision"}</strong></div>
+      <div><span>Local recipe</span><strong>{preview.local.release_version ? `v${preview.local.release_version}` : preview.local.status === "not-imported" ? "Not imported" : "Unknown revision"}</strong></div>
       <span aria-hidden="true">→</span>
-      <div><span>Available</span><strong>{preview.release_version ? `v${preview.release_version}` : "Immutable revision"}</strong></div>
-      <div><span>Upgrade effect</span><strong>{requiredEffect ? upgradeEffectLabel(requiredEffect) : preview.local.status === "not-imported" ? "New installation" : "No runtime change listed"}</strong></div>
+      <div><span>Catalog release</span><strong>{preview.release_version ? `v${preview.release_version}` : "Immutable revision"}</strong></div>
+      <div><span>Runtime impact</span><strong>{requiredEffect ? upgradeEffectLabel(requiredEffect) : preview.local.status === "not-imported" ? "Install after import" : "No runtime change listed"}</strong></div>
       <div><span>Changes</span><strong>{preview.changes_since_local.reduce((total, release) => total + release.changes.length, 0)}</strong></div>
     </div>
+    {preview.local.status === "current" && <div className="public-import-local-handoff" role="region" aria-label="Local recipe handoff"><div><strong>Already in your local Library</strong><p>Build, map, install, and run this immutable revision from its local recipe page.</p></div></div>}
+    {status !== "confirm" && actions}
     {!executable && <div className="public-import-state is-error" role="alert"><div><strong>Import blocked: executable contract required</strong><p>This immutable recipe remains available for inspection, but Vonk Forge only imports recipes that declare a complete executable contract.</p></div></div>}
-    {status === "confirm" && executable && <div className={`public-import-confirmation-copy readiness-${preview.execution_readiness}`}><strong>{preview.qualification === "candidate" ? "Import this candidate?" : "Import this recipe?"}</strong><p>This saves a new immutable local recipe revision. It does not rebuild, reinstall, or restart running services.</p></div>}
+    {status === "confirm" && executable && preview.local.status !== "current" && <div className={`public-import-confirmation-copy readiness-${preview.execution_readiness}`}><strong>{preview.qualification === "candidate" ? "Import this candidate?" : "Import this recipe?"}</strong><p>This saves a new immutable local recipe revision. It does not rebuild, reinstall, or restart running services.</p></div>}
     {status === "confirm" && executable && importError && <div className="public-import-state is-error" role="alert"><div><strong>Import failed</strong><p>{importError}</p></div><button type="button" className="button secondary" disabled={saving} onClick={onImport}>Retry import</button></div>}
     {status === "confirm" && executable && importOutcomeUnknown && <div className="public-import-state is-slow" role="status"><div><strong>Stopped waiting — import outcome unknown</strong><p>The server may still have completed the import. Check or recheck the local Library status before starting another import.</p></div><div><a className="button secondary" href="/library">Check local Library</a><button type="button" className="button secondary" onClick={onRecheckImport}>Recheck status</button></div></div>}
+    {status === "confirm" && actions}
     {status !== "confirm" && <>
       <p className="public-import-description">{preview.description || "No description provided."}</p>
       <div className="public-import-tags" aria-label="Recipe capabilities">{preview.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
@@ -439,10 +453,6 @@ function Preview({preview, saving, importError, importOutcomeUnknown, status, on
       {preview.changes_since_local.length > 0 && <section className="public-import-changelog" aria-labelledby="public-import-changelog-title"><header><span className="public-import-kicker">Release notes</span><h3 id="public-import-changelog-title">{preview.local.status === "update-available" ? `Changes since local v${preview.local.release_version}` : "Catalog changelog"}</h3></header>{preview.changes_since_local.map((release, releaseIndex) => <details open={releaseIndex === 0} key={`${release.version}:${release.content_sha256}`}><summary><strong>v{release.version}</strong><span>{release.released_at} · {upgradeEffectLabel(release.upgrade_effect)}</span></summary><ul>{release.changes.map((change, index) => <li key={`${change.kind}:${index}`}><span>{change.kind}</span><strong>{change.summary}</strong>{change.details && <p>{change.details}</p>}{change.references.length > 0 && <div>{change.references.map((reference, referenceIndex) => <a href={reference} target="_blank" rel="noreferrer" key={reference}>Source {referenceIndex + 1}<span className="sr-only"> (opens in a new tab)</span></a>)}</div>}</li>)}</ul></details>)}</section>}
       <details className="public-import-technical"><summary>Technical details</summary><dl><div><dt>Catalog identity</dt><dd>{preview.publisher}/{preview.slug}</dd></div><div><dt>Qualification evidence</dt><dd>{preview.qualification_basis.replaceAll("-", " ")}</dd></div><div><dt>Readiness evidence</dt><dd>{preview.execution_readiness_basis.replaceAll("-", " ")}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(preview.runtime_distribution)}</dd></div><div><dt>Execution</dt><dd>{runtimeLabel(preview.execution_harness)}</dd></div><div><dt>Topology</dt><dd>{preview.topology_mode}</dd></div><div><dt>Installed / Spark</dt><dd>{formatBytes(preview.maximum_installed_bytes_per_node)}</dd></div><div><dt>Artifacts</dt><dd>{preview.artifact_count}</dd></div>{preview.source_repository && <div><dt>Original repository</dt><dd><a href={preview.source_repository} target="_blank" rel="noreferrer">View source<span className="sr-only"> (opens in a new tab)</span></a></dd></div>}<div><dt>Immutable digest</dt><dd><code>sha256:{preview.content_sha256}</code></dd></div></dl></details>
     </>}
-    <footer className="public-import-preview-actions">
-      <button type="button" className="button secondary" disabled={saving} onClick={onBack}>{status === "confirm" ? "Back to review" : "Choose another recipe"}</button>
-      {executable && (status === "confirm" && !importError && !importOutcomeUnknown ? <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onImport}>{saving ? "Importing…" : preview.local.status === "update-available" || preview.local.status === "different-revision" ? `Import${preview.release_version ? ` v${preview.release_version}` : " catalog revision"}` : preview.qualification === "candidate" ? "Import candidate" : "Import recipe"}</button> : status !== "confirm" && <button type="button" className="button" disabled={saving || ["current", "conflict", "local-ahead"].includes(preview.local.status)} onClick={onConfirm}>{preview.local.status === "current" ? "Already current" : "Continue to confirm"}</button>)}
-    </footer>
     {status === "confirm" && <span className="sr-only">Confirm the selected immutable recipe before importing.</span>}
   </section>;
 }
@@ -467,7 +477,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const [importSlow, setImportSlow] = useState(false);
   const [importOutcomeUnknown, setImportOutcomeUnknown] = useState(false);
   const [importError, setImportError] = useState("");
-  const [completion, setCompletion] = useState("");
+  const [completion, setCompletion] = useState<ImportCompletion>();
   const [manualUri, setManualUri] = useState("");
   const [manualUriError, setManualUriError] = useState("");
   const [announcement, setAnnouncement] = useState("");
@@ -544,7 +554,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     setPreview(undefined);
     setPreviewError("");
     setImportError("");
-    setCompletion("");
+    setCompletion(undefined);
     setPreviewLoading(true);
     setPreviewSlow(false);
     setPreviewCancelled(false);
@@ -685,10 +695,10 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     setImportOutcomeUnknown(false);
     setImportSlow(false);
     try {
-      await runBoundedRequest(controller, () => setImportSlow(true), "The import did not finish within 30 seconds. It may not have been saved; check the local Library before retrying.", () => api.importPublicRecipe(preview.uri, preview.content_sha256, controller.signal));
+      const imported = await runBoundedRequest(controller, () => setImportSlow(true), "The import did not finish within 30 seconds. It may not have been saved; check the local Library before retrying.", () => api.importPublicRecipe(preview.uri, preview.content_sha256, controller.signal));
       if (controller.signal.aborted || sequence !== importSequence.current || route !== importRoute.current) return;
       const updated = preview.local.status === "update-available" || preview.local.status === "different-revision";
-      setCompletion(updated && preview.release_version ? `Updated ${preview.title} to v${preview.release_version}` : `Imported ${preview.title}`);
+      setCompletion({recipeId: imported.recipe_id, title: updated && preview.release_version ? `Updated ${preview.title} to v${preview.release_version}` : `Imported ${preview.title}`});
       setPreview(current => current ? {...current, local: {...current.local, status: "current", content_sha256: current.content_sha256, release_version: current.release_version}} : current);
       await loadCatalog(true);
     } catch (value) {
@@ -707,11 +717,11 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     }
   }
 
-  if (completion) return <section className="public-import-complete" aria-labelledby="public-import-complete-title" role="status" tabIndex={-1} ref={element => { if (element) queueMicrotask(() => element.focus()); }}><span className="public-import-kicker">Import complete</span><h1 id="public-import-complete-title">{completion}</h1><p>The immutable revision is saved in your local Library. Existing installations and running services were not changed.</p><div><a className="button" href="/library">View local Library</a><button type="button" className="button secondary" onClick={() => { setCompletion(""); returnToCatalog(); }}>Import another recipe</button></div></section>;
+  if (completion) { const path = localRecipePath(completion.recipeId); return <section className="public-import-complete" aria-labelledby="public-import-complete-title" role="status" tabIndex={-1} ref={element => { if (element) queueMicrotask(() => element.focus()); }}><span className="public-import-kicker">Import complete</span><h1 id="public-import-complete-title">{completion.title}</h1><p>The immutable revision is saved in your local Library. To install it, continue to its local recipe page and complete Build → Map → Install. Existing installations and running services were not changed.</p><div><a className="button" href={path} onClick={event => { event.preventDefault(); onNavigate(path); }}>Open build &amp; install controls</a><button type="button" className="button secondary" onClick={() => { setCompletion(undefined); returnToCatalog(); }}>Import another recipe</button></div></section>; }
 
   return <div className={`public-import-page step-${step}`}>
     <header className="public-import-page-header">
-      <div><a href="/library" className="public-import-back" aria-disabled={saving || undefined} tabIndex={saving ? -1 : undefined} onClick={saving ? event => event.preventDefault() : undefined}>← Library</a><span className="public-import-kicker">Digest-bound public catalog</span><h1 ref={heading} tabIndex={-1}>Import a public recipe</h1><p>Choose an immutable recipe, inspect its independent qualification and execution-readiness evidence, then confirm the local import.</p></div>
+      <div><a href="/library" className="public-import-back" aria-disabled={saving || undefined} tabIndex={saving ? -1 : undefined} onClick={saving ? event => event.preventDefault() : undefined}>← Library</a><h1 ref={heading} tabIndex={-1}>Import a public recipe</h1><p>Choose an immutable recipe, inspect its independent qualification and execution-readiness evidence, then confirm the local import.</p></div>
       <ol aria-label="Import progress"><li aria-current={step === "catalog" ? "step" : undefined}>1 <span>Catalog</span></li><li aria-current={step === "review" ? "step" : undefined}>2 <span>Review</span></li><li aria-current={step === "confirm" ? "step" : undefined}>3 <span>{saving ? "Importing" : "Confirm"}</span></li></ol>
     </header>
     <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
@@ -727,7 +737,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <label className="public-import-search"><span>Find a recipe</span><input type="search" value={filters.query} onChange={event => updateFilter("query", event.target.value)} placeholder="Model, modality, runtime…" /></label>
         <label><span>Model type</span><select aria-label="Filter by model type" value={filters.modelType} onChange={event => updateModelType(event.target.value as ModelType)}><option value="">All types ({modelTypeCount("")})</option>{MODEL_TYPE_OPTIONS.map(option => { const available = modelTypeCount(option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
         <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
-        <label><span>Local status</span><select aria-label="Filter by local status" value={filters.local} onChange={event => updateFilter("local", event.target.value as LocalFilter)}><option value="">All ({count("local", () => true)})</option>{(["not-imported", "update-available", "current", "needs-review"] as LocalFilter[]).map(value => { const available = count("local", recipe => localMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value === "not-imported" ? "Not installed" : value === "update-available" ? "Update available" : value === "current" ? "Installed current" : "Needs review"} ({available})</option>; })}</select></label>
+        <label><span>Local recipe status</span><select aria-label="Filter by local recipe status" value={filters.local} onChange={event => updateFilter("local", event.target.value as LocalFilter)}><option value="">All ({count("local", () => true)})</option>{(["not-imported", "update-available", "current", "needs-review"] as LocalFilter[]).map(value => { const available = count("local", recipe => localMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value === "not-imported" ? "Not imported" : value === "update-available" ? "Update available" : value === "current" ? "Imported current" : "Needs review"} ({available})</option>; })}</select></label>
         <label><span>Execution readiness</span><select aria-label="Filter by execution readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as PublicRecipeFilters["readiness"])}><option value="">Any readiness ({count("readiness", () => true)})</option>{PUBLIC_RECIPE_READINESS.map(option => { const available = count("readiness", recipe => recipe.execution_readiness === option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
         <fieldset className="public-import-capabilities"><legend>Capabilities <span>Must all match</span></legend>{PUBLIC_RECIPE_CAPABILITIES.map(option => { const selected = filters.capabilities.includes(option.value); const available = capabilityCount(option.value); return <label className={available === 0 && !selected ? "is-disabled" : ""} key={option.value}><input type="checkbox" checked={selected} disabled={available === 0 && !selected} onChange={() => updateFilter("capabilities", selected ? filters.capabilities.filter(value => value !== option.value) : [...filters.capabilities, option.value])}/><span>{option.label}</span><small>{available}</small></label>; })}</fieldset>
         <button type="button" className="button secondary public-import-more-toggle" aria-expanded={more} aria-controls="public-import-more-filters" onClick={() => onNavigate(publicRecipeImportUrl(filters, {more: !more}), true)}>{more ? "Hide more filters" : "More filters"}</button>
@@ -774,7 +784,18 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         {previewError && <div className="public-import-state is-error" role="alert"><div><strong>Preview unavailable</strong><p>{previewError}</p></div><button type="button" className="button secondary" onClick={retryPreview}>Try again</button></div>}
         {previewCancelled && <div className="public-import-state" role="status"><div><strong>Preview canceled</strong><p>No error was reported. You can retry verification when you are ready.</p></div><button type="button" className="button secondary" onClick={retryPreview}>Try again</button></div>}
         {!selectedUri && !previewLoading && <div className="public-import-review-empty"><span aria-hidden="true">↗</span><strong>Select a recipe to review</strong><p>Execution readiness, qualification, version changes, resource needs and provenance will appear here.</p></div>}
-        {preview && <Preview preview={preview} saving={saving} importError={importError} importOutcomeUnknown={importOutcomeUnknown} status={step} onBack={step === "confirm" ? () => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "review"})) : returnToCatalog} onConfirm={() => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "confirm"}))} onImport={() => void importRecipe()} onRecheckImport={recheckImportOutcome}/>}
+        {preview && <Preview
+          preview={preview}
+          saving={saving}
+          importError={importError}
+          importOutcomeUnknown={importOutcomeUnknown}
+          status={step}
+          onBack={step === "confirm" ? () => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "review"})) : returnToCatalog}
+          onConfirm={() => onNavigate(publicRecipeImportUrl(filters, {more, recipe: selectedUri, step: "confirm"}))}
+          onImport={() => void importRecipe()}
+          onOpenLocal={() => { if (preview.local.recipe_id) onNavigate(localRecipePath(preview.local.recipe_id)); }}
+          onRecheckImport={recheckImportOutcome}
+        />}
       </aside>
     </fieldset>
   </div>;

@@ -3,9 +3,10 @@ import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
 import type {LibraryApi, LibraryOperation} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {StatusPill} from "./status-pill";
-import {LibraryPlacement} from "./library-placement";
+import {LibraryPlacement, primaryPlacementRecommendation} from "./library-placement";
 import {LibraryReasons} from "./library-reasons";
 import {LibraryActionDialog} from "./library-action-dialog";
+import {actionName} from "./library-action-types";
 import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
@@ -50,6 +51,15 @@ function lifecycleStage(label: string, items: Array<{state: string}>, completeSt
     return {label, state: reachedLabel, detail: states.map(humanizeIdentifier).join(" · "), tone: "healthy"};
   }
   return {label, state: "In progress", detail: states.map(humanizeIdentifier).join(" · "), tone: "warning"};
+}
+
+function nextActionCopy(name: LibraryActionName): {description: string; title: string} {
+  if (name === "Build") return {title: "Build the recipe image", description: "Create the immutable runtime image before installation. The server preview will verify the builder, source bundle, and exact build digest."};
+  if (name === "Mapping") return {title: "Map the complete Spark group", description: "Bind every declared rank to a compatible Spark group before distributing or installing the recipe."};
+  if (name === "Distribute") return {title: "Distribute the exact image", description: "Copy the verified image to every mapped Spark before installation."};
+  if (name === "Install") return {title: "Install on the selected Sparks", description: "Review disk admission and install this immutable revision on every rank in the group."};
+  if (name === "Load") return {title: "Load and publish the model", description: "Review live memory admission, then start every rank and publish the endpoint."};
+  return {title: `Review ${name.toLocaleLowerCase()}`, description: "Review the current server-authoritative plan before changing lifecycle state."};
 }
 
 export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy}: {
@@ -99,6 +109,10 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
     lifecycleStage("Install", detail.operational_state.installations, ["installed"]),
     lifecycleStage("Run", detail.operational_state.runs, ["running", "published"], "Active"),
   ];
+  const activeRun = detail.operational_state.runs.some(run => ["running", "published"].includes(run.state));
+  const placementRecommendation = activeRun ? undefined : primaryPlacementRecommendation(detail);
+  const recommendedName = placementRecommendation ? actionName(placementRecommendation.target) : undefined;
+  const recommendationCopy = recommendedName ? nextActionCopy(recommendedName) : undefined;
   return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
     <header className="recipe-authority-hero">
       <div>
@@ -118,6 +132,20 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
         <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
       </div>
     </header>
+    <section className={`recipe-next-action${activeRun ? " is-running" : placementRecommendation ? "" : " is-blocked"}`} aria-label="Recommended next action">
+      <div>
+        <p className="fleet-kicker">Recommended next step</p>
+        <h4>{activeRun ? "Model is running" : recommendationCopy?.title ?? "Resolve placement readiness"}</h4>
+        <p>{activeRun
+          ? "No lifecycle change is required. Use Fleet for live node, route, and workload health."
+          : recommendationCopy?.description ?? "No complete Spark group currently exposes an authorized lifecycle action. Review placement blockers and evidence below."}</p>
+      </div>
+      {activeRun
+        ? <a className="button secondary" href="/fleet">Open Fleet</a>
+        : placementRecommendation && recommendedName && placementRecommendation.groupCount === 1
+          ? <button type="button" className="button" disabled={actionBlocked} onClick={event => openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>Review {recommendedName}</button>
+          : <button type="button" className="button secondary" onClick={() => document.getElementById("recipe-placement")?.scrollIntoView({block: "start"})}>{placementRecommendation ? "Choose a Spark group" : "Review placement"}</button>}
+    </section>
     <section className="library-section library-primary-control" aria-label="Lifecycle overview">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
       <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">

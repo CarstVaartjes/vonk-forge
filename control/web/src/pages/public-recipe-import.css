@@ -15,8 +15,8 @@
 }
 
 .public-import-page-header h1 {
-  font-size: clamp(2.1rem, 4.5vw, 3.8rem);
-  letter-spacing: -0.055em;
+  font-size: clamp(2.1rem, 4.5vw, 3.75rem);
+  letter-spacing: -0.04em;
   line-height: 0.98;
   margin: 0.35rem 0 0.6rem;
 }
@@ -773,7 +773,8 @@
 .public-import-confirmation-copy,
 .public-import-note,
 .public-import-warning {
-  border-left: 3px solid var(--mint);
+  border: 1px solid #7cc64b66;
+  border-radius: 0.65rem;
   margin: 0;
   padding: 0.7rem 0.8rem;
 }
@@ -791,14 +792,14 @@
 .public-import-confirmation-copy.readiness-not-declared,
 .public-import-warning {
   background: #3a281866;
-  border-left-color: #e9b36c;
+  border-color: #e9b36c66;
   color: #ffd8a6;
 }
 
 .public-import-trust.readiness-not-executable,
 .public-import-confirmation-copy.readiness-not-executable {
   background: #49242a99;
-  border-left-color: var(--danger);
+  border-color: #ff919d99;
   color: #ffb2ba;
 }
 
@@ -825,6 +826,22 @@
 
 .public-import-version-summary strong {
   font-size: 0.84rem;
+}
+
+.public-import-local-handoff {
+  align-items: center;
+  background: #173d3066;
+  border: 1px solid #68e5b366;
+  border-radius: 0.7rem;
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+  padding: 0.75rem 0.85rem;
+}
+
+.public-import-local-handoff p {
+  color: var(--text-muted);
+  margin: 0.2rem 0 0;
 }
 
 .public-import-primary-facts {
@@ -1050,12 +1067,28 @@
   display: flex;
   gap: 0.6rem;
   justify-content: flex-end;
-  margin: 0 -1rem -1rem;
+  margin: 0 -1rem;
   padding: 0.85rem 1rem;
 }
 
 .public-import-preview-actions .button {
   min-height: 2.75rem;
+}
+
+@media (min-width: 84.001rem) {
+  .public-import-review-pane {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .public-import-preview-actions {
+    box-shadow: 0 0.7rem 1.5rem #0005;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
 }
 
 .public-import-mobile-back {
@@ -1249,7 +1282,7 @@
 
 @media (max-width: 34rem) {
   .public-import-page-header h1 {
-    font-size: 2.15rem;
+    font-size: 2rem;
   }
 
   .public-import-page-header li {
@@ -1257,7 +1290,8 @@
   }
 
   .public-import-page-header li span {
-    display: none;
+    display: inline;
+    font-size: 0.68rem;
   }
 
   .public-import-recipe-list dl,

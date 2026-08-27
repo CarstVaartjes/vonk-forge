@@ -100,6 +100,29 @@ test("compact preference, comparison and graphical requirements stay human-reada
   await attachScreenshot(page, testInfo, "public-recipe-import-compact-and-topology.png");
 });
 
+test("wide review keeps navigation reachable and hands current recipes to install controls", async ({page}) => {
+  const current = publicRecipe("Current 2×Spark", {local: {status: "current", recipe_id: "local-recipe", revision_number: 2, content_sha256: digest("Current 2×Spark"), release_version: "1.2.0"}});
+  await page.unroute("**/api/v1/catalog/public-recipes");
+  await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit: "a".repeat(40), recipes: [current]}}));
+  await page.unroute("**/api/v1/catalog/imports/public/preview");
+  await page.route("**/api/v1/catalog/imports/public/preview", route => route.fulfill({json: {...current, source: "recipe_library", changes_since_local: []}}));
+
+  await page.setViewportSize({width: 1920, height: 900});
+  await page.goto(`/library/import?recipe=${encodeURIComponent(current.uri)}`);
+  const review = page.getByRole("complementary", {name: "Selected recipe review"});
+  const localLink = page.getByRole("link", {name: "Open build & install controls"});
+  await expect(review).toHaveCSS("overflow-y", "auto");
+  await expect(localLink).toBeVisible();
+  await expect(localLink).toHaveAttribute("href", "/library/recipes/local-recipe");
+  const reviewBox = await review.boundingBox();
+  const linkBox = await localLink.boundingBox();
+  expect(reviewBox?.height ?? 0).toBeLessThanOrEqual(868);
+  expect((linkBox?.y ?? 900) + (linkBox?.height ?? 1)).toBeLessThanOrEqual(900);
+
+  await localLink.click();
+  await expect(page).toHaveURL(/\/library\/recipes\/local-recipe$/);
+});
+
 test("mobile uses Catalog → Review → Confirm and preserves usable targets", async ({page}, testInfo) => {
   await page.setViewportSize({width: 360, height: 800});
   await page.goto("/library/import?q=DeepSeek&sparks=2");

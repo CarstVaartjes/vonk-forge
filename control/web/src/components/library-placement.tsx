@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect, useState} from "react";
 import type {MouseEvent} from "react";
 import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
@@ -42,6 +42,24 @@ function isLoadBlocker(reason: Reason): boolean {
 
 function groupInstallable(group: Group): boolean {
   return !group.reasons.some(reason => reason.severity === "error" && !isLoadBlocker(reason));
+}
+
+function installablePlacementGroups(detail: LibraryRecipeDetail): Array<{group: Group; key: string; targets: Group["preview_targets"]}> {
+  const seen = new Set<string>();
+  return detail.placement.flatMap(topology => [...topology.recommendations, ...topology.rejected_groups].flatMap(group => {
+    const key = groupKey(topology.topology_name, group);
+    if (seen.has(key) || !groupInstallable(group)) return [];
+    seen.add(key);
+    const loadBlocked = group.reasons.some(isLoadBlocker);
+    return [{group, key, targets: group.preview_targets.filter(target => !loadBlocked || target.kind !== "run")}];
+  }));
+}
+
+export function primaryPlacementRecommendation(detail: LibraryRecipeDetail): {group: Group; groupCount: number; target: Group["preview_targets"][number]} | undefined {
+  const groups = installablePlacementGroups(detail);
+  const primary = groups.find(group => group.targets.length > 0);
+  if (!primary) return undefined;
+  return {group: primary.group, groupCount: groups.length, target: primary.targets[0]!};
 }
 
 function blockingReasons(topology: Placement, phase: "install" | "load"): PlacementBlocker[] {
@@ -140,10 +158,16 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
   onReview?(target: LibraryActionTarget, trigger: HTMLButtonElement, evidence?: LibraryPlacementGroup): void;
   policy: FreshnessPolicy;
 }) {
-  const [selectedGroup, setSelectedGroup] = useState("");
+  const selectableGroups = installablePlacementGroups(detail);
+  const selectableSignature = selectableGroups.map(group => group.key).join("|");
+  const soleGroup = selectableGroups.length === 1 ? selectableGroups[0]!.key : "";
+  const [selectedGroup, setSelectedGroup] = useState(soleGroup);
   const nodeName = useLibraryNodeName();
+  useEffect(() => {
+    setSelectedGroup(current => selectableGroups.some(group => group.key === current) ? current : soleGroup);
+  }, [selectableSignature, soleGroup]);
   if (detail.placement.length === 0) return <section className="library-section"><h4>Placement</h4><p className="library-placeholder">No valid complete topology placement is available.</p></section>;
-  return <section className="library-section placement-section" aria-label="Complete placement groups">
+  return <section className="library-section placement-section" id="recipe-placement" aria-label="Complete placement groups">
     <div className="section-heading"><div><p className="fleet-kicker">One atomic group</p><h4>Complete placement groups</h4></div><small>Select all ranks together</small></div>
     {detail.placement.map(topology => {
       const installableGroups = [...topology.recommendations, ...topology.rejected_groups]
@@ -175,7 +199,10 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
               onClick={(event: MouseEvent<HTMLButtonElement>) => onReview?.(target, event.currentTarget, group)}
             >Review {actionName(target)}</button>)}
           </div>}
-          <GroupEvidence group={group} hideLoadBlockers={loadBlocked} policy={policy} selected={selected}/>
+          <details className="placement-evidence-disclosure" role="group" aria-label="Capacity and placement evidence">
+            <summary><span>Capacity and placement evidence</span><small>{group.nodes.length} ranks · {formatBytes(Math.min(...group.nodes.map(node => node.disk_free_after_bytes)))} minimum disk after</small></summary>
+            <GroupEvidence group={group} hideLoadBlockers={loadBlocked} policy={policy} selected={selected}/>
+          </details>
         </article>;
       })}</div>
       {installableGroups.length === 0 && <PlacementBlockedSummary blockers={blockingReasons(topology, "install")} nodeCount={topology.node_count}/>}

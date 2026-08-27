@@ -225,12 +225,27 @@ function TechnicalDetails({event}: {event: ActivityRecord}) {
 }
 
 function unavailableTargetLabel(target: string): string {
-  return target.startsWith("spk_") ? "Unavailable Spark" : "Unavailable object";
+  return target.startsWith("spk_") ? "Spark no longer registered" : "Target not in current inventory";
+}
+
+function targetSummaryNames(event: ActivityRecord): string[] {
+  const names: string[] = [];
+  let historicalSparks = 0;
+  let historicalTargets = 0;
+  event.targets.forEach((target, index) => {
+    const name = event.target_names?.[index];
+    if (name) names.push(name);
+    else if (target.startsWith("spk_")) historicalSparks += 1;
+    else historicalTargets += 1;
+  });
+  if (historicalSparks > 0) names.push(`${historicalSparks} historical ${historicalSparks === 1 ? "Spark" : "Sparks"}`);
+  if (historicalTargets > 0) names.push(`${historicalTargets} historical ${historicalTargets === 1 ? "target" : "targets"}`);
+  return names;
 }
 
 function TargetSummary({compact = false, event}: {compact?: boolean; event: ActivityRecord}) {
   if (event.targets.length === 0) return null;
-  const names = event.targets.map((target, index) => event.target_names?.[index] || unavailableTargetLabel(target));
+  const names = targetSummaryNames(event);
   const content = <><span>{names.length === 1 ? "Target" : "Targets"}</span> <strong>{names.join(" · ")}</strong></>;
   return compact ? <small className="activity-target-summary">{content}</small> : <span className="activity-target-summary">{content}</span>;
 }
@@ -616,7 +631,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const filtering = Boolean(query.trim() || category || actor || status);
   return <div className="activity-page">
     <header className="activity-hero">
-      <div><p className="fleet-kicker">Operations history</p><h1 tabIndex={-1}>Activity</h1><p>Understand meaningful control-plane changes without exposing technical identifiers by default.</p></div>
+      <div><h1 tabIndex={-1}>Activity</h1><p>Understand meaningful control-plane changes without exposing technical identifiers by default.</p></div>
       <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>{loading && events ? "Refreshing…" : "Refresh activity"}</button>
     </header>
 

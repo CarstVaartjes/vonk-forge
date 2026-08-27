@@ -50,6 +50,47 @@
   font-size: 0.82rem;
 }
 
+.recipe-next-action {
+  align-items: center;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 14%, #0b1713), #0b1713 72%);
+  border: 1px solid color-mix(in srgb, var(--mint) 58%, var(--border));
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.recipe-next-action.is-running {
+  border-color: color-mix(in srgb, var(--info) 58%, var(--border));
+}
+
+.recipe-next-action.is-blocked {
+  border-color: color-mix(in srgb, var(--warning) 58%, var(--border));
+}
+
+.recipe-next-action h4,
+.recipe-next-action p {
+  margin: 0;
+}
+
+.recipe-next-action h4 {
+  font-size: 1.05rem;
+  margin-top: 0.18rem;
+}
+
+.recipe-next-action p:last-child {
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: 0.28rem;
+  max-width: 52rem;
+}
+
+.recipe-next-action > .button {
+  min-width: max-content;
+}
+
 .library-section,
 .library-operation,
 .library-advanced,
@@ -194,12 +235,13 @@
 }
 
 .library-reasons li {
+  background: #ffffff05;
+  border: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  border-radius: 0.55rem;
   display: grid;
   gap: 0.2rem;
   min-width: 0;
   padding: 0.55rem 0.65rem;
-  border-left: 2px solid var(--info);
-  background: #ffffff05;
 }
 
 .library-reasons li span {
@@ -207,11 +249,11 @@
 }
 
 .library-reasons .reason-warning {
-  border-left-color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
 }
 
 .library-reasons .reason-error {
-  border-left-color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
 .placement-groups {
@@ -222,7 +264,6 @@
 .placement-blocked-summary {
   background: color-mix(in srgb, var(--danger) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
-  border-left: 3px solid var(--danger);
   border-radius: 0.7rem;
   display: grid;
   gap: 0.4rem;
@@ -252,8 +293,8 @@
 
 .placement-load-blocked-summary {
   background: color-mix(in srgb, var(--warning) 8%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
-  border-left: 3px solid var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: 0.55rem;
   display: grid;
   gap: 0.35rem;
   padding: 0.6rem 0.75rem;
@@ -289,6 +330,33 @@
 
 .placement-selector small {
   color: inherit;
+}
+
+.placement-evidence-disclosure {
+  border-top: 1px solid var(--border);
+}
+
+.placement-evidence-disclosure > summary {
+  align-items: center;
+  background: #091410;
+  color: var(--mint-strong);
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  list-style-position: inside;
+  padding: 0.7rem 0.85rem;
+}
+
+.placement-evidence-disclosure > summary small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.placement-evidence-disclosure[open] > summary {
+  border-bottom: 1px solid var(--border);
 }
 
 .placement-evidence {
@@ -608,7 +676,9 @@
   padding: 0.7rem;
 }
 .library-digest-confirmation {
-  border-left: 2px solid var(--mint);
+  background: #7cc64b0a;
+  border: 1px solid #7cc64b66;
+  border-radius: 0.6rem;
   display: grid;
   gap: 0.3rem;
   margin: 1rem 0 0;
@@ -684,6 +754,25 @@
 
   .recipe-authority-statuses {
     align-items: flex-start;
+  }
+
+  .recipe-next-action {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-next-action > .button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .placement-evidence-disclosure > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .placement-evidence-disclosure > summary small {
+    text-align: left;
   }
 
   .lifecycle-track {

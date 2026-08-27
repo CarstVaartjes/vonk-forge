@@ -389,19 +389,21 @@ test("shows visual recipe truth and selects only one complete placement group on
 
   const groups = within(detail).getByRole("region", {name: "Complete placement groups"});
   const select = await within(groups).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
-  expect(within(groups).getByText("MIA Alpha")).toBeVisible();
+  expect(select).toHaveAttribute("aria-pressed", "true");
   expect(within(groups).queryByText("node-alpha")).not.toBeInTheDocument();
-  await user.click(within(select.closest("article")!).getAllByText("Technical details")[0]);
+  const selected = select.closest("article")!;
+  const evidenceDisclosure = within(selected).getByRole("group", {name: "Capacity and placement evidence"});
+  expect(evidenceDisclosure).not.toHaveAttribute("open");
+  const evidenceSummary = within(evidenceDisclosure).getByText("Capacity and placement evidence").closest("summary")!;
+  await user.click(evidenceSummary);
+  expect(evidenceDisclosure).toHaveAttribute("open");
+  expect(within(groups).getByText("MIA Alpha")).toBeVisible();
+  await user.click(within(selected).getAllByText("Technical details")[0]);
   expect(within(select.closest("article")!).getByText("node-alpha")).toBeVisible();
-  expect(select).toHaveAttribute("aria-pressed", "false");
   select.focus();
   expect(select).toHaveFocus();
-  expect(select).toHaveAttribute("aria-pressed", "false");
-  expect(within(groups).queryByRole("checkbox")).not.toBeInTheDocument();
-
-  await user.keyboard(" ");
   expect(select).toHaveAttribute("aria-pressed", "true");
-  const selected = select.closest("article")!;
+  expect(within(groups).queryByRole("checkbox")).not.toBeInTheDocument();
   expect(within(selected).getByText("Complete group · Installed · Not loaded")).toBeVisible();
   expect(within(selected).getByText("Rank 0 · Leader")).toBeVisible();
   expect(within(selected).getByText("Rank 1 · Worker")).toBeVisible();
@@ -915,11 +917,11 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Clear all"}));
 
-  const localStatus = screen.getByRole("combobox", {name: "Filter by local status"});
+  const localStatus = screen.getByRole("combobox", {name: "Filter by local recipe status"});
   expect(within(localStatus).getByRole("option", {name: "All (4)"})).toBeVisible();
-  expect(within(localStatus).getByRole("option", {name: "Not installed (1)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Not imported (1)"})).toBeVisible();
   expect(within(localStatus).getByRole("option", {name: "Update available (1)"})).toBeVisible();
-  expect(within(localStatus).getByRole("option", {name: "Installed current (1)"})).toBeVisible();
+  expect(within(localStatus).getByRole("option", {name: "Imported current (1)"})).toBeVisible();
   expect(within(localStatus).getByRole("option", {name: "Needs review (1)"})).toBeVisible();
   await user.selectOptions(localStatus, "update-available");
   expect(screen.getByRole("heading", {name: /Qwen 3\.5/, level: 3})).toBeVisible();

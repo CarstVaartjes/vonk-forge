@@ -247,7 +247,10 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await page.goto("/fleet");
 
   await expect(page.getByRole("heading", {name: "Fleet", exact: true})).toBeVisible();
-  await expect(page.getByRole("region", {name: "Fleet summary"})).toContainText("1 loaded recipe");
+  const fleetSummary = page.getByRole("region", {name: "Fleet summary"});
+  await expect(fleetSummary).toContainText("1 loaded recipe");
+  await expect(fleetSummary.getByText("Live", {exact: true})).toBeVisible();
+  await expect(fleetSummary.getByText("Offline", {exact: true})).toBeVisible();
   const aurora = page.getByRole("article", {name: /Aurora — (Live|Delayed)/});
   await expect(aurora).toContainText("NVIDIA GB10 · P0");
   await expect(aurora.getByRole("img", {name: "GPU 24h trend"})).toBeVisible();
@@ -277,6 +280,7 @@ test("Fleet cards default to 24h trends and expose editable friendly identity", 
   const range = page.getByRole("combobox", {name: "Card trend range"});
   await expect(range).toHaveValue("24h");
   await expect(range.getByRole("option")).toHaveText(["1h", "24h", "7d", "31d"]);
+  await page.getByRole("button", {name: "Close Fleet controls"}).click();
 
   await page.getByRole("button", {name: "Edit Aurora"}).click();
   const dialog = page.getByRole("dialog", {name: "Name this Spark"});
@@ -356,6 +360,25 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/fleet");
   await openFleetControls(page);
+
+  const mainBounds = await page.locator("#main-content").boundingBox();
+  const controlsBounds = await page.locator(".fleet-controls-popover").boundingBox();
+  expect(mainBounds).not.toBeNull();
+  expect(controlsBounds).not.toBeNull();
+  expect(controlsBounds!.x).toBeGreaterThanOrEqual(mainBounds!.x);
+  expect(controlsBounds!.x + controlsBounds!.width).toBeLessThanOrEqual(1280);
+
+  const commandRows = await page.locator(".fleet-command-header").evaluate(element => {
+    const bounds = (selector: string) => {
+      const child = element.querySelector(selector);
+      if (!(child instanceof HTMLElement)) throw new Error(`Missing ${selector}`);
+      const box = child.getBoundingClientRect();
+      return {bottom: box.bottom, top: box.top};
+    };
+    return {actions: bounds(".fleet-command-actions"), summary: bounds(".fleet-command-summary")};
+  });
+  expect(commandRows.summary.top).toBeGreaterThanOrEqual(commandRows.actions.bottom);
+
   await page.getByRole("button", {name: "Topology"}).click();
 
   await expect(page.getByRole("region", {name: "Fleet topology"})).toBeVisible();
@@ -380,6 +403,11 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
     }))).toEqual({body: width, document: width, viewport: width});
   }
   await page.setViewportSize({width: 360, height: 800});
+  await expect(page.getByRole("button", {name: "Close Fleet controls"})).toBeVisible();
+  await page.getByRole("button", {name: "Close Fleet controls"}).click();
+  await expect(page.locator(".fleet-controls-popover")).toBeHidden();
+  await expect(page.locator(".fleet-controls-menu > summary")).toBeFocused();
+  await expect(page.getByRole("heading", {name: "Fleet"})).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
   await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
 });
@@ -570,7 +598,7 @@ test("Library view modes persist and compare friendly recipes without document o
     horizontallyScrollable: element.scrollWidth > element.clientWidth,
     rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
   }));
-  expect(kpiLayout).toEqual({horizontallyScrollable: true, rows: 1});
+  expect(kpiLayout).toEqual({horizontallyScrollable: false, rows: 3});
 });
 
 test("Library exposes a versioned catalog update and opens its changelog review", async ({page}) => {
@@ -646,6 +674,12 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await expect(authority).toContainText("Bounded search is incomplete");
   await expect(authority).toContainText("Inventory fresh · 10s");
   await expect(authority).toContainText("Spark node + Spark node");
+  const nextAction = authority.getByRole("region", {name: "Recommended next action"});
+  await expect(nextAction).toContainText("Load and publish the model");
+  await expect(nextAction.getByRole("button", {name: "Review Load"})).toBeVisible();
+  const placementEvidence = authority.getByRole("group", {name: "Capacity and placement evidence"});
+  await expect(placementEvidence).not.toHaveAttribute("open");
+  await expect(placementEvidence.getByText("Inventory fresh · 10s")).not.toBeVisible();
   const authorityContrast = await authority.evaluate(element => {
     const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
     const luminance = (value: string) => {
@@ -663,10 +697,8 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
 
   const selector = authority.getByRole("button", {name: "Select complete group Spark node and Spark node"});
-  await selector.focus();
-  await page.keyboard.press("Space");
   await expect(selector).toHaveAttribute("aria-pressed", "true");
-  const review = authority.getByRole("button", {name: "Review Load"});
+  const review = nextAction.getByRole("button", {name: "Review Load"});
   await review.click();
   let dialog = page.getByRole("dialog", {name: "Review Load"});
   await expect(dialog).toContainText("Existing recipes remain loaded. Forge will not unload anything automatically.");
