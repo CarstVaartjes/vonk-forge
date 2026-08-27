@@ -986,7 +986,7 @@ def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].extend(
         [
-            {"name": "block-size", "value": 2304},
+            {"name": "block-size", "value": 7168},
             {"name": "kv-cache-memory", "value": 9_663_676_416},
             {"name": "kv-cache-dtype", "value": "fp8_e4m3"},
             {"name": "enforce-eager", "value": True},
@@ -1005,7 +1005,7 @@ def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
 
     projection = _compile("vllm", recipe=recipe)
 
-    assert projection.command[projection.command.index("--block-size") + 1] == "2304"
+    assert projection.command[projection.command.index("--block-size") + 1] == "7168"
     assert projection.command[projection.command.index("--kv-cache-memory") + 1] == "9663676416"
     assert "--enforce-eager" in projection.command
     assert "--skip-mm-profiling" in projection.command
@@ -1328,6 +1328,7 @@ def test_builtin_harness_rejects_unallowlisted_engine_flags(slug: str) -> None:
     ("slug", "name", "invalid"),
     [
         ("vllm", "max-model-len", 0),
+        ("vllm", "block-size", 16_385),
         ("sglang", "context-length", 10_000_001),
         ("tensorrt-llm", "max-batch-size", 0),
         ("llama-cpp", "n-gpu-layers", 1000),

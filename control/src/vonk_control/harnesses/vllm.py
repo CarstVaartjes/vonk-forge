@@ -53,7 +53,7 @@ _ARGUMENTS = {
     "long-prefill-token-threshold": ArgumentSpec(
         "--long-prefill-token-threshold", validate=integer(1, 10_000_000)
     ),
-    "block-size": ArgumentSpec("--block-size", validate=integer(1, 4096)),
+    "block-size": ArgumentSpec("--block-size", validate=integer(1, 16_384)),
     "quantization": ArgumentSpec(
         "--quantization",
         validate=one_of("awq", "gptq", "fp8", "modelopt_fp4", "bitsandbytes"),
