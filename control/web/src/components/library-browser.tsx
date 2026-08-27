@@ -207,7 +207,9 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
   const unlinked = route.kind === "model"
     ? route.unlinked
     : route.kind === "recipe" && !model && visibleSnapshot.unlinked_recipes.some(item => item.recipe_id === route.recipeId);
-  const visibleRecipes = unlinked ? visibleSnapshot.unlinked_recipes : model?.recipes;
+  const visibleRecipes = unlinked
+    ? visibleSnapshot.unlinked_recipes
+    : model?.recipes ?? visibleFlatRecipes.map(item => item.recipe);
   const modelPath = model ? modelLibraryPath(modelVersionKey(model.model)) : unlinked ? unlinkedLibraryPath() : "/library";
   const selectionFull = compareIds.length >= 3;
   const publicByLocalRecipe = useMemo(() => new Map(publicRecipes.flatMap(item => item.local.recipe_id ? [[item.local.recipe_id, item] as const] : [])), [publicRecipes]);
@@ -272,9 +274,9 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
         </div>
       </section>
 
-      <section className="library-pane library-recipes" aria-label={model ? `Recipes for ${modelLabel(model)}` : unlinked ? "Unlinked recipes" : "Recipes"}>
+      <section className="library-pane library-recipes" aria-label={model ? `Recipes for ${modelLabel(model)}` : unlinked ? "Unlinked recipes" : "Recipe inventory"}>
         <a className="library-back" href="/library" onClick={event => onNavigate(event, "/library")}>Back to Models</a>
-        <div className="library-pane-heading"><div><p className="library-step">2</p><h3>{model ? modelLabel(model) : (unlinked ? "Unlinked" : "Recipes")}</h3></div>{visibleRecipes && <small>{countLabel(visibleRecipes.length, windowed)}</small>}</div>
+        <div className="library-pane-heading"><div><p className="library-step">2</p><h3>{model ? modelLabel(model) : (unlinked ? "Unlinked" : "Recipe inventory")}</h3></div><small>{countLabel(visibleRecipes.length, windowed)}</small></div>
         {visibleRecipes ? <div className="library-list">{visibleRecipes.length > 0 ? visibleRecipes.map(item => <RecipeEntry active={item.recipe_id === recipe?.recipe_id} catalogRecipe={publicByLocalRecipe.get(item.recipe_id)} key={item.recipe_id} onNavigate={onNavigate} onToggle={toggleCompare} recipe={item} selected={compareIds.includes(item.recipe_id)} selectionFull={selectionFull}/>) : <p className="library-placeholder">No recipes match this search.</p>}</div> : <p className="library-placeholder">Select a model to see all of its recipes.</p>}
       </section>
 

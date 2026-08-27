@@ -282,34 +282,34 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const catalogLinkedCount = new Set(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [recipe.local.recipe_id] : [])).size;
 
   return <div className="library-page">
-    <header className="fleet-hero">
-      <div>
+    <header className="library-command-header">
+      <div className="library-command-title">
         <p className="fleet-kicker">Model control</p>
         <h1 ref={heading} tabIndex={-1}>Library</h1>
-      <div className="library-toolbar-actions">
-        <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
-        <a href="/library/import" className="button secondary" onClick={event => onNavigate(event, "/library/import")}>Import public recipe</a>
+        <p>Exact models, installable recipes, placement, and release state in one command surface.</p>
       </div>
-        <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
-      </div>
+      <nav className="library-toolbar-actions" aria-label="Recipe authoring">
+        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Import recipe</a>
+        <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom</a>
+      </nav>
     </header>
     {snapshot && <>
-      <section className="library-overview" aria-label="Library summary">
-        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Model versions</span><strong>{modelCount}</strong><small>Exact immutable identities</small></div>
-        <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
-        <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
-        <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
-        {catalogSupported && <div className={`library-stat${updateCount > 0 ? " library-stat-update" : ""}`} role="group" aria-label={catalogLoading ? "Checking catalog updates" : catalogError ? "Catalog update check unavailable" : `${updateCount} catalog update${updateCount === 1 ? "" : "s"} available`}><span>Catalog updates</span><strong>{catalogLoading ? "…" : catalogError ? "—" : updateCount}</strong><small>{catalogLoading ? "Checking immutable releases" : catalogError ? "Check unavailable" : updateCount > 0 ? "Across all catalog-linked recipes" : catalogLinkedCount > 0 ? `${catalogLinkedCount} local recipe${catalogLinkedCount === 1 ? "" : "s"} checked` : "No local catalog links"}</small></div>}
-      </section>
-      <div className="library-toolbar">
+      <section className="library-command-bar" aria-label="Library command bar">
+        <div className="library-overview" role="region" aria-label="Library summary">
+          <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><strong>{modelCount}</strong><span>models</span></div>
+          <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><strong>{recipeCount}</strong><span>{paginationWindowed ? "recipes shown" : "recipes"}</span></div>
+          <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><strong>{linkedRecipeCount}</strong><span>linked</span></div>
+          <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><strong>{unlinkedRecipeCount}</strong><span>unlinked</span></div>
+          {catalogSupported && <div className={`library-stat${updateCount > 0 ? " library-stat-update" : ""}`} role="group" aria-label={catalogLoading ? "Checking catalog updates" : catalogError ? "Catalog update check unavailable" : `${updateCount} catalog update${updateCount === 1 ? "" : "s"} available`} title={catalogLoading ? "Checking immutable releases" : catalogError ? "Catalog check unavailable" : catalogLinkedCount > 0 ? `${catalogLinkedCount} local recipe links checked` : "No local catalog links"}><strong>{catalogLoading ? "…" : catalogError ? "—" : updateCount}</strong><span>updates</span></div>}
+        </div>
         <label className="library-search">
-          <span>Find a model or recipe</span>
+          <span className="visually-hidden">Find a model or recipe</span>
           <input type="search" aria-label="Search Library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, slugs, capabilities…" />
         </label>
         <div className="library-search-meta" aria-live="polite">
-          {query.trim() ? <><span>Filtering the loaded window</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>Browse exact model versions and available local recipes</span>}
+          {query.trim() ? <><span>Filtering loaded rows</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>{recipeCount} local recipe{recipeCount === 1 ? "" : "s"} ready to inspect</span>}
         </div>
-      </div>
+      </section>
     </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}

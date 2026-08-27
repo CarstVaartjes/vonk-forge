@@ -436,7 +436,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await page.goto("/library");
 
   const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: "Recipes"});
+  const recipes = page.getByRole("region", {name: "Recipe inventory"});
   const detail = page.getByRole("region", {name: "Recipe detail"});
   await expect(models).toBeVisible();
   await expect(recipes).toBeHidden();
