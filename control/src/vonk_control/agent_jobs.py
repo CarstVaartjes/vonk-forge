@@ -399,6 +399,7 @@ class AgentJobService:
                 session,
                 node_id,
                 now,
+                capabilities,
                 runtime_identity,
             )
             expired_attempt = (
@@ -528,8 +529,14 @@ class AgentJobService:
         session: Session,
         node_id: str,
         now: datetime,
+        capabilities: tuple[str, ...] | None,
         runtime_identity: Mapping[str, object],
     ) -> None:
+        if (
+            capabilities is None
+            or AgentOperation.AGENT_UPGRADE.value not in capabilities
+        ):
+            return
         operation = session.scalar(
             select(StoredOperation)
             .where(
