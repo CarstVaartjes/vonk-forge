@@ -61,7 +61,7 @@ jobs:
   rust:
     name: Rust agent contracts
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,6 +83,17 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test Rust workspace
         run: cargo test --workspace --locked
+      - name: Install Spark-compatible rootless Podman
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            fuse-overlayfs podman uidmap
+      - name: Test Spark rootless Podman OCI import
+        run: >-
+          cargo test --locked -p vonk-agent --test recipe_builder
+          faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
       - name: Verify Python protocol parity
         run: >-
           uv run --project agent_protocol --frozen pytest -q
