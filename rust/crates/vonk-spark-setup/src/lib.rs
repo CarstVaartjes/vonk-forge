@@ -413,9 +413,14 @@ struct ReleaseDocument {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReleaseArtifact {
+    architecture: Option<String>,
+    host_signature: Option<String>,
+    package_version: Option<String>,
     path: String,
     sha256: String,
     size: u64,
+    target_binary_digest: Option<String>,
+    target_build_digest: Option<String>,
 }
 
 struct VerifiedRelease {
@@ -1160,6 +1165,14 @@ fn verified_release(
     if package.path != format!("{prefix}vonk-forge-agent.deb")
         || setup.path != format!("{prefix}vonk-spark-setup")
         || setup_signature.path != format!("{prefix}vonk-spark-setup.sig")
+        || !valid_package_release_identity(
+            &package,
+            platform,
+            &document.version,
+            document.acceptance_only,
+        )
+        || has_package_release_identity(&setup)
+        || has_package_release_identity(&setup_signature)
         || !valid_sha256(&package.sha256)
         || !valid_sha256(&setup.sha256)
         || !valid_sha256(&setup_signature.sha256)
@@ -1181,6 +1194,52 @@ fn verified_release(
         version: document.version,
         architecture: architecture.to_owned(),
     })
+}
+
+fn has_package_release_identity(artifact: &ReleaseArtifact) -> bool {
+    artifact.architecture.is_some()
+        || artifact.host_signature.is_some()
+        || artifact.package_version.is_some()
+        || artifact.target_binary_digest.is_some()
+        || artifact.target_build_digest.is_some()
+}
+
+fn valid_package_release_identity(
+    artifact: &ReleaseArtifact,
+    platform: &str,
+    version: &str,
+    acceptance_only: bool,
+) -> bool {
+    match (
+        artifact.architecture.as_deref(),
+        artifact.host_signature.as_deref(),
+        artifact.package_version.as_deref(),
+        artifact.target_binary_digest.as_deref(),
+        artifact.target_build_digest.as_deref(),
+    ) {
+        (None, None, None, None, None) => acceptance_only,
+        (
+            Some(architecture),
+            Some(host_signature),
+            Some(package_version),
+            Some(target_binary_digest),
+            Some(target_build_digest),
+        ) => {
+            !acceptance_only
+                && architecture == platform
+                && host_signature.len() == 128
+                && host_signature
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                && package_version == version
+                && valid_package_version(package_version)
+                && valid_sha256(target_binary_digest)
+                && target_build_digest
+                    .strip_prefix("sha256:")
+                    .is_some_and(valid_sha256)
+        }
+        _ => false,
+    }
 }
 
 fn release_artifact_prefix(
@@ -2827,6 +2886,57 @@ mod tests {
                 "b".repeat(64)
             )
         );
+    }
+
+    #[test]
+    fn package_release_identity_is_complete_and_bound_to_platform_and_version() {
+        let mut artifact = ReleaseArtifact {
+            architecture: Some("linux-arm64".to_owned()),
+            host_signature: Some("a".repeat(128)),
+            package_version: Some("1.0.0".to_owned()),
+            path: "immutable".to_owned(),
+            sha256: "b".repeat(64),
+            size: 1,
+            target_binary_digest: Some("c".repeat(64)),
+            target_build_digest: Some(format!("sha256:{}", "d".repeat(64))),
+        };
+
+        assert!(valid_package_release_identity(
+            &artifact,
+            "linux-arm64",
+            "1.0.0",
+            false,
+        ));
+        assert!(!valid_package_release_identity(
+            &artifact,
+            "linux-amd64",
+            "1.0.0",
+            false,
+        ));
+        artifact.target_build_digest = None;
+        assert!(!valid_package_release_identity(
+            &artifact,
+            "linux-arm64",
+            "1.0.0",
+            false,
+        ));
+
+        artifact.architecture = None;
+        artifact.host_signature = None;
+        artifact.package_version = None;
+        artifact.target_binary_digest = None;
+        assert!(valid_package_release_identity(
+            &artifact,
+            "linux-arm64",
+            "0.9.0",
+            true,
+        ));
+        assert!(!valid_package_release_identity(
+            &artifact,
+            "linux-arm64",
+            "1.0.0",
+            false,
+        ));
     }
 
     #[test]

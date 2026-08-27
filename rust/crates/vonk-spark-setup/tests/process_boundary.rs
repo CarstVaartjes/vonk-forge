@@ -210,9 +210,14 @@ fn signed_request_with_setup(
     let release = serde_json::json!({
         "artifacts": {
             (agent_artifact): {
+                "architecture": identity.platform,
+                "host_signature": "f".repeat(128),
+                "package_version": "1.0.0",
                 "path": format!("artifacts/stable/releases/{generation}/spark/current/{}/vonk-forge-agent.deb", identity.platform),
                 "sha256": hex::encode(Sha256::digest(fs::read(&package_path).unwrap())),
                 "size": fs::metadata(&package_path).unwrap().len(),
+                "target_binary_digest": "1".repeat(64),
+                "target_build_digest": format!("sha256:{}", "2".repeat(64)),
             },
             (setup_artifact): {
                 "path": format!("artifacts/stable/releases/{generation}/spark/current/{}/vonk-spark-setup", identity.platform),

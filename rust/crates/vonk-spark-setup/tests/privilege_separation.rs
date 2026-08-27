@@ -128,9 +128,14 @@ fn signed_release(
     let release = serde_json::json!({
         "artifacts": {
             (agent_artifact): {
+                "architecture": identity.platform,
+                "host_signature": "f".repeat(128),
+                "package_version": "1.0.0",
                 "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-forge-agent.deb", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&package_raw)),
                 "size": package_raw.len(),
+                "target_binary_digest": "1".repeat(64),
+                "target_build_digest": format!("sha256:{}", "2".repeat(64)),
             },
             (setup_artifact): {
                 "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-spark-setup", identity.platform),
