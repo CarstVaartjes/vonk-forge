@@ -31,7 +31,8 @@ hardware restriction.
 
 The installer prompts for:
 
-- the controller host's LAN address and Spark management/fabric CIDRs;
+- the controller host's LAN address, Spark management/fabric CIDRs, and
+  operator jurisdiction;
 - the control, enrollment, agent, and registry hostnames;
 - Tailscale OAuth credentials;
 - the LiteLLM upstream provider key;

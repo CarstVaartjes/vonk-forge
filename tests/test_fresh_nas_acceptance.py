@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -14,6 +15,9 @@ from tests.acceptance.runtime import AcceptanceError
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"
+PAYLOAD_BUILDER = ROOT / "scripts/build-nas-compose-bundle"
+PRODUCTION_RENDERER = ROOT / "scripts/render-production-compose"
+COMPOSE_TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 
 
 def _acceptance_module():
@@ -21,6 +25,15 @@ def _acceptance_module():
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _script_module(path: Path, name: str):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
     return module
 
 
@@ -80,6 +93,44 @@ def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
 
     assert (prompt, "") not in disabled
     assert (prompt, "") in enabled
+
+
+def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> None:
+    acceptance = _acceptance_module()
+    renderer = _script_module(PRODUCTION_RENDERER, "acceptance_prompt_renderer")
+    builder = _script_module(PAYLOAD_BUILDER, "acceptance_prompt_payload_builder")
+    rendered = tmp_path / "docker-compose.yaml"
+    digest = "a" * 64
+    renderer.render(
+        COMPOSE_TEMPLATE,
+        rendered,
+        api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{digest}",
+        worker_image=f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{digest}",
+        hermes_image=f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{digest}",
+    )
+    payload = builder._payload(builder._read_compose(rendered), "stable")
+    required = payload["required_values"]
+    canonical_prompts = []
+    for item in required:
+        label = item["prompt"]
+        if item.get("default") is not None:
+            label = f"{label} [{item['default']}]"
+        canonical_prompts.append(f"{label}: ")
+
+    responses = acceptance.nas_responses(
+        nas_ip="192.0.2.10",
+        tailnet_suffix="acceptance.example.test",
+        oauth_client_id="client-id",
+        oauth_client_secret="client-secret",
+        upstream_key="upstream-key",
+        hermes=False,
+    )
+
+    assert [prompt for prompt, _ in responses[: len(required)]] == canonical_prompts
+    assert responses[3] == (
+        "Operator jurisdiction (uppercase country code, or EU): ",
+        "NL",
+    )
 
 
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
