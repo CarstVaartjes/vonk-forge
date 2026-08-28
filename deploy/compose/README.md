@@ -1,7 +1,8 @@
-# NAS control-plane deployment
+# Controller-host deployment
 
-The supported NAS installation starts on an ordinary Linux or macOS
-workstation. Run one command as your normal user:
+The supported controller installation starts on an ordinary Linux or macOS
+workstation. The eventual controller host can be this same laptop or any local
+NAS or server that runs Docker Compose. Run one command as your normal user:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh
@@ -18,16 +19,19 @@ vonk-forge/
 └── secrets/
 ```
 
-No Docker daemon, Git checkout, root access, SSH connection, mounted NAS share,
-or repository file is needed on the workstation. Copy or drag the whole
-`vonk-forge/` directory to the NAS without changing its internal layout, then
-import `docker-compose.yaml` in the NAS Docker/Compose application and start the
-project. The Compose file uses relative paths, so the three entries must remain
-together.
+No Docker daemon, Git checkout, root access, SSH connection, mounted share, or
+repository file is needed on the preparation workstation. Keep the whole
+`vonk-forge/` directory on this computer or move it to another local controller
+host without changing its internal layout. Start `docker-compose.yaml` with the
+host's shell or Docker/Compose application. The Compose file uses relative paths,
+so the three entries must remain together.
+
+The `/nas` segment in the public installer URL is historical; it is not a
+hardware restriction.
 
 The installer prompts for:
 
-- the NAS LAN address and Spark management/fabric CIDRs;
+- the controller host's LAN address and Spark management/fabric CIDRs;
 - the control, enrollment, agent, and registry hostnames;
 - Tailscale OAuth credentials;
 - the LiteLLM upstream provider key;
@@ -40,8 +44,9 @@ configuration and relative secret paths.
 
 ## Start and verify
 
-In a NAS UI, select the uploaded directory as one Compose project, pull the
-referenced images, and start it. On a NAS with a shell, the equivalent is:
+In a Docker UI, select the complete directory as one Compose project, pull the
+referenced images, and start it. On any controller host with a shell, the
+equivalent is:
 
 ```sh
 cd vonk-forge
@@ -68,7 +73,7 @@ curl -fsSL https://install.vonkforge.ai/nas | sh
 
 Upgrade mode preserves `.env`, `secrets/`, and site identity while atomically
 replacing the release-controlled Compose file and adding any newly required
-inputs. Upload the resulting directory over the NAS project, pull, and
+inputs. Place the resulting directory over the controller project, pull, and
 redeploy. Keep named volumes during normal upgrades.
 
 Development and production use this exact topology and configuration contract.
