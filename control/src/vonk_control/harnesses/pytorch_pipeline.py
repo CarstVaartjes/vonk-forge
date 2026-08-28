@@ -28,6 +28,7 @@ _MIME_TYPES = (
     "video/mp4",
     "model/gltf-binary",
     "application/octet-stream",
+    "application/zip",
 )
 _ARGUMENTS = {
     "entrypoint": ArgumentSpec("--entrypoint", validate=source_bundle_file),

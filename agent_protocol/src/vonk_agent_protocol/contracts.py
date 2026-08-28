@@ -83,6 +83,7 @@ class AgentOperation(StrEnum):
     RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"
     RECIPE_START = "recipe.start"
+    RECIPE_JOB_RUN = "recipe.job.run.v1"
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
 
@@ -163,7 +164,11 @@ def _validate_safe_keys(
         for key, item in value.items():
             if not isinstance(key, str):
                 raise AgentProtocolError("JSON object keys must be strings")
-            if _is_path_key(key):
+            if _is_path_key(key) and not (
+                operation is AgentOperation.RECIPE_JOB_RUN
+                and path == ("output_limits",)
+                and key == "max_file_bytes"
+            ):
                 raise AgentProtocolError(f"filesystem path key is not allowed: {key}")
             if UNSAFE_KEY.search(key) and not (
                 allow_secret_refs and (key == "secrets" or field_name == "secrets")
@@ -197,16 +202,24 @@ def _validate_safe_keys(
             if VERSIONED_PLATFORM_TARGET.fullmatch(value) is None:
                 raise AgentProtocolError("platform target identifier is not canonical")
         elif (
-            operation is AgentOperation.RECIPE_BUILD
-            and _typed_build_string(path, value)
-        ) or (
-            operation is AgentOperation.AGENT_UPGRADE
-            and path == ("package_url",)
-            and AGENT_PACKAGE_URL.fullmatch(value) is not None
-        ) or (
-            typed_result_strings
-            and ("/" in value or "\\" in value)
-            and _typed_result_string(path, value)
+            (
+                operation is AgentOperation.RECIPE_BUILD
+                and _typed_build_string(path, value)
+            )
+            or (
+                operation is AgentOperation.RECIPE_JOB_RUN
+                and _typed_recipe_job_string(path, value)
+            )
+            or (
+                operation is AgentOperation.AGENT_UPGRADE
+                and path == ("package_url",)
+                and AGENT_PACKAGE_URL.fullmatch(value) is not None
+            )
+            or (
+                typed_result_strings
+                and ("/" in value or "\\" in value)
+                and _typed_result_string(path, value)
+            )
         ):
             return
         elif "/" in value or "\\" in value:
@@ -245,11 +258,54 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
     )
 
 
+def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
+    if (
+        (
+            len(path) == 3
+            and path[0] == "inputs"
+            and isinstance(path[1], int)
+            and path[2] == "media_type"
+        )
+        or (
+            len(path) == 3
+            and path[:2] == ("output_limits", "allowed_media_types")
+            and isinstance(path[2], int)
+        )
+        or (
+            len(path) == 3
+            and path[0] == "output_mappings"
+            and isinstance(path[1], int)
+            and path[2] == "media_type"
+        )
+    ):
+        return bool(
+            re.fullmatch(
+                r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}",
+                value,
+            )
+        )
+    if path and path[0] == "parameters":
+        return len(value.encode("utf-8")) <= 4096 and "\x00" not in value
+    return False
+
+
 def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
     if path in {("endpoint",), ("evidence", "endpoint")}:
         return _recipe_endpoint(value)
     if path == ("evidence", "model_identity"):
         return _model_identity(value)
+    if (
+        len(path) == 4
+        and path[:2] == ("output_manifest", "files")
+        and isinstance(path[2], int)
+        and path[3] == "media_type"
+    ):
+        return bool(
+            re.fullmatch(
+                r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}",
+                value,
+            )
+        )
     return False
 
 
@@ -380,15 +436,12 @@ def _validate_agent_upgrade_payload(value: Mapping[str, Any]) -> None:
         or not isinstance(value["package_url"], str)
         or AGENT_PACKAGE_URL.fullmatch(value["package_url"]) is None
         or not isinstance(value["package_version"], str)
-        or re.fullmatch(
-            r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}", value["package_version"]
-        )
+        or re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}", value["package_version"])
         is None
         or not isinstance(value["target_binary_digest"], str)
         or DIGEST.fullmatch(value["target_binary_digest"]) is None
         or not isinstance(value["target_build_digest"], str)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", value["target_build_digest"])
-        is None
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", value["target_build_digest"]) is None
     ):
         raise AgentProtocolError("agent upgrade payload is invalid")
 
@@ -700,10 +753,12 @@ class AgentClaim:
         object.__setattr__(self, "node_id", _node_id(self.node_id))
         if not isinstance(self.operation, AgentOperation):
             raise AgentProtocolError("operation is not supported")
-        if not isinstance(self.authority_revision, str) or not AUTHORITY_REVISION.fullmatch(
-            self.authority_revision
-        ):
-            raise AgentProtocolError("authority_revision must be a 64-character lowercase SHA-256")
+        if not isinstance(
+            self.authority_revision, str
+        ) or not AUTHORITY_REVISION.fullmatch(self.authority_revision):
+            raise AgentProtocolError(
+                "authority_revision must be a 64-character lowercase SHA-256"
+            )
         if not isinstance(self.payload_digest, str) or not DIGEST.fullmatch(
             self.payload_digest
         ):
@@ -747,8 +802,12 @@ class AgentClaim:
         except (TypeError, ValueError) as error:
             raise AgentProtocolError("operation is not supported") from error
         authority_revision = value["authority_revision"]
-        if not isinstance(authority_revision, str) or not AUTHORITY_REVISION.fullmatch(authority_revision):
-            raise AgentProtocolError("authority_revision must be a 64-character lowercase SHA-256")
+        if not isinstance(authority_revision, str) or not AUTHORITY_REVISION.fullmatch(
+            authority_revision
+        ):
+            raise AgentProtocolError(
+                "authority_revision must be a 64-character lowercase SHA-256"
+            )
         payload_digest = value["payload_digest"]
         if not isinstance(payload_digest, str) or not DIGEST.fullmatch(payload_digest):
             raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
@@ -875,7 +934,12 @@ class AgentResult:
         object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
         object.__setattr__(self, "node_id", _node_id(self.node_id))
         object.__setattr__(self, "deadline", _deadline(self.deadline))
-        if self.state not in {"succeeded", "failed", "waiting-for-operator"}:
+        if self.state not in {
+            "succeeded",
+            "failed",
+            "cancelled",
+            "waiting-for-operator",
+        }:
             raise AgentProtocolError("result state is not supported")
         object.__setattr__(
             self,
@@ -915,6 +979,7 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "agent-job.schema.json",
         "agent-result.schema.json",
         "agent-directive.schema.json",
+        "recipe-job-run.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
     try:
@@ -937,6 +1002,10 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-result.schema.json": AgentResult.parse,
         "agent-directive.schema.json": AgentDirective.parse,
     }
+    if schema_name == "recipe-job-run.schema.json":
+        from .recipe_jobs import RecipeJobRunRequest
+
+        parsers[schema_name] = RecipeJobRunRequest.parse
     try:
         parser = parsers[schema_name]
     except KeyError as error:

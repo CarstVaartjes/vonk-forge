@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Generate the deterministic CC0 unit-cube GLB qualification fixture."""
+
+from __future__ import annotations
+
+import json
+import struct
+import sys
+from pathlib import Path
+
+
+def build() -> bytes:
+    vertices = [
+        (-0.5, -0.5, -0.5),
+        (0.5, -0.5, -0.5),
+        (0.5, 0.5, -0.5),
+        (-0.5, 0.5, -0.5),
+        (-0.5, -0.5, 0.5),
+        (0.5, -0.5, 0.5),
+        (0.5, 0.5, 0.5),
+        (-0.5, 0.5, 0.5),
+    ]
+    indices = [
+        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2,
+        0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
+    ]
+    positions = struct.pack("<24f", *(value for vertex in vertices for value in vertex))
+    triangles = struct.pack("<36H", *indices)
+    binary = positions + triangles
+    document = {
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5126,
+                "count": 8,
+                "max": [0.5, 0.5, 0.5],
+                "min": [-0.5, -0.5, -0.5],
+                "type": "VEC3",
+            },
+            {"bufferView": 1, "componentType": 5123, "count": 36, "type": "SCALAR"},
+        ],
+        "asset": {"generator": "vonk-forge qualification fixture", "version": "2.0"},
+        "bufferViews": [
+            {"buffer": 0, "byteLength": 96, "byteOffset": 0, "target": 34962},
+            {"buffer": 0, "byteLength": 72, "byteOffset": 96, "target": 34963},
+        ],
+        "buffers": [{"byteLength": len(binary)}],
+        "meshes": [
+            {
+                "name": "qualification-cube",
+                "primitives": [
+                    {"attributes": {"POSITION": 0}, "indices": 1, "mode": 4}
+                ],
+            }
+        ],
+        "nodes": [{"mesh": 0}],
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+    }
+    encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
+    encoded += b" " * (-len(encoded) % 4)
+    total = 12 + 8 + len(encoded) + 8 + len(binary)
+    return (
+        struct.pack("<4sII", b"glTF", 2, total)
+        + struct.pack("<II", len(encoded), 0x4E4F534A)
+        + encoded
+        + struct.pack("<II", len(binary), 0x004E4942)
+        + binary
+    )
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: generate-qualification-cube-glb OUTPUT")
+    Path(sys.argv[1]).write_bytes(build())
+
+
+if __name__ == "__main__":
+    main()

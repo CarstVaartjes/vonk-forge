@@ -65,6 +65,7 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
         "recipe.image.import.v1",
         "recipe.install",
         "recipe.start",
+        "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
     }

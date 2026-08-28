@@ -23,6 +23,7 @@ class VisualArtifact:
         Attributes:
             download_bytes (int):
             id (str):
+            include_paths (list[str]):
             installed_bytes (int):
             kind (str):
             repository (str):
@@ -32,6 +33,7 @@ class VisualArtifact:
 
     download_bytes: int
     id: str
+    include_paths: list[str]
     installed_bytes: int
     kind: str
     repository: str
@@ -46,6 +48,10 @@ class VisualArtifact:
         download_bytes = self.download_bytes
 
         id = self.id
+
+        include_paths = self.include_paths
+
+
 
         installed_bytes = self.installed_bytes
 
@@ -65,6 +71,7 @@ class VisualArtifact:
         field_dict.update({
             "download_bytes": download_bytes,
             "id": id,
+            "include_paths": include_paths,
             "installed_bytes": installed_bytes,
             "kind": kind,
             "repository": repository,
@@ -83,6 +90,9 @@ class VisualArtifact:
 
         id = d.pop("id")
 
+        include_paths = cast(list[str], d.pop("include_paths"))
+
+
         installed_bytes = d.pop("installed_bytes")
 
         kind = d.pop("kind")
@@ -97,6 +107,7 @@ class VisualArtifact:
         visual_artifact = cls(
             download_bytes=download_bytes,
             id=id,
+            include_paths=include_paths,
             installed_bytes=installed_bytes,
             kind=kind,
             repository=repository,

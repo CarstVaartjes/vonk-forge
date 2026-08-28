@@ -2,6 +2,7 @@ use std::{fs, path::Path, time::Duration};
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
@@ -380,6 +381,103 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         bounded_body_limit(response, expected_bytes as usize).await
+    }
+
+    pub async fn download_recipe_job_input(
+        &self,
+        job_id: uuid::Uuid,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+    ) -> Result<(), ClientError> {
+        if !valid_sha256(sha256) || expected_bytes > 512 * 1024 * 1024 || !destination.is_absolute()
+        {
+            return Err(ClientError::Protocol);
+        }
+        let mut response = self
+            .client
+            .get(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}"))?)
+            .send()
+            .await?;
+        classify_status(response.status())?;
+        if response.content_length() != Some(expected_bytes) {
+            return Err(ClientError::Protocol);
+        }
+        let parent = destination.parent().ok_or(ClientError::Protocol)?;
+        let temporary = parent.join(format!(".job-input-{}.tmp", uuid::Uuid::new_v4()));
+        let result = async {
+            let mut output = tokio::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .mode(0o600)
+                .open(&temporary)
+                .await?;
+            let mut observed = 0_u64;
+            let mut hasher = Sha256::new();
+            while let Some(chunk) = response.chunk().await? {
+                observed = observed
+                    .checked_add(chunk.len() as u64)
+                    .filter(|value| *value <= expected_bytes)
+                    .ok_or(ClientError::Protocol)?;
+                hasher.update(&chunk);
+                output.write_all(&chunk).await?;
+            }
+            if observed != expected_bytes || hex::encode(hasher.finalize()) != sha256 {
+                return Err(ClientError::Protocol);
+            }
+            output.sync_all().await?;
+            drop(output);
+            tokio::fs::hard_link(&temporary, destination).await?;
+            tokio::fs::remove_file(&temporary).await?;
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&temporary).await;
+        }
+        result
+    }
+
+    pub async fn upload_recipe_job_output(
+        &self,
+        job_id: uuid::Uuid,
+        name: &str,
+        media_type: &str,
+        sha256: &str,
+        expected_bytes: u64,
+        path: &Path,
+    ) -> Result<(), ClientError> {
+        if name.is_empty()
+            || name == "manifest.json"
+            || name.len() > 128
+            || !name.as_bytes()[0].is_ascii_alphanumeric()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            || !valid_sha256(sha256)
+            || media_type.is_empty()
+            || media_type.len() > 128
+            || tokio::fs::metadata(path).await?.len() != expected_bytes
+        {
+            return Err(ClientError::Protocol);
+        }
+        let file = tokio::fs::File::open(path).await?;
+        let response = self
+            .client
+            .put(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/outputs/{sha256}"))?)
+            .header("x-vonk-artifact-name", name)
+            .header("content-type", media_type)
+            .header("content-length", expected_bytes)
+            .timeout(Duration::from_secs(3600))
+            .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
+            .send()
+            .await?;
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(())
+        } else {
+            classify_status(response.status())?;
+            Err(ClientError::Protocol)
+        }
     }
 
     pub async fn upload_recipe_image(
@@ -766,6 +864,39 @@ mod tests {
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         request_capture_client(status, Vec::new(), Vec::new(), None)
+    }
+
+    fn job_input_client(
+        declared_bytes: usize,
+        body: Vec<u8>,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|value| value == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {declared_bytes}\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            stream.write_all(&body).unwrap();
+            request
+        });
+        (
+            AgentHttpClient {
+                client: reqwest::Client::new(),
+                controller: Url::parse(&format!("http://{address}/")).unwrap(),
+                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            },
+            server,
+        )
     }
 
     fn telemetry_sample(sequence: i64) -> TelemetrySample {
@@ -1171,5 +1302,40 @@ mod tests {
         );
         assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
         assert!(request.ends_with(b"accepted archive"));
+    }
+
+    #[tokio::test]
+    async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temps() {
+        let cases = [
+            (7, b"weights".to_vec(), "a".repeat(64), false),
+            (7, b"short".to_vec(), hex_sha256(b"short!!"), false),
+            (8, b"oversize".to_vec(), hex_sha256(b"oversize"), false),
+            (7, b"weights".to_vec(), hex_sha256(b"weights"), true),
+        ];
+        for (declared, body, digest, succeeds) in cases {
+            let directory = tempfile::tempdir().unwrap();
+            let destination = directory.path().join("input.bin");
+            let (client, server) = job_input_client(declared, body);
+            let result = client
+                .download_recipe_job_input(
+                    Uuid::parse_str("45ea6921-50c9-4971-be2a-4cd04ce05069").unwrap(),
+                    &digest,
+                    7,
+                    &destination,
+                )
+                .await;
+            server.join().unwrap();
+            assert_eq!(result.is_ok(), succeeds);
+            assert_eq!(destination.exists(), succeeds);
+            assert!(
+                !std::fs::read_dir(directory.path())
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .any(|entry| entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".job-input-"))
+            );
+        }
     }
 }

@@ -377,7 +377,11 @@ def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | N
         return None
     if (
         not isinstance(value, Mapping)
-        or set(value) != {"path", "required", "media_types", "max_bytes"}
+        or set(value)
+        not in (
+            {"path", "required", "media_types", "max_bytes"},
+            {"path", "required", "media_types", "max_bytes", "slots"},
+        )
         or value.get("path") != "/inputs"
         or type(value.get("required")) is not bool
         or type(value.get("media_types")) is not list
@@ -391,9 +395,54 @@ def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | N
         or len(set(value["media_types"])) != len(value["media_types"])
         or len(value["media_types"]) > 16
         or type(value.get("max_bytes")) is not int
-        or value["max_bytes"] < 1
+        or not 1 <= value["max_bytes"] <= 1024**3
     ):
         raise HarnessCompileError("harness input contract is invalid")
+    slots = value.get("slots")
+    if slots is not None:
+        if type(slots) is not list or not 1 <= len(slots) <= 32:
+            raise HarnessCompileError("harness input slot contract is invalid")
+        identifiers: set[str] = set()
+        for slot in slots:
+            if (
+                not isinstance(slot, Mapping)
+                or set(slot)
+                != {
+                    "id",
+                    "label",
+                    "description",
+                    "media_types",
+                    "extensions",
+                    "min_files",
+                    "max_files",
+                    "max_file_bytes",
+                    "max_total_bytes",
+                }
+                or type(slot.get("id")) is not str
+                or re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", slot["id"]) is None
+                or slot["id"] in identifiers
+                or type(slot.get("media_types")) is not list
+                or not slot["media_types"]
+                or not set(slot["media_types"]) <= set(value["media_types"])
+                or type(slot.get("extensions")) is not list
+                or any(
+                    type(extension) is not str
+                    or re.fullmatch(r"\.[a-z0-9][a-z0-9._-]{0,15}", extension) is None
+                    for extension in slot["extensions"]
+                )
+                or type(slot.get("min_files")) is not int
+                or type(slot.get("max_files")) is not int
+                or not 0 <= slot["min_files"] <= slot["max_files"] <= 32
+                or slot["max_files"] < 1
+                or type(slot.get("max_file_bytes")) is not int
+                or not 1 <= slot["max_file_bytes"] <= 512 * 1024**2
+                or type(slot.get("max_total_bytes")) is not int
+                or not slot["max_file_bytes"]
+                <= slot["max_total_bytes"]
+                <= value["max_bytes"]
+            ):
+                raise HarnessCompileError("harness input slot contract is invalid")
+            identifiers.add(slot["id"])
     return value
 
 

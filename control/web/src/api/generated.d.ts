@@ -123,6 +123,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/artifact-jobs/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capabilities */
+        get: operations["getArtifactJobCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifact-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Status */
+        get: operations["getArtifactJobStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifact-jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Job */
+        post: operations["cancelArtifactJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifact-jobs/{job_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize Job */
+        post: operations["finalizeArtifactJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifact-jobs/{job_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result Metadata */
+        get: operations["getArtifactJobResult"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifact-jobs/{job_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Job */
+        post: operations["submitArtifactJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -1047,6 +1149,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/job-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Job Run */
+        post: operations["activateRecipeJobRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recipes/mapping-plans/preview": {
         parameters: {
             query?: never;
@@ -1160,6 +1279,24 @@ export interface paths {
         get: operations["getRecipeRunStatus"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/runs/{run_id}/artifact-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Jobs */
+        get: operations["listArtifactJobsForRun"];
+        put?: never;
+        /** Create Job */
+        post: operations["createArtifactJob"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1330,6 +1467,33 @@ export interface components {
             /** Source Yaml */
             source_yaml: string;
         };
+        /** ArtifactFileDeclaration */
+        ArtifactFileDeclaration: {
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Slot */
+            slot: string;
+        };
+        /** ArtifactJobCreate */
+        ArtifactJobCreate: {
+            /** Inputs */
+            inputs?: components["schemas"]["ArtifactFileDeclaration"][];
+            /** Interface */
+            interface: string;
+            output_limits: components["schemas"]["OutputLimits"];
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
         /** AuthSession */
         AuthSession: {
             /**
@@ -1398,6 +1562,11 @@ export interface components {
             recipe_revision_id: string;
             /** Request Key */
             request_key: string;
+        };
+        /** CancelRequest */
+        CancelRequest: {
+            /** Reason */
+            reason: string;
         };
         /** CapacityReservations */
         CapacityReservations: {
@@ -2791,6 +2960,17 @@ export interface components {
             /** Runs */
             runs: components["schemas"]["OperationalRun"][];
         };
+        /** OutputLimits */
+        OutputLimits: {
+            /** Allowed Media Types */
+            allowed_media_types: string[];
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+        };
         /** PlacementEvidenceCounts */
         PlacementEvidenceCounts: {
             /** Builds */
@@ -4146,6 +4326,8 @@ export interface components {
             download_bytes: number;
             /** Id */
             id: string;
+            /** Include Paths */
+            include_paths: string[];
             /** Installed Bytes */
             installed_bytes: number;
             /** Kind */
@@ -4212,18 +4394,71 @@ export interface components {
             /** Slug */
             slug: string;
         };
+        /** VisualInputSlot */
+        VisualInputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+        };
         /** VisualInterface */
         VisualInterface: {
             /** Adapter */
             adapter: string;
             /** Health Path */
             health_path?: string | null;
+            input?: components["schemas"]["VisualInterfaceInput"] | null;
             /** Model Aliases */
             model_aliases?: string[];
+            output?: components["schemas"]["VisualInterfaceOutput"] | null;
             /** Path */
             path?: string | null;
             /** Port */
             port?: number | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+        };
+        /** VisualInterfaceInput */
+        VisualInterfaceInput: {
+            /** Max Bytes */
+            max_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+            /** Path */
+            path: string;
+            /** Required */
+            required: boolean;
+            /** Slots */
+            slots?: components["schemas"]["VisualInputSlot"][];
+        };
+        /** VisualInterfaceOutput */
+        VisualInterfaceOutput: {
+            /** Allowed Media Types */
+            allowed_media_types: string[];
+            /** Max Total Bytes */
+            max_total_bytes?: number | null;
+            /** Path */
+            path: string;
+            /** Slots */
+            slots?: components["schemas"]["VisualOutputSlot"][];
         };
         /** VisualMetadata */
         VisualMetadata: {
@@ -4233,6 +4468,31 @@ export interface components {
             tags: string[];
             /** Title */
             title: string;
+        };
+        /** VisualModelLicense */
+        VisualModelLicense: {
+            territorial_restrictions?: components["schemas"]["VisualTerritorialRestrictions"] | null;
+        };
+        /** VisualOutputSlot */
+        VisualOutputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
         };
         /** VisualProvenance */
         VisualProvenance: {
@@ -4257,6 +4517,9 @@ export interface components {
             interfaces: components["schemas"]["VisualInterface"][];
             metadata: components["schemas"]["VisualMetadata"];
             model: components["schemas"]["VisualCatalogIdentity"];
+            model_license: components["schemas"]["VisualModelLicense"] | null;
+            /** Parameters */
+            parameters: components["schemas"]["VisualRecipeParameter"][];
             provenance: components["schemas"]["VisualProvenance"];
             runtime: components["schemas"]["VisualRuntime"];
             /**
@@ -4265,6 +4528,33 @@ export interface components {
              */
             schema_version: 1;
             validation: components["schemas"]["VisualValidation"];
+        };
+        /** VisualRecipeParameter */
+        VisualRecipeParameter: {
+            /** Allowed Values */
+            allowed_values?: (string | number | boolean | null)[];
+            /**
+             * Change Effect
+             * @enum {string}
+             */
+            change_effect: "rebuild" | "reinstall" | "restart";
+            /** Default */
+            default: string | number | boolean | null;
+            /** Description */
+            description: string;
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "boolean" | "enum";
         };
         /** VisualRuntime */
         VisualRuntime: {
@@ -4277,6 +4567,13 @@ export interface components {
             lifecycle_pre_start_count: number;
             /** Stop Timeout Seconds */
             stop_timeout_seconds: number;
+        };
+        /** VisualTerritorialRestrictions */
+        VisualTerritorialRestrictions: {
+            /** Denied Jurisdictions */
+            denied_jurisdictions: string[];
+            /** Notice */
+            notice: string;
         };
         /** VisualValidation */
         VisualValidation: {
@@ -4616,6 +4913,197 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getArtifactJobCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getArtifactJobStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelArtifactJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    finalizeArtifactJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getArtifactJobResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitArtifactJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7482,6 +7970,39 @@ export interface operations {
             };
         };
     };
+    activateRecipeJobRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     previewRecipeMapping: {
         parameters: {
             query?: never;
@@ -7698,6 +8219,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listArtifactJobsForRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createArtifactJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactJobCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

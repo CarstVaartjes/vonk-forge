@@ -6,16 +6,17 @@ operator-facing invariants explicit: placement is deterministic and digest
 bound, lifecycle calls are capability checked, and all mutations are delegated
 to the durable PostgreSQL-backed operation service.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from typing import Any, Mapping, Protocol, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from vonk_agent_protocol import canonical_message
 
 from .auth import Actor
-from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 
 
 class LibraryOperationDenied(PermissionError):
@@ -28,13 +29,21 @@ class LibraryPlacementConflict(ValueError):
 
 class LifecycleService(Protocol):
     def preview_install(self, mapping_id: str, recipe_build_id: str) -> Any: ...
-    def install(self, plan: Any, *, plan_digest: str, actor: str, request_id: str) -> Any: ...
+    def install(
+        self, plan: Any, *, plan_digest: str, actor: str, request_id: str
+    ) -> Any: ...
     def preview_run(self, installation_id: str, alias: str) -> Any: ...
-    def start(self, plan: Any, *, plan_digest: str, actor: str, request_id: str) -> Any: ...
+    def start(
+        self, plan: Any, *, plan_digest: str, actor: str, request_id: str
+    ) -> Any: ...
     def preview_stop(self, run_id: str) -> Any: ...
-    def stop(self, run_id: str, *, plan_digest: str, actor: str, request_id: str) -> Any: ...
+    def stop(
+        self, run_id: str, *, plan_digest: str, actor: str, request_id: str
+    ) -> Any: ...
     def preview_uninstall(self, installation_id: str) -> Any: ...
-    def uninstall(self, installation_id: str, *, plan_digest: str, actor: str, request_id: str) -> Any: ...
+    def uninstall(
+        self, installation_id: str, *, plan_digest: str, actor: str, request_id: str
+    ) -> Any: ...
     def get(self, operation_id: str) -> Any: ...
     def retry(self, operation_id: str, *, actor: str, request_id: str) -> Any: ...
 
@@ -68,7 +77,9 @@ class LibraryLifecycleAuthority:
     service: LifecycleService
 
     @staticmethod
-    def require_operate(actor: Actor | str, capabilities: Sequence[str] | None = None) -> None:
+    def require_operate(
+        actor: Actor | str, capabilities: Sequence[str] | None = None
+    ) -> None:
         """Require ``library:operate``; administrators are implicitly capable."""
         role = actor.role if isinstance(actor, Actor) else actor
         if role == "administrator":
@@ -91,21 +102,31 @@ class LibraryLifecycleAuthority:
         if type(count) is not int or count < 1:
             raise LibraryPlacementConflict("topology node_count is invalid")
         required = set(required_capabilities)
-        eligible = tuple(sorted(
-            spark.node_id for spark in sparks
-            if spark.online and spark.free_bytes >= required_bytes
-            and spark.free_memory_bytes >= required_memory_bytes
-            and required <= set(spark.capabilities)
-        ))
+        eligible = tuple(
+            sorted(
+                spark.node_id
+                for spark in sparks
+                if spark.online
+                and spark.free_bytes >= required_bytes
+                and spark.free_memory_bytes >= required_memory_bytes
+                and required <= set(spark.capabilities)
+            )
+        )
         rejected = {
-            spark.node_id: "offline" if not spark.online else (
-                "missing capability" if not required <= set(spark.capabilities)
+            spark.node_id: "offline"
+            if not spark.online
+            else (
+                "missing capability"
+                if not required <= set(spark.capabilities)
                 else "insufficient capacity"
             )
-            for spark in sparks if spark.node_id not in eligible
+            for spark in sparks
+            if spark.node_id not in eligible
         }
         if len(eligible) < count:
-            raise LibraryPlacementConflict("fewer eligible Sparks than topology requires")
+            raise LibraryPlacementConflict(
+                "fewer eligible Sparks than topology requires"
+            )
         nodes = eligible[:count]
         identity = {
             "schema_version": 1,
@@ -117,9 +138,13 @@ class LibraryLifecycleAuthority:
         }
         digest = hashlib.sha256(canonical_message(identity)).hexdigest()
         return PlacementPreview(
-            topology=dict(topology), nodes=nodes, eligible=eligible,
-            rejected=rejected, required_bytes=required_bytes,
-            required_memory_bytes=required_memory_bytes, placement_digest=digest,
+            topology=dict(topology),
+            nodes=nodes,
+            eligible=eligible,
+            rejected=rejected,
+            required_bytes=required_bytes,
+            required_memory_bytes=required_memory_bytes,
+            placement_digest=digest,
         )
 
     @staticmethod
@@ -127,33 +152,94 @@ class LibraryLifecycleAuthority:
         if digest != preview.placement_digest:
             raise LibraryPlacementConflict("placement preview digest is stale")
 
-    def install(self, plan: Any, *, plan_digest: str, actor: Actor, request_id: str, capabilities: Sequence[str] = ()) -> Any:
+    def install(
+        self,
+        plan: Any,
+        *,
+        plan_digest: str,
+        actor: Actor,
+        request_id: str,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         self.require_operate(actor, capabilities)
-        return self.service.install(plan, plan_digest=plan_digest, actor=actor.subject, request_id=request_id)
+        return self.service.install(
+            plan, plan_digest=plan_digest, actor=actor.subject, request_id=request_id
+        )
 
-    def run(self, plan: Any, *, plan_digest: str, actor: Actor, request_id: str, capabilities: Sequence[str] = ()) -> Any:
+    def run(
+        self,
+        plan: Any,
+        *,
+        plan_digest: str,
+        actor: Actor,
+        request_id: str,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         self.require_operate(actor, capabilities)
-        return self.service.start(plan, plan_digest=plan_digest, actor=actor.subject, request_id=request_id)
+        return self.service.start(
+            plan, plan_digest=plan_digest, actor=actor.subject, request_id=request_id
+        )
 
-    def stop(self, run_id: str, *, plan_digest: str, actor: Actor, request_id: str, capabilities: Sequence[str] = ()) -> Any:
+    def stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: Actor,
+        request_id: str,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         self.require_operate(actor, capabilities)
-        return self.service.stop(run_id, plan_digest=plan_digest, actor=actor.subject, request_id=request_id)
+        return self.service.stop(
+            run_id, plan_digest=plan_digest, actor=actor.subject, request_id=request_id
+        )
 
-    def uninstall(self, installation_id: str, *, plan_digest: str, actor: Actor, request_id: str, capabilities: Sequence[str] = ()) -> Any:
+    def uninstall(
+        self,
+        installation_id: str,
+        *,
+        plan_digest: str,
+        actor: Actor,
+        request_id: str,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         self.require_operate(actor, capabilities)
-        return self.service.uninstall(installation_id, plan_digest=plan_digest, actor=actor.subject, request_id=request_id)
+        return self.service.uninstall(
+            installation_id,
+            plan_digest=plan_digest,
+            actor=actor.subject,
+            request_id=request_id,
+        )
 
-    def operation(self, operation_id: str, *, actor: Actor | None = None, capabilities: Sequence[str] = ()) -> Any:
+    def operation(
+        self,
+        operation_id: str,
+        *,
+        actor: Actor | None = None,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         if actor is not None:
             self.require_operate(actor, capabilities)
         return self.service.get(operation_id)
 
-    def retry(self, operation_id: str, *, actor: Actor, request_id: str, capabilities: Sequence[str] = ()) -> Any:
+    def retry(
+        self,
+        operation_id: str,
+        *,
+        actor: Actor,
+        request_id: str,
+        capabilities: Sequence[str] = (),
+    ) -> Any:
         self.require_operate(actor, capabilities)
-        return self.service.retry(operation_id, actor=actor.subject, request_id=request_id)
+        return self.service.retry(
+            operation_id, actor=actor.subject, request_id=request_id
+        )
 
 
 __all__ = [
-    "LibraryLifecycleAuthority", "LibraryOperationDenied", "LibraryPlacementConflict",
-    "PlacementPreview", "SparkCapacity",
+    "LibraryLifecycleAuthority",
+    "LibraryOperationDenied",
+    "LibraryPlacementConflict",
+    "PlacementPreview",
+    "SparkCapacity",
 ]

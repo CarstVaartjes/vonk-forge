@@ -251,6 +251,11 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 validation="optional_cidr_list",
             ),
             _required_value(
+                "VONK_OPERATOR_JURISDICTION",
+                "Operator jurisdiction (uppercase country code, or EU)",
+                validation="jurisdiction",
+            ),
+            _required_value(
                 "VONK_CONTROL_HOSTNAME", "Control hostname", validation="hostname"
             ),
             _required_value(

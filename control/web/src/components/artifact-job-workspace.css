@@ -1,0 +1,251 @@
+.artifact-job-workspace {
+  background: #0c1612;
+  border: 1px solid var(--border-strong);
+  border-radius: 1rem;
+  box-shadow: 0 1.4rem 4rem #0002, inset 0 1px #ffffff0b;
+  container-type: inline-size;
+  margin-top: 1rem;
+  overflow: hidden;
+}
+
+.artifact-job-heading {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1rem;
+}
+
+.artifact-job-heading h4,
+.artifact-job-heading p,
+.artifact-job-history h5 {
+  margin: 0;
+}
+
+.artifact-job-heading h4 { font-size: 1.08rem; }
+.artifact-job-heading p { color: var(--text-muted); margin-top: 0.35rem; max-width: 68ch; }
+
+.artifact-job-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.9fr) minmax(24rem, 1.1fr);
+  min-width: 0;
+}
+
+.artifact-job-form,
+.artifact-job-history {
+  min-width: 0;
+  padding: 1rem;
+}
+
+.artifact-job-form { border-right: 1px solid var(--border); }
+.artifact-job-form > label { margin: 0 0 1rem; max-width: none; }
+.artifact-job-form > label > span,
+.artifact-job-parameters label > span:first-child {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.artifact-job-form input,
+.artifact-job-form select,
+.artifact-job-form textarea { width: 100%; }
+.artifact-job-form textarea { line-height: 1.5; resize: vertical; }
+.artifact-job-form small { color: var(--text-muted); line-height: 1.45; }
+
+.artifact-job-parameters {
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.8rem;
+}
+
+.artifact-job-parameters legend { font-size: 0.78rem; font-weight: 800; padding: 0 0.35rem; }
+.artifact-job-parameters label { margin: 0; max-width: none; }
+.artifact-job-check { align-items: flex-start; grid-template-columns: auto 1fr; }
+.artifact-job-check input { margin-top: 0.2rem; width: auto; }
+.artifact-job-check strong,
+.artifact-job-check small { display: block; }
+.artifact-job-field-error { color: #ffb2ba !important; }
+
+.artifact-input-list,
+.artifact-output-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.artifact-input-list { border: 1px solid var(--border); border-radius: 0.65rem; overflow: hidden; }
+.artifact-input-list li { display: grid; gap: 0.15rem; padding: 0.65rem 0.75rem; }
+.artifact-input-list li + li { border-top: 1px solid var(--border); }
+.artifact-input-list span { font-weight: 750; overflow-wrap: anywhere; }
+
+.artifact-job-preflight {
+  background: #10251d;
+  border: 1px solid #2c624f;
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+  padding: 0.8rem;
+}
+
+.artifact-job-preflight.has-errors { background: #26191a; border-color: #743740; }
+.artifact-job-preflight > div { align-items: baseline; display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; justify-content: space-between; }
+.artifact-job-preflight span,
+.artifact-job-preflight p { color: var(--text-muted); font-size: 0.75rem; }
+.artifact-job-preflight ul { color: #ffb2ba; margin: 0; padding-left: 1.2rem; }
+.artifact-job-preflight li + li { margin-top: 0.3rem; }
+.artifact-job-preflight details { border-top: 1px solid var(--border); padding-top: 0.45rem; }
+.artifact-job-preflight summary { cursor: pointer; font-size: 0.75rem; font-weight: 800; min-height: 2.75rem; padding: 0.75rem 0; }
+.artifact-job-preflight p { margin: 0; overflow-wrap: anywhere; }
+.artifact-storage-capacity { font-variant-numeric: tabular-nums; }
+
+.artifact-transfer {
+  background: #0b1b24;
+  border: 1px solid #31556e;
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  padding: 0.8rem;
+}
+
+.artifact-transfer > div { align-items: baseline; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; }
+.artifact-transfer span { color: #b5dcff; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.artifact-transfer progress { height: 0.65rem; width: 100%; }
+.artifact-transfer .button { justify-self: start; }
+
+.artifact-job-empty,
+.artifact-job-history-empty,
+.artifact-job-error,
+.artifact-job-notice,
+.artifact-job-contract-notice {
+  margin: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: #07110e;
+}
+
+.artifact-job-empty p,
+.artifact-job-history-empty p,
+.artifact-job-error p { color: var(--text-muted); margin: 0.3rem 0 0; }
+.artifact-job-notice { border-color: #31556e; color: #b5dcff; margin: 0 0 1rem; }
+.artifact-job-contract-notice { border-color: #6c5627; margin: 0 0 1rem; }
+.artifact-job-contract-notice p { color: var(--text-muted); line-height: 1.5; margin: 0.3rem 0 0; }
+.artifact-job-error { border-color: #743740; margin: 0 0 1rem; }
+.artifact-job-error .button { margin-top: 0.65rem; }
+
+.artifact-job-history { display: grid; gap: 0.75rem; align-content: start; }
+.artifact-job-history > header { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+.artifact-job-history > header .button { min-height: 2.4rem; padding: 0.45rem 0.75rem; }
+.artifact-job-history-empty { margin: 0; }
+.artifact-job-history-empty[role="status"] { align-items: center; display: flex; gap: 0.7rem; }
+.artifact-job-featured { min-width: 0; }
+
+.artifact-job-archive > summary {
+  display: none;
+}
+
+.artifact-job-archive > .artifact-job-history-row {
+  margin: 0;
+}
+
+.artifact-job-history-row {
+  background: #111912;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  min-width: 0;
+  padding: 0.8rem;
+}
+
+.artifact-job-history-row > header,
+.artifact-output-heading {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: space-between;
+}
+
+.artifact-job-history-row > header > div,
+.artifact-output-heading > div { align-items: center; display: flex; flex-wrap: wrap; gap: 0.45rem; min-width: 0; }
+.artifact-job-history-row > header span,
+.artifact-output-heading span { color: var(--text-muted); font-size: 0.72rem; }
+
+.artifact-job-progress { margin-top: 0.75rem; }
+.artifact-job-progress-track { background: #07110e; border: 1px solid var(--border); border-radius: 99px; display: block; height: 0.45rem; overflow: hidden; }
+.artifact-job-progress-track > span { animation: artifact-job-progress 1.8s cubic-bezier(.16, 1, .3, 1) infinite; background: var(--info); display: block; height: 100%; width: 34%; }
+.artifact-job-progress p { color: var(--text-muted); font-size: 0.75rem; margin: 0.35rem 0 0; }
+
+.artifact-job-reason { color: #ffb2ba; margin: 0.75rem 0 0; overflow-wrap: anywhere; }
+.artifact-job-evidence { display: grid; grid-template-columns: auto 1fr; margin: 0.75rem 0 0; gap: 0.3rem 0.7rem; font-size: 0.75rem; }
+.artifact-job-evidence dt { color: var(--text-muted); }
+.artifact-job-evidence dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.artifact-output-list { display: grid; gap: 0.7rem; margin-top: 0.8rem; }
+.artifact-output-row { background: #07110e; border: 1px solid var(--border); border-radius: 0.65rem; min-width: 0; padding: 0.7rem; }
+.artifact-output-row img,
+.artifact-output-row video { background: #050806; border: 1px solid var(--border); border-radius: 0.5rem; display: block; margin-top: 0.7rem; max-height: 26rem; object-fit: contain; width: 100%; }
+.artifact-output-row audio { display: block; margin-top: 0.7rem; width: 100%; }
+.artifact-output-heading strong,
+.artifact-output-heading span { display: block; overflow-wrap: anywhere; }
+.artifact-output-heading .button { min-height: 2.4rem; padding: 0.45rem 0.7rem; }
+.artifact-glb-notice { border-top: 1px solid var(--border); display: grid; gap: 0.25rem; margin-top: 0.7rem; padding-top: 0.7rem; }
+.artifact-glb-notice span { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
+
+.artifact-job-row-actions { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.75rem; }
+.artifact-job-row-actions p { color: var(--text-muted); flex-basis: 100%; margin: 0; }
+.artifact-job-row-actions .button,
+.artifact-job-row-actions button { min-height: 2.5rem; padding: 0.5rem 0.75rem; }
+
+@keyframes artifact-job-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
+@container (max-width: 44rem) {
+  .artifact-job-layout { grid-template-columns: minmax(0, 1fr); }
+  .artifact-job-form { border-bottom: 1px solid var(--border); border-right: 0; }
+}
+
+@media (max-width: 34rem) {
+  .artifact-job-heading { align-items: stretch; flex-direction: column; }
+  .artifact-job-form > button[type="submit"],
+  .artifact-output-heading .button { width: 100%; }
+  .artifact-output-heading > div { flex: 1 0 100%; }
+
+  .artifact-job-archive {
+    background: #0d1712;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+
+  .artifact-job-archive > summary {
+    align-items: center;
+    cursor: pointer;
+    display: flex;
+    gap: 0.65rem;
+    justify-content: space-between;
+    list-style: none;
+    min-height: 52px;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .artifact-job-archive > summary::-webkit-details-marker { display: none; }
+  .artifact-job-archive > summary > span { align-items: center; display: flex; gap: 0.45rem; min-width: 0; }
+  .artifact-job-archive > summary .status-pill { flex: 0 0 auto; max-width: none; white-space: nowrap; }
+  .artifact-job-archive > summary > span:last-child { color: var(--text-muted); font-size: 0.68rem; text-align: right; }
+  .artifact-job-archive > summary svg { flex: 0 0 auto; height: 1rem; transition: transform 160ms cubic-bezier(.16, 1, .3, 1); width: 1rem; }
+  .artifact-job-archive[open] > summary { border-bottom: 1px solid var(--border); }
+  .artifact-job-archive[open] > summary svg { transform: rotate(180deg); }
+  .artifact-job-archive > .artifact-job-history-row { border: 0; border-radius: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-job-progress-track > span { animation: none; margin-left: 33%; }
+}

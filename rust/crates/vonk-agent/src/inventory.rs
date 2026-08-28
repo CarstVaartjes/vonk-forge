@@ -112,6 +112,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             "runtime.spark-docker-nvidia.v1".to_owned(),
             "recipe.build.v1".to_owned(),
             "recipe.image.import.v1".to_owned(),
+            "recipe.job.run.v1".to_owned(),
             "runtime.vonk.v1".to_owned(),
         ];
         if let Some(speed) = self.fabric_bandwidth_mbps {

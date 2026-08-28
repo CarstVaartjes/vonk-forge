@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .legal_admission import operator_jurisdiction
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -146,6 +147,7 @@ class Settings:
     worker_api_token: bytes
     management_cidrs: str
     direct_fabric_cidrs: str
+    operator_jurisdiction: str | None
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
@@ -155,6 +157,8 @@ class Settings:
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
     install_channel: str = "stable"
+    artifact_job_storage_max_bytes: int = 16 * 1024**3
+    artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
 
     @property
     def database_host(self) -> str | None:
@@ -264,6 +268,35 @@ class Settings:
         install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "stable")
         if install_channel not in {"dev", "stable"}:
             raise SettingsError("VONK_INSTALL_CHANNEL is invalid")
+        try:
+            artifact_job_storage_max_bytes = int(
+                os.environ.get("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", str(16 * 1024**3))
+            )
+            artifact_job_retention_seconds = int(
+                os.environ.get(
+                    "VONK_ARTIFACT_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60)
+                )
+            )
+        except ValueError as error:
+            raise SettingsError(
+                "artifact job storage settings must be integers"
+            ) from error
+        if not 1024**3 <= artifact_job_storage_max_bytes <= 1024**4:
+            raise SettingsError(
+                "artifact job storage maximum must be between 1 GiB and 1 TiB"
+            )
+        if not 3600 <= artifact_job_retention_seconds <= 365 * 24 * 60 * 60:
+            raise SettingsError(
+                "artifact job retention must be between one hour and one year"
+            )
+        try:
+            configured_jurisdiction = operator_jurisdiction(
+                os.environ.get("VONK_OPERATOR_JURISDICTION")
+            )
+        except ValueError as error:
+            raise SettingsError(
+                f"VONK_OPERATOR_JURISDICTION is invalid: {error}"
+            ) from error
         controller_ca_path = (
             _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
         )
@@ -470,6 +503,7 @@ class Settings:
             worker_api_token=worker_api_token,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
+            operator_jurisdiction=configured_jurisdiction,
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
@@ -479,6 +513,8 @@ class Settings:
             agent_controller_address=agent_controller_address,
             agent_service_hostnames=agent_service_hostnames,
             install_channel=install_channel,
+            artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
+            artifact_job_retention_seconds=artifact_job_retention_seconds,
         )
 
 
@@ -493,6 +529,12 @@ class WorkerSettings:
     internal_api_timeout_seconds: float
     management_cidrs: str
     direct_fabric_cidrs: str
+    operator_jurisdiction: str | None
+    state_path: Path
+    artifact_job_storage_max_bytes: int
+    artifact_job_retention_seconds: int
+    artifact_job_reconcile_interval_seconds: int
+    artifact_job_reconcile_batch_limit: int
 
     @classmethod
     def from_env_and_secrets(cls) -> WorkerSettings:
@@ -558,6 +600,49 @@ class WorkerSettings:
                 )
             except PresenceError as error:
                 raise SettingsError(str(error)) from error
+        try:
+            configured_jurisdiction = operator_jurisdiction(
+                os.environ.get("VONK_OPERATOR_JURISDICTION")
+            )
+        except ValueError as error:
+            raise SettingsError(
+                f"VONK_OPERATOR_JURISDICTION is invalid: {error}"
+            ) from error
+        try:
+            artifact_job_storage_max_bytes = int(
+                os.environ.get("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", str(16 * 1024**3))
+            )
+            artifact_job_retention_seconds = int(
+                os.environ.get(
+                    "VONK_ARTIFACT_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60)
+                )
+            )
+            artifact_job_reconcile_interval_seconds = int(
+                os.environ.get("VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS", "3600")
+            )
+            artifact_job_reconcile_batch_limit = int(
+                os.environ.get("VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT", "1000")
+            )
+        except ValueError as error:
+            raise SettingsError(
+                "artifact job worker settings must be integers"
+            ) from error
+        if not 1024**3 <= artifact_job_storage_max_bytes <= 1024**4:
+            raise SettingsError(
+                "artifact job storage maximum must be between 1 GiB and 1 TiB"
+            )
+        if not 3600 <= artifact_job_retention_seconds <= 365 * 24 * 60 * 60:
+            raise SettingsError(
+                "artifact job retention must be between one hour and one year"
+            )
+        if not 60 <= artifact_job_reconcile_interval_seconds <= 7 * 24 * 60 * 60:
+            raise SettingsError(
+                "artifact job reconciliation interval must be between one minute and one week"
+            )
+        if not 1 <= artifact_job_reconcile_batch_limit <= 10000:
+            raise SettingsError(
+                "artifact job reconciliation batch limit must be between 1 and 10000"
+            )
         return cls(
             database_url=database_url,
             deployment_mode=mode,
@@ -566,4 +651,12 @@ class WorkerSettings:
             internal_api_timeout_seconds=timeout,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
+            operator_jurisdiction=configured_jurisdiction,
+            state_path=_absolute_root("VONK_STATE_PATH", "/srv/vonk-forge/state"),
+            artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
+            artifact_job_retention_seconds=artifact_job_retention_seconds,
+            artifact_job_reconcile_interval_seconds=(
+                artifact_job_reconcile_interval_seconds
+            ),
+            artifact_job_reconcile_batch_limit=artifact_job_reconcile_batch_limit,
         )

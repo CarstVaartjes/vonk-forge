@@ -38,6 +38,7 @@ def setup(
     capabilities=("runtime.vonk.v1",),
     port_reserved=False,
     system_reserve=0,
+    denied_jurisdictions=(),
     engine=None,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
@@ -60,7 +61,11 @@ def setup(
     catalog = CatalogService(
         sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
     )
-    _seed_recipe_dependencies(catalog, document)
+    _seed_recipe_dependencies(
+        catalog,
+        document,
+        denied_jurisdictions=tuple(denied_jurisdictions),
+    )
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -196,6 +201,40 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert run.alias == plan.alias == run.plan["alias"]
+
+
+def test_territorial_license_run_admission_is_fail_closed(tmp_path) -> None:
+    sessions, now, _node, installation = setup(
+        tmp_path,
+        free_memory=300,
+        denied_jurisdictions=("EU", "GB", "KR"),
+    )
+
+    unconfigured = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    ).plan_run(installation, alias="hunyuan", now=now)
+    assert unconfigured.allowed is False
+    assert unconfigured.nodes[0].blockers[0].code == (
+        "run.license_jurisdiction_required"
+    )
+
+    south_korea = RunAdmissionService(
+        sessions,
+        inventory_max_age=300,
+        memory_floor_bytes=50,
+        operator_jurisdiction="KR",
+    ).plan_run(installation, alias="hunyuan", now=now)
+    assert south_korea.allowed is False
+    assert south_korea.nodes[0].blockers[0].code == ("run.license_territory_denied")
+
+    permitted = RunAdmissionService(
+        sessions,
+        inventory_max_age=300,
+        memory_floor_bytes=50,
+        operator_jurisdiction="US",
+    ).plan_run(installation, alias="hunyuan", now=now)
+    assert permitted.allowed is True
+    assert permitted.nodes[0].warnings[0].code == "run.license_territory_checked"
 
 
 def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:

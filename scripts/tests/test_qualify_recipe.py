@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import runpy
 import subprocess
 import sys
 import threading
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/qualify-recipe"
@@ -24,13 +27,83 @@ def test_structural_qualification_supports_standard_media_outputs() -> None:
     assert "artifact.mime.video-mp4" in supported
     assert "artifact.mime.model-gltf-binary" in supported
     assert "artifact.mime.application-octet-stream" in supported
+    assert "artifact.mime.application-zip" in supported
+
+
+def test_artifact_zip_qualification_rejects_traversal_and_corruption() -> None:
+    namespace = runpy.run_path(str(SCRIPT))
+    validator = namespace["JobContainerQualification"]._MAGIC[
+        "artifact.mime.application-zip"
+    ]
+    clean = io.BytesIO()
+    with zipfile.ZipFile(clean, "w") as archive:
+        archive.writestr("manifest.json", b"{}")
+    assert validator(clean.getvalue())
+
+    unsafe = io.BytesIO()
+    with zipfile.ZipFile(unsafe, "w") as archive:
+        archive.writestr("../escape", b"x")
+    assert not validator(unsafe.getvalue())
+    assert not validator(b"PK\x03\x04broken")
+
+
+def test_artifact_job_qualification_validates_every_declared_output(
+    tmp_path: Path,
+) -> None:
+    namespace = runpy.run_path(str(SCRIPT))
+    qualifier_type = namespace["JobContainerQualification"]
+    qualifier = qualifier_type.__new__(qualifier_type)
+    qualifier.recipe = {
+        "validation": {
+            "validators": [
+                {
+                    "interface": "image-job",
+                    "checks": ["artifact.mime.image-png"],
+                }
+            ]
+        }
+    }
+    qualifier.interface_adapter = "image-job"
+    first = b"\x89PNG\r\n\x1a\nfirst"
+    second = b"\x89PNG\r\n\x1a\nsecond"
+    (tmp_path / "layer-1.png").write_bytes(first)
+    (tmp_path / "layer-2.png").write_bytes(second)
+
+    evidence = qualifier._output_evidence(tmp_path)
+
+    assert [item["path"] for item in evidence] == ["layer-1.png", "layer-2.png"]
+    assert all(len(item["sha256"]) == 64 for item in evidence)
+
+
+def test_artifact_job_input_contract_is_enforced_before_model_load(
+    tmp_path: Path,
+) -> None:
+    namespace = runpy.run_path(str(SCRIPT))
+    qualifier_type = namespace["JobContainerQualification"]
+    qualifier = qualifier_type.__new__(qualifier_type)
+    qualifier.args = SimpleNamespace(input_root=tmp_path)
+    qualifier.interface = {
+        "input": {
+            "path": "/inputs",
+            "required": True,
+            "media_types": ["text/plain"],
+            "max_bytes": 16,
+        }
+    }
+    qualifier.steps = []
+    (tmp_path / "prompt.txt").write_text("qualified", encoding="utf-8")
+
+    assert qualifier._input_root(tmp_path) == tmp_path
+    assert qualifier.steps == [
+        {"check": "job.input.validated", "passed": True, "bytes": 9, "files": 1}
+    ]
 
 
 def _fake_engine(path: Path, architecture: str) -> Path:
     engine = path / "docker"
     engine.write_text(
         "#!/bin/sh\n"
-        "if [ \"$1\" = info ]; then\n"
+        'if [ "$1" = info ]; then\n'
         f"  printf '%s\\n' '{architecture}'\n"
         "  exit 0\n"
         "fi\n"
@@ -41,7 +114,9 @@ def _fake_engine(path: Path, architecture: str) -> Path:
     return engine
 
 
-def _behavioral_engine(path: Path, architecture: str = "arm64") -> tuple[Path, Path, Path]:
+def _behavioral_engine(
+    path: Path, architecture: str = "arm64"
+) -> tuple[Path, Path, Path]:
     engine = path / "docker"
     state = path / "engine-state.json"
     log = path / "engine-log.jsonl"
@@ -126,11 +201,7 @@ class _QualificationHandler(BaseHTTPRequestHandler):
         assert request["max_tokens"] == 64
         self._json(
             200,
-            {
-                "choices": [
-                    {"message": {"role": "assistant", "content": "qualified"}}
-                ]
-            },
+            {"choices": [{"message": {"role": "assistant", "content": "qualified"}}]},
         )
 
 
@@ -275,9 +346,7 @@ def test_container_qualification_executes_generic_distributed_lifecycle(
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     starts = [call for call in calls if call[:1] == ["run"]]
     assert len(starts) == 6
-    assert all(
-        sum("dst=/models" in value for value in call) == 1 for call in starts
-    )
+    assert all(sum("dst=/models" in value for value in call) == 1 for call in starts)
     assert "worker" in starts[0][starts[0].index("--name") + 1]
     assert "entrypoint" in starts[1][starts[1].index("--name") + 1]
     rank_loss_stop = next(
@@ -366,20 +435,19 @@ def test_bridge_qualification_publishes_the_bounded_endpoint_and_builds_offline(
         "/opt/vonk/bin/ds4-serve",
         "--model",
         "/models/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
-        "--mtp",
-        "/models/DeepSeek-V4-Flash-DSpark-support-0731.gguf",
         "--ctx",
         "131072",
         "--batched-session",
         "2",
-        "--dspark",
         "--cuda",
         "--host",
         "0.0.0.0",
         "--port",
         str(server.server_port),
     ]
-    assert all(call[-len(expected_engine_argv) :] == expected_engine_argv for call in starts)
+    assert all(
+        call[-len(expected_engine_argv) :] == expected_engine_argv for call in starts
+    )
 
 
 def test_container_qualification_is_fail_closed_on_failed_invocation(

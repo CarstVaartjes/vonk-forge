@@ -9,6 +9,9 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 EXPECTED_BASELINE_TABLES = {
+    "artifact_job_blobs",
+    "artifact_job_files",
+    "artifact_jobs",
     "control_authority_heads",
     "control_authority_proposals",
     "control_authority_revisions",
@@ -130,6 +133,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0001_fleet_library_baseline.py",
         "0002_fleet_node_profile_events.py",
         "0003_agent_reenrollment_grants.py",
+        "0004_artifact_jobs.py",
     ]
 
 
@@ -162,7 +166,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0003_agent_reenrollment_grants"
+            == "0004_artifact_jobs"
         )
 
 

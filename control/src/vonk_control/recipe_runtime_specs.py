@@ -29,6 +29,9 @@ from .recipe_contract import (
 
 _OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _BUILTIN_HARNESS_REGISTRY = HarnessRegistry.with_builtins()
+_JOB_INTERFACES = frozenset(
+    {"image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
+)
 
 
 class RecipeRuntimeSpecError(ValueError):
@@ -154,12 +157,22 @@ def compile_runtime_spec(
         ),
         None,
     )
-    if not isinstance(endpoint, Mapping):
-        raise RecipeRuntimeSpecError("recipe endpoint is invalid")
+    job_interface = next(
+        (
+            item
+            for item in interfaces
+            if isinstance(item, Mapping) and item.get("adapter") in _JOB_INTERFACES
+        ),
+        None,
+    )
+    if (endpoint is None) == (job_interface is None):
+        raise RecipeRuntimeSpecError(
+            "recipe must declare exactly one service or job interface"
+        )
     lifecycle = runtime.get("lifecycle")
     if not isinstance(lifecycle, Mapping):
         raise RecipeRuntimeSpecError("recipe lifecycle is invalid")
-    return {
+    spec = {
         "identity": {
             "recipe_revision_sha256": recipe_content_sha256(document),
             "model_version_sha256": model_version.content_sha256,
@@ -186,12 +199,6 @@ def compile_runtime_spec(
         ],
         "runtime": compiled_runtime,
         "artifacts": role_artifacts,
-        "endpoint": {
-            "protocol": endpoint["adapter"],
-            "port": endpoint["port"],
-            "model_aliases": copy.deepcopy(endpoint["model_aliases"]),
-            "health_path": endpoint["health_path"],
-        },
         "security": {
             "devices": copy.deepcopy(runtime_security["devices"]),
             "user": projection.user,
@@ -212,6 +219,35 @@ def compile_runtime_spec(
             "role": role,
         },
     }
+    if endpoint is not None:
+        spec["endpoint"] = {
+            "protocol": endpoint["adapter"],
+            "port": endpoint["port"],
+            "model_aliases": copy.deepcopy(endpoint["model_aliases"]),
+            "health_path": endpoint["health_path"],
+        }
+    else:
+        assert isinstance(job_interface, Mapping)
+        readiness = lifecycle.get("readiness")
+        if not isinstance(readiness, Mapping):
+            raise RecipeRuntimeSpecError("recipe job timeout is invalid")
+        timeout_seconds = readiness.get("timeout_seconds")
+        output_path = job_interface.get("path")
+        input_contract = job_interface.get("input")
+        if (
+            type(timeout_seconds) is not int
+            or not 1 <= timeout_seconds <= 3600
+            or output_path != "/outputs"
+            or (input_contract is not None and not isinstance(input_contract, Mapping))
+        ):
+            raise RecipeRuntimeSpecError("recipe job interface is invalid")
+        spec["job"] = {
+            "interface": job_interface["adapter"],
+            "input": copy.deepcopy(input_contract),
+            "output_path": output_path,
+            "timeout_seconds": timeout_seconds,
+        }
+    return spec
 
 
 def resolve_recipe_entities(
@@ -225,8 +261,7 @@ def resolve_recipe_entities(
     patch_ref = recipe_patch_bundle(document)
     model_version = _resolve_model_version(session, model_version_ref)
     auxiliary_model_versions = tuple(
-        _resolve_model_version(session, reference)
-        for reference in model_dependencies
+        _resolve_model_version(session, reference) for reference in model_dependencies
     )
     harness = _lookup_exact(session, harness_ref)
     distribution = _lookup_exact(session, distribution_ref)

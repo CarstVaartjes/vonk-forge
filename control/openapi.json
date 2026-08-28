@@ -320,6 +320,85 @@
         "title": "ApplyRequest",
         "type": "object"
       },
+      "ArtifactFileDeclaration": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 536870912.0,
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "slot": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Slot",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "name",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "ArtifactFileDeclaration",
+        "type": "object"
+      },
+      "ArtifactJobCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFileDeclaration"
+            },
+            "maxItems": 32,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "interface": {
+            "pattern": "^(audio-job|video-job|image-job|mesh-job|artifact-job)$",
+            "title": "Interface",
+            "type": "string"
+          },
+          "output_limits": {
+            "$ref": "#/components/schemas/OutputLimits"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interface",
+          "output_limits",
+          "timeout_seconds"
+        ],
+        "title": "ArtifactJobCreate",
+        "type": "object"
+      },
       "AuthSession": {
         "additionalProperties": false,
         "properties": {
@@ -495,6 +574,22 @@
           "request_key"
         ],
         "title": "BuildRequest",
+        "type": "object"
+      },
+      "CancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CancelRequest",
         "type": "object"
       },
       "CapacityReservations": {
@@ -4742,6 +4837,46 @@
           "runs"
         ],
         "title": "OperationalState",
+        "type": "object"
+      },
+      "OutputLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Allowed Media Types",
+            "type": "array"
+          },
+          "max_file_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 2147483648.0,
+            "minimum": 1.0,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes",
+          "allowed_media_types"
+        ],
+        "title": "OutputLimits",
         "type": "object"
       },
       "PlacementEvidenceCounts": {
@@ -9062,6 +9197,16 @@
             "title": "Id",
             "type": "string"
           },
+          "include_paths": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Include Paths",
+            "type": "array"
+          },
           "installed_bytes": {
             "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
@@ -9102,6 +9247,7 @@
           "kind",
           "repository",
           "revision",
+          "include_paths",
           "download_bytes",
           "installed_bytes",
           "roles"
@@ -9298,6 +9444,85 @@
         "title": "VisualIdentity",
         "type": "object"
       },
+      "VisualInputSlot": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "pattern": "^\\.[a-z0-9][a-z0-9._-]{0,15}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Extensions",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "max_file_bytes": {
+            "maximum": 536870912.0,
+            "minimum": 1.0,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "min_files": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Min Files",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "media_types",
+          "extensions",
+          "min_files",
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes"
+        ],
+        "title": "VisualInputSlot",
+        "type": "object"
+      },
       "VisualInterface": {
         "additionalProperties": false,
         "properties": {
@@ -9320,6 +9545,16 @@
             ],
             "title": "Health Path"
           },
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualInterfaceInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "model_aliases": {
             "items": {
               "maxLength": 128,
@@ -9329,6 +9564,16 @@
             "maxItems": 64,
             "title": "Model Aliases",
             "type": "array"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualInterfaceOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "anyOf": [
@@ -9355,12 +9600,135 @@
               }
             ],
             "title": "Port"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "maximum": 3600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
           }
         },
         "required": [
           "adapter"
         ],
         "title": "VisualInterface",
+        "type": "object"
+      },
+      "VisualInterfaceInput": {
+        "additionalProperties": false,
+        "properties": {
+          "max_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "min_files": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Min Files",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/VisualInputSlot"
+            },
+            "maxItems": 32,
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "required",
+          "media_types",
+          "max_bytes",
+          "min_files",
+          "max_files"
+        ],
+        "title": "VisualInterfaceInput",
+        "type": "object"
+      },
+      "VisualInterfaceOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_media_types": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Allowed Media Types",
+            "type": "array"
+          },
+          "max_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 2147483648.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total Bytes"
+          },
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/VisualOutputSlot"
+            },
+            "maxItems": 32,
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "allowed_media_types"
+        ],
+        "title": "VisualInterfaceOutput",
         "type": "object"
       },
       "VisualMetadata": {
@@ -9395,6 +9763,103 @@
           "tags"
         ],
         "title": "VisualMetadata",
+        "type": "object"
+      },
+      "VisualModelLicense": {
+        "additionalProperties": false,
+        "properties": {
+          "territorial_restrictions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualTerritorialRestrictions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "VisualModelLicense",
+        "type": "object"
+      },
+      "VisualOutputSlot": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "pattern": "^\\.[a-z0-9][a-z0-9._-]{0,15}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Extensions",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "max_file_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 2147483648.0,
+            "minimum": 1.0,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "min_files": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Min Files",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "media_types",
+          "extensions",
+          "min_files",
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes"
+        ],
+        "title": "VisualOutputSlot",
         "type": "object"
       },
       "VisualProvenance": {
@@ -9475,6 +9940,24 @@
           "model": {
             "$ref": "#/components/schemas/VisualCatalogIdentity"
           },
+          "model_license": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualModelLicense"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/VisualRecipeParameter"
+            },
+            "maxItems": 128,
+            "title": "Parameters",
+            "type": "array"
+          },
           "provenance": {
             "$ref": "#/components/schemas/VisualProvenance"
           },
@@ -9495,8 +9978,10 @@
           "identity",
           "metadata",
           "model",
+          "model_license",
           "execution",
           "build",
+          "parameters",
           "artifacts",
           "runtime",
           "interfaces",
@@ -9504,6 +9989,133 @@
           "provenance"
         ],
         "title": "VisualRecipeDocument",
+        "type": "object"
+      },
+      "VisualRecipeParameter": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_values": {
+            "items": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "maximum": 9.223372036854776e+18,
+                  "minimum": -9.223372036854776e+18,
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 128,
+            "title": "Allowed Values",
+            "type": "array"
+          },
+          "change_effect": {
+            "enum": [
+              "rebuild",
+              "reinstall",
+              "restart"
+            ],
+            "title": "Change Effect",
+            "type": "string"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": -9.223372036854776e+18,
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "description": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": -9.223372036854776e+18,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": -9.223372036854776e+18,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pattern"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "boolean",
+              "enum"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "type",
+          "default",
+          "change_effect"
+        ],
+        "title": "VisualRecipeParameter",
         "type": "object"
       },
       "VisualRuntime": {
@@ -9549,6 +10161,33 @@
           "stop_timeout_seconds"
         ],
         "title": "VisualRuntime",
+        "type": "object"
+      },
+      "VisualTerritorialRestrictions": {
+        "additionalProperties": false,
+        "properties": {
+          "denied_jurisdictions": {
+            "items": {
+              "pattern": "^[A-Z]{2}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Denied Jurisdictions",
+            "type": "array"
+          },
+          "notice": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Notice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "denied_jurisdictions",
+          "notice"
+        ],
+        "title": "VisualTerritorialRestrictions",
         "type": "object"
       },
       "VisualValidation": {
@@ -10085,6 +10724,436 @@
           }
         ],
         "summary": "Preview Agent Upgrade"
+      }
+    },
+    "/api/v1/artifact-jobs/capabilities": {
+      "get": {
+        "operationId": "getArtifactJobCapabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Getartifactjobcapabilities",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capabilities"
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}": {
+      "get": {
+        "operationId": "getArtifactJobStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Getartifactjobstatus",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Job Status"
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancelArtifactJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancelartifactjob",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cancel Job"
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/finalize": {
+      "post": {
+        "operationId": "finalizeArtifactJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Finalizeartifactjob",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finalize Job"
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/inputs/{name}": {
+      "put": {
+        "operationId": "uploadArtifactJobInput",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Content-SHA256",
+            "required": false,
+            "schema": {
+              "default": "",
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "X-Content-Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+              "title": "Content-Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Content-Length",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 536870912,
+              "minimum": 0,
+              "title": "Content-Length",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Uploadartifactjobinput",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Upload Input",
+        "x-vonk-streaming-transport": true
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/result": {
+      "get": {
+        "operationId": "getArtifactJobResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Getartifactjobresult",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Result Metadata"
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/results/{sha256}": {
+      "get": {
+        "operationId": "downloadArtifactJobResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Artifact result byte stream"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Download Result",
+        "x-vonk-streaming-transport": true
+      }
+    },
+    "/api/v1/artifact-jobs/{job_id}/submit": {
+      "post": {
+        "operationId": "submitArtifactJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submitartifactjob",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Submit Job"
       }
     },
     "/api/v1/audit": {
@@ -13999,6 +15068,49 @@
         "summary": "Uninstall"
       }
     },
+    "/api/v1/recipes/job-runs": {
+      "post": {
+        "operationId": "activateRecipeJobRun",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Activate Job Run"
+      }
+    },
     "/api/v1/recipes/mapping-plans/preview": {
       "post": {
         "operationId": "previewRecipeMapping",
@@ -14314,6 +15426,108 @@
           }
         ],
         "summary": "Run Status"
+      }
+    },
+    "/api/v1/recipes/runs/{run_id}/artifact-jobs": {
+      "get": {
+        "operationId": "listArtifactJobsForRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Listartifactjobsforrun",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Jobs"
+      },
+      "post": {
+        "operationId": "createArtifactJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactJobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Createartifactjob",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Job"
       }
     },
     "/api/v1/recipes/runs/{run_id}/stop": {

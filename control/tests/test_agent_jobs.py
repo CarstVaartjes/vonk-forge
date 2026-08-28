@@ -188,7 +188,9 @@ def test_agent_can_claim_only_its_node_operation(service) -> None:
     assert claim.node_id == NODE_A
 
 
-def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(service) -> None:
+def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
+    service,
+) -> None:
     jobs, sessions, clock = service
     target = {
         "architecture": "linux-arm64",
@@ -205,9 +207,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(service
         "target_build_digest": "sha256:" + "b" * 64,
     }
     job = parent(sessions, clock)
-    operation = jobs.enqueue(
-        job.id, NODE_A, "agent.upgrade.v1", COMMIT, target
-    )
+    operation = jobs.enqueue(job.id, NODE_A, "agent.upgrade.v1", COMMIT, target)
     old_identity = {
         "architecture": "linux-arm64",
         "binary_digest": "f" * 64,
@@ -815,7 +815,15 @@ def test_heartbeat_persists_canonical_progress_and_renews_lease(service) -> None
     progress = jobs.heartbeat(claim, {"phase": "checking"}, 60)
 
     assert progress.deadline > claim.deadline
-    assert dict(progress.progress) == {"phase": "checking"}
+    assert progress.cancel_requested is False
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        assert attempt.progress == {"phase": "checking"}
 
 
 def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:

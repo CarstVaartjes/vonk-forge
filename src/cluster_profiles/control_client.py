@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import stat
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -30,6 +32,8 @@ from .generated_control.models.job_detail_response import JobDetailResponse
 from .generated_control.types import Response as GeneratedResponse
 
 _MAX_RESPONSE = 1_048_576
+_MAX_ARTIFACT_INPUT = 512 * 1024**2
+_MAX_ARTIFACT_OUTPUT = 1024**3
 _MAX_TOKEN = 8192
 _MAX_REMOTE_TEXT = 256
 _PEM_BLOCK = re.compile(
@@ -330,6 +334,7 @@ class ControlClient:
         *,
         opener: Callable[..., object] | None = None,
         timeout_seconds: float = 15,
+        artifact_transfer_timeout_seconds: float = 3_600,
     ) -> None:
         parsed = urllib.parse.urlsplit(base_url)
         if (
@@ -345,11 +350,16 @@ class ControlClient:
                 "control URL must be an HTTPS origin without credentials"
             )
         token = _read_token_file(token_file)
+        if not 1 <= artifact_transfer_timeout_seconds <= 3_600:
+            raise ControlClientError(
+                "artifact transfer timeout must be between 1 and 3600 seconds"
+            )
         self._base = base_url.rstrip("/")
         self._token = token
         self._opener = opener if opener is not None else _redirect_denied_opener()
         self._transport = _OpenerTransport(self._opener, timeout_seconds)
         self._timeout = timeout_seconds
+        self._artifact_transfer_timeout = artifact_transfer_timeout_seconds
 
     def _generated_client(
         self,
@@ -511,6 +521,245 @@ class ControlClient:
         if not isinstance(decoded, dict):
             raise ControlClientError("control API response must be an object")
         return decoded
+
+    def upload_file(
+        self,
+        path: str,
+        source: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+    ) -> dict[str, object]:
+        """Stream one previously declared input after rechecking its identity."""
+        if not path.startswith("/api/v1/") or ".." in path:
+            raise ControlClientError("control API path is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ControlClientError("artifact input SHA-256 is invalid")
+        if not 0 <= expected_size <= _MAX_ARTIFACT_INPUT:
+            raise ControlClientError("artifact input size is invalid")
+        flags = (
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOINHERIT", 0)
+        )
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
+            raise ControlClientError("artifact input cannot be opened safely")
+        descriptor = -1
+        try:
+            descriptor = os.open(source, flags | no_follow)
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_size:
+                raise ControlClientError("artifact input changed before upload")
+            digest = hashlib.sha256()
+            observed = 0
+            while observed <= _MAX_ARTIFACT_INPUT:
+                chunk = os.read(
+                    descriptor,
+                    min(1024**2, _MAX_ARTIFACT_INPUT + 1 - observed),
+                )
+                if not chunk:
+                    break
+                observed += len(chunk)
+                digest.update(chunk)
+            if observed != expected_size or digest.hexdigest() != expected_sha256:
+                raise ControlClientError("artifact input changed before upload")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            headers = {
+                "Authorization": f"Bearer {self._token}",
+                "Accept": "application/json",
+                "Content-Type": media_type,
+                "Content-Length": str(expected_size),
+                "X-Content-SHA256": expected_sha256,
+            }
+            with os.fdopen(descriptor, "rb", closefd=True) as stream:
+                descriptor = -1
+                request = urllib.request.Request(
+                    self._base + path, data=stream, headers=headers, method="PUT"
+                )
+                try:
+                    with self._opener(
+                        request, timeout=self._artifact_transfer_timeout
+                    ) as response:
+                        content = response.read(_MAX_RESPONSE + 1)
+                        status = response.status
+                        response_headers = response.headers
+                except urllib.error.HTTPError as error:
+                    content = error.read(_MAX_RESPONSE + 1)
+                    status = error.code
+                    response_headers = error.headers
+                except (OSError, urllib.error.URLError) as error:
+                    raise ControlClientError(
+                        f"control API request failed: {type(error).__name__}"
+                    ) from None
+        except ControlClientError:
+            raise
+        except OSError:
+            raise ControlClientError(
+                "artifact input must be a readable regular non-symlink file"
+            ) from None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if len(content) > _MAX_RESPONSE:
+            raise ControlResponseTooLarge("control API response exceeds safety limit")
+        if not 200 <= status < 300:
+            try:
+                problem = json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                problem = None
+            detail = problem.get("detail") if isinstance(problem, dict) else None
+            error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+            raise error_type(
+                status,
+                detail if isinstance(detail, str) else "control API request failed",
+                _bounded_retry_after(response_headers.get("retry-after")),
+                sensitive_values=(self._token,),
+            )
+        try:
+            decoded = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ControlClientError("control API returned invalid JSON") from None
+        if not isinstance(decoded, dict):
+            raise ControlClientError("control API response must be an object")
+        return decoded
+
+    def download_file(
+        self,
+        path: str,
+        destination: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        overwrite: bool,
+    ) -> dict[str, object]:
+        """Stream, verify, and atomically publish one result file."""
+        if not path.startswith("/api/v1/") or ".." in path:
+            raise ControlClientError("control API path is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ControlClientError("artifact output SHA-256 is invalid")
+        if not 0 <= expected_size <= _MAX_ARTIFACT_OUTPUT:
+            raise ControlClientError("artifact output size is invalid")
+        parent = destination.parent
+        if parent.is_symlink() or not parent.is_dir():
+            raise ControlClientError("artifact output directory is invalid")
+        if destination.exists() and not overwrite:
+            raise ControlClientError(
+                f"artifact output already exists: {destination.name}"
+            )
+        request = urllib.request.Request(
+            self._base + path,
+            headers={"Authorization": f"Bearer {self._token}", "Accept": "*/*"},
+            method="GET",
+        )
+        temporary = Path()
+        descriptor = -1
+        try:
+            try:
+                response_context = self._opener(
+                    request, timeout=self._artifact_transfer_timeout
+                )
+            except urllib.error.HTTPError as error:
+                content = error.read(_MAX_RESPONSE + 1)
+                if len(content) > _MAX_RESPONSE:
+                    raise ControlResponseTooLarge(
+                        "control API response exceeds safety limit"
+                    )
+                try:
+                    problem = json.loads(content)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    problem = None
+                detail = problem.get("detail") if isinstance(problem, dict) else None
+                error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
+                raise error_type(
+                    error.code,
+                    detail if isinstance(detail, str) else "control API request failed",
+                    _bounded_retry_after(error.headers.get("retry-after")),
+                    sensitive_values=(self._token,),
+                ) from None
+            except (OSError, urllib.error.URLError) as error:
+                raise ControlClientError(
+                    f"control API request failed: {type(error).__name__}"
+                ) from None
+            with response_context as response:
+                if not 200 <= response.status < 300:
+                    raise ControlHTTPError(
+                        response.status,
+                        "control API request failed",
+                        sensitive_values=(self._token,),
+                    )
+                response_type = response.headers.get("content-type", "").split(";", 1)[
+                    0
+                ]
+                if response_type.strip().lower() != media_type:
+                    raise ControlMalformedResponse(
+                        "artifact output content type does not match its manifest"
+                    )
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        declared_length = int(content_length)
+                    except ValueError:
+                        raise ControlMalformedResponse(
+                            "artifact output content length is invalid"
+                        ) from None
+                    if declared_length != expected_size:
+                        raise ControlMalformedResponse(
+                            "artifact output content length does not match its manifest"
+                        )
+                response_digest = response.headers.get("x-content-sha256")
+                if response_digest != expected_sha256:
+                    raise ControlMalformedResponse(
+                        "artifact output digest header does not match its manifest"
+                    )
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=f".{destination.name}.", suffix=".download", dir=parent
+                )
+                temporary = Path(temporary_name)
+                os.fchmod(descriptor, 0o600)
+                digest = hashlib.sha256()
+                observed = 0
+                with os.fdopen(descriptor, "wb", closefd=True) as output:
+                    descriptor = -1
+                    while observed <= expected_size:
+                        chunk = response.read(
+                            min(1024**2, expected_size + 1 - observed)
+                        )
+                        if not chunk:
+                            break
+                        observed += len(chunk)
+                        digest.update(chunk)
+                        output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if observed != expected_size or digest.hexdigest() != expected_sha256:
+                    raise ControlMalformedResponse(
+                        "artifact output content does not match its manifest"
+                    )
+            if overwrite:
+                os.replace(temporary, destination)
+            else:
+                os.link(temporary, destination, follow_symlinks=False)
+                temporary.unlink()
+            temporary = Path()
+        except FileExistsError:
+            raise ControlClientError(
+                f"artifact output already exists: {destination.name}"
+            ) from None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            if temporary != Path():
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+        return {
+            "destination": str(destination),
+            "media_type": media_type,
+            "size_bytes": expected_size,
+            "sha256": expected_sha256,
+        }
 
     def create_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
         return self.request("POST", "/api/v1/proposals", payload)

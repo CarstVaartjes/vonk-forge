@@ -65,6 +65,15 @@ pub struct RecipeRunObservation {
     pub ready: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct JobOutputState {
+    pub output_path: &'static str,
+    pub file_count: usize,
+    pub total_bytes: u64,
+    pub manifest_sha256: String,
+}
+
 #[derive(Debug, Serialize)]
 struct RuntimeContract<'a> {
     schema_version: u8,
@@ -72,7 +81,10 @@ struct RuntimeContract<'a> {
     installation_id: &'a str,
     run_id: &'a str,
     artifacts: Vec<RuntimeArtifact>,
-    endpoint: RuntimeEndpoint<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    endpoint: Option<RuntimeEndpoint<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    job: Option<RuntimeJob<'a>>,
     placement: RuntimePlacement<'a>,
 }
 
@@ -92,6 +104,17 @@ struct RuntimeEndpoint<'a> {
     protocol: &'a str,
     model_aliases: &'a [String],
     health_path: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeJob<'a> {
+    interface: &'a str,
+    input: &'a Option<serde_json::Value>,
+    input_path: &'static str,
+    output_path: &'a str,
+    timeout_seconds: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<&'a serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -152,6 +175,123 @@ fn runtime_policy() -> Result<RuntimePolicy, OciError> {
 }
 
 impl<R: ProcessRunner> OciRuntime<'_, R> {
+    pub fn job_input_destination(&self, run_id: &str, name: &str) -> Result<PathBuf, OciError> {
+        if name.is_empty()
+            || name == "manifest.json"
+            || name.len() > 128
+            || !name.as_bytes()[0].is_ascii_alphanumeric()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(OciError::Artifact);
+        }
+        let state = managed_path(self.data_root, "runs", run_id)?;
+        fs::create_dir_all(&state)?;
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+        let inputs = state.join("inputs");
+        fs::create_dir_all(&inputs)?;
+        fs::set_permissions(&inputs, fs::Permissions::from_mode(0o700))?;
+        let destination = inputs.join(name);
+        if fs::symlink_metadata(&destination).is_ok() {
+            return Err(OciError::Artifact);
+        }
+        Ok(destination)
+    }
+
+    pub fn write_job_input_manifest(
+        &self,
+        run_id: &str,
+        names: &[String],
+        bytes: &[u8],
+        expected_sha256: &str,
+    ) -> Result<(), OciError> {
+        self.verify_job_inputs(run_id, names)?;
+        if bytes.len() > 64 * 1024
+            || expected_sha256.len() != 64
+            || hex::encode(Sha256::digest(bytes)) != expected_sha256
+        {
+            return Err(OciError::Artifact);
+        }
+        let inputs = managed_path(self.data_root, "runs", run_id)?.join("inputs");
+        let manifest = inputs.join("manifest.json");
+        let mut output = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o400)
+            .open(&manifest)?;
+        output.write_all(bytes)?;
+        output.sync_all()?;
+        fs::set_permissions(&manifest, fs::Permissions::from_mode(0o400))?;
+        File::open(inputs)?.sync_all()?;
+        Ok(())
+    }
+
+    pub fn verify_job_inputs(&self, run_id: &str, names: &[String]) -> Result<(), OciError> {
+        let state = managed_path(self.data_root, "runs", run_id)?;
+        fs::create_dir_all(&state)?;
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+        let inputs = state.join("inputs");
+        fs::create_dir_all(&inputs)?;
+        fs::set_permissions(&inputs, fs::Permissions::from_mode(0o700))?;
+        let metadata = fs::symlink_metadata(&inputs)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        let mut observed = fs::read_dir(inputs)?
+            .map(|entry| {
+                let entry = entry?;
+                let file_type = entry.file_type()?;
+                if !file_type.is_file() || file_type.is_symlink() {
+                    return Err(OciError::Artifact);
+                }
+                entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| OciError::Artifact)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        observed.sort();
+        if observed != names {
+            return Err(OciError::Artifact);
+        }
+        Ok(())
+    }
+
+    pub fn job_output_root(&self, run_id: &str) -> Result<PathBuf, OciError> {
+        let outputs = managed_path(self.data_root, "runs", run_id)?.join("outputs");
+        let metadata = fs::symlink_metadata(&outputs)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        Ok(outputs)
+    }
+
+    pub fn cleanup_job_scope(&self, job_id: &str) -> Result<(), OciError> {
+        if !canonical_uuid(job_id) {
+            return Err(OciError::Artifact);
+        }
+        for path in [
+            self.data_root.join("runs").join(job_id),
+            self.data_root.join("run-metadata").join(job_id),
+        ] {
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) => {
+                    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                        return Err(OciError::Artifact);
+                    }
+                    fs::remove_dir_all(&path)?;
+                    if let Some(parent) = path.parent() {
+                        File::open(parent)?.sync_all()?;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+
     pub fn ensure_disk_available(&self, required_bytes: u64) -> Result<(), OciError> {
         let required = required_bytes
             .checked_add(10_000_000_000)
@@ -245,11 +385,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
         placement.validate()?;
+        let endpoint = spec.endpoint.as_ref();
+        let job = spec.job.as_ref();
         if (placement.world_size > 1) != spec.runtime.placement_environment.is_some() {
             return Err(OciError::Runtime);
         }
         if spec.security.host_network
-            && (placement.world_size < 2 || placement.port != spec.endpoint.port)
+            && (placement.world_size < 2
+                || endpoint.is_none_or(|endpoint| placement.port != endpoint.port))
         {
             return Err(OciError::Runtime);
         }
@@ -259,13 +402,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let metadata = self.run_metadata_path(run_id)?;
         let shared_memory_bytes =
             (placement.reserved_memory_bytes / 8).clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024);
-        let mut arguments = vec![
-            "run".to_owned(),
-            "--detach".to_owned(),
-            "--name".to_owned(),
-            format!("vonk-{run_id}"),
-            "--restart".to_owned(),
-            "no".to_owned(),
+        let mut arguments = vec!["run".to_owned()];
+        if job.is_some() {
+            arguments.extend([
+                "--name".to_owned(),
+                format!("vonk-{run_id}"),
+                "--restart".to_owned(),
+                "no".to_owned(),
+            ]);
+        } else {
+            arguments.extend([
+                "--detach".to_owned(),
+                "--name".to_owned(),
+                format!("vonk-{run_id}"),
+                "--restart".to_owned(),
+                "no".to_owned(),
+            ]);
+        }
+        arguments.extend([
             "--read-only".to_owned(),
             "--tmpfs".to_owned(),
             "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
@@ -304,11 +458,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "VONK_RUNTIME_SPEC=/run/vonk/runtime.json".to_owned(),
             "--env".to_owned(),
             "VONK_MODEL_ROOT=/models".to_owned(),
-            "--env".to_owned(),
-            "VONK_LISTEN_HOST=0.0.0.0".to_owned(),
-            "--env".to_owned(),
-            format!("VONK_LISTEN_PORT={}", spec.endpoint.port),
-        ];
+        ]);
+        if let Some(endpoint) = endpoint {
+            arguments.extend([
+                "--env".to_owned(),
+                "VONK_LISTEN_HOST=0.0.0.0".to_owned(),
+                "--env".to_owned(),
+                format!("VONK_LISTEN_PORT={}", endpoint.port),
+            ]);
+        } else if let Some(job) = job {
+            arguments.extend([
+                "--env".to_owned(),
+                "VONK_INPUT_ROOT=/inputs".to_owned(),
+                "--env".to_owned(),
+                "VONK_OUTPUT_ROOT=/outputs".to_owned(),
+                "--env".to_owned(),
+                format!("VONK_JOB_TIMEOUT_SECONDS={}", job.timeout_seconds),
+            ]);
+        }
         if spec.security.host_network {
             arguments.extend([
                 "--ipc".to_owned(),
@@ -320,17 +487,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 "--ulimit".to_owned(),
                 "stack=67108864:67108864".to_owned(),
             ]);
-        } else {
+        } else if let Some(endpoint) = endpoint {
             arguments.extend([
                 "--publish".to_owned(),
                 match placement.endpoint_address {
                     Some(IpAddr::V4(address)) => {
-                        format!("{address}:{}:{}", placement.port, spec.endpoint.port)
+                        format!("{address}:{}:{}", placement.port, endpoint.port)
                     }
                     Some(IpAddr::V6(address)) => {
-                        format!("[{address}]:{}:{}", placement.port, spec.endpoint.port)
+                        format!("[{address}]:{}:{}", placement.port, endpoint.port)
                     }
-                    None => format!("{}:{}", placement.port, spec.endpoint.port),
+                    None => format!("{}:{}", placement.port, endpoint.port),
                 },
             ]);
         }
@@ -411,6 +578,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     }
                     arguments.extend(["--mount".to_owned(), value]);
                 }
+                "inputs" => {
+                    let value = format!(
+                        "type=bind,src={},dst={},readonly",
+                        run_root.join("inputs").display(),
+                        mount.target
+                    );
+                    arguments.extend(["--mount".to_owned(), value]);
+                }
                 _ => return Err(OciError::Runtime),
             }
         }
@@ -449,8 +624,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let outputs = state.join("outputs");
         fs::create_dir_all(&outputs)?;
         fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+        if spec.job.is_some() {
+            let inputs = state.join("inputs");
+            let metadata = fs::symlink_metadata(&inputs)?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(OciError::Artifact);
+            }
+        }
         let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, installation_id, run_id, placement)?;
+        self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let pre_start = spec
             .lifecycle
@@ -474,6 +656,38 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             pre_start,
             main,
         })
+    }
+
+    pub fn prepare_job_start(
+        &self,
+        spec: &WorkloadSpec,
+        installation_id: &str,
+        run_id: &str,
+        placement: &Placement,
+        parameters: &serde_json::Value,
+        timeout_seconds: u16,
+    ) -> Result<RuntimeStartPlan, OciError> {
+        let Some(installed_job) = spec.job.as_ref() else {
+            return Err(OciError::Runtime);
+        };
+        if timeout_seconds == 0 || timeout_seconds > installed_job.timeout_seconds {
+            return Err(OciError::Runtime);
+        }
+        let mut effective = spec.clone();
+        effective
+            .job
+            .as_mut()
+            .ok_or(OciError::Runtime)?
+            .timeout_seconds = timeout_seconds;
+        let plan = self.prepare_start(&effective, installation_id, run_id, placement)?;
+        self.write_runtime_contract(
+            &effective,
+            installation_id,
+            run_id,
+            placement,
+            Some(parameters),
+        )?;
+        Ok(plan)
     }
 
     pub fn prepare_stop(&self, run_id: &str) -> Result<RuntimeStopPlan, OciError> {
@@ -567,9 +781,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let Some((spec, _, placement)) = lifecycle else {
                 continue;
             };
-            if spec.endpoint.health_path.contains(['?', '#', '\0'])
-                || !spec
-                    .endpoint
+            let Some(endpoint) = spec.endpoint.as_ref() else {
+                continue;
+            };
+            if endpoint.health_path.contains(['?', '#', '\0'])
+                || !endpoint
                     .health_path
                     .bytes()
                     .all(|byte| byte.is_ascii_graphic())
@@ -585,7 +801,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     .endpoint_address
                     .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
                 port: placement.port,
-                health_path: spec.endpoint.health_path,
+                health_path: endpoint.health_path.clone(),
             });
         }
         Ok(probes)
@@ -853,6 +1069,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
+        parameters: Option<&serde_json::Value>,
     ) -> Result<(), OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let artifacts = spec
@@ -872,13 +1089,21 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             installation_id,
             run_id,
             artifacts,
-            endpoint: RuntimeEndpoint {
+            endpoint: spec.endpoint.as_ref().map(|endpoint| RuntimeEndpoint {
                 listen_host: "0.0.0.0",
-                listen_port: spec.endpoint.port,
-                protocol: &spec.endpoint.protocol,
-                model_aliases: &spec.endpoint.model_aliases,
-                health_path: &spec.endpoint.health_path,
-            },
+                listen_port: endpoint.port,
+                protocol: &endpoint.protocol,
+                model_aliases: &endpoint.model_aliases,
+                health_path: &endpoint.health_path,
+            }),
+            job: spec.job.as_ref().map(|job| RuntimeJob {
+                interface: &job.interface,
+                input: &job.input,
+                input_path: "/inputs",
+                output_path: &job.output_path,
+                timeout_seconds: job.timeout_seconds,
+                parameters,
+            }),
             placement: RuntimePlacement {
                 endpoint_address: placement.endpoint_address,
                 rank: placement.rank,
@@ -891,6 +1116,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         };
         atomic_write(&metadata, "runtime.json", &serde_json::to_vec(&contract)?)?;
         Ok(())
+    }
+
+    pub fn job_output_state(&self, run_id: &str) -> Result<JobOutputState, OciError> {
+        let outputs = managed_path(self.data_root, "runs", run_id)?.join("outputs");
+        let metadata = fs::symlink_metadata(&outputs)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        let mut files = BTreeMap::new();
+        let mut total_bytes = 0;
+        visit_files(&outputs, &outputs, &mut files, &mut total_bytes)?;
+        let manifest_sha256 = hex::encode(Sha256::digest(serde_json::to_vec(&files)?));
+        Ok(JobOutputState {
+            output_path: "/outputs",
+            file_count: files.len(),
+            total_bytes,
+            manifest_sha256,
+        })
     }
 
     fn materialize_artifact(
@@ -1008,8 +1251,28 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let mut remaining = artifact.download_bytes;
+        let mut selector_matches = vec![false; artifact.include_paths.len()];
         for file in model.siblings {
             let relative = safe_relative_path(&file.rfilename)?;
+            let included = artifact.include_paths.is_empty()
+                || artifact.include_paths.iter().enumerate().fold(
+                    false,
+                    |included, (index, selector)| {
+                        let matched = selector.strip_suffix('/').map_or_else(
+                            || file.rfilename == *selector,
+                            |prefix| {
+                                file.rfilename
+                                    .strip_prefix(prefix)
+                                    .is_some_and(|tail| tail.starts_with('/'))
+                            },
+                        );
+                        selector_matches[index] |= matched;
+                        included || matched
+                    },
+                );
+            if !included {
+                continue;
+            }
             let destination = staging.join(&relative);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)?;
@@ -1039,6 +1302,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             {
                 return Err(OciError::Artifact);
             }
+        }
+        if remaining != 0 || selector_matches.iter().any(|matched| !matched) {
+            return Err(OciError::Artifact);
         }
         Ok(())
     }
@@ -1195,10 +1461,13 @@ fn normalize_legacy_ds4_spec(mut spec: WorkloadSpec) -> Result<WorkloadSpec, Oci
         )
         || spec.runtime.environment[1].secret.is_some()
         || spec.artifacts.len() != 2
-        || spec.endpoint.protocol != "openai"
-        || spec.endpoint.port != authority.2
-        || spec.endpoint.model_aliases != ["deepseek-v4-flash"]
-        || spec.endpoint.health_path != "/v1/models"
+        || spec.endpoint.as_ref().is_none_or(|endpoint| {
+            endpoint.protocol != "openai"
+                || endpoint.port != authority.2
+                || endpoint.model_aliases != ["deepseek-v4-flash"]
+                || endpoint.health_path != "/v1/models"
+        })
+        || spec.job.is_some()
         || spec.topology.name != "solo"
         || spec.topology.node_count != 1
         || spec.topology.rank != 0

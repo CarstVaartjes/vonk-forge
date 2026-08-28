@@ -186,6 +186,7 @@ async fn run_control_lane(
         "agent.upgrade.v1",
         "recipe.build.v1",
         "recipe.image.import.v1",
+        "recipe.job.run.v1",
         "recipe.install",
         "recipe.start",
         "recipe.stop",

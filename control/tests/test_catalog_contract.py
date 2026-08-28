@@ -39,9 +39,21 @@ def test_exact_reference_has_portable_immutable_identity() -> None:
     )
 
 
-def test_catalog_contract_rejects_territory_automation() -> None:
+def test_catalog_contract_accepts_bounded_territorial_restrictions() -> None:
     document = json.loads(MODEL_VERSION_FIXTURE.read_text())
-    document["license"]["excluded_territories"] = ["NL"]
+    document["license"]["territorial_restrictions"] = {
+        "denied_jurisdictions": ["EU", "GB", "KR"],
+        "notice": "Use is not permitted in the EU, UK, or South Korea.",
+    }
+
+    validate_catalog_document(document)
+
+    document["license"]["territorial_restrictions"]["unknown"] = True
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)
+
+    del document["license"]["territorial_restrictions"]["unknown"]
+    document["license"]["territorial_restrictions"]["denied_jurisdictions"] = ["eu"]
 
     with pytest.raises(CatalogContractError):
         validate_catalog_document(document)

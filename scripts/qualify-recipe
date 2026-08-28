@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -11,9 +13,11 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "control/src"))
@@ -56,6 +60,7 @@ SUPPORTED_CHECKS = frozenset(
         "artifact.mime.video-mp4",
         "artifact.mime.model-gltf-binary",
         "artifact.mime.application-octet-stream",
+        "artifact.mime.application-zip",
     }
 )
 
@@ -91,7 +96,14 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--level", choices=("structural", "container"), required=True)
     parser.add_argument("--engine", default="docker")
     parser.add_argument("--endpoint-host", default="127.0.0.1")
-    parser.add_argument("--artifact-root", type=Path, default=Path("/var/lib/vonk/models"))
+    parser.add_argument(
+        "--artifact-root", type=Path, default=Path("/var/lib/vonk/models")
+    )
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        help="bounded fixture directory mounted read-only for artifact-job qualification",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args()
     if not 0 < args.timeout_seconds <= 3600:
@@ -160,13 +172,19 @@ def _context_files(context: Path) -> dict[str, bytes]:
             raise QualificationError(f"source context symlink is forbidden: {relative}")
         if source.is_dir():
             continue
-        if not source.is_file() or "__pycache__" in source.parts or source.suffix == ".pyc":
+        if (
+            not source.is_file()
+            or "__pycache__" in source.parts
+            or source.suffix == ".pyc"
+        ):
             raise QualificationError(f"source context entry is forbidden: {relative}")
         files[relative] = source.read_bytes()
     return files
 
 
-def _structural(path: Path, *, library_root: Path, platform_root: Path) -> QualificationInputs:
+def _structural(
+    path: Path, *, library_root: Path, platform_root: Path
+) -> QualificationInputs:
     resolver = _CatalogResolver(library_root, platform_root)
     recipe = _load(path)
     validate_recipe(recipe)
@@ -182,7 +200,11 @@ def _structural(path: Path, *, library_root: Path, platform_root: Path) -> Quali
     harness = resolver.resolve(execution["harness"])
     distribution = resolver.resolve(runtime["distribution"])
     patch_reference = execution.get("patch_bundle")
-    patch = resolver.resolve(patch_reference) if isinstance(patch_reference, Mapping) else None
+    patch = (
+        resolver.resolve(patch_reference)
+        if isinstance(patch_reference, Mapping)
+        else None
+    )
     context_contract = build.get("context")
     context_value = (
         context_contract.get("path") if isinstance(context_contract, Mapping) else None
@@ -198,18 +220,21 @@ def _structural(path: Path, *, library_root: Path, platform_root: Path) -> Quali
         try:
             context.relative_to(platform_root.resolve())
         except ValueError:
-            raise QualificationError("recipe build context escapes the recipe/platform roots") from error
+            raise QualificationError(
+                "recipe build context escapes the recipe/platform roots"
+            ) from error
     if not context.is_dir():
         raise QualificationError("recipe build context is unavailable")
     bundle = generate_source_bundle(_context_files(context))
     enforce_build_source_policy(recipe, bundle)
-    if (
-        not isinstance(context_contract, Mapping)
-        or context_contract.get("expected_bytes") != len(bundle.archive)
-    ):
+    if not isinstance(context_contract, Mapping) or context_contract.get(
+        "expected_bytes"
+    ) != len(bundle.archive):
         raise QualificationError("recipe source bundle size mismatch")
     validators = recipe.get("validation")
-    raw_validators = validators.get("validators") if isinstance(validators, Mapping) else None
+    raw_validators = (
+        validators.get("validators") if isinstance(validators, Mapping) else None
+    )
     checks = {
         check
         for validator in raw_validators or ()
@@ -304,7 +329,9 @@ def _request(url: str, *, body: dict[str, object] | None, timeout: float) -> obj
     try:
         return json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise QualificationError("qualification endpoint response is invalid") from error
+        raise QualificationError(
+            "qualification endpoint response is invalid"
+        ) from error
 
 
 def _await_health(url: str, *, healthy: bool, timeout: float) -> None:
@@ -339,11 +366,21 @@ class ContainerQualification:
         assert isinstance(interfaces, list) and interfaces
         interface = interfaces[0]
         assert isinstance(interface, Mapping)
-        self.port = int(interface["port"])
+        self.interface = interface
+        self.interface_adapter = str(interface["adapter"])
+        self.port = (
+            int(interface["port"]) if self.interface_adapter == "openai" else None
+        )
         self.health_url = (
             f"http://{self.args.endpoint_host}:{self.port}{interface['health_path']}"
+            if self.port is not None
+            else None
         )
-        self.chat_url = f"http://{self.args.endpoint_host}:{self.port}/v1/chat/completions"
+        self.chat_url = (
+            f"http://{self.args.endpoint_host}:{self.port}/v1/chat/completions"
+            if self.port is not None
+            else None
+        )
         self.roles = self._roles()
         lifecycle = self.recipe["runtime"]
         assert isinstance(lifecycle, Mapping)
@@ -373,10 +410,19 @@ class ContainerQualification:
     def _record(self, check: str, **evidence: object) -> None:
         self.steps.append({"check": check, "passed": True, **evidence})
 
-    def _engine(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def _engine(
+        self,
+        *arguments: str,
+        check: bool = True,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return _run(
             [self.args.engine, *arguments],
-            timeout=min(self.args.timeout_seconds, 600.0),
+            timeout=(
+                min(self.args.timeout_seconds, 600.0)
+                if timeout is None
+                else min(self.args.timeout_seconds, timeout)
+            ),
             check=check,
         )
 
@@ -405,12 +451,16 @@ class ContainerQualification:
         assert isinstance(build, Mapping)
         network = build["network"]
         assert isinstance(network, Mapping)
+        network_mode = network.get("mode")
+        if network_mode not in {"none", "public"}:
+            raise QualificationError("recipe build network mode is invalid")
+        engine_network = "none" if network_mode == "none" else "default"
         command = [
             "build",
             "--platform",
             "linux/arm64",
             "--network",
-            "none",
+            engine_network,
             "--pull=false",
             "--file",
             str(self.inputs.context / str(build["dockerfile"])),
@@ -427,8 +477,9 @@ class ContainerQualification:
         self._engine(*command)
         self._record(
             "image.build",
-            declared_network=network["mode"],
-            network="none",
+            allowed_hosts=list(network.get("hosts", ())),
+            declared_network=network_mode,
+            network=engine_network,
             platform="linux/arm64",
         )
 
@@ -451,10 +502,10 @@ class ContainerQualification:
             "--network",
             "host" if self.recipe["runtime"]["security"]["host_network"] else "bridge",
         ]
-        if (
-            not self.recipe["runtime"]["security"]["host_network"]
-            and self._endpoint_owner(rank)
-        ):
+        if not self.recipe["runtime"]["security"][
+            "host_network"
+        ] and self._endpoint_owner(rank):
+            assert self.port is not None
             command.extend(
                 (
                     "--publish",
@@ -466,6 +517,7 @@ class ContainerQualification:
         command.extend(("--env", f"VONK_RANK={rank}"))
         command.extend(("--env", f"VONK_WORLD_SIZE={len(self.roles)}"))
         if len(self.roles) > 1:
+            assert self.port is not None
             command.extend(("--env", "VONK_LOCAL_ADDR=127.0.0.1"))
             command.extend(("--env", "VONK_MASTER_ADDR=127.0.0.1"))
             command.extend(("--env", f"VONK_MASTER_PORT={self.port + 1}"))
@@ -508,7 +560,9 @@ class ContainerQualification:
         if name is None:
             return
         if self.running(rank):
-            self._engine("stop", "--time", str(self.lifecycle["stop_timeout_seconds"]), name)
+            self._engine(
+                "stop", "--time", str(self.lifecycle["stop_timeout_seconds"]), name
+            )
         self._engine("rm", "-f", name, check=False)
         self.containers.pop(rank, None)
 
@@ -534,6 +588,7 @@ class ContainerQualification:
         interfaces = self.recipe["interfaces"]
         assert isinstance(interfaces, list) and isinstance(interfaces[0], Mapping)
         aliases = interfaces[0]["model_aliases"]
+        assert self.chat_url is not None
         result = _request(
             self.chat_url,
             body={
@@ -552,11 +607,18 @@ class ContainerQualification:
             and isinstance(choices[0], Mapping)
             else None
         )
-        if not isinstance(message, Mapping) or not str(message.get("content", "")).strip():
+        if (
+            not isinstance(message, Mapping)
+            or not str(message.get("content", "")).strip()
+        ):
             raise QualificationError("qualification invocation returned no content")
         return result
 
     def execute(self) -> list[dict[str, object]]:
+        if self.interface_adapter != "openai":
+            raise QualificationError(
+                "artifact jobs require the job qualification strategy"
+            )
         if self.args.artifact_root.is_symlink() or not self.args.artifact_root.is_dir():
             raise QualificationError("installed artifact root is unavailable")
         with tempfile.TemporaryDirectory(prefix="vonk-qualify-") as output_directory:
@@ -568,6 +630,7 @@ class ContainerQualification:
                 if not all(self.running(rank) for rank in self.roles):
                     raise QualificationError("distributed ranks did not start")
                 self._record("collective.two-ranks", ranks=sorted(self.roles))
+            assert self.health_url is not None
             _await_health(self.health_url, healthy=True, timeout=self.timeout)
             self._record("endpoint-owner.ready", rank=0)
             self.invoke()
@@ -607,6 +670,193 @@ class ContainerQualification:
         for rank in sorted(self.containers, reverse=True):
             self.stop(rank)
         self._record("runtime.cleanup", containers=0)
+
+
+class JobContainerQualification(ContainerQualification):
+    """Build and execute an exact one-shot artifact job twice with bounded fixtures."""
+
+    @staticmethod
+    def _valid_zip(value: bytes) -> bool:
+        try:
+            with zipfile.ZipFile(io.BytesIO(value)) as archive:
+                members = archive.infolist()
+                if not 1 <= len(members) <= 64:
+                    return False
+                total = 0
+                for member in members:
+                    path = Path(member.filename)
+                    if (
+                        path.is_absolute()
+                        or ".." in path.parts
+                        or member.flag_bits & 0x1
+                        or member.file_size > 512 * 1024**2
+                    ):
+                        return False
+                    total += member.file_size
+                    if total > 1024**3:
+                        return False
+                return archive.testzip() is None
+        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError):
+            return False
+
+    _MAGIC: ClassVar[dict[str, object]] = {
+        "artifact.mime.image-png": lambda value: value.startswith(b"\x89PNG\r\n\x1a\n"),
+        "artifact.mime.audio-wav": lambda value: (
+            value.startswith(b"RIFF") and value[8:12] == b"WAVE"
+        ),
+        "artifact.mime.video-mp4": lambda value: len(value) >= 12
+        and value[4:8] == b"ftyp",
+        "artifact.mime.model-gltf-binary": lambda value: value.startswith(b"glTF"),
+        "artifact.mime.application-octet-stream": lambda value: bool(value),
+        "artifact.mime.application-zip": _valid_zip,
+    }
+
+    def _input_root(self, temporary_root: Path) -> Path:
+        root = (
+            self.args.input_root.resolve()
+            if self.args.input_root
+            else temporary_root / "inputs"
+        )
+        if not root.exists():
+            root.mkdir(mode=0o700)
+        if root.is_symlink() or not root.is_dir():
+            raise QualificationError("artifact-job input root is invalid")
+        contract = self.interface.get("input")
+        files = tuple(
+            sorted(root.rglob("*"), key=lambda item: item.as_posix().encode())
+        )
+        total = 0
+        count = 0
+        for item in files:
+            if item.is_symlink() or (not item.is_dir() and not item.is_file()):
+                raise QualificationError("artifact-job input contains an unsafe entry")
+            if item.is_file():
+                total += item.stat().st_size
+                count += 1
+        if isinstance(contract, Mapping):
+            maximum = contract.get("max_bytes")
+            if type(maximum) is not int or total > maximum:
+                raise QualificationError(
+                    "artifact-job input exceeds its declared byte limit"
+                )
+            if contract.get("required") is True and count == 0:
+                raise QualificationError(
+                    "artifact-job requires at least one input fixture"
+                )
+        elif count:
+            raise QualificationError("artifact-job does not declare an input contract")
+        self._record("job.input.validated", bytes=total, files=count)
+        return root
+
+    def _job_name(self, iteration: int) -> str:
+        digest = catalog_content_sha256(self.inputs.distribution)[:12]
+        return f"vonk-q-{digest}-job-{iteration}"
+
+    def _run_job(self, *, inputs: Path, outputs: Path, iteration: int) -> None:
+        if len(self.roles) != 1:
+            raise QualificationError(
+                "artifact-job container qualification requires one rank"
+            )
+        projection = self._projection(0)
+        name = self._job_name(iteration)
+        command = [
+            "run",
+            "--name",
+            name,
+            "--pull",
+            "never",
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--user",
+            projection.user,
+            "--network",
+            "none",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=1g",
+        ]
+        if "nvidia.com/gpu=all" in self.recipe["runtime"]["security"]["devices"]:
+            command.extend(("--gpus", "all"))
+        for name_value, value in projection.environment:
+            command.extend(("--env", f"{name_value}={value}"))
+        command.extend(("--mount", f"type=bind,src={inputs},dst=/inputs,readonly"))
+        command.extend(("--mount", f"type=bind,src={outputs},dst=/outputs"))
+        command.extend(
+            (
+                "--mount",
+                f"type=bind,src={self.args.artifact_root.resolve()},dst=/models,readonly",
+            )
+        )
+        command.extend((self.image, *projection.command))
+        try:
+            self._engine(*command, timeout=self.timeout)
+        finally:
+            self._engine("rm", "-f", name, check=False)
+
+    def _output_evidence(self, outputs: Path) -> list[dict[str, object]]:
+        validators = self.recipe.get("validation")
+        raw_validators = (
+            validators.get("validators") if isinstance(validators, Mapping) else ()
+        )
+        expected = {
+            check
+            for validator in raw_validators or ()
+            if isinstance(validator, Mapping)
+            and validator.get("interface") == self.interface_adapter
+            for check in validator.get("checks", ())
+            if check in self._MAGIC
+        }
+        if len(expected) != 1:
+            raise QualificationError(
+                "artifact-job requires exactly one supported MIME validator"
+            )
+        check = next(iter(expected))
+        evidence: list[dict[str, object]] = []
+        for item in sorted(
+            outputs.rglob("*"), key=lambda path: path.as_posix().encode()
+        ):
+            if item.is_symlink() or (not item.is_dir() and not item.is_file()):
+                raise QualificationError("artifact-job output contains an unsafe entry")
+            if not item.is_file():
+                continue
+            value = item.read_bytes()
+            if not self._MAGIC[check](value):
+                raise QualificationError(
+                    "artifact-job output does not match its declared MIME"
+                )
+            evidence.append(
+                {
+                    "path": item.relative_to(outputs).as_posix(),
+                    "bytes": len(value),
+                    "sha256": hashlib.sha256(value).hexdigest(),
+                }
+            )
+        if not evidence:
+            raise QualificationError("artifact-job produced no validated outputs")
+        return evidence
+
+    def execute(self) -> list[dict[str, object]]:
+        if self.interface_adapter == "openai":
+            raise QualificationError("service recipes require the endpoint strategy")
+        if self.args.artifact_root.is_symlink() or not self.args.artifact_root.is_dir():
+            raise QualificationError("installed artifact root is unavailable")
+        with tempfile.TemporaryDirectory(prefix="vonk-qualify-job-") as directory:
+            temporary_root = Path(directory)
+            inputs = self._input_root(temporary_root)
+            self.build()
+            for iteration in (1, 2):
+                outputs = temporary_root / f"outputs-{iteration}"
+                outputs.mkdir(mode=0o700)
+                started = time.monotonic()
+                self._run_job(inputs=inputs, outputs=outputs, iteration=iteration)
+                evidence = self._output_evidence(outputs)
+                self._record(
+                    "job.completed",
+                    iteration=iteration,
+                    duration_seconds=round(time.monotonic() - started, 6),
+                    outputs=evidence,
+                )
+        return self.steps
 
 
 def _print(value: Mapping[str, object]) -> None:
@@ -657,7 +907,17 @@ def main() -> int:
             }
         )
         return 3
-    qualifier = ContainerQualification(inputs, args)
+    interfaces = inputs.recipe.get("interfaces")
+    first_interface = (
+        interfaces[0] if isinstance(interfaces, list) and interfaces else None
+    )
+    qualifier_type = (
+        ContainerQualification
+        if isinstance(first_interface, Mapping)
+        and first_interface.get("adapter") == "openai"
+        else JobContainerQualification
+    )
+    qualifier = qualifier_type(inputs, args)
     try:
         steps = qualifier.execute()
         qualifier.cleanup()

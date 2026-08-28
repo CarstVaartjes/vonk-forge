@@ -21,6 +21,20 @@ from .host_helper import (
     host_artifact_signing_bytes,
     host_helper_grant_signing_bytes,
 )
+from .recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobInputFile,
+    RecipeJobOutputLimits,
+    RecipeJobOutputMapping,
+    RecipeJobRunRequest,
+    RecipeJobRunResult,
+)
+from .recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from .recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
 from .workload_packages import (
     ComponentDescriptor,
@@ -59,6 +73,12 @@ __all__ = [
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "RecipeJobFile",
+    "RecipeJobInputFile",
+    "RecipeJobOutputLimits",
+    "RecipeJobOutputMapping",
+    "RecipeJobRunRequest",
+    "RecipeJobRunResult",
     "RecipeOperationRequest",
     "RestartUnit",
     "SignedHostHelperGrant",
@@ -69,6 +89,8 @@ __all__ = [
     "host_helper_grant_signing_bytes",
     "package_helper_grant_signing_bytes",
     "package_object_receipt_signing_bytes",
+    "recipe_job_manifest_document",
+    "recipe_job_manifest_sha256",
     "schema_validator",
     "validate_schema_message",
 ]

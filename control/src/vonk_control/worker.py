@@ -128,6 +128,7 @@ class Worker:
         *,
         logs=None,
         housekeeping: Callable[[], object] | None = None,
+        artifact_housekeeping: Callable[[], object] | None = None,
         reconciliations=None,
         recipes=None,
         loop_heartbeat: Callable[[], object] | None = None,
@@ -137,6 +138,7 @@ class Worker:
         self._handlers = dict(handlers)
         self._logs = logs
         self._housekeeping = housekeeping
+        self._artifact_housekeeping = artifact_housekeeping
         self._reconciliations = reconciliations
         self._recipes = recipes
         self._loop_heartbeat = loop_heartbeat
@@ -145,6 +147,8 @@ class Worker:
     def run_once(self) -> bool:
         if self._housekeeping is not None:
             self._housekeeping()
+        if self._artifact_housekeeping is not None:
+            self._artifact_housekeeping()
         sources: list[Callable[[], bool]] = []
         if self._reconciliations is not None:
             sources.append(self._reconciliations.tick)
@@ -169,7 +173,10 @@ class Worker:
         if attempt is None:
             return False
         if self._logs is not None:
-            self._logs.save(attempt.job_id, f"job {attempt.kind} attempt {attempt.attempt} started".encode())
+            self._logs.save(
+                attempt.job_id,
+                f"job {attempt.kind} attempt {attempt.attempt} started".encode(),
+            )
         handler = self._handlers.get(attempt.kind)
         if handler is None:
             self._jobs.fail(attempt, f"unsupported job kind: {attempt.kind}")
@@ -177,14 +184,22 @@ class Worker:
                 self._logs.save(attempt.job_id, b"job failed: unsupported job kind")
             return True
         try:
-            result = handler(HandlerRequest(
-                attempt.job_id, attempt.kind, attempt.payload,
-                attempt.authority_revision, attempt.targets,
-            ))
+            result = handler(
+                HandlerRequest(
+                    attempt.job_id,
+                    attempt.kind,
+                    attempt.payload,
+                    attempt.authority_revision,
+                    attempt.targets,
+                )
+            )
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")
             if self._logs is not None:
-                self._logs.save(attempt.job_id, f"job failed: {type(error).__name__}: {error}".encode())
+                self._logs.save(
+                    attempt.job_id,
+                    f"job failed: {type(error).__name__}: {error}".encode(),
+                )
         else:
             self._jobs.succeed(attempt, result)
             if self._logs is not None:
@@ -204,11 +219,20 @@ def assemble_production_worker(
     clock,
     authority,
     worker_id: str,
+    artifact_job_root: Path,
+    artifact_job_storage_max_bytes: int,
+    artifact_job_retention_seconds: int,
+    artifact_job_reconcile_interval_seconds: int,
+    artifact_job_reconcile_batch_limit: int,
+    operator_jurisdiction: str | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
     """Compose the worker-owned reconciliation runtime."""
 
     from .agent_reconciliation import AgentReconciliationService
+    from .artifact_blob_store import ArtifactBlobStore
+    from .artifact_jobs import ArtifactJobService
+    from .artifact_maintenance import ArtifactMaintenanceCadence
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
@@ -224,6 +248,7 @@ def assemble_production_worker(
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
     )
+
     reconciliations = AgentReconciliationService(
         sessions,
         agent_jobs=agent_jobs,
@@ -248,11 +273,13 @@ def assemble_production_worker(
             sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
+            operator_jurisdiction=operator_jurisdiction,
         ),
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
             memory_floor_bytes=4_000_000_000,
+            operator_jurisdiction=operator_jurisdiction,
         ),
         agent_jobs=agent_jobs,
         clock=clock,
@@ -281,12 +308,29 @@ def assemble_production_worker(
         ),
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
+    artifact_jobs = ArtifactJobService(
+        sessions,
+        recipe_operations=lifecycle,
+        blob_store=ArtifactBlobStore(
+            artifact_job_root,
+            max_stored_bytes=artifact_job_storage_max_bytes,
+        ),
+        clock=clock,
+        retention_seconds=artifact_job_retention_seconds,
+    )
     return Worker(
         jobs,
         worker_id,
         {},
         housekeeping=TelemetryMaintenanceCadence(
             telemetry_maintenance,
+            clock=clock,
+        ),
+        artifact_housekeeping=ArtifactMaintenanceCadence(
+            artifact_jobs.reconcile_storage,
+            state_root=artifact_job_root,
+            interval_seconds=artifact_job_reconcile_interval_seconds,
+            batch_limit=artifact_job_reconcile_batch_limit,
             clock=clock,
         ),
         reconciliations=reconciliations,
@@ -358,6 +402,14 @@ if __name__ == "__main__":
         clock=clock,
         authority=authority,
         worker_id=os.environ.get("HOSTNAME", "control-worker"),
+        operator_jurisdiction=settings.operator_jurisdiction,
+        artifact_job_root=settings.state_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=settings.artifact_job_storage_max_bytes,
+        artifact_job_retention_seconds=settings.artifact_job_retention_seconds,
+        artifact_job_reconcile_interval_seconds=(
+            settings.artifact_job_reconcile_interval_seconds
+        ),
+        artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
         loop_heartbeat=WorkerHeartbeatRecorder(
             sessions,
             process_instance_id=current_worker_instance_id(),

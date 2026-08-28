@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Run the packaged controller-only fleet qualification workflow."""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from cluster_profiles.fleet_qualification_cli import main
+
+raise SystemExit(main())

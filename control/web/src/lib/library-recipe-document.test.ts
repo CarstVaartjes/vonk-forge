@@ -12,6 +12,7 @@ test.each([
   ["prototype adapter", {...visual, runtime: {...visual.runtime, adapter: "vllm"}}, "$.runtime.adapter is not allowed."],
   ["bad model identity", {...visual, model: {...visual.model, content_sha256: "not-a-digest"}}, "$.model.content_sha256 must be 64 lowercase hexadecimal characters."],
   ["bad interface", {...visual, interfaces: [{...visual.interfaces[0], port: 0}]}, "$.interfaces[0].port must be a safe integer of at least 1."],
+  ["unsorted artifact subset", {...visual, artifacts: [{...visual.artifacts[0], include_paths: ["weights/model.safetensors", "config.json"]}]}, "$.artifacts[0].include_paths must be sorted and unique."],
 ])("rejects %s from the strict visual contract", (_case, document, error) => {
   expect(parseVisualRecipeDocument(JSON.stringify(document))).toEqual({ok: false, error});
 });

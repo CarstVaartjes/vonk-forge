@@ -27,6 +27,16 @@ function integer(value: unknown, path: string, minimum = 0): number {
   return value;
 }
 
+function number(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new DocumentValidationError(`${path} must be a finite number.`);
+  return value;
+}
+
+function scalar(value: unknown, path: string): void {
+  if (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") throw new DocumentValidationError(`${path} must be a string, number, boolean, or null.`);
+  if (typeof value === "number" && !Number.isFinite(value)) throw new DocumentValidationError(`${path} must be a finite number.`);
+}
+
 function array(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) throw new DocumentValidationError(`${path} must be an array.`);
   return value;
@@ -48,14 +58,44 @@ function identity(value: unknown, path: string, kinds: readonly string[]): void 
   string(result.publisher, `${path}.publisher`); string(result.slug, `${path}.slug`); digest(result.content_sha256, `${path}.content_sha256`);
 }
 
+function slots(value: unknown, path: string): void {
+  array(value, path).forEach((item, index) => {
+    const slotPath = `${path}[${index}]`;
+    const slot = object(item, slotPath, ["id", "label", "description", "media_types", "extensions", "min_files", "max_files", "max_file_bytes", "max_total_bytes"]);
+    for (const key of ["id", "label", "description"] as const) string(slot[key], `${slotPath}.${key}`);
+    strings(slot.media_types, `${slotPath}.media_types`); strings(slot.extensions, `${slotPath}.extensions`);
+    for (const key of ["min_files", "max_files", "max_file_bytes", "max_total_bytes"] as const) integer(slot[key], `${slotPath}.${key}`);
+  });
+}
+
 function validateDocument(value: unknown): VisualRecipeDocument {
-  const root = object(value, "$", ["schema_version", "identity", "metadata", "model", "execution", "build", "artifacts", "runtime", "interfaces", "validation", "provenance"]);
+  const root = object(value, "$", ["schema_version", "identity", "metadata", "model", "model_license", "parameters", "execution", "build", "artifacts", "runtime", "interfaces", "validation", "provenance"]);
   if (root.schema_version !== 1) throw new DocumentValidationError("$.schema_version must equal 1.");
   const recipeIdentity = object(root.identity, "$.identity", ["publisher", "slug"]);
   string(recipeIdentity.publisher, "$.identity.publisher"); string(recipeIdentity.slug, "$.identity.slug");
   const metadata = object(root.metadata, "$.metadata", ["title", "description", "tags"]);
   string(metadata.title, "$.metadata.title"); string(metadata.description, "$.metadata.description"); strings(metadata.tags, "$.metadata.tags");
   identity(root.model, "$.model", ["model-version"]);
+  if (root.model_license !== null) {
+    const modelLicense = object(root.model_license, "$.model_license", ["territorial_restrictions"]);
+    if (modelLicense.territorial_restrictions !== null && modelLicense.territorial_restrictions !== undefined) {
+      const restrictions = object(modelLicense.territorial_restrictions, "$.model_license.territorial_restrictions", ["denied_jurisdictions", "notice"]);
+      strings(restrictions.denied_jurisdictions, "$.model_license.territorial_restrictions.denied_jurisdictions");
+      string(restrictions.notice, "$.model_license.territorial_restrictions.notice");
+    }
+  }
+  array(root.parameters, "$.parameters").forEach((item, index) => {
+    const parameterPath = `$.parameters[${index}]`;
+    const parameter = object(item, parameterPath, ["name", "description", "type", "default", "minimum", "maximum", "allowed_values", "pattern", "change_effect"]);
+    string(parameter.name, `${parameterPath}.name`); string(parameter.description, `${parameterPath}.description`);
+    if (!["string", "integer", "boolean", "enum"].includes(string(parameter.type, `${parameterPath}.type`))) throw new DocumentValidationError(`${parameterPath}.type is not supported.`);
+    scalar(parameter.default, `${parameterPath}.default`);
+    if (parameter.minimum !== null && parameter.minimum !== undefined) number(parameter.minimum, `${parameterPath}.minimum`);
+    if (parameter.maximum !== null && parameter.maximum !== undefined) number(parameter.maximum, `${parameterPath}.maximum`);
+    if (parameter.allowed_values !== undefined) array(parameter.allowed_values, `${parameterPath}.allowed_values`).forEach((allowed, allowedIndex) => scalar(allowed, `${parameterPath}.allowed_values[${allowedIndex}]`));
+    if (parameter.pattern !== null && parameter.pattern !== undefined) string(parameter.pattern, `${parameterPath}.pattern`);
+    if (!["rebuild", "reinstall", "restart"].includes(string(parameter.change_effect, `${parameterPath}.change_effect`))) throw new DocumentValidationError(`${parameterPath}.change_effect is not supported.`);
+  });
   const execution = object(root.execution, "$.execution", ["harness", "patch_bundle"]);
   identity(execution.harness, "$.execution.harness", ["execution-harness"]);
   if (execution.patch_bundle !== null) identity(execution.patch_bundle, "$.execution.patch_bundle", ["patch-bundle"]);
@@ -65,19 +105,38 @@ function validateDocument(value: unknown): VisualRecipeDocument {
   string(build.dockerfile, "$.build.dockerfile"); string(build.platform, "$.build.platform"); string(build.network_mode, "$.build.network_mode"); strings(build.network_hosts, "$.build.network_hosts");
   for (const key of ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"] as const) integer(build[key], `$.build.${key}`, key === "timeout_seconds" ? 1 : 0);
   array(root.artifacts, "$.artifacts").forEach((item, index) => {
-    const artifact = object(item, `$.artifacts[${index}]`, ["id", "kind", "repository", "revision", "download_bytes", "installed_bytes", "roles"]);
+    const artifact = object(item, `$.artifacts[${index}]`, ["id", "kind", "repository", "revision", "include_paths", "download_bytes", "installed_bytes", "roles"]);
     for (const key of ["id", "kind", "repository", "revision"] as const) string(artifact[key], `$.artifacts[${index}].${key}`);
+    const includePaths = strings(artifact.include_paths, `$.artifacts[${index}].include_paths`);
+    if (includePaths.length > 256) throw new DocumentValidationError(`$.artifacts[${index}].include_paths must contain at most 256 items.`);
+    if (includePaths.some(path => path.length > 512)) throw new DocumentValidationError(`$.artifacts[${index}].include_paths entries must contain at most 512 characters.`);
+    if (includePaths.some((path, pathIndex) => pathIndex > 0 && includePaths[pathIndex - 1]! >= path)) throw new DocumentValidationError(`$.artifacts[${index}].include_paths must be sorted and unique.`);
     integer(artifact.download_bytes, `$.artifacts[${index}].download_bytes`); integer(artifact.installed_bytes, `$.artifacts[${index}].installed_bytes`); strings(artifact.roles, `$.artifacts[${index}].roles`);
   });
   const runtime = object(root.runtime, "$.runtime", ["distribution", "entrypoint", "lifecycle_pre_start_count", "lifecycle_post_stop_count", "stop_timeout_seconds"]);
   identity(runtime.distribution, "$.runtime.distribution", ["runtime-distribution"]); strings(runtime.entrypoint, "$.runtime.entrypoint"); integer(runtime.lifecycle_pre_start_count, "$.runtime.lifecycle_pre_start_count"); integer(runtime.lifecycle_post_stop_count, "$.runtime.lifecycle_post_stop_count"); integer(runtime.stop_timeout_seconds, "$.runtime.stop_timeout_seconds", 1);
   array(root.interfaces, "$.interfaces").forEach((item, index) => {
-    const current = object(item, `$.interfaces[${index}]`, ["adapter", "port", "model_aliases", "health_path", "path"]);
-    string(current.adapter, `$.interfaces[${index}].adapter`);
-    if (current.port !== null && current.port !== undefined) integer(current.port, `$.interfaces[${index}].port`, 1);
-    if (current.model_aliases !== undefined) strings(current.model_aliases, `$.interfaces[${index}].model_aliases`);
-    if (current.health_path !== null && current.health_path !== undefined) string(current.health_path, `$.interfaces[${index}].health_path`);
-    if (current.path !== null && current.path !== undefined) string(current.path, `$.interfaces[${index}].path`);
+    const interfacePath = `$.interfaces[${index}]`;
+    const current = object(item, interfacePath, ["adapter", "port", "model_aliases", "health_path", "path", "input", "output", "timeout_seconds"]);
+    string(current.adapter, `${interfacePath}.adapter`);
+    if (current.port !== null && current.port !== undefined) integer(current.port, `${interfacePath}.port`, 1);
+    if (current.model_aliases !== undefined) strings(current.model_aliases, `${interfacePath}.model_aliases`);
+    if (current.health_path !== null && current.health_path !== undefined) string(current.health_path, `${interfacePath}.health_path`);
+    if (current.path !== null && current.path !== undefined) string(current.path, `${interfacePath}.path`);
+    if (current.timeout_seconds !== null && current.timeout_seconds !== undefined) integer(current.timeout_seconds, `${interfacePath}.timeout_seconds`, 1);
+    if (current.input !== null && current.input !== undefined) {
+      const input = object(current.input, `${interfacePath}.input`, ["path", "required", "media_types", "max_bytes", "min_files", "max_files", "slots"]);
+      string(input.path, `${interfacePath}.input.path`);
+      if (typeof input.required !== "boolean") throw new DocumentValidationError(`${interfacePath}.input.required must be a boolean.`);
+      strings(input.media_types, `${interfacePath}.input.media_types`); integer(input.max_bytes, `${interfacePath}.input.max_bytes`); integer(input.min_files, `${interfacePath}.input.min_files`); integer(input.max_files, `${interfacePath}.input.max_files`);
+      if (input.slots !== undefined) slots(input.slots, `${interfacePath}.input.slots`);
+    }
+    if (current.output !== null && current.output !== undefined) {
+      const output = object(current.output, `${interfacePath}.output`, ["path", "allowed_media_types", "max_total_bytes", "slots"]);
+      string(output.path, `${interfacePath}.output.path`); strings(output.allowed_media_types, `${interfacePath}.output.allowed_media_types`);
+      if (output.max_total_bytes !== null && output.max_total_bytes !== undefined) integer(output.max_total_bytes, `${interfacePath}.output.max_total_bytes`);
+      if (output.slots !== undefined) slots(output.slots, `${interfacePath}.output.slots`);
+    }
   });
   const validation = object(root.validation, "$.validation", ["checks", "benchmark_count"]); strings(validation.checks, "$.validation.checks"); integer(validation.benchmark_count, "$.validation.benchmark_count");
   const provenance = object(root.provenance, "$.provenance", ["source_kind", "source_reference", "attribution"]); string(provenance.source_kind, "$.provenance.source_kind"); if (provenance.source_reference !== null && typeof provenance.source_reference !== "string") throw new DocumentValidationError("$.provenance.source_reference must be a string or null."); strings(provenance.attribution, "$.provenance.attribution");

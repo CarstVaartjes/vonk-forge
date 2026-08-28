@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --python 3.12 --project control --frozen --group dev --with-editable . python
+#!/usr/bin/env -S uv run --python 3.12 --project control --frozen --group dev --with-editable . --with-editable agent_protocol python
 """Generate the admin-only OpenAPI and pinned upstream language clients.
 
 Generator provenance:
@@ -15,6 +15,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -74,12 +76,26 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     return admin_openapi_schema(app)
 
 
-def _write_openapi(document: dict[str, object]) -> None:
-    OPENAPI.write_text(
+def _write_openapi(document: dict[str, object], *, path: Path = OPENAPI) -> None:
+    path.write_text(
         json.dumps(document, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
         newline="\n",
     )
+
+
+def _generated_client_schema(document: dict[str, object]) -> dict[str, object]:
+    """Exclude byte streams that require the handwritten streaming transports."""
+
+    schema = deepcopy(document)
+    paths = schema.get("paths", {})
+    for path, path_item in list(paths.items()):
+        for method, operation in list(path_item.items()):
+            if operation.get("x-vonk-streaming-transport") is True:
+                del path_item[method]
+        if not path_item:
+            del paths[path]
+    return schema
 
 
 def _run(command: list[str]) -> None:
@@ -114,37 +130,45 @@ def _normalize_generated_text(path: Path) -> None:
 
 
 def main() -> None:
-    # The cluster-profile client remains a signed-bearer client. Generate it
-    # from the unchanged administrative surface before adding browser-only
-    # session operations to the shared web contract.
-    _write_openapi(_schema(include_browser_auth=False))
-    _run(
-        [
-            "openapi-python-client",
-            "generate",
-            "--path",
-            str(OPENAPI),
-            "--config",
-            str(ROOT / "control/openapi-python-client.yaml"),
-            "--meta",
-            "none",
-            "--output-path",
-            str(PYTHON_OUTPUT),
-            "--overwrite",
-        ]
-    )
-    _normalize_generated_text(PYTHON_OUTPUT)
-    _write_openapi(_schema(include_browser_auth=True))
-    TYPESCRIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    _run(
-        [
-            str(ROOT / "tools/openapi-client/node_modules/.bin/openapi-typescript"),
-            str(OPENAPI),
-            "--output",
-            str(TYPESCRIPT_OUTPUT),
-        ]
-    )
-    _normalize_generated_text(TYPESCRIPT_OUTPUT)
+    # Keep the tracked document complete. Generated clients receive a filtered
+    # copy because large byte streams use the handwritten Python and browser
+    # transports instead of buffered typed-client methods.
+    with tempfile.TemporaryDirectory(prefix="vonk-openapi-clients-") as temporary:
+        client_openapi = Path(temporary) / "openapi.json"
+
+        admin_schema = _schema(include_browser_auth=False)
+        _write_openapi(admin_schema)
+        _write_openapi(_generated_client_schema(admin_schema), path=client_openapi)
+        _run(
+            [
+                "openapi-python-client",
+                "generate",
+                "--path",
+                str(client_openapi),
+                "--config",
+                str(ROOT / "control/openapi-python-client.yaml"),
+                "--meta",
+                "none",
+                "--output-path",
+                str(PYTHON_OUTPUT),
+                "--overwrite",
+            ]
+        )
+        _normalize_generated_text(PYTHON_OUTPUT)
+
+        browser_schema = _schema(include_browser_auth=True)
+        _write_openapi(browser_schema)
+        _write_openapi(_generated_client_schema(browser_schema), path=client_openapi)
+        TYPESCRIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+        _run(
+            [
+                str(ROOT / "tools/openapi-client/node_modules/.bin/openapi-typescript"),
+                str(client_openapi),
+                "--output",
+                str(TYPESCRIPT_OUTPUT),
+            ]
+        )
+        _normalize_generated_text(TYPESCRIPT_OUTPUT)
 
 
 if __name__ == "__main__":

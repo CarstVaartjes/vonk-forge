@@ -267,6 +267,30 @@ def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
 
     artifacts = _mapping_sequence(document.get("artifacts"), "artifacts")
     artifact_ids = _unique_field(artifacts, "id", "artifacts")
+    for index, artifact in enumerate(artifacts):
+        include_paths = artifact.get("include_paths", ())
+        if not isinstance(include_paths, Sequence) or isinstance(
+            include_paths, (str, bytes, bytearray)
+        ):
+            raise RecipeContractError(
+                "recipe.artifact_include_paths",
+                f"artifacts.{index}.include_paths",
+                "include_paths must be an array",
+            )
+        if list(include_paths) != sorted(include_paths) or len(
+            set(include_paths)
+        ) != len(include_paths):
+            raise RecipeContractError(
+                "recipe.artifact_include_paths",
+                f"artifacts.{index}.include_paths",
+                "include_paths must be sorted and unique",
+            )
+        if include_paths and artifact.get("kind") != "huggingface.snapshot":
+            raise RecipeContractError(
+                "recipe.artifact_include_paths",
+                f"artifacts.{index}.include_paths",
+                "include_paths are only valid for Hugging Face snapshots",
+            )
     runtime = _mapping(document.get("runtime"), "runtime")
     arguments = _mapping_sequence(runtime.get("arguments"), "runtime.arguments")
     for index, argument in enumerate(arguments):
@@ -364,6 +388,27 @@ def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
 
     interfaces = _mapping_sequence(document.get("interfaces"), "interfaces")
     interface_names = _unique_field(interfaces, "adapter", "interfaces")
+    job_interfaces = [
+        interface
+        for interface in interfaces
+        if interface.get("adapter")
+        in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
+    ]
+    if job_interfaces:
+        topology = _mapping(document.get("topology"), "topology")
+        if topology.get("node_count") != 1:
+            raise RecipeContractError(
+                "recipe.job_topology",
+                "topology.node_count",
+                "artifact job recipes currently require a single-node topology",
+            )
+        lifecycle = _mapping(runtime.get("lifecycle"), "runtime.lifecycle")
+        if lifecycle.get("pre_start") or lifecycle.get("post_stop"):
+            raise RecipeContractError(
+                "recipe.job_hooks",
+                "runtime.lifecycle",
+                "artifact job recipes cannot declare pre-start or post-stop hooks",
+            )
     validators = _mapping_sequence(
         _mapping(document.get("validation"), "validation").get("validators"),
         "validation.validators",

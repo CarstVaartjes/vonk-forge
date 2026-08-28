@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -86,6 +86,7 @@ impl AgentClaim {
             "agent.upgrade.v1"
                 | "recipe.build.v1"
                 | "recipe.image.import.v1"
+                | "recipe.job.run.v1"
                 | "recipe.install"
                 | "recipe.start"
                 | "recipe.stop"
@@ -239,7 +240,7 @@ impl AgentResult {
             || !valid_node_id(&self.node_id)
             || !matches!(
                 self.state.as_str(),
-                "succeeded" | "failed" | "waiting-for-operator"
+                "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
             )
         {
             return Err(ProtocolError::Identity("result identity"));
@@ -271,10 +272,149 @@ pub struct EnrollmentEvidence {
 pub enum RecipeOperationRequest {
     Build(RecipeBuildRequest),
     ImageImport(RecipeImageImportRequest),
+    JobRun(RecipeJobRunRequest),
     Install(RecipeInstallRequest),
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobFile {
+    pub name: String,
+    pub media_type: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobInputFile {
+    pub slot: String,
+    pub name: String,
+    pub media_type: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobOutputLimits {
+    pub max_files: u16,
+    pub max_file_bytes: u64,
+    pub max_total_bytes: u64,
+    pub allowed_media_types: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobOutputMapping {
+    pub slot: String,
+    pub media_type: String,
+    pub extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobRunRequest {
+    pub schema_version: u8,
+    pub job_id: Uuid,
+    pub run_id: Uuid,
+    pub installation_id: Uuid,
+    pub recipe_revision_id: Uuid,
+    pub recipe_content_sha256: String,
+    pub image_digest: String,
+    pub plan_digest: String,
+    pub interface: String,
+    pub rank: u32,
+    pub role: String,
+    pub contract_sha256: String,
+    pub input_manifest_sha256: String,
+    pub input_total_bytes: u64,
+    pub inputs: Vec<RecipeJobInputFile>,
+    pub parameters: Value,
+    pub output_mappings: Vec<RecipeJobOutputMapping>,
+    pub output_limits: RecipeJobOutputLimits,
+    pub timeout_seconds: u16,
+    pub reserved_memory_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobOutputManifest {
+    pub schema_version: u8,
+    pub manifest_sha256: String,
+    pub total_bytes: u64,
+    pub files: Vec<RecipeJobFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobEvidence {
+    pub elapsed_milliseconds: u64,
+    pub peak_memory_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeJobRunResult {
+    pub schema_version: u8,
+    pub job_id: Uuid,
+    pub run_id: Uuid,
+    pub exit_code: i32,
+    pub output_manifest: RecipeJobOutputManifest,
+    pub evidence: RecipeJobEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl RecipeJobRunResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let manifest = serde_json::json!({
+            "schema_version": self.output_manifest.schema_version,
+            "total_bytes": self.output_manifest.total_bytes,
+            "files": self.output_manifest.files,
+        });
+        let valid = self.schema_version == 1
+            && (0..=255).contains(&self.exit_code)
+            && self.output_manifest.schema_version == 1
+            && self.output_manifest.files.len() <= 32
+            && self
+                .output_manifest
+                .files
+                .windows(2)
+                .all(|pair| pair[0].name < pair[1].name)
+            && self.output_manifest.files.iter().all(|file| {
+                valid_job_file_name(&file.name)
+                    && valid_media_type(&file.media_type)
+                    && file.size_bytes <= 1024 * 1024 * 1024
+                    && lower_hex(&file.sha256, 64)
+            })
+            && self
+                .output_manifest
+                .files
+                .iter()
+                .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
+                == Some(self.output_manifest.total_bytes)
+            && self.output_manifest.total_bytes <= 2 * 1024 * 1024 * 1024
+            && canonical_json(&manifest)
+                .ok()
+                .is_some_and(|bytes| hex_sha256(&bytes) == self.output_manifest.manifest_sha256)
+            && self.evidence.elapsed_milliseconds <= 7 * 24 * 60 * 60 * 1000
+            && self
+                .evidence
+                .peak_memory_bytes
+                .is_none_or(|value| value <= 16 * 1024_u64.pow(4))
+            && self.reason.as_ref().is_none_or(|reason| {
+                !reason.is_empty() && reason.len() <= 512 && !reason.contains('\0')
+            });
+        if valid {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe job result"))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -418,6 +558,10 @@ impl RecipeOperationRequest {
             "recipe.image.import.v1" => {
                 Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
             }
+            "recipe.job.run.v1" => {
+                validate_job_wire(&claim.payload)?;
+                Self::JobRun(serde_json::from_value(claim.payload.clone())?)
+            }
             "recipe.install" => Self::Install(serde_json::from_value(claim.payload.clone())?),
             "recipe.start" => Self::Start(serde_json::from_value(claim.payload.clone())?),
             "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
@@ -441,6 +585,7 @@ impl RecipeOperationRequest {
                     && lower_hex(&value.oci_layout_sha256, 64)
                     && (1..=16 * 1024_u64.pow(4)).contains(&value.image_bytes)
             }
+            Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
@@ -488,6 +633,214 @@ impl RecipeOperationRequest {
             Err(ProtocolError::Identity("recipe payload"))
         }
     }
+}
+
+fn validate_job_wire(value: &Value) -> Result<(), ProtocolError> {
+    for field in ["job_id", "run_id", "installation_id", "recipe_revision_id"] {
+        let canonical = value
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
+            .is_some_and(|(raw, parsed)| parsed.to_string() == raw);
+        if !canonical {
+            return Err(ProtocolError::Identity("recipe job payload"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
+    let inputs_valid = value.inputs.len() <= 32
+        && value
+            .inputs
+            .windows(2)
+            .all(|pair| pair[0].name < pair[1].name)
+        && value.inputs.iter().all(|file| {
+            valid_job_slot(&file.slot)
+                && valid_job_file_name(&file.name)
+                && valid_media_type(&file.media_type)
+                && file.size_bytes <= 512 * 1024 * 1024
+                && lower_hex(&file.sha256, 64)
+        })
+        && value
+            .inputs
+            .iter()
+            .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
+            == Some(value.input_total_bytes)
+        && value.input_total_bytes <= 1024 * 1024 * 1024;
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "total_bytes": value.input_total_bytes,
+        "files": value.inputs,
+    });
+    let manifest_valid = canonical_json(&manifest)
+        .ok()
+        .is_some_and(|bytes| hex_sha256(&bytes) == value.input_manifest_sha256);
+    let limits = &value.output_limits;
+    let mappings_valid = (1..=32).contains(&value.output_mappings.len())
+        && value
+            .output_mappings
+            .windows(2)
+            .all(|pair| pair[0].slot < pair[1].slot)
+        && value.output_mappings.iter().all(|mapping| {
+            valid_job_slot(&mapping.slot)
+                && valid_media_type(&mapping.media_type)
+                && (1..=16).contains(&mapping.extensions.len())
+                && mapping.extensions.windows(2).all(|pair| pair[0] < pair[1])
+                && mapping
+                    .extensions
+                    .iter()
+                    .all(|extension| valid_job_extension(extension))
+        })
+        && value
+            .output_mappings
+            .iter()
+            .flat_map(|mapping| mapping.extensions.iter())
+            .collect::<BTreeSet<_>>()
+            .len()
+            == value
+                .output_mappings
+                .iter()
+                .map(|mapping| mapping.extensions.len())
+                .sum::<usize>();
+    value.schema_version == 1
+        && lower_hex(&value.recipe_content_sha256, 64)
+        && valid_oci_digest(&value.image_digest)
+        && lower_hex(&value.plan_digest, 64)
+        && lower_hex(&value.contract_sha256, 64)
+        && matches!(
+            value.interface.as_str(),
+            "audio-job" | "video-job" | "image-job" | "mesh-job" | "artifact-job"
+        )
+        && value.rank == 0
+        && value.role == "entrypoint"
+        && inputs_valid
+        && manifest_valid
+        && value.parameters.is_object()
+        && canonical_json(&value.parameters).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
+        && valid_job_parameter(&value.parameters, 0)
+        && mappings_valid
+        && (1..=32).contains(&limits.max_files)
+        && (1..=1024 * 1024 * 1024).contains(&limits.max_file_bytes)
+        && (1..=2 * 1024 * 1024 * 1024).contains(&limits.max_total_bytes)
+        && limits.max_file_bytes <= limits.max_total_bytes
+        && !limits.allowed_media_types.is_empty()
+        && limits.allowed_media_types.len() <= 16
+        && limits
+            .allowed_media_types
+            .iter()
+            .enumerate()
+            .all(|(index, media_type)| {
+                valid_media_type(media_type)
+                    && !limits.allowed_media_types[..index].contains(media_type)
+                    && (index == 0 || limits.allowed_media_types[index - 1] < *media_type)
+            })
+        && limits.allowed_media_types.iter().all(|allowed| {
+            value
+                .output_mappings
+                .iter()
+                .any(|mapping| &mapping.media_type == allowed)
+        })
+        && (1..=3600).contains(&value.timeout_seconds)
+        && (1..=16 * 1024_u64.pow(4)).contains(&value.reserved_memory_bytes)
+}
+
+fn valid_job_slot(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value.as_bytes()[0].is_ascii_alphabetic()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn valid_job_file_name(value: &str) -> bool {
+    !value.is_empty()
+        && value != "manifest.json"
+        && value.len() <= 128
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn valid_job_extension(value: &str) -> bool {
+    let Some(value) = value.strip_prefix('.') else {
+        return false;
+    };
+    !value.is_empty()
+        && value.len() <= 16
+        && (value.as_bytes()[0].is_ascii_lowercase() || value.as_bytes()[0].is_ascii_digit())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn valid_media_type(value: &str) -> bool {
+    value.split_once('/').is_some_and(|(kind, subtype)| {
+        let valid_part = |part: &str| {
+            !part.is_empty()
+                && part.len() <= 64
+                && (part.as_bytes()[0].is_ascii_lowercase() || part.as_bytes()[0].is_ascii_digit())
+                && part.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(
+                            byte,
+                            b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
+                        )
+                })
+        };
+        valid_part(kind) && valid_part(subtype)
+    })
+}
+
+fn valid_job_parameter(value: &Value, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => true,
+        Value::String(value) => value.len() <= 4096 && !value.contains('\0'),
+        Value::Array(values) => {
+            values.len() <= 128
+                && values
+                    .iter()
+                    .all(|value| valid_job_parameter(value, depth + 1))
+        }
+        Value::Object(values) => values.iter().all(|(key, value)| {
+            let key = key.to_ascii_lowercase();
+            values.len() <= 128
+                && !key.is_empty()
+                && key.len() <= 64
+                && !unsafe_parameter_key(&key)
+                && valid_job_parameter(value, depth + 1)
+        }),
+    }
+}
+
+fn unsafe_parameter_key(key: &str) -> bool {
+    [
+        "password",
+        "secret",
+        "token",
+        "authorization",
+        "command",
+        "shell",
+        "environment",
+    ]
+    .iter()
+    .any(|value| key.contains(value))
+        || key.match_indices("private").any(|(index, _)| {
+            let tail = &key[index + "private".len()..];
+            tail.starts_with("key") || tail.get(1..).is_some_and(|value| value.starts_with("key"))
+        })
+        || key.split(['_', '-']).any(|part| {
+            matches!(
+                part,
+                "path" | "file" | "filename" | "filepath" | "directory" | "folder"
+            )
+        })
 }
 
 fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
@@ -750,4 +1103,187 @@ fn link_local(value: std::net::IpAddr) -> bool {
 
 fn valid_fabric_address(value: std::net::IpAddr) -> bool {
     !value.is_loopback() && !value.is_unspecified() && !value.is_multicast() && !link_local(value)
+}
+
+#[cfg(test)]
+mod recipe_job_tests {
+    use super::*;
+
+    fn request() -> RecipeJobRunRequest {
+        let inputs = vec![RecipeJobInputFile {
+            slot: "input".to_owned(),
+            name: "input.mp4".to_owned(),
+            media_type: "video/mp4".to_owned(),
+            size_bytes: 123,
+            sha256: "a".repeat(64),
+        }];
+        let manifest = serde_json::json!({
+            "schema_version": 1,
+            "total_bytes": 123,
+            "files": inputs,
+        });
+        RecipeJobRunRequest {
+            schema_version: 1,
+            job_id: Uuid::new_v4(),
+            run_id: Uuid::new_v4(),
+            installation_id: Uuid::new_v4(),
+            recipe_revision_id: Uuid::new_v4(),
+            recipe_content_sha256: "b".repeat(64),
+            image_digest: format!("sha256:{}", "c".repeat(64)),
+            plan_digest: "d".repeat(64),
+            interface: "video-job".to_owned(),
+            rank: 0,
+            role: "entrypoint".to_owned(),
+            contract_sha256: "e".repeat(64),
+            input_manifest_sha256: hex_sha256(&canonical_json(&manifest).unwrap()),
+            input_total_bytes: 123,
+            inputs,
+            parameters: serde_json::json!({"guidance_scale": 7}),
+            output_mappings: vec![RecipeJobOutputMapping {
+                slot: "video".to_owned(),
+                media_type: "video/mp4".to_owned(),
+                extensions: vec![".mp4".to_owned()],
+            }],
+            output_limits: RecipeJobOutputLimits {
+                max_files: 32,
+                max_file_bytes: 1024 * 1024,
+                max_total_bytes: 2 * 1024 * 1024,
+                allowed_media_types: vec!["video/mp4".to_owned()],
+            },
+            timeout_seconds: 3600,
+            reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+        }
+    }
+
+    #[test]
+    fn job_contract_binds_canonical_inputs_and_rejects_unsafe_parameters() {
+        let valid = request();
+        assert!(validate_recipe_job(&valid));
+
+        let mut cross_manifest = valid.clone();
+        cross_manifest.inputs[0].name = "other.mp4".to_owned();
+        assert!(!validate_recipe_job(&cross_manifest));
+
+        let mut traversal = valid.clone();
+        traversal.inputs[0].name = "../input.mp4".to_owned();
+        assert!(!validate_recipe_job(&traversal));
+
+        let mut invalid_slot = valid.clone();
+        invalid_slot.inputs[0].slot = "0input".to_owned();
+        assert!(!validate_recipe_job(&invalid_slot));
+
+        let mut reserved_manifest = valid.clone();
+        reserved_manifest.inputs[0].name = "manifest.json".to_owned();
+        let manifest = serde_json::json!({
+            "schema_version": 1,
+            "total_bytes": reserved_manifest.input_total_bytes,
+            "files": reserved_manifest.inputs,
+        });
+        reserved_manifest.input_manifest_sha256 = hex_sha256(&canonical_json(&manifest).unwrap());
+        assert!(!validate_recipe_job(&reserved_manifest));
+
+        let mut command = valid;
+        command.parameters = serde_json::json!({"shell_command": "curl example.invalid"});
+        assert!(!validate_recipe_job(&command));
+    }
+
+    #[test]
+    fn output_mapping_contract_is_sorted_exact_and_collision_free() {
+        let mut valid = request();
+        valid.output_mappings = vec![
+            RecipeJobOutputMapping {
+                slot: "custom".to_owned(),
+                media_type: "application/vnd.vonk.custom".to_owned(),
+                extensions: vec![".vonk.bin".to_owned()],
+            },
+            RecipeJobOutputMapping {
+                slot: "document".to_owned(),
+                media_type: "application/pdf".to_owned(),
+                extensions: vec![".pdf".to_owned()],
+            },
+            RecipeJobOutputMapping {
+                slot: "fallback".to_owned(),
+                media_type: "application/octet-stream".to_owned(),
+                extensions: vec![".bin".to_owned()],
+            },
+            RecipeJobOutputMapping {
+                slot: "image".to_owned(),
+                media_type: "image/avif".to_owned(),
+                extensions: vec![".avif".to_owned()],
+            },
+        ];
+        valid.output_limits.allowed_media_types = vec![
+            "application/octet-stream".to_owned(),
+            "application/pdf".to_owned(),
+            "application/vnd.vonk.custom".to_owned(),
+            "image/avif".to_owned(),
+        ];
+        assert!(validate_recipe_job(&valid));
+
+        let mut collision = valid.clone();
+        collision.output_mappings[3].extensions = vec![".pdf".to_owned()];
+        assert!(!validate_recipe_job(&collision));
+
+        let mut undeclared_limit = valid.clone();
+        undeclared_limit.output_limits.allowed_media_types = vec!["video/mp4".to_owned()];
+        assert!(!validate_recipe_job(&undeclared_limit));
+
+        let mut uppercase = valid;
+        uppercase.output_mappings[1].extensions = vec![".PDF".to_owned()];
+        assert!(!validate_recipe_job(&uppercase));
+    }
+
+    #[test]
+    fn python_job_claim_and_result_vectors_have_rust_parity() {
+        let claim: AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        claim.validate().unwrap();
+        let parsed = RecipeOperationRequest::parse(&claim).unwrap();
+        let RecipeOperationRequest::JobRun(request) = parsed else {
+            panic!("job vector parsed as the wrong operation");
+        };
+        assert_eq!(
+            request.input_manifest_sha256,
+            "a3fa3ff4a07e23b945e72cda963e6aaf24671bc52642d328180b0ea4cde1776d"
+        );
+
+        let result: AgentResult = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+        ))
+        .unwrap();
+        result.validate().unwrap();
+        let typed: RecipeJobRunResult = serde_json::from_value(result.result.clone()).unwrap();
+        typed.validate().unwrap();
+        assert_eq!(
+            result.result["output_manifest"]["manifest_sha256"],
+            "9f7781fb8415bc1cb9e835fe4bcc9c8dd8f45f6a6b333f0e0550e812db1da9cd"
+        );
+
+        let mut unavailable_peak = typed;
+        unavailable_peak.evidence.peak_memory_bytes = None;
+        unavailable_peak.validate().unwrap();
+        assert!(
+            serde_json::to_value(unavailable_peak).unwrap()["evidence"]["peak_memory_bytes"]
+                .is_null()
+        );
+    }
+
+    #[test]
+    fn cancelled_is_a_typed_terminal_agent_result_state() {
+        let result = AgentResult {
+            attempt: 1,
+            deadline: DateTime::parse_from_rfc3339("2026-08-28T12:00:00+00:00").unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
+            operation_id: Uuid::new_v4(),
+            result: serde_json::json!({"reason": "controller cancellation requested"}),
+            schema_version: 1,
+            state: "cancelled".to_owned(),
+        };
+
+        result.validate().unwrap();
+    }
 }

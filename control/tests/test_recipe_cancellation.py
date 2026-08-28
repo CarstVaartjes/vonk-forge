@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from vonk_control.recipe_operations import _cancel_reason
 
 

@@ -52,8 +52,31 @@ _ADMIN_OPERATION_IDS = {
     ("delete", "/api/v1/fleet-profiles/{profile_id}"): "deleteFleetProfile",
     ("post", "/api/v1/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
     ("post", "/api/v1/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
-    ("get", "/api/v1/fleet-profile-applications/{application_id}"): "getFleetProfileApplication",
+    (
+        "get",
+        "/api/v1/fleet-profile-applications/{application_id}",
+    ): "getFleetProfileApplication",
     ("get", "/api/v1/library"): "listLibrary",
+    ("post", "/api/v1/recipes/job-runs"): "activateRecipeJobRun",
+    (
+        "get",
+        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+    ): "listArtifactJobsForRun",
+    (
+        "post",
+        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+    ): "createArtifactJob",
+    ("get", "/api/v1/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
+    ("get", "/api/v1/artifact-jobs/{job_id}"): "getArtifactJobStatus",
+    ("put", "/api/v1/artifact-jobs/{job_id}/inputs/{name}"): "uploadArtifactJobInput",
+    ("post", "/api/v1/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
+    ("post", "/api/v1/artifact-jobs/{job_id}/submit"): "submitArtifactJob",
+    ("post", "/api/v1/artifact-jobs/{job_id}/cancel"): "cancelArtifactJob",
+    ("get", "/api/v1/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
+    (
+        "get",
+        "/api/v1/artifact-jobs/{job_id}/results/{sha256}",
+    ): "downloadArtifactJobResult",
     (
         "get",
         "/api/v1/library/recipes/{recipe_id}",
@@ -82,9 +105,15 @@ _ADMIN_OPERATION_IDS = {
     ("put", "/api/v1/catalog/recipes/{recipe_id}/draft"): "updateLocalRecipeDraft",
     ("post", "/api/v1/catalog/recipes/{recipe_id}/resolve"): "resolveLocalRecipe",
     ("post", "/api/v1/catalog/recipes/{recipe_id}/fork"): "forkLocalRecipe",
-    ("post", "/api/v1/catalog/imports/workload_run/preview"): "previewWorkloadRunImport",
+    (
+        "post",
+        "/api/v1/catalog/imports/workload_run/preview",
+    ): "previewWorkloadRunImport",
     ("post", "/api/v1/catalog/imports/workload_run"): "applyWorkloadRunImport",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/resolve-import"): "resolveWorkloadRunImport",
+    (
+        "post",
+        "/api/v1/catalog/recipes/{recipe_id}/resolve-import",
+    ): "resolveWorkloadRunImport",
 }
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
@@ -111,8 +140,7 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     """Describe stable JSON errors for generated clients."""
 
     return {
-        status_code: {"model": BoundedErrorResponse}
-        for status_code in status_codes
+        status_code: {"model": BoundedErrorResponse} for status_code in status_codes
     }
 
 
@@ -135,9 +163,7 @@ class AgentSummary(StrictModel):
         default=None,
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$",
     )
-    build_digest: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     capabilities: list[str]
     last_seen_at: str | None
@@ -251,9 +277,7 @@ def job_response(
             attempt=int(item["attempt"]),
             progress=_progress_projection(item.get("progress")),
             updated_at=(
-                None
-                if item.get("updated_at") is None
-                else str(item["updated_at"])
+                None if item.get("updated_at") is None else str(item["updated_at"])
             ),
         )
         for item in operation_page.items
@@ -461,7 +485,9 @@ class _DurableOperationProjection:
         now = _aware(self._clock())
         with self._sessions() as session:
             nodes = list(
-                session.scalars(select(AgentNode).order_by(AgentNode.node_id).limit(500))
+                session.scalars(
+                    select(AgentNode).order_by(AgentNode.node_id).limit(500)
+                )
             )
             certificates = list(
                 session.scalars(
@@ -483,11 +509,13 @@ class _DurableOperationProjection:
         projected: list[Mapping[str, object]] = []
         for node in nodes:
             last_seen = None if node.last_seen_at is None else _aware(node.last_seen_at)
-            age = None if last_seen is None else max(0.0, (now - last_seen).total_seconds())
-            certificate = latest_certificates.get(node.node_id)
-            not_after = (
-                None if certificate is None else _aware(certificate.not_after)
+            age = (
+                None
+                if last_seen is None
+                else max(0.0, (now - last_seen).total_seconds())
             )
+            certificate = latest_certificates.get(node.node_id)
+            not_after = None if certificate is None else _aware(certificate.not_after)
             projected.append(
                 {
                     "capabilities": [
@@ -499,7 +527,9 @@ class _DurableOperationProjection:
                         None if not_after is None else not_after.isoformat()
                     ),
                     "last_seen_age_seconds": age,
-                    "last_seen_at": None if last_seen is None else last_seen.isoformat(),
+                    "last_seen_at": None
+                    if last_seen is None
+                    else last_seen.isoformat(),
                     "node_id": node.node_id,
                     "protocol_version": node.protocol_version,
                     "semantic_version": node.semantic_version,
@@ -549,9 +579,9 @@ class _DurableOperationProjection:
                 )
             operations = list(
                 session.scalars(
-                    statement
-                    .order_by(AgentOperation.created_at, AgentOperation.id)
-                    .limit(limit + 1)
+                    statement.order_by(
+                        AgentOperation.created_at, AgentOperation.id
+                    ).limit(limit + 1)
                 )
             )
             has_more = len(operations) > limit
@@ -602,10 +632,7 @@ class _DurableOperationProjection:
                     if attempts.get(operation.id) is None
                     else (
                         None
-                        if _progress_projection(
-                            attempts[operation.id].progress
-                        )
-                        is None
+                        if _progress_projection(attempts[operation.id].progress) is None
                         else _progress_projection(
                             attempts[operation.id].progress
                         ).model_dump(mode="json")
@@ -731,9 +758,7 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         paths[path] = selected
     source["paths"] = paths
     components = source.setdefault("components", {})
-    components["securitySchemes"] = {
-        "BearerAuth": {"scheme": "bearer", "type": "http"}
-    }
+    components["securitySchemes"] = {"BearerAuth": {"scheme": "bearer", "type": "http"}}
     if includes_browser_auth:
         components["securitySchemes"]["BrowserSession"] = {
             "in": "cookie",

@@ -9,12 +9,17 @@ from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestSt
 from .agents_response import AgentsResponse
 from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
 from .apply_request import ApplyRequest
+from .artifact_file_declaration import ArtifactFileDeclaration
+from .artifact_job_create import ArtifactJobCreate
+from .artifact_job_create_parameters import ArtifactJobCreateParameters
 from .bounded_error_response import BoundedErrorResponse
 from .build_plan_response import BuildPlanResponse
 from .build_preview_input import BuildPreviewInput
 from .build_preview_request import BuildPreviewRequest
 from .build_preview_target import BuildPreviewTarget
 from .build_request import BuildRequest
+from .cancel_artifact_job_response_cancelartifactjob import CancelArtifactJobResponseCancelartifactjob
+from .cancel_request import CancelRequest
 from .capacity_reservations import CapacityReservations
 from .catalog_entity_list_response import CatalogEntityListResponse
 from .catalog_entity_revision_response import CatalogEntityRevisionResponse
@@ -23,6 +28,7 @@ from .catalog_entity_revision_response_kind import CatalogEntityRevisionResponse
 from .catalog_entity_revision_response_lifecycle import CatalogEntityRevisionResponseLifecycle
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
+from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
 from .create_catalog_entity_request import CreateCatalogEntityRequest
 from .create_catalog_entity_request_document import CreateCatalogEntityRequestDocument
 from .create_recipe_request import CreateRecipeRequest
@@ -33,6 +39,7 @@ from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInst
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
+from .finalize_artifact_job_response_finalizeartifactjob import FinalizeArtifactJobResponseFinalizeartifactjob
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -69,6 +76,9 @@ from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
 from .freshness_policy import FreshnessPolicy
 from .get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
+from .get_artifact_job_capabilities_response_getartifactjobcapabilities import GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
+from .get_artifact_job_result_response_getartifactjobresult import GetArtifactJobResultResponseGetartifactjobresult
+from .get_artifact_job_status_response_getartifactjobstatus import GetArtifactJobStatusResponseGetartifactjobstatus
 from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .global_import_preview_request import GlobalImportPreviewRequest
@@ -113,6 +123,7 @@ from .library_run_summary import LibraryRunSummary
 from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
+from .list_artifact_jobs_for_run_response_listartifactjobsforrun import ListArtifactJobsForRunResponseListartifactjobsforrun
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
 from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
 from .mapping_node_plan_response import MappingNodePlanResponse
@@ -148,6 +159,7 @@ from .operational_run import OperationalRun
 from .operational_run_route_state import OperationalRunRouteState
 from .operational_run_state import OperationalRunState
 from .operational_state import OperationalState
+from .output_limits import OutputLimits
 from .placement_evidence_counts import PlacementEvidenceCounts
 from .placement_evidence_counts_truncated_collections_item import PlacementEvidenceCountsTruncatedCollectionsItem
 from .placement_limits import PlacementLimits
@@ -246,6 +258,7 @@ from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
 from .stop_request import StopRequest
+from .submit_artifact_job_response_submitartifactjob import SubmitArtifactJobResponseSubmitartifactjob
 from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
 from .telemetry_details import TelemetryDetails
 from .telemetry_history_response import TelemetryHistoryResponse
@@ -277,12 +290,21 @@ from .visual_catalog_identity import VisualCatalogIdentity
 from .visual_catalog_identity_kind import VisualCatalogIdentityKind
 from .visual_execution import VisualExecution
 from .visual_identity import VisualIdentity
+from .visual_input_slot import VisualInputSlot
 from .visual_interface import VisualInterface
+from .visual_interface_input import VisualInterfaceInput
+from .visual_interface_output import VisualInterfaceOutput
 from .visual_metadata import VisualMetadata
+from .visual_model_license import VisualModelLicense
+from .visual_output_slot import VisualOutputSlot
 from .visual_provenance import VisualProvenance
 from .visual_provenance_source_kind import VisualProvenanceSourceKind
 from .visual_recipe_document import VisualRecipeDocument
+from .visual_recipe_parameter import VisualRecipeParameter
+from .visual_recipe_parameter_change_effect import VisualRecipeParameterChangeEffect
+from .visual_recipe_parameter_type import VisualRecipeParameterType
 from .visual_runtime import VisualRuntime
+from .visual_territorial_restrictions import VisualTerritorialRestrictions
 from .visual_validation import VisualValidation
 
 __all__ = (
@@ -295,12 +317,17 @@ __all__ = (
     "AgentUpgradePreviewRequestStrategy",
     "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
     "ApplyRequest",
+    "ArtifactFileDeclaration",
+    "ArtifactJobCreate",
+    "ArtifactJobCreateParameters",
     "BoundedErrorResponse",
     "BuildPlanResponse",
     "BuildPreviewInput",
     "BuildPreviewRequest",
     "BuildPreviewTarget",
     "BuildRequest",
+    "CancelArtifactJobResponseCancelartifactjob",
+    "CancelRequest",
     "CapacityReservations",
     "CatalogEntityListResponse",
     "CatalogEntityRevisionResponse",
@@ -309,6 +336,7 @@ __all__ = (
     "CatalogEntityRevisionResponseLifecycle",
     "CatalogProblem",
     "ChangeRequest",
+    "CreateArtifactJobResponseCreateartifactjob",
     "CreateCatalogEntityRequest",
     "CreateCatalogEntityRequestDocument",
     "CreateRecipeRequest",
@@ -319,6 +347,7 @@ __all__ = (
     "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
+    "FinalizeArtifactJobResponseFinalizeartifactjob",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -355,6 +384,9 @@ __all__ = (
     "ForkRecipeRequest",
     "FreshnessPolicy",
     "GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet",
+    "GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities",
+    "GetArtifactJobResultResponseGetartifactjobresult",
+    "GetArtifactJobStatusResponseGetartifactjobstatus",
     "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
     "GlobalImportPreviewRequest",
@@ -399,6 +431,7 @@ __all__ = (
     "LibraryRunSummaryRouteState",
     "LibraryRunSummaryState",
     "LibrarySnapshot",
+    "ListArtifactJobsForRunResponseListartifactjobsforrun",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
     "ListIdentityHistoryResponseListidentityhistory",
     "MappingNodePlanResponse",
@@ -434,6 +467,7 @@ __all__ = (
     "OperationalState",
     "OperationResponse",
     "OperationResponseResultType0",
+    "OutputLimits",
     "PlacementEvidenceCounts",
     "PlacementEvidenceCountsTruncatedCollectionsItem",
     "PlacementLimits",
@@ -532,6 +566,7 @@ __all__ = (
     "StopPlanResponse",
     "StopPreviewRequest",
     "StopRequest",
+    "SubmitArtifactJobResponseSubmitartifactjob",
     "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
     "TelemetryDetails",
     "TelemetryHistoryResponse",
@@ -563,11 +598,20 @@ __all__ = (
     "VisualCatalogIdentityKind",
     "VisualExecution",
     "VisualIdentity",
+    "VisualInputSlot",
     "VisualInterface",
+    "VisualInterfaceInput",
+    "VisualInterfaceOutput",
     "VisualMetadata",
+    "VisualModelLicense",
+    "VisualOutputSlot",
     "VisualProvenance",
     "VisualProvenanceSourceKind",
     "VisualRecipeDocument",
+    "VisualRecipeParameter",
+    "VisualRecipeParameterChangeEffect",
+    "VisualRecipeParameterType",
     "VisualRuntime",
+    "VisualTerritorialRestrictions",
     "VisualValidation",
 )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import urllib.error
@@ -9,7 +10,11 @@ from typing import Self
 
 import pytest
 
-from cluster_profiles.control_client import ControlClient, ControlUnauthorized
+from cluster_profiles.control_client import (
+    ControlClient,
+    ControlMalformedResponse,
+    ControlUnauthorized,
+)
 
 
 class _Response:
@@ -27,6 +32,27 @@ class _Response:
 
     def read(self, maximum: int) -> bytes:
         return self._body[:maximum]
+
+
+class _StreamResponse:
+    def __init__(
+        self, body: bytes, *, media_type: str, sha256: str, size: int | None = None
+    ) -> None:
+        self.status = 200
+        self.headers = Message()
+        self.headers["Content-Type"] = media_type
+        self.headers["Content-Length"] = str(len(body) if size is None else size)
+        self.headers["X-Content-SHA256"] = sha256
+        self._body = io.BytesIO(body)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, maximum: int) -> bytes:
+        return self._body.read(maximum)
 
 
 def _token(tmp_path: Path) -> Path:
@@ -94,3 +120,107 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
 
     assert raised.value.detail == "bad token <redacted>"
     assert raised.value.retry_after_seconds == 7
+
+
+def test_artifact_input_upload_streams_the_reverified_local_file(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "prompt.txt"
+    content = b"bounded prompt\n"
+    source.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    observed: list[object] = []
+
+    def opener(request, *, timeout: float):
+        observed.extend(
+            (
+                request.full_url,
+                request.get_header("Content-type"),
+                request.get_header("X-content-sha256"),
+                request.data.read(),
+                timeout,
+            )
+        )
+        return _Response(200, {"state": "draft"})
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+
+    result = client.upload_file(
+        "/api/v1/artifact-jobs/job-1/inputs/prompt.txt",
+        source,
+        media_type="text/plain",
+        expected_sha256=digest,
+        expected_size=len(content),
+    )
+
+    assert result == {"state": "draft"}
+    assert observed == [
+        "https://forge.example.test/api/v1/artifact-jobs/job-1/inputs/prompt.txt",
+        "text/plain",
+        digest,
+        content,
+        3_600,
+    ]
+
+
+def test_artifact_output_download_is_verified_and_atomically_published(
+    tmp_path: Path,
+) -> None:
+    content = b"verified output"
+    digest = hashlib.sha256(content).hexdigest()
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _StreamResponse(
+            content, media_type="image/png", sha256=digest
+        ),
+    )
+    destination = tmp_path / "result.png"
+
+    result = client.download_file(
+        f"/api/v1/artifact-jobs/job-1/results/{digest}",
+        destination,
+        media_type="image/png",
+        expected_sha256=digest,
+        expected_size=len(content),
+        overwrite=False,
+    )
+
+    assert destination.read_bytes() == content
+    assert result == {
+        "destination": str(destination),
+        "media_type": "image/png",
+        "size_bytes": len(content),
+        "sha256": digest,
+    }
+    assert list(tmp_path.glob(".result.png.*.download")) == []
+
+
+def test_artifact_output_download_fails_closed_without_partial_file(
+    tmp_path: Path,
+) -> None:
+    content = b"corrupted output"
+    expected = hashlib.sha256(b"expected output").hexdigest()
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _StreamResponse(
+            content, media_type="image/png", sha256=expected
+        ),
+    )
+    destination = tmp_path / "result.png"
+
+    with pytest.raises(ControlMalformedResponse, match="does not match"):
+        client.download_file(
+            f"/api/v1/artifact-jobs/job-1/results/{expected}",
+            destination,
+            media_type="image/png",
+            expected_sha256=expected,
+            expected_size=len(content),
+            overwrite=False,
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".result.png.*.download")) == []

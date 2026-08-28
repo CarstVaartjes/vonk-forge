@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
+import os
 import re
+import stat
 import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -40,6 +43,13 @@ PUBLIC_LOCAL_STATES = (
 )
 PUBLIC_MODEL_TYPES = ("language", "vision", "image", "video", "audio", "3d")
 PUBLIC_SORTS = ("catalog", "model", "sparks", "download")
+ARTIFACT_JOB_INTERFACES = (
+    "audio-job",
+    "video-job",
+    "image-job",
+    "mesh-job",
+    "artifact-job",
+)
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES: dict[str, tuple[timedelta, str, int]] = {
     "1h": (timedelta(hours=1), "minute", 60),
@@ -57,6 +67,19 @@ ACTIVITY_STATUSES = (
 ACTIVITY_SORTS = ("recent", "attention")
 RECIPE_PRESETS = ("custom", "vllm", "diffusers")
 _MAX_PAGES = 100
+_MAX_ARTIFACT_JOB_INPUT_FILES = 32
+_MAX_ARTIFACT_JOB_INPUT_FILE_BYTES = 512 * 1024**2
+_MAX_ARTIFACT_JOB_INPUT_TOTAL_BYTES = 1024**3
+_MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES = 1024**3
+_MAX_ARTIFACT_JOB_OUTPUT_TOTAL_BYTES = 2 * 1024**3
+_ARTIFACT_FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_ARTIFACT_INPUT_SLOT = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
+_ARTIFACT_MEDIA_TYPE = re.compile(
+    r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
+    r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\Z"
+)
+_LOWER_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_RESERVED_ARTIFACT_INPUT_NAMES = frozenset({"manifest.json"})
 _ACTION_LABELS = {
     "agent.enrollment.grant.create": "Created enrollment grant",
     "agent.enrollment.submit.approved": "Approved Spark enrollment",
@@ -146,7 +169,29 @@ class ControllerClient(Protocol):
         path: str,
         payload: Mapping[str, object] | None = None,
         *,
+        extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
+    ) -> dict[str, object]: ...
+
+    def upload_file(
+        self,
+        path: str,
+        source: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+    ) -> dict[str, object]: ...
+
+    def download_file(
+        self,
+        path: str,
+        destination: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        overwrite: bool,
     ) -> dict[str, object]: ...
 
 
@@ -285,6 +330,32 @@ def add_controller_commands(
     revoke.add_argument("node_id")
     _apply(revoke)
     _add_json(revoke)
+
+    upgrade = fleet_commands.add_parser(
+        "upgrade", help="Preview or apply a controller-managed Spark agent rollout"
+    )
+    upgrade_commands = _subcommands(upgrade, "upgrade_command")
+    upgrade_candidate = upgrade_commands.add_parser(
+        "candidate", help="Show the current signed agent package"
+    )
+    _add_json(upgrade_candidate)
+    for variant in ("preview", "apply"):
+        upgrade_variant = upgrade_commands.add_parser(variant)
+        upgrade_variant.add_argument(
+            "--node-id",
+            action="append",
+            default=[],
+            help="Target one or more Sparks; omit to target every eligible Spark",
+        )
+        upgrade_variant.add_argument(
+            "--strategy",
+            choices=("one-at-a-time", "all-at-once"),
+            default="one-at-a-time",
+        )
+        if variant == "apply":
+            upgrade_variant.add_argument("--plan-digest", required=True)
+            _apply(upgrade_variant)
+        _add_json(upgrade_variant)
 
     library = commands.add_parser(
         "library", help="Browse and operate the recipe Library"
@@ -435,6 +506,130 @@ def add_controller_commands(
     run.add_argument("run_id")
     _add_json(run)
 
+    artifact_job = library_commands.add_parser(
+        "job", help="Run and retrieve a bounded artifact-producing recipe job"
+    )
+    artifact_job_commands = _subcommands(artifact_job, "artifact_job_command")
+
+    job_capabilities = artifact_job_commands.add_parser(
+        "capabilities", help="Show controller transfer limits and storage headroom"
+    )
+    _add_json(job_capabilities)
+    list_jobs = artifact_job_commands.add_parser(
+        "list", help="List durable jobs for one logical recipe run"
+    )
+    list_jobs.add_argument("run_id")
+    _add_json(list_jobs)
+
+    def activate_job_shared(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--installation-id", required=True)
+        parser.add_argument("--alias", required=True)
+
+    _action_pair(
+        artifact_job_commands,
+        "activate",
+        activate_job_shared,
+        lambda parser: parser.add_argument("--plan-digest", required=True),
+    )
+
+    def add_job_inputs(parser: argparse.ArgumentParser, *, required: bool) -> None:
+        parser.add_argument(
+            "--input",
+            action="append",
+            nargs=4,
+            default=[],
+            required=required,
+            metavar=("SLOT", "NAME", "MEDIA_TYPE", "PATH"),
+            help="Declare a local input; repeat for up to 32 files",
+        )
+
+    def add_job_declaration(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("run_id")
+        parser.add_argument(
+            "--interface", choices=ARTIFACT_JOB_INTERFACES, required=True
+        )
+        parser.add_argument("--parameters", type=Path)
+        add_job_inputs(parser, required=False)
+        parser.add_argument(
+            "--output-media-type",
+            action="append",
+            required=True,
+            help="Allowed output MIME type; repeat to allow more than one",
+        )
+        parser.add_argument("--max-output-files", type=int, default=1)
+        parser.add_argument(
+            "--max-output-file-bytes",
+            type=int,
+            default=_MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES,
+        )
+        parser.add_argument(
+            "--max-output-total-bytes",
+            type=int,
+            default=_MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES,
+        )
+        parser.add_argument("--timeout-seconds", type=int, default=3_600)
+        _request_key(parser)
+        _apply(parser)
+        _add_json(parser)
+
+    create_job = artifact_job_commands.add_parser(
+        "create", help="Declare inputs and create a draft job"
+    )
+    add_job_declaration(create_job)
+    launch_job = artifact_job_commands.add_parser(
+        "launch", help="Create, upload, finalize, and submit one job"
+    )
+    add_job_declaration(launch_job)
+
+    upload_job = artifact_job_commands.add_parser(
+        "upload", help="Upload declared local inputs to a draft job"
+    )
+    upload_job.add_argument("job_id")
+    add_job_inputs(upload_job, required=True)
+    _apply(upload_job)
+    _add_json(upload_job)
+
+    for command_name, command_help in (
+        ("finalize", "Seal a draft after all declared inputs are uploaded"),
+        ("submit", "Submit a finalized job to its Spark"),
+    ):
+        job_mutation = artifact_job_commands.add_parser(command_name, help=command_help)
+        job_mutation.add_argument("job_id")
+        _apply(job_mutation)
+        _add_json(job_mutation)
+
+    status_job = artifact_job_commands.add_parser("status", help="Show job status")
+    status_job.add_argument("job_id")
+    _add_json(status_job)
+    result_job = artifact_job_commands.add_parser(
+        "result", help="Show result metadata for a successful job"
+    )
+    result_job.add_argument("job_id")
+    _add_json(result_job)
+    download_job = artifact_job_commands.add_parser(
+        "download", help="Verify and atomically download successful outputs"
+    )
+    download_job.add_argument("job_id")
+    download_job.add_argument("--output-directory", type=Path, required=True)
+    download_job.add_argument(
+        "--sha256",
+        action="append",
+        default=[],
+        help="Download only an exact output digest; repeat to select more than one",
+    )
+    download_job.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Atomically replace existing output files",
+    )
+    _apply(download_job)
+    _add_json(download_job)
+    cancel_job = artifact_job_commands.add_parser("cancel", help="Cancel a job")
+    cancel_job.add_argument("job_id")
+    cancel_job.add_argument("--reason", required=True)
+    _apply(cancel_job)
+    _add_json(cancel_job)
+
     activity = commands.add_parser("activity", help="Audit history and background jobs")
     activity_commands = _subcommands(activity, "activity_command")
     activity_list = activity_commands.add_parser(
@@ -488,6 +683,130 @@ def _read_object(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("input JSON must be an object")
     return value
+
+
+def _inspect_artifact_input(
+    slot: str, name: str, media_type: str, source: Path
+) -> tuple[dict[str, object], Path]:
+    if _ARTIFACT_INPUT_SLOT.fullmatch(slot) is None:
+        raise ValueError(
+            "artifact input slot must be 1-32 ASCII letters, digits, underscore, or hyphen and start with a letter"
+        )
+    if _ARTIFACT_FILE_NAME.fullmatch(name) is None:
+        raise ValueError(
+            "artifact input name must be 1-128 ASCII letters, digits, dot, underscore, or hyphen"
+        )
+    if name in _RESERVED_ARTIFACT_INPUT_NAMES:
+        raise ValueError(f"artifact input name is reserved: {name}")
+    if _ARTIFACT_MEDIA_TYPE.fullmatch(media_type) is None:
+        raise ValueError("artifact input media type must be a lowercase MIME type")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOINHERIT", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise ValueError("artifact input cannot be opened safely on this platform")
+    descriptor = -1
+    try:
+        descriptor = os.open(source, flags | no_follow)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("artifact input must be a regular non-symlink file")
+        if metadata.st_size > _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES:
+            raise ValueError("artifact input exceeds the 512 MiB per-file limit")
+        digest = hashlib.sha256()
+        observed_size = 0
+        while observed_size <= _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(1024**2, _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES + 1 - observed_size),
+            )
+            if not chunk:
+                break
+            observed_size += len(chunk)
+            digest.update(chunk)
+        if observed_size > _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES:
+            raise ValueError("artifact input exceeds the 512 MiB per-file limit")
+        if observed_size != metadata.st_size:
+            raise ValueError("artifact input changed while it was being inspected")
+    except ValueError:
+        raise
+    except OSError:
+        raise ValueError(
+            "artifact input must be a readable regular non-symlink file"
+        ) from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return (
+        {
+            "slot": slot,
+            "name": name,
+            "media_type": media_type,
+            "size_bytes": observed_size,
+            "sha256": digest.hexdigest(),
+        },
+        source,
+    )
+
+
+def _artifact_inputs(
+    values: list[list[str]],
+) -> list[tuple[dict[str, object], Path]]:
+    if len(values) > _MAX_ARTIFACT_JOB_INPUT_FILES:
+        raise ValueError("artifact job accepts at most 32 input files")
+    inspected = [
+        _inspect_artifact_input(slot, name, media_type, Path(source))
+        for slot, name, media_type, source in values
+    ]
+    names = [str(item[0]["name"]) for item in inspected]
+    if len(set(names)) != len(names):
+        raise ValueError("artifact input names must be unique")
+    if (
+        sum(int(item[0]["size_bytes"]) for item in inspected)
+        > _MAX_ARTIFACT_JOB_INPUT_TOTAL_BYTES
+    ):
+        raise ValueError("artifact job inputs exceed the 1 GiB total limit")
+    return sorted(inspected, key=lambda item: str(item[0]["name"]).encode())
+
+
+def _artifact_job_create_payload(
+    args: argparse.Namespace,
+    inputs: list[tuple[dict[str, object], Path]],
+) -> dict[str, object]:
+    media_types = sorted(set(args.output_media_type))
+    if (
+        not media_types
+        or len(media_types) > 16
+        or any(_ARTIFACT_MEDIA_TYPE.fullmatch(value) is None for value in media_types)
+    ):
+        raise ValueError("output media types must be 1-16 unique lowercase MIME types")
+    if not 1 <= args.max_output_files <= 32:
+        raise ValueError("--max-output-files must be between 1 and 32")
+    if not 1 <= args.max_output_file_bytes <= _MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES:
+        raise ValueError("--max-output-file-bytes must be between 1 and 1 GiB")
+    if not 1 <= args.max_output_total_bytes <= _MAX_ARTIFACT_JOB_OUTPUT_TOTAL_BYTES:
+        raise ValueError("--max-output-total-bytes must be between 1 and 2 GiB")
+    if args.max_output_file_bytes > args.max_output_total_bytes:
+        raise ValueError("per-file output limit cannot exceed the total output limit")
+    if not 1 <= args.timeout_seconds <= 3_600:
+        raise ValueError("--timeout-seconds must be between 1 and 3600")
+    parameters = _read_object(args.parameters) if args.parameters else {}
+    if (
+        len(json.dumps(parameters, sort_keys=True, separators=(",", ":")).encode())
+        > 16 * 1024
+    ):
+        raise ValueError("artifact job parameters exceed the 16 KiB protocol limit")
+    return {
+        "interface": args.interface,
+        "parameters": parameters,
+        "inputs": [item[0] for item in inputs],
+        "output_limits": {
+            "max_files": args.max_output_files,
+            "max_file_bytes": args.max_output_file_bytes,
+            "max_total_bytes": args.max_output_total_bytes,
+            "allowed_media_types": media_types,
+        },
+        "timeout_seconds": args.timeout_seconds,
+    }
 
 
 def _merge_patch(base: object, patch: object) -> object:
@@ -1330,9 +1649,334 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             "/api/v1/agents/enrollments/grants",
             payload,
         )
+    if command == "upgrade":
+        if args.upgrade_command == "candidate":
+            return client.request("GET", "/api/v1/agents/upgrades/candidate")
+        for node_id in args.node_id:
+            if not re.fullmatch(r"spk_[0-9a-f]{32}", node_id):
+                raise ValueError("upgrade node ID must match spk_<32 lowercase hex>")
+        payload = {"strategy": args.strategy}
+        if args.node_id:
+            payload["node_ids"] = args.node_id
+        if args.upgrade_command == "preview":
+            return client.request("POST", "/api/v1/agents/upgrades/preview", payload)
+        payload["plan_digest"] = args.plan_digest
+        return _plan_or_request(
+            args,
+            client,
+            "POST",
+            "/api/v1/agents/upgrades",
+            payload,
+        )
     return _plan_or_request(
         args, client, "POST", f"/api/v1/agents/nodes/{_quoted(args.node_id)}/revoke"
     )
+
+
+def _artifact_job_id(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            value,
+        )
+        is None
+    ):
+        raise ValueError("controller returned an invalid artifact job ID")
+    return value
+
+
+def _artifact_capabilities(value: Mapping[str, object]) -> dict[str, object]:
+    transport = value.get("transport")
+    storage = value.get("storage")
+    expected_transport = {
+        "max_input_files": _MAX_ARTIFACT_JOB_INPUT_FILES,
+        "max_input_file_bytes": _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES,
+        "max_input_total_bytes": _MAX_ARTIFACT_JOB_INPUT_TOTAL_BYTES,
+        "max_output_files": 32,
+        "max_output_file_bytes": _MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES,
+        "max_output_total_bytes": _MAX_ARTIFACT_JOB_OUTPUT_TOTAL_BYTES,
+        "max_timeout_seconds": 3_600,
+        "reserved_input_names": sorted(_RESERVED_ARTIFACT_INPUT_NAMES),
+    }
+    if value.get("schema_version") != 1 or not isinstance(transport, Mapping):
+        raise ValueError("controller returned invalid artifact-job capabilities")
+    if any(
+        transport.get(key) != expected for key, expected in expected_transport.items()
+    ):
+        raise ValueError("controller artifact-job transfer contract is incompatible")
+    if not isinstance(storage, Mapping):
+        raise TypeError("controller returned invalid artifact storage capabilities")
+    maximum = storage.get("max_stored_bytes")
+    used = storage.get("used_bytes")
+    remaining = storage.get("remaining_bytes")
+    if (
+        not isinstance(maximum, int)
+        or isinstance(maximum, bool)
+        or maximum < 1
+        or not isinstance(used, int)
+        or isinstance(used, bool)
+        or not 0 <= used <= maximum
+        or not isinstance(remaining, int)
+        or isinstance(remaining, bool)
+        or remaining != maximum - used
+    ):
+        raise ValueError("controller returned invalid artifact storage capabilities")
+    return dict(value)
+
+
+def _artifact_storage_preflight(
+    capabilities: Mapping[str, object],
+    inputs: list[tuple[dict[str, object], Path]],
+) -> dict[str, object]:
+    storage = capabilities["storage"]
+    assert isinstance(storage, Mapping)
+    distinct: dict[str, int] = {}
+    for declaration, _source in inputs:
+        distinct.setdefault(str(declaration["sha256"]), int(declaration["size_bytes"]))
+    required = sum(distinct.values())
+    remaining = int(storage["remaining_bytes"])
+    return {
+        "distinct_input_bytes": required,
+        "storage_remaining_bytes": remaining,
+        "fits_without_server_reuse": required <= remaining,
+        "note": (
+            "Capacity is sufficient without server-side blob reuse."
+            if required <= remaining
+            else "Capacity is insufficient unless every excess input blob already exists in the controller CAS."
+        ),
+    }
+
+
+def _artifact_output_files(result: Mapping[str, object]) -> list[dict[str, object]]:
+    raw = result.get("output_files")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("artifact job result contains no downloadable outputs")
+    outputs: list[dict[str, object]] = []
+    names: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise TypeError("artifact job result contains invalid output metadata")
+        name = item.get("name")
+        media_type = item.get("media_type")
+        size = item.get("size_bytes")
+        digest = item.get("sha256")
+        if (
+            not isinstance(name, str)
+            or _ARTIFACT_FILE_NAME.fullmatch(name) is None
+            or name in names
+            or not isinstance(media_type, str)
+            or _ARTIFACT_MEDIA_TYPE.fullmatch(media_type) is None
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or not 0 <= size <= _MAX_ARTIFACT_JOB_OUTPUT_FILE_BYTES
+            or not isinstance(digest, str)
+            or _LOWER_SHA256.fullmatch(digest) is None
+        ):
+            raise ValueError("artifact job result contains invalid output metadata")
+        names.add(name)
+        outputs.append(dict(item))
+    if (
+        sum(int(item["size_bytes"]) for item in outputs)
+        > _MAX_ARTIFACT_JOB_OUTPUT_TOTAL_BYTES
+    ):
+        raise ValueError("artifact job result exceeds the CLI output safety limit")
+    return outputs
+
+
+def _run_artifact_job(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.artifact_job_command
+    if command == "capabilities":
+        return _artifact_capabilities(
+            client.request("GET", "/api/v1/artifact-jobs/capabilities")
+        )
+    if command == "list":
+        return client.request(
+            "GET",
+            f"/api/v1/recipes/runs/{_quoted(args.run_id)}/artifact-jobs",
+        )
+    if command == "activate":
+        apply = args.activate_command == "apply"
+        payload: dict[str, object] = {
+            "installation_id": args.installation_id,
+            "alias": args.alias,
+        }
+        if not apply:
+            return client.request("POST", "/api/v1/recipes/run-plans/preview", payload)
+        payload.update(
+            plan_digest=args.plan_digest,
+            request_key=_request_key_value(args, request_id_factory),
+        )
+        return _plan_or_request(
+            args, client, "POST", "/api/v1/recipes/job-runs", payload
+        )
+    if command in {"create", "launch"}:
+        inputs = _artifact_inputs(args.input)
+        payload = _artifact_job_create_payload(args, inputs)
+        request_key = _request_key_value(args, request_id_factory)
+        if (
+            args.request_key
+            and re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                request_key,
+            )
+            is None
+        ):
+            raise ValueError("--request-key must be a lowercase UUID")
+        create_path = f"/api/v1/recipes/runs/{_quoted(args.run_id)}/artifact-jobs"
+        if not args.apply:
+            steps: list[dict[str, object]] = [
+                {
+                    "method": "POST",
+                    "path": create_path,
+                    "request_key": request_key,
+                    "body": payload,
+                }
+            ]
+            if command == "launch":
+                steps.extend(
+                    {
+                        "method": "PUT",
+                        "path": f"/api/v1/artifact-jobs/<created-job-id>/inputs/{_quoted(str(declaration['name']))}",
+                        "source": str(source),
+                        "sha256": declaration["sha256"],
+                        "size_bytes": declaration["size_bytes"],
+                    }
+                    for declaration, source in inputs
+                )
+                steps.extend(
+                    [
+                        {
+                            "method": "POST",
+                            "path": "/api/v1/artifact-jobs/<created-job-id>/finalize",
+                        },
+                        {
+                            "method": "POST",
+                            "path": "/api/v1/artifact-jobs/<created-job-id>/submit",
+                        },
+                    ]
+                )
+            return {"mode": "plan", "steps": steps}
+        capabilities = _artifact_capabilities(
+            client.request("GET", "/api/v1/artifact-jobs/capabilities")
+        )
+        storage_preflight = _artifact_storage_preflight(capabilities, inputs)
+        created = client.request(
+            "POST",
+            create_path,
+            payload,
+            extra_headers={"X-Request-ID": request_key},
+        )
+        if command == "create":
+            return {**created, "storage_preflight": storage_preflight}
+        job_id = _artifact_job_id(created.get("id"))
+        uploaded: list[dict[str, object]] = []
+        for declaration, source in inputs:
+            client.upload_file(
+                f"/api/v1/artifact-jobs/{_quoted(job_id)}/inputs/{_quoted(str(declaration['name']))}",
+                source,
+                media_type=str(declaration["media_type"]),
+                expected_sha256=str(declaration["sha256"]),
+                expected_size=int(declaration["size_bytes"]),
+            )
+            uploaded.append(declaration)
+        client.request("POST", f"/api/v1/artifact-jobs/{_quoted(job_id)}/finalize")
+        submitted = client.request(
+            "POST", f"/api/v1/artifact-jobs/{_quoted(job_id)}/submit"
+        )
+        return {
+            "job": submitted,
+            "uploaded_inputs": uploaded,
+            "storage_preflight": storage_preflight,
+            "steps_completed": 3 + len(uploaded),
+        }
+    job_id = _quoted(args.job_id)
+    base = f"/api/v1/artifact-jobs/{job_id}"
+    if command == "upload":
+        inputs = _artifact_inputs(args.input)
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "steps": [
+                    {
+                        "method": "PUT",
+                        "path": f"{base}/inputs/{_quoted(str(declaration['name']))}",
+                        "source": str(source),
+                        **declaration,
+                    }
+                    for declaration, source in inputs
+                ],
+            }
+        responses = [
+            client.upload_file(
+                f"{base}/inputs/{_quoted(str(declaration['name']))}",
+                source,
+                media_type=str(declaration["media_type"]),
+                expected_sha256=str(declaration["sha256"]),
+                expected_size=int(declaration["size_bytes"]),
+            )
+            for declaration, source in inputs
+        ]
+        return {
+            "job": responses[-1],
+            "uploaded_inputs": [item[0] for item in inputs],
+        }
+    if command in {"finalize", "submit"}:
+        return _plan_or_request(args, client, "POST", f"{base}/{command}")
+    if command == "status":
+        return client.request("GET", base)
+    if command == "result":
+        return client.request("GET", f"{base}/result")
+    if command == "cancel":
+        reason = " ".join(args.reason.split())
+        if not reason or len(reason) > 512:
+            raise ValueError("--reason must be 1-512 non-whitespace characters")
+        return _plan_or_request(
+            args, client, "POST", f"{base}/cancel", {"reason": reason}
+        )
+    result = client.request("GET", f"{base}/result")
+    outputs = _artifact_output_files(result)
+    requested = list(dict.fromkeys(args.sha256))
+    if any(_LOWER_SHA256.fullmatch(value) is None for value in requested):
+        raise ValueError("--sha256 must be exactly 64 lowercase hexadecimal characters")
+    if requested:
+        available = {str(item["sha256"]) for item in outputs}
+        missing = [digest for digest in requested if digest not in available]
+        if missing:
+            raise ValueError(f"artifact output digest not found: {missing[0]}")
+        selected = set(requested)
+        outputs = [item for item in outputs if item["sha256"] in selected]
+    directory = args.output_directory
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("--output-directory must be an existing non-symlink directory")
+    plans = [
+        {
+            "path": f"{base}/results/{item['sha256']}",
+            "destination": str(directory / str(item["name"])),
+            "media_type": item["media_type"],
+            "size_bytes": item["size_bytes"],
+            "sha256": item["sha256"],
+        }
+        for item in outputs
+    ]
+    if not args.apply:
+        return {"mode": "plan", "downloads": plans, "overwrite": args.overwrite}
+    downloaded = [
+        client.download_file(
+            str(plan["path"]),
+            Path(str(plan["destination"])),
+            media_type=str(plan["media_type"]),
+            expected_sha256=str(plan["sha256"]),
+            expected_size=int(plan["size_bytes"]),
+            overwrite=args.overwrite,
+        )
+        for plan in plans
+    ]
+    return {"job_id": args.job_id, "downloads": downloaded}
 
 
 def _run_library(
@@ -1517,6 +2161,8 @@ def _run_library(
             f"{path}/retry",
             {"request_key": _request_key_value(args, request_id_factory)},
         )
+    if command == "job":
+        return _run_artifact_job(args, client, request_id_factory)
     return client.request("GET", f"/api/v1/recipes/runs/{_quoted(args.run_id)}")
 
 

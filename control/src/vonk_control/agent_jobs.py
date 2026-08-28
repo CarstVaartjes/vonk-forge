@@ -15,6 +15,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
+    AgentDirective,
     AgentOperation,
     AgentProgress,
     AgentResult,
@@ -28,6 +29,7 @@ from .models import (
     AgentNode,
     AgentNodeProfile,
     AgentOperationAttempt,
+    ArtifactJob,
     Job,
     Observation,
     RecipeBuild,
@@ -57,6 +59,7 @@ _RECIPE_CAPABILITIES = frozenset(
         AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.RECIPE_START.value,
+        AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
     }
@@ -72,12 +75,13 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.RECIPE_START.value,
+        AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
     }
 )
 _TERMINAL_PARENT_STATES = frozenset(
-    {"succeeded", "failed", "waiting-for-operator", "expired"}
+    {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
 )
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
@@ -93,10 +97,14 @@ _REQUIRED_CAPABILITIES = frozenset(
     }
 )
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
-_NEXT_CAPABILITIES = _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
+_NEXT_CAPABILITIES = (
+    _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
+)
 _OPTIONAL_CAPABILITIES = frozenset({AgentOperation.AGENT_UPGRADE.value})
 _KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
-_CONTROL_OPERATIONS = (_NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES) | _OPTIONAL_CAPABILITIES
+_CONTROL_OPERATIONS = (
+    _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
+) | _OPTIONAL_CAPABILITIES
 
 
 class StaleAgentAttempt(RuntimeError):
@@ -491,6 +499,7 @@ class AgentJobService:
                 operation.retry_disposition_attempt = None
                 operation.updated_at = now
                 if not self._project_unsafe_expiry(session, operation, now):
+                    self._project_artifact_job_expiry(session, operation, now)
                     self._aggregate_parent(session, operation.parent_job_id)
                 return None
             operation.current_attempt += 1
@@ -852,7 +861,7 @@ class AgentJobService:
         lease_seconds: int,
         *,
         source: AgentSource | None = None,
-    ) -> AgentProgress:
+    ) -> AgentDirective:
         self._mark_started()
         if lease_seconds <= 0:
             raise ValueError("lease must be positive")
@@ -876,7 +885,22 @@ class AgentJobService:
             attempt.progress = _document(message.progress)
             attempt.lease_deadline = deadline
             operation.updated_at = now
-            return message
+            parent = session.get(Job, operation.parent_job_id)
+            cancel_requested = bool(
+                parent is not None
+                and isinstance(parent.result, Mapping)
+                and parent.result.get("cancel_requested") is True
+            )
+            return AgentDirective(
+                schema_version=message.schema_version,
+                job_id=message.job_id,
+                operation_id=message.operation_id,
+                attempt=message.attempt,
+                fence=message.fence,
+                node_id=message.node_id,
+                deadline=message.deadline,
+                cancel_requested=cancel_requested,
+            )
 
     def succeed(self, fence: AgentFence, result: Mapping[str, object]) -> None:
         self._finish(fence, "succeeded", result=result, reason=None)
@@ -976,6 +1000,7 @@ class AgentJobService:
                 StoredOperation.id,
                 StoredOperation.node_id,
                 AgentOperationAttempt.agent_certificate_serial,
+                StoredOperation.parent_job_id,
             )
             .join(
                 AgentOperationAttempt,
@@ -987,7 +1012,7 @@ class AgentJobService:
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
             )
-        operation_id, node_id, certificate_serial = identity_hint
+        operation_id, node_id, certificate_serial, parent_job_id = identity_hint
         self._lock_reconciliation_targets(session, operation_id)
         identity = self._lock_identity(session, node_id, certificate_serial)
         now = self._clock()
@@ -1001,6 +1026,13 @@ class AgentJobService:
             session,
             operation_id,
         )
+        parent = session.scalar(
+            select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
+        )
+        if parent is None or parent.state not in {"queued", "running"}:
+            raise StaleAgentAttempt(
+                "agent operation lease, certificate, or fence is stale"
+            )
         operation = session.scalar(
             select(StoredOperation)
             .where(StoredOperation.id == operation_id)
@@ -1020,6 +1052,7 @@ class AgentJobService:
         )
         if (
             attempt is None
+            or operation.state != "running"
             or (not isinstance(fence, str) and operation.parent_job_id != fence.job_id)
             or (not isinstance(fence, str) and operation.id != fence.operation_id)
             or (not isinstance(fence, str) and operation.node_id != fence.node_id)
@@ -1028,6 +1061,7 @@ class AgentJobService:
                 and operation.current_attempt != fence.attempt
             )
             or attempt.operation_id != operation.id
+            or operation.current_attempt != attempt.attempt
             or attempt.state != "running"
             or _aware(attempt.lease_deadline) <= _aware(now)
         ):
@@ -1317,6 +1351,39 @@ class AgentJobService:
         return True
 
     @staticmethod
+    def _project_artifact_job_expiry(
+        session: Session,
+        operation: StoredOperation,
+        now: datetime,
+    ) -> bool:
+        if operation.kind != AgentOperation.RECIPE_JOB_RUN.value:
+            return False
+        artifact_job = session.scalar(
+            select(ArtifactJob)
+            .where(ArtifactJob.operation_id == operation.parent_job_id)
+            .with_for_update(of=ArtifactJob)
+        )
+        if artifact_job is None:
+            return False
+        reason = (
+            "artifact job agent lease expired; the uncertain attempt was fenced "
+            "and late results will be rejected"
+        )
+        operation.state = "failed"
+        operation.updated_at = now
+        if artifact_job.state not in {"succeeded", "failed", "cancelled"}:
+            artifact_job.state = "failed"
+            artifact_job.status_reason = reason
+            artifact_job.result_evidence = {
+                "failure_kind": "agent-lease-expired",
+                "recoverable": True,
+                "late_results_accepted": False,
+            }
+            artifact_job.completed_at = now
+            artifact_job.updated_at = now
+        return True
+
+    @staticmethod
     def _probe_health(result: Mapping[str, object]) -> dict[str, object]:
         if set(result) != {"status", "evidence"} or result.get("status") != "ok":
             raise ValueError("successful node probe result is invalid")
@@ -1495,7 +1562,13 @@ class AgentJobService:
                 .order_by(StoredOperation.created_at, StoredOperation.id)
             )
         )
-        terminal = {"compensated", "succeeded", "failed", "waiting-for-operator"}
+        terminal = {
+            "cancelled",
+            "compensated",
+            "failed",
+            "succeeded",
+            "waiting-for-operator",
+        }
         if not operations or any(
             operation.state not in terminal for operation in operations
         ):
@@ -1505,6 +1578,8 @@ class AgentJobService:
             state = "failed"
         elif "waiting-for-operator" in states:
             state = "waiting-for-operator"
+        elif "cancelled" in states:
+            state = "cancelled"
         else:
             state = "succeeded"
         job.state = state

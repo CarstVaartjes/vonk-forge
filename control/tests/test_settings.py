@@ -13,6 +13,18 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.global_catalog_url == "https://vonkforge.ai"
     assert settings.recipe_library_api_url == "https://api.github.com"
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
+    assert settings.operator_jurisdiction is None
+
+
+def test_operator_jurisdiction_is_explicit_and_strict(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", "NL")
+    assert Settings.from_env_and_secrets().operator_jurisdiction == "NL"
+
+    for invalid in ("nl", "NLD", " NL", "N1", "ZZ"):
+        monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", invalid)
+        with pytest.raises(SettingsError, match="VONK_OPERATOR_JURISDICTION"):
+            Settings.from_env_and_secrets()
 
 
 def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> None:
@@ -206,6 +218,8 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
         "registry.example.test",
     )
     assert settings.install_channel == "dev"
+    assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
+    assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
 
 
 def test_install_channel_rejects_unpublished_values(monkeypatch) -> None:
@@ -213,6 +227,14 @@ def test_install_channel_rejects_unpublished_values(monkeypatch) -> None:
     monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")
 
     with pytest.raises(SettingsError, match="VONK_INSTALL_CHANNEL"):
+        Settings.from_env_and_secrets()
+
+
+def test_artifact_job_storage_settings_are_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", "1024")
+
+    with pytest.raises(SettingsError, match="artifact job storage maximum"):
         Settings.from_env_and_secrets()
 
 

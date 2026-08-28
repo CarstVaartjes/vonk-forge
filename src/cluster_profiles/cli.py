@@ -55,6 +55,12 @@ def _runs_without_controller(args: argparse.Namespace) -> bool:
         return not args.apply
     if args.command == "library" and args.library_command == "template":
         return True
+    if (
+        args.command == "library"
+        and args.library_command == "job"
+        and args.artifact_job_command == "download"
+    ):
+        return False
     return hasattr(args, "apply") and not args.apply
 
 

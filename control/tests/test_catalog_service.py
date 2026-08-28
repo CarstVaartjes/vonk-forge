@@ -62,11 +62,20 @@ def _resolve_entity(service: CatalogService, document: dict[str, object]):
 
 
 def _seed_recipe_dependencies(
-    service: CatalogService, recipe_document: dict[str, object]
+    service: CatalogService,
+    recipe_document: dict[str, object],
+    *,
+    denied_jurisdictions: tuple[str, ...] = (),
 ) -> dict[str, object]:
     group = _resolve_entity(service, model_group())
     model_revision = _resolve_entity(service, model(group.content_sha256))
-    version = _resolve_entity(service, model_version(model_revision.content_sha256))
+    version_document = model_version(model_revision.content_sha256)
+    if denied_jurisdictions:
+        version_document["license"]["territorial_restrictions"] = {
+            "denied_jurisdictions": list(denied_jurisdictions),
+            "notice": "Use is prohibited in the configured territories.",
+        }
+    version = _resolve_entity(service, version_document)
     harness = _resolve_entity(service, execution_harness())
     distribution = _resolve_entity(
         service, runtime_distribution(harness.content_sha256)

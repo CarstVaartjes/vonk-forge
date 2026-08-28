@@ -1,11 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ring::signature;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,8 @@ pub enum OperationError {
     InvalidArtifact,
     #[error("compiled command failed")]
     CommandFailed,
+    #[error("one-shot runtime could not be stopped safely")]
+    StopUncertain,
     #[error("host mutation failed")]
     Io(#[from] std::io::Error),
 }
@@ -82,10 +85,20 @@ impl ManagedRoots {
 pub struct CommandOutput {
     pub success: bool,
     pub stdout: Vec<u8>,
+    pub exit_code: Option<i32>,
 }
 
 pub trait CommandRunner: Send + Sync {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String>;
+
+    fn run_with_timeout(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        _timeout: Duration,
+    ) -> Result<CommandOutput, String> {
+        self.run(executable, arguments)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,6 +106,22 @@ pub struct ProcessCommandRunner;
 
 impl CommandRunner for ProcessCommandRunner {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+        let timeout = if executable == Path::new("/usr/bin/dpkg") {
+            Duration::from_secs(120)
+        } else if executable == Path::new("/usr/bin/docker") {
+            Duration::from_secs(600)
+        } else {
+            Duration::from_secs(30)
+        };
+        self.run_with_timeout(executable, arguments, timeout)
+    }
+
+    fn run_with_timeout(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<CommandOutput, String> {
         if !matches!(
             executable.to_str(),
             Some(
@@ -110,7 +139,10 @@ impl CommandRunner for ProcessCommandRunner {
         let capture_output = matches!(
             executable.to_str(),
             Some("/usr/bin/dpkg-deb" | "/usr/bin/docker")
-        );
+        ) && !(executable == Path::new("/usr/bin/docker")
+            && arguments
+                .iter()
+                .any(|value| value.starts_with("VONK_JOB_TIMEOUT_SECONDS=")));
         let mut command = Command::new(executable);
         command
             .args(arguments)
@@ -139,13 +171,6 @@ impl CommandRunner for ProcessCommandRunner {
                     .map(|_| value)
             })
         });
-        let timeout = if executable == Path::new("/usr/bin/dpkg") {
-            Duration::from_secs(120)
-        } else if executable == Path::new("/usr/bin/docker") {
-            Duration::from_secs(600)
-        } else {
-            Duration::from_secs(30)
-        };
         let status = match child.wait_timeout(timeout) {
             Ok(Some(status)) => status,
             Ok(None) | Err(_) => {
@@ -167,6 +192,7 @@ impl CommandRunner for ProcessCommandRunner {
         Ok(CommandOutput {
             success: status.success(),
             stdout,
+            exit_code: status.code(),
         })
     }
 }
@@ -177,6 +203,66 @@ pub struct OperationOutcome {
     pub schema_version: u8,
     pub status: String,
     pub evidence_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+}
+
+#[derive(Default)]
+struct JobCancellationState {
+    active_starts: HashSet<String>,
+    cancelled: HashSet<String>,
+}
+
+#[derive(Default)]
+struct JobCancellationFence {
+    state: Mutex<JobCancellationState>,
+}
+
+struct ActiveJobStart<'a> {
+    fence: &'a JobCancellationFence,
+    run_id: String,
+}
+
+impl JobCancellationFence {
+    fn begin(&self, run_id: &str) -> Result<ActiveJobStart<'_>, OperationError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?;
+        if state.cancelled.contains(run_id) || !state.active_starts.insert(run_id.to_owned()) {
+            return Err(OperationError::CommandFailed);
+        }
+        Ok(ActiveJobStart {
+            fence: self,
+            run_id: run_id.to_owned(),
+        })
+    }
+
+    fn cancel(&self, run_id: &str) -> Result<(), OperationError> {
+        self.state
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?
+            .cancelled
+            .insert(run_id.to_owned());
+        Ok(())
+    }
+
+    fn is_active(&self, run_id: &str) -> Result<bool, OperationError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?
+            .active_starts
+            .contains(run_id))
+    }
+}
+
+impl Drop for ActiveJobStart<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.fence.state.lock() {
+            state.active_starts.remove(&self.run_id);
+        }
+    }
 }
 
 pub struct OperationExecutor<R> {
@@ -186,6 +272,7 @@ pub struct OperationExecutor<R> {
     required_owner_uid: Option<u32>,
     package_owner_uid: Option<u32>,
     runtime_request_owner_uid: Option<u32>,
+    job_cancellation: JobCancellationFence,
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -217,6 +304,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             required_owner_uid,
             package_owner_uid: required_owner_uid,
             runtime_request_owner_uid: required_owner_uid,
+            job_cancellation: JobCancellationFence::default(),
         })
     }
 
@@ -235,28 +323,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, evidence) = match operation {
+        let (status, evidence, exit_code) = match operation {
             HostOperation::CreateManagedDirectory {
                 area,
                 relative_path,
             } => {
                 let path = self.create_managed_directory(area, relative_path)?;
-                ("directory-created", path.to_string_lossy().into_owned())
+                (
+                    "directory-created",
+                    path.to_string_lossy().into_owned(),
+                    None,
+                )
             }
             HostOperation::InstallVonkDeb {
                 package_sha256,
                 package_signature,
             } => {
                 self.install_package(package_sha256, package_signature)?;
-                ("package-installed", package_sha256.clone())
+                ("package-installed", package_sha256.clone(), None)
             }
             HostOperation::RestartVonkUnit { unit } => {
                 let unit_name = self.restart_unit(unit)?;
-                ("unit-restarted", unit_name.to_owned())
+                ("unit-restarted", unit_name.to_owned(), None)
             }
             HostOperation::ScheduleReboot { delay_seconds } => {
                 self.schedule_reboot(*delay_seconds)?;
-                ("reboot-scheduled", delay_seconds.to_string())
+                ("reboot-scheduled", delay_seconds.to_string(), None)
             }
             HostOperation::ExecuteContainerRuntimeRequest {
                 action,
@@ -266,21 +358,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 fence,
                 request_sha256,
             } => {
-                self.execute_runtime_request(
+                let outcome = self.execute_runtime_request(
                     action,
                     job_id,
                     operation_id,
                     *attempt,
                     fence,
                     request_sha256,
-                )?;
-                ("container-runtime-request-executed", request_sha256.clone())
+                );
+                let (status, exit_code) = match outcome {
+                    Ok(exit_code) => ("container-runtime-request-executed", exit_code),
+                    Err(OperationError::StopUncertain) => {
+                        ("container-runtime-stop-uncertain", Some(124))
+                    }
+                    Err(error) => return Err(error),
+                };
+                (status, request_sha256.clone(), exit_code)
             }
         };
         Ok(OperationOutcome {
             schema_version: 1,
             status: status.to_owned(),
             evidence_sha256: hex_sha256(evidence.as_bytes()),
+            exit_code,
         })
     }
 
@@ -458,7 +558,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         attempt: u32,
         fence: &uuid::Uuid,
         request_sha256: &str,
-    ) -> Result<(), OperationError> {
+    ) -> Result<Option<i32>, OperationError> {
         let request = self.read_runtime_request(request_sha256)?;
         let expected_action = match action {
             ContainerRuntimeAction::ImageImport => HostRuntimeAction::ImageImport,
@@ -476,17 +576,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidOperation);
         }
         match request.action {
-            HostRuntimeAction::ImageImport => {
-                self.runtime_image_import(request.operation_id, &request.arguments)
+            HostRuntimeAction::ImageImport => self
+                .runtime_image_import(request.operation_id, &request.arguments)
+                .map(|()| None),
+            HostRuntimeAction::ImageInspect => self
+                .runtime_image_inspect(&request.arguments)
+                .map(|()| None),
+            HostRuntimeAction::RunInspect => {
+                self.runtime_run_inspect(&request.arguments).map(|()| None)
             }
-            HostRuntimeAction::ImageInspect => self.runtime_image_inspect(&request.arguments),
-            HostRuntimeAction::RunInspect => self.runtime_run_inspect(&request.arguments),
             HostRuntimeAction::Start => self.runtime_start(&request.arguments),
             HostRuntimeAction::Stop => {
                 if request.arguments.get(1).map(String::as_str) == Some("run") {
                     self.runtime_start(&request.arguments)
                 } else {
-                    self.runtime_stop(&request.arguments)
+                    self.runtime_stop(&request.arguments).map(|()| None)
                 }
             }
         }
@@ -618,7 +722,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         self.require_image_receipt(image_digest, &image, &inspected.0)
     }
 
-    fn runtime_start(&self, arguments: &[String]) -> Result<(), OperationError> {
+    fn runtime_start(&self, arguments: &[String]) -> Result<Option<i32>, OperationError> {
         let (image_digest, docker) = arguments
             .split_first()
             .ok_or(OperationError::InvalidOperation)?;
@@ -626,6 +730,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if image_digest != &validated.image_digest {
             return Err(OperationError::InvalidOperation);
         }
+        // A one-shot START remains registered from validation through attached container exit.
+        // Cancellation STOPs can therefore distinguish "not created yet" from "already gone"
+        // and retry until this exact job can no longer start late.
+        let _active_job = validated
+            .job_timeout_seconds
+            .map(|_| self.job_cancellation.begin(&validated.run_id))
+            .transpose()?;
         self.require_host_endpoint_firewall(&validated)?;
         let inspected = self.inspect_runtime_image(&validated.image)?;
         self.require_image_receipt(image_digest, &validated.image, &inspected.0)?;
@@ -647,12 +758,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 {
                     return Err(OperationError::InvalidArtifact);
                 }
-                return Ok(());
+                return Ok(None);
             }
         }
         self.prepare_runtime_access(&validated)?;
         let mut compiled = validated.arguments.clone();
-        if validated.detached {
+        if validated.detached || validated.job_timeout_seconds.is_some() {
             compiled.splice(
                 validated.image_index..validated.image_index,
                 [
@@ -665,15 +776,36 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 ],
             );
         }
-        let output = self.run_docker(&compiled)?;
+        let output = if let Some(timeout) = validated.job_timeout_seconds {
+            match self.runner.run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &compiled,
+                Duration::from_secs(timeout.into()),
+            ) {
+                Ok(output) => output,
+                Err(_) => {
+                    return finish_timed_out_job(
+                        self.runtime_stop(&[validated.run_id.clone(), "30".to_owned()]),
+                    );
+                }
+            }
+        } else {
+            self.run_docker(&compiled)?
+        };
         let identifier = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
             .unwrap_or("");
-        if !output.success || validated.detached && !lower_hex(identifier, 64) {
+        if validated.detached && (!output.success || !lower_hex(identifier, 64)) {
             return Err(OperationError::CommandFailed);
         }
-        Ok(())
+        if validated.job_timeout_seconds.is_some() {
+            self.runtime_stop(&[validated.run_id.clone(), "30".to_owned()])
+                .map_err(|_| OperationError::StopUncertain)?;
+        }
+        Ok(validated
+            .job_timeout_seconds
+            .map(|_| bounded_container_exit_code(&output)))
     }
 
     fn require_host_endpoint_firewall(
@@ -732,7 +864,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
-        for path in &run.models {
+        for path in run.models.iter().chain(run.inputs.iter()) {
             let output = self
                 .runner
                 .run(
@@ -769,35 +901,51 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn runtime_stop(&self, arguments: &[String]) -> Result<(), OperationError> {
-        let [run_id, timeout] = arguments else {
-            return Err(OperationError::InvalidOperation);
-        };
-        let timeout = timeout
-            .parse::<u16>()
-            .ok()
-            .filter(|value| (1..=600).contains(value))
-            .ok_or(OperationError::InvalidOperation)?;
-        if uuid::Uuid::parse_str(run_id)
-            .ok()
-            .map(|value| value.to_string())
-            != Some(run_id.clone())
-        {
-            return Err(OperationError::InvalidOperation);
+        self.runtime_stop_until(arguments, Instant::now() + Duration::from_secs(30))
+    }
+
+    fn runtime_stop_until(
+        &self,
+        arguments: &[String],
+        deadline: Instant,
+    ) -> Result<(), OperationError> {
+        let (run_id, timeout, cancel_job) = parse_runtime_stop(arguments)?;
+        if cancel_job {
+            self.job_cancellation.cancel(run_id)?;
         }
+        loop {
+            self.runtime_stop_once(run_id, timeout)?;
+            if !cancel_job || !self.job_cancellation.is_active(run_id)? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(OperationError::StopUncertain);
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn runtime_stop_once(&self, run_id: &str, timeout: u16) -> Result<(), OperationError> {
         let name = format!("vonk-{run_id}");
-        let existing = self.run_docker(&[
+        let existing = self.run_docker_with_timeout(
+            &[
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
             "{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
             name.clone(),
-        ])?;
+            ],
+            Duration::from_secs(15),
+        )?;
         if !existing.success {
-            let daemon = self.run_docker(&[
-                "version".to_owned(),
-                "--format".to_owned(),
-                "{{.Server.Version}}".to_owned(),
-            ])?;
+            let daemon = self.run_docker_with_timeout(
+                &[
+                    "version".to_owned(),
+                    "--format".to_owned(),
+                    "{{.Server.Version}}".to_owned(),
+                ],
+                Duration::from_secs(15),
+            )?;
             return if daemon.success {
                 Ok(())
             } else {
@@ -808,16 +956,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str()) {
             return Err(OperationError::InvalidArtifact);
         }
-        let stopped = self.run_docker(&[
-            "stop".to_owned(),
-            "--timeout".to_owned(),
-            timeout.to_string(),
-            name.clone(),
-        ])?;
+        let stopped = self.run_docker_with_timeout(
+            &[
+                "stop".to_owned(),
+                "--timeout".to_owned(),
+                timeout.to_string(),
+                name.clone(),
+            ],
+            Duration::from_secs(u64::from(timeout) + 15),
+        )?;
         if !stopped.success {
             return Err(OperationError::CommandFailed);
         }
-        let removed = self.run_docker(&["rm".to_owned(), name])?;
+        let removed =
+            self.run_docker_with_timeout(&["rm".to_owned(), name], Duration::from_secs(15))?;
         if !removed.success {
             return Err(OperationError::CommandFailed);
         }
@@ -827,6 +979,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn run_docker(&self, arguments: &[String]) -> Result<CommandOutput, OperationError> {
         self.runner
             .run(Path::new("/usr/bin/docker"), arguments)
+            .map_err(|_| OperationError::CommandFailed)
+    }
+
+    fn run_docker_with_timeout(
+        &self,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<CommandOutput, OperationError> {
+        self.runner
+            .run_with_timeout(Path::new("/usr/bin/docker"), arguments, timeout)
             .map_err(|_| OperationError::CommandFailed)
     }
 
@@ -1029,6 +1191,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
+fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
+    output
+        .exit_code
+        .filter(|code| (0..=255).contains(code))
+        .unwrap_or(1)
+}
+
 struct ValidatedDockerRun {
     image: String,
     image_digest: String,
@@ -1038,9 +1207,11 @@ struct ValidatedDockerRun {
     run_id: String,
     uid: u32,
     models: Vec<PathBuf>,
+    inputs: Option<PathBuf>,
     outputs: PathBuf,
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
+    job_timeout_seconds: Option<u16>,
 }
 
 fn validate_docker_run(
@@ -1078,11 +1249,13 @@ fn validate_docker_run(
     let mut publishes = 0_usize;
     let mut environments = 0_usize;
     let mut listen_port = None;
+    let mut job_timeout_seconds = None;
     let mut gpu = false;
     let mut models = Vec::new();
     let mut model_sources = BTreeSet::new();
     let mut model_targets = BTreeSet::new();
     let mut outputs = None;
+    let mut inputs = None;
     let mut runtime_contract = None;
 
     while index < arguments.len() {
@@ -1251,6 +1424,16 @@ fn validate_docker_run(
                         return Err(OperationError::InvalidOperation);
                     }
                 }
+                if let Some(value) = value.strip_prefix("VONK_JOB_TIMEOUT_SECONDS=") {
+                    let parsed = value
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|seconds| (1..=3600).contains(seconds))
+                        .ok_or(OperationError::InvalidOperation)?;
+                    if job_timeout_seconds.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                }
                 environments += 1;
             }
             "--mount" => {
@@ -1274,6 +1457,14 @@ fn validate_docker_run(
                     && outputs.is_none()
                 {
                     outputs = Some(source);
+                } else if target == "/inputs"
+                    && readonly
+                    && source.file_name().and_then(|value| value.to_str()) == Some("inputs")
+                    && source.parent().and_then(Path::parent)
+                        == Some(roots.agent_data.join("runs").as_path())
+                    && inputs.is_none()
+                {
+                    inputs = Some(source);
                 } else if target == "/run/vonk/runtime.json"
                     && readonly
                     && source.starts_with(roots.agent_data.join("run-metadata"))
@@ -1304,7 +1495,12 @@ fn validate_docker_run(
         .ok_or(OperationError::InvalidOperation)?;
     let named_run_id = name.as_deref();
     if !((detach && !remove && restart && named_run_id == Some(state_run_id))
-        || (!detach && remove && !restart && named_run_id.is_none()))
+        || (!detach && remove && !restart && named_run_id.is_none())
+        || (!detach
+            && !remove
+            && restart
+            && named_run_id == Some(state_run_id)
+            && job_timeout_seconds.is_some()))
         || !read_only
         || !temporary_filesystem
         || !init
@@ -1323,6 +1519,9 @@ fn validate_docker_run(
         || (network == Some("host") && publishes != 0)
         || (network == Some("host") && listen_port.is_none())
         || (!detach && publishes != 0)
+        || (detach && (inputs.is_some() || job_timeout_seconds.is_some()))
+        || (!detach && (inputs.is_none() || job_timeout_seconds.is_none()))
+        || (!detach && (listen_port.is_some() || network != Some("bridge")))
         || (network == Some("host") && (!ipc_host || !infiniband || !memlock || !stack || !gpu))
         || (network == Some("bridge") && (ipc_host || infiniband || memlock || stack))
         || environments == 0
@@ -1334,6 +1533,13 @@ fn validate_docker_run(
             .and_then(Path::file_name)
             .and_then(|value| value.to_str())
             != Some(state_run_id)
+        || inputs.as_ref().is_some_and(|inputs| {
+            inputs
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                != Some(state_run_id)
+        })
     {
         return Err(OperationError::InvalidOperation);
     }
@@ -1353,7 +1559,7 @@ fn validate_docker_run(
             return Err(OperationError::UnsafePath);
         }
     }
-    for path in [&outputs, &runtime_contract] {
+    for path in inputs.iter().chain([&outputs, &runtime_contract]) {
         let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
         if metadata.file_type().is_symlink()
             || !(metadata.is_dir() || metadata.is_file())
@@ -1366,6 +1572,52 @@ fn validate_docker_run(
             return Err(OperationError::UnsafePath);
         }
     }
+    let agent_data = roots
+        .agent_data
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let runs = roots.agent_data.join("runs");
+    let run_root = runs.join(state_run_id);
+    let metadata_root = roots.agent_data.join("run-metadata");
+    let run_metadata = metadata_root.join(state_run_id);
+    for path in [&runs, &run_root, &metadata_root, &run_metadata] {
+        require_safe_directory(path, agent_data_owner_uid)?;
+    }
+    let canonical_runs = runs
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_run = run_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_metadata_root = metadata_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_run_metadata = run_metadata
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if canonical_runs.parent() != Some(agent_data.as_path())
+        || canonical_run.parent() != Some(canonical_runs.as_path())
+        || canonical_metadata_root.parent() != Some(agent_data.as_path())
+        || canonical_run_metadata.parent() != Some(canonical_metadata_root.as_path())
+        || outputs
+            .canonicalize()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            != Some(canonical_run.clone())
+        || inputs.as_ref().is_some_and(|path| {
+            path.canonicalize()
+                .ok()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+                != Some(canonical_run.clone())
+        })
+        || runtime_contract
+            .canonicalize()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            != Some(canonical_run_metadata)
+    {
+        return Err(OperationError::UnsafePath);
+    }
     let mut compiled_arguments = arguments.to_vec();
     compiled_arguments[index] = image.clone();
     Ok(ValidatedDockerRun {
@@ -1377,9 +1629,11 @@ fn validate_docker_run(
         run_id: state_run_id.to_owned(),
         uid,
         models,
+        inputs,
         outputs,
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
+        job_timeout_seconds,
     })
 }
 
@@ -1401,6 +1655,38 @@ fn parse_mount(value: &str) -> Result<(PathBuf, &str, bool), OperationError> {
         return Err(OperationError::InvalidOperation);
     }
     Ok((source, target, readonly))
+}
+
+fn parse_runtime_stop(arguments: &[String]) -> Result<(&str, u16, bool), OperationError> {
+    let (run_id, timeout, cancel_job) = match arguments {
+        [run_id, timeout] => (run_id.as_str(), timeout.as_str(), false),
+        [run_id, timeout, marker] if marker == "job-cancel" => {
+            (run_id.as_str(), timeout.as_str(), true)
+        }
+        _ => return Err(OperationError::InvalidOperation),
+    };
+    let timeout = timeout
+        .parse::<u16>()
+        .ok()
+        .filter(|value| (1..=600).contains(value))
+        .ok_or(OperationError::InvalidOperation)?;
+    if uuid::Uuid::parse_str(run_id)
+        .ok()
+        .map(|value| value.to_string())
+        .as_deref()
+        != Some(run_id)
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    Ok((run_id, timeout, cancel_job))
+}
+
+fn finish_timed_out_job(
+    stop_result: Result<(), OperationError>,
+) -> Result<Option<i32>, OperationError> {
+    stop_result
+        .map(|()| Some(124))
+        .map_err(|_| OperationError::StopUncertain)
 }
 
 fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
@@ -1592,19 +1878,125 @@ fn sync_directory(path: &Path) -> Result<(), OperationError> {
 mod tests {
     use std::fs;
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     use tempfile::TempDir;
 
-    use super::{ManagedRoots, valid_publication, validate_docker_run};
+    use super::{
+        CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
+        OperationExecutor, bounded_container_exit_code, finish_timed_out_job, parse_runtime_stop,
+        valid_publication, validate_docker_run,
+    };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
+
+    #[derive(Clone, Copy)]
+    struct MissingContainerRunner;
+
+    impl CommandRunner for MissingContainerRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            let daemon_probe = arguments.first().map(String::as_str) == Some("version");
+            Ok(CommandOutput {
+                success: daemon_probe,
+                stdout: Vec::new(),
+                exit_code: Some(if daemon_probe { 0 } else { 1 }),
+            })
+        }
+    }
+
+    #[test]
+    fn job_cancellation_fence_blocks_late_start_and_tracks_active_start() {
+        let fence = JobCancellationFence::default();
+        let active = fence.begin(RUN_ID).unwrap();
+        assert!(fence.is_active(RUN_ID).unwrap());
+        drop(active);
+        assert!(!fence.is_active(RUN_ID).unwrap());
+
+        fence.cancel(RUN_ID).unwrap();
+        assert!(fence.begin(RUN_ID).is_err());
+    }
+
+    #[test]
+    fn only_exact_job_cancel_marker_enables_the_late_start_fence() {
+        assert_eq!(
+            parse_runtime_stop(&[RUN_ID.to_owned(), "5".to_owned()]).unwrap(),
+            (RUN_ID, 5, false)
+        );
+        assert_eq!(
+            parse_runtime_stop(&[RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned(),])
+                .unwrap(),
+            (RUN_ID, 5, true)
+        );
+        assert!(
+            parse_runtime_stop(&[
+                RUN_ID.to_owned(),
+                "5".to_owned(),
+                "service-cancel".to_owned(),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn stop_deadline_never_reports_success_while_a_slow_start_remains_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let _active = executor.job_cancellation.begin(RUN_ID).unwrap();
+
+        assert!(matches!(
+            executor.runtime_stop_until(
+                &[RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned(),],
+                Instant::now(),
+            ),
+            Err(OperationError::StopUncertain)
+        ));
+    }
+
+    #[test]
+    fn timeout_stop_failure_is_never_downgraded_to_exit_124() {
+        assert!(matches!(
+            finish_timed_out_job(Err(OperationError::CommandFailed)),
+            Err(OperationError::StopUncertain)
+        ));
+        assert_eq!(finish_timed_out_job(Ok(())).unwrap(), Some(124));
+    }
+
+    #[test]
+    fn attached_job_preserves_a_bounded_container_exit_status() {
+        assert_eq!(
+            bounded_container_exit_code(&CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                exit_code: Some(37),
+            }),
+            37
+        );
+        for exit_code in [None, Some(-1), Some(256)] {
+            assert_eq!(
+                bounded_container_exit_code(&CommandOutput {
+                    success: false,
+                    stdout: Vec::new(),
+                    exit_code,
+                }),
+                1
+            );
+        }
+    }
 
     fn runtime_fixture() -> (TempDir, ManagedRoots) {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("data"));
         fs::create_dir_all(roots.agent_data.join("models").join("sha256")).unwrap();
         fs::create_dir_all(roots.agent_data.join("runs").join(RUN_ID).join("outputs")).unwrap();
+        fs::create_dir_all(roots.agent_data.join("runs").join(RUN_ID).join("inputs")).unwrap();
         let metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
         fs::create_dir_all(&metadata).unwrap();
         fs::write(metadata.join("runtime.json"), b"{}").unwrap();
@@ -1695,6 +2087,86 @@ mod tests {
             ),
         ]);
         arguments
+    }
+
+    fn job_runtime_arguments(roots: &ManagedRoots, model: PathBuf) -> Vec<String> {
+        let mut arguments = runtime_arguments(roots, &[(model, "/models", true)]);
+        arguments.remove(
+            arguments
+                .iter()
+                .position(|value| value == "--detach")
+                .unwrap(),
+        );
+        let publish = arguments
+            .iter()
+            .position(|value| value == "--publish")
+            .unwrap();
+        arguments.drain(publish..=publish + 1);
+        let listen = arguments
+            .iter()
+            .position(|value| value == "VONK_LISTEN_PORT=8000")
+            .unwrap();
+        arguments.drain(listen - 1..=listen);
+        let image = arguments.len() - 1;
+        arguments.splice(
+            image..image,
+            [
+                "--env".to_owned(),
+                "VONK_JOB_TIMEOUT_SECONDS=3600".to_owned(),
+                "--mount".to_owned(),
+                format!(
+                    "type=bind,src={},dst=/inputs,readonly",
+                    roots
+                        .agent_data
+                        .join("runs")
+                        .join(RUN_ID)
+                        .join("inputs")
+                        .display()
+                ),
+            ],
+        );
+        arguments
+    }
+
+    #[test]
+    fn attached_jobs_require_readonly_inputs_from_the_same_run() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::create_dir(&model).unwrap();
+        let arguments = job_runtime_arguments(&roots, model);
+        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        assert!(!validated.detached);
+        assert_eq!(validated.job_timeout_seconds, Some(3600));
+        let expected_inputs = roots.agent_data.join("runs").join(RUN_ID).join("inputs");
+        assert_eq!(validated.inputs.as_deref(), Some(expected_inputs.as_path()));
+
+        let mut writable = arguments.clone();
+        let mount = writable
+            .iter_mut()
+            .find(|value| value.contains("dst=/inputs"))
+            .unwrap();
+        mount.truncate(mount.len() - ",readonly".len());
+        assert!(validate_docker_run(&writable, &roots, None).is_err());
+
+        let other_run = "50000000-0000-4000-8000-000000000005";
+        let other_inputs = roots.agent_data.join("runs").join(other_run).join("inputs");
+        fs::create_dir_all(&other_inputs).unwrap();
+        let mut cross_run = arguments.clone();
+        *cross_run
+            .iter_mut()
+            .find(|value| value.contains("dst=/inputs"))
+            .unwrap() = format!(
+            "type=bind,src={},dst=/inputs,readonly",
+            other_inputs.display()
+        );
+        assert!(validate_docker_run(&cross_run, &roots, None).is_err());
+
+        let run_root = roots.agent_data.join("runs").join(RUN_ID);
+        let relocated = roots.agent_data.join("runs").join(other_run);
+        fs::remove_dir_all(&relocated).unwrap();
+        fs::rename(&run_root, &relocated).unwrap();
+        symlink(&relocated, &run_root).unwrap();
+        assert!(validate_docker_run(&arguments, &roots, None).is_err());
     }
 
     #[test]

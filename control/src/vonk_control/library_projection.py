@@ -70,11 +70,18 @@ from .library_contract import (
     VisualCatalogIdentity,
     VisualExecution,
     VisualIdentity,
+    VisualInputSlot,
     VisualInterface,
+    VisualInterfaceInput,
+    VisualInterfaceOutput,
     VisualMetadata,
+    VisualModelLicense,
+    VisualOutputSlot,
     VisualProvenance,
     VisualRecipeDocument,
+    VisualRecipeParameter,
     VisualRuntime,
+    VisualTerritorialRestrictions,
     VisualValidation,
     _bounded_reasons,
     _bounded_text,
@@ -99,6 +106,8 @@ from .library_operational import (
 )
 from .models import (
     AgentNode,
+    CatalogEntity,
+    CatalogEntityRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
@@ -330,7 +339,173 @@ def _catalog_identity(value: Mapping[str, object]) -> VisualCatalogIdentity:
     )
 
 
-def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
+def _visual_parameter(value: Mapping[str, object]) -> VisualRecipeParameter:
+    return VisualRecipeParameter(
+        name=_bounded_text(value["name"], 64),
+        description=_bounded_text(value["description"], 512),
+        type=str(value["type"]),
+        default=value["default"],
+        minimum=None if "minimum" not in value else int(value["minimum"]),
+        maximum=None if "maximum" not in value else int(value["maximum"]),
+        allowed_values=list(value.get("allowed_values", []))[:128],
+        pattern=(
+            None if "pattern" not in value else _bounded_text(value["pattern"], 256)
+        ),
+        change_effect=str(value["change_effect"]),
+    )
+
+
+def _visual_interface_input(
+    value: object,
+) -> VisualInterfaceInput | None:
+    if not isinstance(value, Mapping):
+        return None
+    slots = [
+        VisualInputSlot(
+            id=str(slot["id"]),
+            label=_bounded_text(slot["label"], 64),
+            description=_bounded_text(slot["description"], 256),
+            media_types=[
+                _bounded_text(media_type, 128) for media_type in slot["media_types"]
+            ][:16],
+            extensions=[str(extension) for extension in slot["extensions"]][:16],
+            min_files=int(slot["min_files"]),
+            max_files=int(slot["max_files"]),
+            max_file_bytes=int(slot["max_file_bytes"]),
+            max_total_bytes=int(slot["max_total_bytes"]),
+        )
+        for slot in value.get("slots", [])
+    ][:32]
+    return VisualInterfaceInput(
+        path=_bounded_text(value["path"], 512),
+        required=bool(value["required"]),
+        media_types=[_bounded_text(item, 128) for item in value["media_types"]][:16],
+        max_bytes=_saturating_nonnegative(value["max_bytes"]),
+        min_files=(
+            sum(slot.min_files for slot in slots)
+            if slots
+            else (1 if value["required"] else 0)
+        ),
+        max_files=(min(32, sum(slot.max_files for slot in slots)) if slots else 32),
+        slots=slots,
+    )
+
+
+def _exact_output_media_types(
+    document: Mapping[str, object], interface: Mapping[str, object]
+) -> list[str]:
+    """Return only MIME types bound literally and checked by this recipe."""
+
+    runtime = document["runtime"]
+    validation = document["validation"]
+    output_mime = next(
+        (
+            argument.get("value")
+            for argument in runtime["arguments"]
+            if argument.get("name") == "output-mime"
+        ),
+        None,
+    )
+    if not isinstance(output_mime, str) or "/" not in output_mime:
+        return []
+    expected_check = "artifact.mime." + output_mime.replace("/", "-")
+    checked = any(
+        validator["interface"] == interface["adapter"]
+        and expected_check in validator["checks"]
+        for validator in validation["validators"]
+    )
+    return [output_mime] if checked else []
+
+
+def _visual_interface_output(
+    document: Mapping[str, object], interface: Mapping[str, object]
+) -> VisualInterfaceOutput | None:
+    path = interface.get("path")
+    if not isinstance(path, str):
+        return None
+    value = interface.get("output")
+    if not isinstance(value, Mapping):
+        return VisualInterfaceOutput(
+            path=_bounded_text(path, 512),
+            allowed_media_types=_exact_output_media_types(document, interface),
+        )
+    slots = [
+        VisualOutputSlot(
+            id=str(slot["id"]),
+            label=_bounded_text(slot["label"], 64),
+            description=_bounded_text(slot["description"], 256),
+            media_types=[
+                _bounded_text(media_type, 128) for media_type in slot["media_types"]
+            ][:16],
+            extensions=[str(extension) for extension in slot["extensions"]][:16],
+            min_files=int(slot["min_files"]),
+            max_files=int(slot["max_files"]),
+            max_file_bytes=int(slot["max_file_bytes"]),
+            max_total_bytes=int(slot["max_total_bytes"]),
+        )
+        for slot in value["slots"]
+    ][:32]
+    media_types = list(
+        dict.fromkeys(media_type for slot in slots for media_type in slot.media_types)
+    )[:16]
+    return VisualInterfaceOutput(
+        path=_bounded_text(value["path"], 512),
+        allowed_media_types=media_types,
+        max_total_bytes=int(value["max_total_bytes"]),
+        slots=slots,
+    )
+
+
+def _visual_model_license(
+    model_version_document: Mapping[str, object] | None,
+) -> VisualModelLicense | None:
+    if model_version_document is None:
+        return None
+    license_document = model_version_document.get("license")
+    restriction = (
+        license_document.get("territorial_restrictions")
+        if isinstance(license_document, Mapping)
+        else None
+    )
+    if not isinstance(restriction, Mapping):
+        return VisualModelLicense(territorial_restrictions=None)
+    return VisualModelLicense(
+        territorial_restrictions=VisualTerritorialRestrictions(
+            denied_jurisdictions=[
+                str(item) for item in restriction["denied_jurisdictions"]
+            ][:32],
+            notice=_bounded_text(restriction["notice"], 1_000),
+        )
+    )
+
+
+def _resolved_model_version_document(
+    session: Session,
+    recipe_document: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Load the exact immutable model authority without projecting arbitrary fields."""
+
+    reference = recipe_document["model"]
+    revision = session.scalar(
+        select(CatalogEntityRevision)
+        .join(CatalogEntity, CatalogEntity.id == CatalogEntityRevision.entity_id)
+        .where(
+            CatalogEntity.kind == "model-version",
+            CatalogEntity.publisher == reference["publisher"],
+            CatalogEntity.slug == reference["slug"],
+            CatalogEntityRevision.content_sha256 == reference["content_sha256"],
+            CatalogEntityRevision.lifecycle == "resolved",
+        )
+        .order_by(CatalogEntityRevision.revision_number.desc())
+        .limit(1)
+    )
+    return revision.document if revision is not None else None
+
+
+def _visual_recipe(
+    document: Mapping[str, object],
+    model_version_document: Mapping[str, object] | None = None,
+) -> VisualRecipeDocument:
     identity = document["identity"]
     metadata = document["metadata"]
     build = document["build"]
@@ -354,6 +529,7 @@ def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
             tags=[_bounded_text(item, 64) for item in metadata["tags"]][:64],
         ),
         model=_catalog_identity(document["model"]),
+        model_license=_visual_model_license(model_version_document),
         execution=VisualExecution(
             harness=_catalog_identity(execution["harness"]),
             patch_bundle=(
@@ -377,12 +553,22 @@ def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
             memory_bytes=_saturating_nonnegative(build_resources["memory_bytes"]),
             timeout_seconds=int(build_resources["timeout_seconds"]),
         ),
+        parameters=[
+            _visual_parameter(parameter) for parameter in document["parameters"]
+        ][:128],
         artifacts=[
             VisualArtifact(
                 id=_bounded_text(artifact["id"], 64),
                 kind=_bounded_text(artifact["kind"], 64),
                 repository=_bounded_text(artifact["repository"], 256),
                 revision=_bounded_text(artifact["revision"], 128),
+                include_paths=sorted(
+                    (
+                        _bounded_text(item, 512)
+                        for item in artifact.get("include_paths", [])
+                    ),
+                    key=lambda item: item.encode("utf-8"),
+                )[:256],
                 download_bytes=_saturating_nonnegative(artifact["download_bytes"]),
                 installed_bytes=_saturating_nonnegative(artifact["installed_bytes"]),
                 roles=[_bounded_text(item, 64) for item in artifact["roles"]][:64],
@@ -417,6 +603,13 @@ def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
                     if "path" not in interface
                     else _bounded_text(interface["path"], 512)
                 ),
+                timeout_seconds=(
+                    int(lifecycle["readiness"]["timeout_seconds"])
+                    if "path" in interface and "readiness" in lifecycle
+                    else None
+                ),
+                input=_visual_interface_input(interface.get("input")),
+                output=_visual_interface_output(document, interface),
             )
             for interface in document["interfaces"]
         ][:64],
@@ -894,9 +1087,7 @@ class LibraryProjection:
                     },
                     recipes=values,
                 )
-                for (publisher, slug, content_sha256), values in sorted(
-                    grouped.items()
-                )
+                for (publisher, slug, content_sha256), values in sorted(grouped.items())
             ],
             unlinked_recipes=unlinked,
             next_cursor=next_cursor,
@@ -907,6 +1098,7 @@ class LibraryProjection:
         current = _utc(self._clock())
         latest = self._latest_revision_ids()
         placement_evidence: _PlacementOperationalEvidence | None = None
+        model_version_document: Mapping[str, object] | None = None
         with self._sessions.begin() as session:
             row = session.execute(
                 select(LocalRecipe, LocalRecipeRevision)
@@ -927,6 +1119,10 @@ class LibraryProjection:
                 raise KeyError(recipe_id)
             recipe, revision = row
             document, reasons = _validated_document(revision)
+            if document is not None:
+                model_version_document = _resolved_model_version_document(
+                    session, document
+                )
             operational_truncations: dict[str, int] = {}
             # Phase 1: prioritize active runs before the bounded public history.
             run_rows = list(
@@ -1243,7 +1439,7 @@ class LibraryProjection:
             generated_at=current,
             recipe=_identity(recipe),
             selected_revision=_revision_summary(revision),
-            visual_recipe=_visual_recipe(document),
+            visual_recipe=_visual_recipe(document, model_version_document),
             topology=topology,
             operational_state=operational,
             placement=[placement],

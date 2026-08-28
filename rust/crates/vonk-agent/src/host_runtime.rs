@@ -35,6 +35,13 @@ struct HelperResponse {
     request_id: Option<String>,
     status: String,
     evidence_sha256: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+}
+
+pub struct HostRuntimeOutcome {
+    pub exit_code: Option<i32>,
+    pub stop_uncertain: bool,
 }
 
 pub struct HostRuntimeBoundary<'a> {
@@ -43,13 +50,41 @@ pub struct HostRuntimeBoundary<'a> {
     pub helper_socket: &'a Path,
 }
 
+struct RequestFileCleanup(PathBuf);
+
+impl Drop for RequestFileCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 impl HostRuntimeBoundary<'_> {
     pub async fn execute(
         &self,
         claim: &AgentClaim,
         action: HostRuntimeAction,
         arguments: Vec<String>,
-    ) -> Result<(), HostRuntimeError> {
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let helper_timeout = match action {
+            HostRuntimeAction::Start => arguments
+                .iter()
+                .find_map(|value| value.strip_prefix("VONK_JOB_TIMEOUT_SECONDS="))
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| (1..=3600).contains(value))
+                .map_or(Duration::from_secs(610), |value| {
+                    // Leave room after the adapter deadline for bounded inspect/stop/remove and
+                    // a truthful uncertainty response from the privileged helper.
+                    Duration::from_secs(value + 120)
+                }),
+            HostRuntimeAction::Stop => arguments
+                .get(1)
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| (1..=600).contains(value))
+                .map_or(Duration::from_secs(45), |value| {
+                    Duration::from_secs(value + 45)
+                }),
+            _ => Duration::from_secs(610),
+        };
         let request = HostRuntimeRequest {
             schema_version: 1,
             action,
@@ -63,7 +98,11 @@ impl HostRuntimeBoundary<'_> {
         let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
-        let result = async {
+        // The attached helper call is deliberately run on a blocking worker so a cancellation
+        // heartbeat can issue a concurrent STOP. If that cancellation drops this future, still
+        // remove the signed request file; the helper already received its canonical body.
+        let _request_cleanup = RequestFileCleanup(request_path);
+        async {
             let grant = self
                 .client
                 .host_runtime_grant(claim, action, &digest)
@@ -75,10 +114,16 @@ impl HostRuntimeBoundary<'_> {
                 .ok_or(HostRuntimeError::Protocol)?
                 .to_owned();
             let grant = canonical_json(&grant).map_err(|_| HostRuntimeError::Protocol)?;
-            let response = call_helper(self.helper_socket, &grant)?;
+            let helper_socket = self.helper_socket.to_path_buf();
+            let response = tokio::task::spawn_blocking(move || {
+                call_helper(&helper_socket, &grant, helper_timeout)
+            })
+            .await
+            .map_err(|_| HostRuntimeError::Protocol)??;
+            let stop_uncertain = response.status == "container-runtime-stop-uncertain";
             if response.schema_version != 1
                 || response.request_id.as_deref() != Some(request_id.as_str())
-                || response.status != "container-runtime-request-executed"
+                || (!stop_uncertain && response.status != "container-runtime-request-executed")
                 || response
                     .evidence_sha256
                     .as_deref()
@@ -86,11 +131,18 @@ impl HostRuntimeBoundary<'_> {
             {
                 return Err(HostRuntimeError::Protocol);
             }
-            Ok(())
+            if response
+                .exit_code
+                .is_some_and(|code| !(0..=255).contains(&code))
+            {
+                return Err(HostRuntimeError::Protocol);
+            }
+            Ok(HostRuntimeOutcome {
+                exit_code: response.exit_code,
+                stop_uncertain,
+            })
         }
-        .await;
-        let _ = fs::remove_file(request_path);
-        result
+        .await
     }
 }
 
@@ -159,12 +211,16 @@ fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, Host
     Ok(destination)
 }
 
-fn call_helper(socket: &Path, body: &[u8]) -> Result<HelperResponse, HostRuntimeError> {
+fn call_helper(
+    socket: &Path,
+    body: &[u8],
+    read_timeout: Duration,
+) -> Result<HelperResponse, HostRuntimeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         return Err(HostRuntimeError::Protocol);
     }
     let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(Duration::from_secs(610)))?;
+    stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     stream.write_all(&(body.len() as u32).to_be_bytes())?;
     stream.write_all(body)?;

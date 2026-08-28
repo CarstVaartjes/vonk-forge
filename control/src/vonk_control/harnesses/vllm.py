@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from math import isfinite
 
 from .common import (
     ArgumentSpec,
@@ -92,6 +93,9 @@ _ARGUMENTS = {
     "enable-chunked-prefill": ArgumentSpec(
         "--enable-chunked-prefill", takes_value=False
     ),
+    "disable-chunked-prefill": ArgumentSpec(
+        "--no-enable-chunked-prefill", takes_value=False
+    ),
     "enforce-eager": ArgumentSpec("--enforce-eager", takes_value=False),
     "skip-mm-profiling": ArgumentSpec("--skip-mm-profiling", takes_value=False),
     "async-scheduling": ArgumentSpec("--async-scheduling", takes_value=False),
@@ -103,6 +107,10 @@ _ARGUMENTS = {
         validate=one_of("auto", "bfloat16", "float16", "float32"),
     ),
     "mamba-cache-mode": ArgumentSpec("--mamba-cache-mode", validate=one_of("align")),
+    "attention-backend": ArgumentSpec(
+        "--attention-backend",
+        validate=one_of("FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"),
+    ),
     "enable-flashinfer-autotune": ArgumentSpec(
         "--enable-flashinfer-autotune", takes_value=False
     ),
@@ -147,6 +155,12 @@ _ARGUMENTS = {
     "limit-mm-per-prompt": ArgumentSpec(
         "--limit-mm-per-prompt", validate=lambda value: _limited_mm_per_prompt(value)
     ),
+    "media-io-kwargs": ArgumentSpec(
+        "--media-io-kwargs", validate=lambda value: _media_io_kwargs(value)
+    ),
+    "video-pruning-rate": ArgumentSpec(
+        "--video-pruning-rate", validate=lambda value: _video_pruning_rate(value)
+    ),
     "chat-template": ArgumentSpec(
         "--chat-template",
         validate=one_of("/opt/vonk/templates/glm53-chat-template-mm.jinja"),
@@ -189,6 +203,7 @@ class VllmHarnessCompiler:
         _require_role_artifacts(recipe, role, artifact_mounts)
         require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", primary_mount))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
+        _validate_chunked_prefill_controls(parsed)
         local_media_input = parsed.get("--allowed-local-media-path") is not None
         _validate_reasoning_plugin(parsed, primary_mount=primary_mount)
         _validate_speculative_config(
@@ -551,9 +566,52 @@ def _limited_mm_per_prompt(value: str) -> bool:
     return (
         isinstance(parsed, Mapping)
         and bool(parsed)
-        and set(parsed) <= {"image", "video"}
+        and set(parsed) <= {"audio", "image", "video"}
         and all(type(limit) is int and 0 <= limit <= 16 for limit in parsed.values())
     )
+
+
+def _media_io_kwargs(value: str) -> bool:
+    try:
+        parsed = json.loads(
+            value,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(parsed, Mapping) or set(parsed) != {"video"}:
+        return False
+    video = parsed["video"]
+    if (
+        not isinstance(video, Mapping)
+        or not video
+        or not set(video) <= {"fps", "num_frames"}
+    ):
+        return False
+    fps = video.get("fps")
+    if fps is not None and (
+        type(fps) not in {int, float} or not isfinite(fps) or not 0 < fps <= 60
+    ):
+        return False
+    num_frames = video.get("num_frames")
+    return num_frames is None or type(num_frames) is int and 1 <= num_frames <= 256
+
+
+def _video_pruning_rate(value: str) -> bool:
+    try:
+        parsed = float(value)
+    except ValueError:
+        return False
+    return isfinite(parsed) and 0 <= parsed < 1
+
+
+def _validate_chunked_prefill_controls(parsed: Mapping[str, str | bool]) -> None:
+    if (
+        parsed.get("--enable-chunked-prefill") is True
+        and parsed.get("--no-enable-chunked-prefill") is True
+    ):
+        raise HarnessCompileError("vLLM chunked prefill controls conflict")
 
 
 def _reject_json_constant(value: str) -> object:
