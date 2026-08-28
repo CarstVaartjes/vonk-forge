@@ -1,84 +1,67 @@
-# Vonk Forge operator documentation
+# Vonk Forge documentation
 
-Vonk Forge runs a Docker-capable control host (normally a NAS) and one or more
-Vonk Forge GPU node agents. Caddy is the only published ingress; Tailscale is the
-default remote-access boundary; GPU node agents make outbound mTLS connections;
-LiteLLM publishes only routes acknowledged by the control plane.
-Normal administration uses the stable private Tailscale HTTPS
-`svc:vonk-forge` Service in a browser without an SSH or PowerShell tunnel. The
-generated deployment's configurator logs the exact URL after startup.
+Vonk Forge is a private control plane for one NVIDIA DGX Spark or a fleet. The
+controller runs on any local computer with Docker Compose—your laptop, a NAS, or
+a server—and owns the Web UI, API, PostgreSQL state, identity, policy, and
+runtime secrets. Native Spark agents connect outbound; normal operation does not
+require routine SSH.
 
-## Authority boundary
+## Choose your path
 
-- Local PostgreSQL owns recipe families, authored and imported revisions,
-  WorkloadRun import reports, installations, placements, and runs. It remains
-  usable without the global catalog or a Git remote.
-- The public `vonk-forge-recipes` repository publishes reviewed immutable recipe
-  metadata and model-target research. It never stores image layers, model
-  weights, or cluster state. Vonk Forge Web may later provide a browser-facing
-  catalog, but it is not the recipe authority.
-- GitHub and signed release metadata establish the provenance of immutable
-  installation artifacts. They are not runtime desired state: fleet topology,
-  platform policy, and proposals are persisted in local PostgreSQL.
+| I want to… | Start here |
+| --- | --- |
+| Install a controller and first Spark | [Public installation guide](https://vonkforge.ai/install) |
+| Understand what is public and what stays local | [Architecture overview](architecture-overview.md) |
+| Operate Fleet, Library, profiles, and workloads | [Control-plane operations](runbooks/control-plane-operations.md) |
+| Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
+| Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
+| Understand identities and trust | [Security threat model](security/threat-model.md) |
+| Contribute or verify changes | [Testing and CI](testing-and-ci.md) |
 
-## Deployment boundary
+## Authority at a glance
 
-- The NAS/Docker service host runs the local control API, repository-less worker,
-  PostgreSQL, Caddy, LiteLLM, and observability services. Optional Hermes is a
-  default-disabled Compose profile. Caddy is the
-  local ingress boundary; it is not the global website host.
-- One stable Git tag drives the GitHub Actions platform release: it builds,
-  tests, signs, and publishes the API/worker/Hermes images and the matching
-  `vonk-forge-agent` ARM64 Debian package. The verified package can then be
-  published to the public Cloudflare R2 APT repository at
-  `packages.vonkforge.ai`.
-- Accepted `main` commits publish authenticated development packages to apt
-  `dev`; trusted stable tags attach the exact accepted package evidence to the
-  GitHub Release before apt `stable` advances. Package and apt signing
-  authority remain separate from NAS runtime secrets.
-- The initial local product does not require Railway or a hosted catalog API.
-  The future `vonk-forge-web` frontend belongs on Cloudflare Pages; its global
-  API/validation worker/PostgreSQL backend may later provide discovery without
-  replacing the public recipe repository or local catalog authority.
-- Recipe containers and model weights are installed and run on the NAS/GPU nodes,
-  never on Railway or Cloudflare Pages.
+```mermaid
+flowchart LR
+    Public[Public website and recipe library<br/>documentation, signed artifacts, metadata]
+    Control[Local controller<br/>PostgreSQL, policy, identity, secrets]
+    Spark[DGX Spark agents<br/>cache, runtime, telemetry]
 
-## Start here
+    Public -->|verify and import| Control
+    Control -->|previewed operations| Spark
+```
+
+- Local PostgreSQL owns recipes, installations, placements, runs, profiles, and
+  audit state. It remains usable without a hosted catalog or Git remote.
+- The public recipe library contains immutable metadata and deterministic source
+  contexts—not images, weights, credentials, or fleet state.
+- Caddy is the private local ingress. Tailscale is the default remote-access
+  boundary. Spark agents use enrolled identity and outbound connections.
+- Recipe containers and model weights run and remain on Spark-local infrastructure,
+  not on `vonkforge.ai` or Cloudflare Pages.
+
+## Operator guides
 
 - [Fresh development installation](runbooks/fresh-development-install.md)
-- [Architecture overview](architecture-overview.md)
-- [Source-first local Compose deployment](../deploy/compose/README.md)
-- [Development NAS installation and runtime secrets](runbooks/development-nas-installation.md)
-- [Agent Debian package `dev`/`stable` release, secrets, and APT installation](operations/agent-package-release.md)
-- [Testing and CI](testing-and-ci.md)
-- [Identity verification policy](identity-verifier.md)
-- [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
-- [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
-  Library, recipe placement, resource previews, and safe action semantics
-- [`vonkctl` local controller CLI](runbooks/vonkctl.md) — the Fleet, Library,
-  public catalog, and Activity workflows with plan-first mutations
-- [PostgreSQL authority administration](runbooks/authority-administration.md) —
-  immutable revisions, proposals, and the runtime authority boundary
-- [Model and recipe identities](operators/model-catalog.md) — model identity, recipes,
-  topology, install/update, and exact-revision rollback
-- [Model target ledger](operators/model-targets.md) — current defaults,
-  candidates, blocked upstreams, and the path from research to an accepted
-  recipe
-- [Standard recipe library](operators/recipe-library.md) — the public recipe
-  repository, authority split, immutable imports, and validation commands
-- [Execution harness operations](operators/execution-harnesses.md) — built-in
-  harnesses, interface publication, clean reset, and canonical acceptance
-- [Control-plane telemetry](runbooks/control-plane-telemetry.md) — metrics,
-  freshness, resolutions, retention, and troubleshooting
+- [Controller bootstrap](runbooks/control-plane-bootstrap.md)
+- [Controller operations](runbooks/control-plane-operations.md)
+- [PostgreSQL authority administration](runbooks/authority-administration.md)
 - [Node onboarding and health](runbooks/node-onboarding.md)
-- [Recipe operations](runbooks/model-switching.md)
-- [Vonk Forge agent installation](operations/install-vonk-agent.md)
-- [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
-- [Model switching](runbooks/model-switching.md)
-- [Platform release publication](runbooks/platform-release-publication.md)
-- [Security threat model](security/threat-model.md)
+- [Agent installation and enrollment](operations/install-vonk-agent.md)
+- [Telemetry and troubleshooting](runbooks/control-plane-telemetry.md)
+- [Recipe and model switching](runbooks/model-switching.md)
+- [Model and recipe identities](operators/model-catalog.md)
+- [Standard recipe library](operators/recipe-library.md)
+- [Execution harnesses](operators/execution-harnesses.md)
+- [Model target qualification](operators/model-targets.md)
 
-Commands in these pages are plan-first by default. They show the exact
-revision, placement, resource checks, and affected nodes before mutation;
-`--apply` is required for a state-changing operation. Secrets and private
-keys never belong in recipes, Git, command arguments, or captured diagnostics.
+## Release and platform guides
+
+- [Platform release publication](runbooks/platform-release-publication.md)
+- [Agent package release](operations/agent-package-release.md)
+- [Identity verification policy](identity-verifier.md)
+- [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
+
+Commands in these pages are plan-first: they expose revisions, placement,
+resource checks, and affected nodes before mutation. State-changing CLI
+operations require `--apply`. Credentials and private keys never belong in Git,
+recipes, command arguments, or captured diagnostics.
