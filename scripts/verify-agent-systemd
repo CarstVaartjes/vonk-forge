@@ -18,6 +18,7 @@ UNITS = (
     "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
+    "vonk-forge-package-upgrade-recover.service",
 )
 SECURITY_UNITS = tuple(name for name in UNITS if name.endswith(".service"))
 SUMMARY = re.compile(
@@ -55,11 +56,20 @@ def _install(root: Path, repository: Path) -> None:
         )
     for name in UNITS:
         shutil.copy2(repository / "packaging/systemd" / name, unit_root / name)
+    agent_dropin = unit_root / "vonk-forge-agent.service.d"
+    agent_dropin.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        repository
+        / "packaging/systemd/vonk-forge-agent.service.d"
+        / "20-package-upgrade-recovery.conf",
+        agent_dropin / "20-package-upgrade-recovery.conf",
+    )
     for path in (
         "usr/bin/true",
         "usr/lib/vonk-forge/vonk-agent",
         "usr/lib/vonk-forge/vonk-agent-helper",
         "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+        "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
     ):
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -153,9 +163,9 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
     if (
-        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-helper"
-        or helper["Service"].get("RuntimeDirectoryMode") != "0711"
-        or helper["Service"].get("RuntimeDirectoryPreserve") != "yes"
+        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-candidates"
+        or helper["Service"].get("RuntimeDirectoryMode") != "0700"
+        or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"
     ):
         raise RuntimeError("package helper runtime ownership boundary is invalid")
     return {
@@ -176,7 +186,8 @@ def verify(repository: Path) -> dict[str, object]:
         if any(unit["ambient_capabilities"] for unit in units.values()):
             raise RuntimeError("agent services must not receive ambient capabilities")
         for name, unit in units.items():
-            if unit["cap_sys_ptrace"]:
+            expected_ptrace = name == "vonk-forge-package-upgrade-recover.service"
+            if unit["cap_sys_ptrace"] != expected_ptrace:
                 raise RuntimeError(
                     f"CAP_SYS_PTRACE boundary for {name} does not match policy"
                 )

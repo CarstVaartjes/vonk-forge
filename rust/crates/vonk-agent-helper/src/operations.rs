@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -51,6 +51,7 @@ pub struct ManagedRoots {
     pub state: PathBuf,
     pub workloads: PathBuf,
     pub incoming: PathBuf,
+    pub package_custody: PathBuf,
     pub runtime_requests: PathBuf,
     pub runtime_image_receipts: PathBuf,
     pub agent_data: PathBuf,
@@ -64,6 +65,7 @@ impl ManagedRoots {
             state: data.join("state"),
             workloads: data.join("workloads"),
             incoming: data.join("incoming"),
+            package_custody: data.join("helper/package-candidates"),
             runtime_requests: data.join("runtime-requests"),
             runtime_image_receipts: data.join("runtime-images"),
             agent_data: data.to_path_buf(),
@@ -77,6 +79,11 @@ impl ManagedRoots {
 
     pub fn with_agent_data(mut self, root: &Path) -> Self {
         self.agent_data = root.to_path_buf();
+        self
+    }
+
+    pub fn with_package_custody(mut self, root: &Path) -> Self {
+        self.package_custody = root.to_path_buf();
         self
     }
 }
@@ -272,7 +279,73 @@ pub struct OperationExecutor<R> {
     required_owner_uid: Option<u32>,
     package_owner_uid: Option<u32>,
     runtime_request_owner_uid: Option<u32>,
+    package_install: Mutex<()>,
     job_cancellation: JobCancellationFence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArtifactIdentity {
+    device: u64,
+    inode: u64,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    links: u64,
+    bytes: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+struct CustodiedPackage {
+    path: PathBuf,
+    invocation_directory: PathBuf,
+    custody_root: PathBuf,
+    cleaned: bool,
+}
+
+impl CustodiedPackage {
+    fn new(path: PathBuf, invocation_directory: PathBuf, custody_root: PathBuf) -> Self {
+        Self {
+            path,
+            invocation_directory,
+            custody_root,
+            cleaned: false,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn cleanup(mut self) -> Result<(), OperationError> {
+        self.cleanup_inner()?;
+        self.cleaned = true;
+        Ok(())
+    }
+
+    fn cleanup_inner(&self) -> Result<(), OperationError> {
+        match fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        match fs::remove_dir(&self.invocation_directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        sync_directory(&self.custody_root)
+    }
+}
+
+impl Drop for CustodiedPackage {
+    fn drop(&mut self) {
+        if !self.cleaned {
+            let _ = self.cleanup_inner();
+        }
+    }
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -304,6 +377,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             required_owner_uid,
             package_owner_uid: required_owner_uid,
             runtime_request_owner_uid: required_owner_uid,
+            package_install: Mutex::new(()),
             job_cancellation: JobCancellationFence::default(),
         })
     }
@@ -316,6 +390,57 @@ impl<R: CommandRunner> OperationExecutor<R> {
     pub fn with_runtime_request_owner(mut self, uid: u32) -> Self {
         self.runtime_request_owner_uid = Some(uid);
         self
+    }
+
+    pub fn prepare_package_custody(&self) -> Result<(), OperationError> {
+        let _install_guard = self
+            .package_install
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?;
+        if !self.roots.package_custody.is_absolute() {
+            return Err(OperationError::UnsafePath);
+        }
+        let custody_parent = self
+            .roots
+            .package_custody
+            .parent()
+            .ok_or(OperationError::UnsafePath)?;
+        require_safe_directory(custody_parent, self.required_owner_uid)?;
+        ensure_private_directory(&self.roots.package_custody, self.required_owner_uid)?;
+
+        let mut invocations =
+            fs::read_dir(&self.roots.package_custody)?.collect::<Result<Vec<_>, _>>()?;
+        invocations.sort_by_key(fs::DirEntry::file_name);
+        for invocation in invocations {
+            let name = invocation.file_name();
+            let name = name.to_str().ok_or(OperationError::UnsafePath)?;
+            if !lower_hex(name, 32) {
+                return Err(OperationError::UnsafePath);
+            }
+            let directory = invocation.path();
+            require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
+            let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
+            if candidates.len() > 1 {
+                return Err(OperationError::UnsafePath);
+            }
+            if let Some(candidate) = candidates.pop() {
+                let candidate_name = candidate.file_name();
+                let candidate_name = candidate_name
+                    .to_str()
+                    .and_then(|value| value.strip_suffix(".deb"))
+                    .ok_or(OperationError::UnsafePath)?;
+                if !lower_hex(candidate_name, 64) {
+                    return Err(OperationError::UnsafePath);
+                }
+                let metadata = fs::symlink_metadata(candidate.path())?;
+                if !safe_custody_file(&metadata, self.required_owner_uid, metadata.len()) {
+                    return Err(OperationError::UnsafePath);
+                }
+                fs::remove_file(candidate.path())?;
+            }
+            fs::remove_dir(directory)?;
+        }
+        sync_directory(&self.roots.package_custody)
     }
 
     pub fn execute(&self, operation: &HostOperation) -> Result<OperationOutcome, OperationError> {
@@ -437,16 +562,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
         digest: &str,
         detached_signature: &str,
     ) -> Result<(), OperationError> {
+        let _install_guard = self
+            .package_install
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?;
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
-        let package = self.roots.incoming.join(format!("{digest}.deb"));
-        self.verify_artifact(
-            &package,
-            "deb",
-            digest,
-            detached_signature,
-            self.package_owner_uid,
-        )?;
-        let package_name = package.to_string_lossy().into_owned();
+        let incoming = self.roots.incoming.join(format!("{digest}.deb"));
+        let package = self.take_package_custody(&incoming, digest, detached_signature)?;
+        let package_name = package.path().to_string_lossy().into_owned();
         self.require_field(&package_name, "Package", "vonk-forge-agent")?;
         self.require_field(&package_name, "Architecture", "arm64")?;
         let result = self
@@ -463,9 +586,100 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !result.success {
             return Err(OperationError::CommandFailed);
         }
-        fs::remove_file(&package)?;
-        sync_directory(&self.roots.incoming)?;
+        package.cleanup()?;
         Ok(())
+    }
+
+    fn take_package_custody(
+        &self,
+        incoming: &Path,
+        expected_digest: &str,
+        detached_signature: &str,
+    ) -> Result<CustodiedPackage, OperationError> {
+        if !self.roots.package_custody.is_absolute() {
+            return Err(OperationError::UnsafePath);
+        }
+        let custody_parent = self
+            .roots
+            .package_custody
+            .parent()
+            .ok_or(OperationError::UnsafePath)?;
+        require_safe_directory(custody_parent, self.required_owner_uid)?;
+        ensure_private_directory(&self.roots.package_custody, self.required_owner_uid)?;
+
+        // The agent owns `incoming`, so a path verified there cannot be handed to
+        // a privileged process. Copy through one no-follow descriptor into a
+        // fresh root-only namespace and make every subsequent consumer use it.
+        let invocation = uuid::Uuid::new_v4().simple().to_string();
+        let invocation_directory = self.roots.package_custody.join(invocation);
+        fs::create_dir(&invocation_directory)?;
+        fs::set_permissions(&invocation_directory, fs::Permissions::from_mode(0o700))?;
+        require_exact_directory(&invocation_directory, self.required_owner_uid, 0o700)?;
+        let candidate = invocation_directory.join(format!("{expected_digest}.deb"));
+        let custody = CustodiedPackage::new(
+            candidate,
+            invocation_directory,
+            self.roots.package_custody.clone(),
+        );
+
+        let mut source = OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(incoming)
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        let source_before = source
+            .metadata()
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        require_agent_artifact(&source_before, self.package_owner_uid)?;
+        let mut destination = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(custody.path())?;
+        let mut digest = Sha256::new();
+        let mut consumed = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = source
+                .read(&mut buffer)
+                .map_err(|_| OperationError::InvalidArtifact)?;
+            if count == 0 {
+                break;
+            }
+            consumed = consumed
+                .checked_add(count as u64)
+                .filter(|value| *value <= MAX_ARTIFACT_BYTES)
+                .ok_or(OperationError::InvalidArtifact)?;
+            digest.update(&buffer[..count]);
+            destination.write_all(&buffer[..count])?;
+        }
+        destination.sync_all()?;
+        let source_after = source
+            .metadata()
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        let destination_metadata = destination.metadata()?;
+        let observed_digest = hex::encode(digest.finalize());
+        if artifact_identity(&source_before) != artifact_identity(&source_after)
+            || consumed != source_before.len()
+            || observed_digest != expected_digest
+            || !safe_custody_file(&destination_metadata, self.required_owner_uid, consumed)
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let signature_bytes =
+            hex::decode(detached_signature).map_err(|_| OperationError::InvalidArtifact)?;
+        signature::UnparsedPublicKey::new(&signature::ED25519, self.release_public_key)
+            .verify(
+                &artifact_signing_bytes("deb", expected_digest)
+                    .map_err(|_| OperationError::InvalidArtifact)?,
+                &signature_bytes,
+            )
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        drop(destination);
+        drop(source);
+        sync_directory(&self.roots.package_custody)?;
+        Ok(custody)
     }
 
     fn require_field(
@@ -1128,64 +1342,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
-    fn verify_artifact(
-        &self,
-        path: &Path,
-        kind: &str,
-        expected_digest: &str,
-        detached_signature: &str,
-        required_owner_uid: Option<u32>,
-    ) -> Result<(), OperationError> {
-        let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::InvalidArtifact)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.len() == 0
-            || metadata.len() > MAX_ARTIFACT_BYTES
-            || metadata.mode() & 0o022 != 0
-            || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
-        let mut file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
-        let before = file
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
-        let mut digest = Sha256::new();
-        let mut consumed = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .map_err(|_| OperationError::InvalidArtifact)?;
-            if count == 0 {
-                break;
-            }
-            consumed += count as u64;
-            if consumed > MAX_ARTIFACT_BYTES {
-                return Err(OperationError::InvalidArtifact);
-            }
-            digest.update(&buffer[..count]);
-        }
-        let after = file
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
-        if stable_identity(&before) != stable_identity(&after)
-            || hex::encode(digest.finalize()) != expected_digest
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
-        let signature_bytes =
-            hex::decode(detached_signature).map_err(|_| OperationError::InvalidArtifact)?;
-        signature::UnparsedPublicKey::new(&signature::ED25519, self.release_public_key)
-            .verify(
-                &artifact_signing_bytes(kind, expected_digest)
-                    .map_err(|_| OperationError::InvalidArtifact)?,
-                &signature_bytes,
-            )
-            .map_err(|_| OperationError::InvalidArtifact)
-    }
-
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
@@ -1745,6 +1901,83 @@ fn require_safe_directory(
         return Err(OperationError::UnsafePath);
     }
     Ok(())
+}
+
+fn ensure_private_directory(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+) -> Result<(), OperationError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => require_exact_directory(path, required_owner_uid, 0o700).map(|_| ()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+            require_exact_directory(path, required_owner_uid, 0o700).map(|_| ())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn require_exact_directory(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+    expected_mode: u32,
+) -> Result<(u32, u32), OperationError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.mode() & 0o777 != expected_mode
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+        || required_owner_uid == Some(0) && metadata.gid() != 0
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    Ok((metadata.uid(), metadata.gid()))
+}
+
+fn require_agent_artifact(
+    metadata: &fs::Metadata,
+    required_owner_uid: Option<u32>,
+) -> Result<(), OperationError> {
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.len() == 0
+        || metadata.len() > MAX_ARTIFACT_BYTES
+        || metadata.mode() & 0o777 != 0o600
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(())
+}
+
+fn safe_custody_file(
+    metadata: &fs::Metadata,
+    required_owner_uid: Option<u32>,
+    expected_bytes: u64,
+) -> bool {
+    metadata.is_file()
+        && metadata.nlink() == 1
+        && metadata.len() == expected_bytes
+        && metadata.mode() & 0o777 == 0o600
+        && required_owner_uid.is_none_or(|uid| metadata.uid() == uid)
+        && (required_owner_uid != Some(0) || metadata.gid() == 0)
+}
+
+fn artifact_identity(metadata: &fs::Metadata) -> ArtifactIdentity {
+    ArtifactIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        uid: metadata.uid(),
+        gid: metadata.gid(),
+        mode: metadata.mode(),
+        links: metadata.nlink(),
+        bytes: metadata.len(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    }
 }
 
 fn valid_artifact_id(value: &str) -> bool {

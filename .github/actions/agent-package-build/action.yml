@@ -334,10 +334,21 @@ runs:
           scripts/test-agent-package-native-lifecycle \
           tests/scripts/test_docker_firewall.sh \
           tests/nodes/test_agent_package_native_lifecycle.sh \
-          tests/nodes/test_agent_upgrade_bridge_sandbox.sh
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
         sudo tests/scripts/test_docker_firewall.sh
         tests/nodes/test_agent_package_native_lifecycle.sh
-        sudo tests/nodes/test_agent_upgrade_bridge_sandbox.sh
+        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=legacy2 \
+          CRASH_MODE=full-cgroup \
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
+        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          CRASH_MODE=full-cgroup \
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
+        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          CRASH_MODE=dpkg-only \
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
+        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root \
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
 
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)

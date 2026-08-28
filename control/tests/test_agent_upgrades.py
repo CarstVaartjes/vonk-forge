@@ -1,9 +1,7 @@
 import hashlib
 import json
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import httpx
 import pytest
@@ -11,10 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import (
-    _HELPER_BRIDGE_DISPATCH_MARGIN,
-    _HELPER_BRIDGE_RECOVERY_BACKOFF,
-    _HELPER_BRIDGE_RUNTIME_MAX,
-    _HELPER_STOP_TIMEOUT,
+    _AGENT_UPGRADE_RECOVERY_FENCE,
     AgentUpgradeConflict,
     AgentUpgradeService,
 )
@@ -58,7 +53,6 @@ NEW_IDENTITY = {
     "binary_digest": PACKAGE["target_binary_digest"],
     "build_digest": PACKAGE["target_build_digest"],
 }
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Clock:
@@ -251,25 +245,91 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
     assert _operation_nodes(sessions, job.id) == [NODE_A]
 
 
-def test_bridge_retry_backoff_covers_package_runtime_stop_and_dispatch_budget() -> None:
-    preinst = (REPOSITORY_ROOT / "packaging/debian/preinst").read_text()
-    helper_unit = (
-        REPOSITORY_ROOT / "packaging/systemd/vonk-forge-package-helper.service"
-    ).read_text()
-    runtime_match = re.search(r"--property=RuntimeMaxSec=(\d+)s", preinst)
-    stop_match = re.search(r"^TimeoutStopSec=(\d+)s$", helper_unit, re.MULTILINE)
-
-    assert runtime_match is not None
-    assert stop_match is not None
-    assert _HELPER_BRIDGE_RUNTIME_MAX == timedelta(seconds=int(runtime_match.group(1)))
-    assert _HELPER_STOP_TIMEOUT == timedelta(seconds=int(stop_match.group(1)))
-    assert _HELPER_BRIDGE_DISPATCH_MARGIN == timedelta(seconds=45)
-    assert _HELPER_BRIDGE_RECOVERY_BACKOFF == timedelta(seconds=240)
-    assert _HELPER_BRIDGE_RECOVERY_BACKOFF == (
-        _HELPER_BRIDGE_RUNTIME_MAX
-        + _HELPER_STOP_TIMEOUT
-        + _HELPER_BRIDGE_DISPATCH_MARGIN
+def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "durable-retry-fence", clock=clock
     )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, "agent upgrade request is invalid")
+
+    # This is a controller safety contract, independent of how the package
+    # helper durably recovers apt/dpkg state. The not-before value and sole
+    # automatic retry are persisted on the operation attempt.
+    assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=240)
+    with sessions() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert operation is not None
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 1,
+            )
+        )
+        assert attempt is not None
+        deadline = attempt.lease_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        assert deadline == clock() + _AGENT_UPGRADE_RECOVERY_FENCE
+        assert operation.retry_disposition == "retry"
+        assert operation.retry_disposition_attempt == 1
+
+    restarted_operations = AgentJobService(sessions, clock=clock)
+    restarted_upgrades = AgentUpgradeService(
+        sessions,
+        restarted_operations,
+        clock=clock,
+        current_revision=lambda: REVISION,
+    )
+    restarted_operations.set_result_consumer(restarted_upgrades.consume_agent_result)
+
+    assert (
+        restarted_operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    clock.advance(seconds=239)
+    assert (
+        restarted_operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    clock.advance(seconds=1)
+    second = _claim_upgrade(restarted_operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert second.attempt == 2
+
+    restarted_operations.fail(second, "agent upgrade helper is unavailable")
+    clock.advance(seconds=240)
+    assert (
+        restarted_operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    with sessions() as session:
+        operation = session.get(AgentOperation, second.operation_id)
+        assert operation is not None
+        assert operation.current_attempt == 2
+        assert operation.retry_disposition is None
+        assert operation.retry_disposition_attempt is None
 
 
 def test_same_binary_packaging_only_release_can_use_bridge_retry(tmp_path) -> None:

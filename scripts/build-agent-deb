@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
@@ -550,6 +551,7 @@ def build(
     }
     oras_license = read_release_data(binary_root / "oras.LICENSE", 1024 * 1024)
     binary_digest = hashlib.sha256(binaries["vonk-agent"]).hexdigest()
+    helper_digest = hashlib.sha256(binaries["vonk-agent-helper"]).hexdigest()
     if build_digest == f"sha256:{binary_digest}":
         raise BuildError("build digest must be distinct from binary digest")
     output = output.resolve()
@@ -607,11 +609,40 @@ def build(
             firewall_helper,
             0o555,
         )
+        recovery_unit = source(
+            "packaging/systemd/vonk-forge-package-upgrade-recover.service"
+        )
+        recovery_unit_digest = hashlib.sha256(recovery_unit).hexdigest()
+        recovery_unit_base64 = base64.b64encode(recovery_unit)
+        agent_gate = source(
+            "packaging/systemd/vonk-forge-agent.service.d/"
+            "20-package-upgrade-recovery.conf"
+        )
+        agent_gate_digest = hashlib.sha256(agent_gate).hexdigest()
+        agent_gate_base64 = base64.b64encode(agent_gate)
+        preinst = (
+            source("packaging/debian/preinst")
+            .replace(b"@VERSION@", version.encode())
+            .replace(b"@ARCHITECTURE@", debian_architecture.encode())
+            .replace(b"@AGENT_SHA256@", binary_digest.encode())
+            .replace(b"@HELPER_SHA256@", helper_digest.encode())
+            .replace(b"@RECOVERY_UNIT_SHA256@", recovery_unit_digest.encode())
+            .replace(b"@RECOVERY_UNIT_BASE64@", recovery_unit_base64)
+            .replace(b"@AGENT_GATE_SHA256@", agent_gate_digest.encode())
+            .replace(b"@AGENT_GATE_BASE64@", agent_gate_base64)
+        )
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
+            preinst,
+            0o555,
+        )
         for name in (
             "vonk-forge-agent.service",
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
+            "vonk-forge-package-upgrade-recover.service",
         ):
             install_file(
                 stage,
@@ -619,6 +650,13 @@ def build(
                 source(f"packaging/systemd/{name}"),
                 0o644,
             )
+        install_file(
+            stage,
+            "lib/systemd/system/vonk-forge-agent.service.d/"
+            "20-package-upgrade-recovery.conf",
+            agent_gate,
+            0o644,
+        )
         documents = evidence(
             version,
             epoch,
@@ -627,6 +665,7 @@ def build(
             {
                 **binaries,
                 "vonk-forge-docker-firewall": firewall_helper,
+                "vonk-forge-package-upgrade-recover": preinst,
             },
         )
         for name, raw in documents.items():
@@ -649,9 +688,6 @@ def build(
             b"@VERSION@", version.encode()
         )
         install_file(stage, "DEBIAN/postinst", postinst, 0o755)
-        preinst = source("packaging/debian/preinst").replace(
-            b"@VERSION@", version.encode()
-        )
         install_file(stage, "DEBIAN/preinst", preinst, 0o755)
         checksum_lines = []
         for path in sorted(item for item in stage.rglob("*") if item.is_file()):

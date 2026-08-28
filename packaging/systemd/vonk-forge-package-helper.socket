@@ -1,5 +1,6 @@
 [Unit]
 Description=Vonk Forge privileged agent-helper socket
+Wants=vonk-forge-package-upgrade-recover.service
 
 [Socket]
 ListenStream=/run/vonk-forge-package-helper/package-helper.sock

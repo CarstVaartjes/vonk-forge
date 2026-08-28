@@ -1,46 +1,239 @@
 #!/bin/sh
 set -eu
+umask 077
 
-new_version='@VERSION@'
+package_name=vonk-forge-agent
+target_version='@VERSION@'
+target_architecture='@ARCHITECTURE@'
+target_agent_sha256='@AGENT_SHA256@'
+target_helper_sha256='@HELPER_SHA256@'
+recovery_unit_sha256='@RECOVERY_UNIT_SHA256@'
+recovery_unit_base64='@RECOVERY_UNIT_BASE64@'
+agent_gate_sha256='@AGENT_GATE_SHA256@'
+agent_gate_base64='@AGENT_GATE_BASE64@'
+
+state_parent=/var/lib/vonk-forge
+state_dir=$state_parent/package-upgrade
+intent=$state_dir/intent
+lock=$state_dir/lock
+pending=$state_parent/helper-upgrade.pending
+receipt=$state_parent/helper-upgrade.receipt
+runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
+unit_name=vonk-forge-package-upgrade-recover.service
+helper_socket=vonk-forge-package-helper.socket
+socket_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.socket.d
+socket_dropin=$socket_dropin_dir/20-package-upgrade-recovery.conf
+agent_gate_dir=/lib/systemd/system/vonk-forge-agent.service.d
+agent_gate=$agent_gate_dir/20-package-upgrade-recovery.conf
+agent_blocker=$state_dir/agent-blocked
 helper_unit=vonk-forge-package-helper.service
-bridge_root=/run/vonk-forge-package-helper/upgrade-bridge
-bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
-bridge_dropin=$bridge_dropin_dir/20-package-upgrade-bridge.conf
-bridge_main_pid=$bridge_root/previous-main-pid
-helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
+agent_unit=vonk-forge-agent.service
+installed_helper_unit=/lib/systemd/system/vonk-forge-package-helper.service
+legacy_bridge_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
+legacy_bridge=$legacy_bridge_dir/20-package-upgrade-bridge.conf
+legacy_bridge_retired=${legacy_bridge}.retired
+legacy_bridge_runtime=/run/vonk-forge-package-helper/upgrade-bridge
+legacy_bridge_marker=$legacy_bridge_runtime/previous-main-pid
 
-write_preunpack_pending() {
-    [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
-        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+temporary_failure() {
+    echo "vonk-forge-agent: package recovery will retry: $1" >&2
+    exit 75
+}
+
+unsafe_state() {
+    echo "vonk-forge-agent: unsafe package recovery state: $1" >&2
+    exit 78
+}
+
+valid_digest() {
+    case "$1" in *[!0-9a-f]*|'') return 1 ;; esac
+    [ "${#1}" -eq 64 ]
+}
+
+valid_version() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9A-Za-z.+~:-]+$'
+}
+
+valid_boot_id() {
+    printf '%s\n' "$1" \
+        | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
+valid_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+process_start() {
+    pid=$1
+    valid_pid "$pid" && [ "$pid" -gt 1 ] && [ -r "/proc/$pid/stat" ] \
         || return 1
-    if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
-        [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
-            && /usr/bin/sed -n '1p' "$helper_pending" \
-                | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-        pending_lines=$(/usr/bin/wc -l < "$helper_pending")
-        if [ "$pending_lines" -eq 2 ]; then
-            /usr/bin/sed -n '2p' "$helper_pending" \
-                | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
-                || return 1
-        elif [ "$pending_lines" -eq 3 ]; then
-            /usr/bin/sed -n '2p' "$helper_pending" \
-                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
-            /usr/bin/sed -n '3p' "$helper_pending" \
-                | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
-        else
-            return 1
-        fi
+    start=$(/usr/bin/awk '{ print $22 }' "/proc/$pid/stat") || return 1
+    valid_pid "$start" || return 1
+    printf '%s\n' "$start"
+}
+
+safe_root_directory() {
+    directory=$1
+    mode=$2
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$directory")" = "0:0:$mode" ]
+}
+
+ensure_root_directory() {
+    directory=$1
+    mode=$2
+    if [ -L "$directory" ] \
+        || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
+        return 1
     fi
-    pending_new=$(/usr/bin/mktemp /var/lib/vonk-forge/.helper-upgrade.XXXXXX)
-    trap '/usr/bin/rm -f -- "$pending_new"' EXIT HUP INT TERM
-    printf '%s\n' "version=$new_version" 'state=pre-unpack' > "$pending_new"
-    /usr/bin/chown root:root "$pending_new"
-    /usr/bin/chmod 0600 "$pending_new"
-    /usr/bin/sync -f "$pending_new"
-    /usr/bin/mv -f -- "$pending_new" "$helper_pending"
-    /usr/bin/sync -f /var/lib/vonk-forge
+    if [ ! -d "$directory" ]; then
+        /usr/bin/install -d -o root -g root -m "0$mode" "$directory"
+        /usr/bin/sync -f "$(/usr/bin/dirname "$directory")"
+    fi
+    safe_root_directory "$directory" "$mode"
+}
+
+safe_root_file() {
+    file=$1
+    mode=$2
+    [ -f "$file" ] && [ ! -L "$file" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$file")" = "0:0:$mode:1" ]
+}
+
+atomic_install() {
+    source_path=$1
+    destination=$2
+    mode=$3
+    destination_dir=$(/usr/bin/dirname "$destination")
+    temporary=$(/usr/bin/mktemp "$destination_dir/.vonk-upgrade.XXXXXX")
+    trap '/usr/bin/rm -f -- "$temporary"' EXIT HUP INT TERM
+    /usr/bin/cp --reflink=never -- "$source_path" "$temporary"
+    /usr/bin/chown root:root "$temporary"
+    /usr/bin/chmod "0$mode" "$temporary"
+    /usr/bin/sync -f "$temporary"
+    /usr/bin/mv -f -- "$temporary" "$destination"
+    /usr/bin/sync -f "$destination_dir"
     trap - EXIT HUP INT TERM
+}
+
+atomic_text() {
+    destination=$1
+    mode=$2
+    contents=$3
+    destination_dir=$(/usr/bin/dirname "$destination")
+    temporary=$(/usr/bin/mktemp "$destination_dir/.vonk-upgrade.XXXXXX")
+    trap '/usr/bin/rm -f -- "$temporary"' EXIT HUP INT TERM
+    printf '%s' "$contents" > "$temporary"
+    /usr/bin/chown root:root "$temporary"
+    /usr/bin/chmod "0$mode" "$temporary"
+    /usr/bin/sync -f "$temporary"
+    /usr/bin/mv -f -- "$temporary" "$destination"
+    /usr/bin/sync -f "$destination_dir"
+    trap - EXIT HUP INT TERM
+}
+
+safe_intent() {
+    safe_root_directory "$state_dir" 700 \
+        && safe_root_file "$intent" 600 \
+        && [ "$(/usr/bin/wc -l < "$intent")" -eq 14 ] \
+        && /usr/bin/sed -n '1p' "$intent" | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$intent" | grep -Fxq "package=$package_name" \
+        && /usr/bin/sed -n '3p' "$intent" | grep -Eq '^target_version=[0-9A-Za-z.+~:-]+$' \
+        && /usr/bin/sed -n '4p' "$intent" | grep -Eq '^architecture=(arm64|amd64)$' \
+        && /usr/bin/sed -n '5p' "$intent" | grep -Eq '^package_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '6p' "$intent" | grep -Eq '^package_bytes=[1-9][0-9]*$' \
+        && /usr/bin/sed -n '7p' "$intent" | grep -Eq '^agent_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '8p' "$intent" | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '9p' "$intent" | grep -Eq '^runner_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '10p' "$intent" | grep -Eq '^unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '11p' "$intent" \
+            | grep -Eq '^request_boot_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+        && /usr/bin/sed -n '12p' "$intent" | grep -Eq '^dpkg_pid=[0-9]+$' \
+        && /usr/bin/sed -n '13p' "$intent" | grep -Eq '^dpkg_start_time=[0-9]+$' \
+        && /usr/bin/sed -n '14p' "$intent" | grep -Eq '^recovery_nonce=[0-9a-f]{64}$'
+}
+
+read_intent() {
+    safe_intent || return 1
+    intent_version=$(/usr/bin/sed -n '3s/^target_version=//p' "$intent")
+    intent_architecture=$(/usr/bin/sed -n '4s/^architecture=//p' "$intent")
+    package_sha256=$(/usr/bin/sed -n '5s/^package_sha256=//p' "$intent")
+    package_bytes=$(/usr/bin/sed -n '6s/^package_bytes=//p' "$intent")
+    expected_agent_sha256=$(/usr/bin/sed -n '7s/^agent_sha256=//p' "$intent")
+    expected_helper_sha256=$(/usr/bin/sed -n '8s/^helper_sha256=//p' "$intent")
+    expected_runner_sha256=$(/usr/bin/sed -n '9s/^runner_sha256=//p' "$intent")
+    expected_unit_sha256=$(/usr/bin/sed -n '10s/^unit_sha256=//p' "$intent")
+    request_boot_id=$(/usr/bin/sed -n '11s/^request_boot_id=//p' "$intent")
+    request_dpkg_pid=$(/usr/bin/sed -n '12s/^dpkg_pid=//p' "$intent")
+    request_dpkg_start=$(/usr/bin/sed -n '13s/^dpkg_start_time=//p' "$intent")
+    recovery_nonce=$(/usr/bin/sed -n '14s/^recovery_nonce=//p' "$intent")
+    cached_package=$state_dir/$package_sha256.deb
+}
+
+safe_cached_package() {
+    safe_root_file "$cached_package" 600 \
+        && [ "$(/usr/bin/stat -c %s "$cached_package")" = "$package_bytes" ] \
+        && [ "$(/usr/bin/sha256sum "$cached_package" | /usr/bin/cut -d' ' -f1)" \
+            = "$package_sha256" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$cached_package" Package)" \
+            = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$cached_package" Version)" \
+            = "$intent_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$cached_package" Architecture)" \
+            = "$intent_architecture" ]
+}
+
+safe_pending() {
+    safe_root_file "$pending" 600 \
+        && [ "$(/usr/bin/wc -l < "$pending")" -eq 3 ] \
+        && /usr/bin/sed -n '1p' "$pending" | grep -Fxq "version=$intent_version" \
+        && /usr/bin/sed -n '2p' "$pending" \
+            | grep -Fxq "helper_sha256=$expected_helper_sha256" \
+        && /usr/bin/sed -n '3p' "$pending" \
+            | grep -Fxq "agent_sha256=$expected_agent_sha256"
+}
+
+safe_agent_blocker() {
+    safe_root_file "$agent_blocker" 600 \
+        && [ "$(/usr/bin/wc -l < "$agent_blocker")" -eq 4 ] \
+        && /usr/bin/sed -n '1p' "$agent_blocker" \
+            | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$agent_blocker" \
+            | grep -Fxq "target_version=$intent_version" \
+        && /usr/bin/sed -n '3p' "$agent_blocker" \
+            | grep -Fxq "helper_sha256=$expected_helper_sha256" \
+        && /usr/bin/sed -n '4p' "$agent_blocker" \
+            | grep -Fxq "agent_sha256=$expected_agent_sha256"
+}
+
+safe_known_pending() {
+    safe_root_file "$pending" 600 \
+        && /usr/bin/sed -n '1p' "$pending" \
+            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
+    pending_lines=$(/usr/bin/wc -l < "$pending")
+    if [ "$pending_lines" -eq 2 ]; then
+        /usr/bin/sed -n '2p' "$pending" \
+            | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$'
+    elif [ "$pending_lines" -eq 3 ]; then
+        /usr/bin/sed -n '2p' "$pending" \
+            | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
+            && /usr/bin/sed -n '3p' "$pending" \
+                | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
+    else
+        return 1
+    fi
+}
+
+normalize_pending_gate() {
+    if [ -e "$pending" ] || [ -L "$pending" ]; then
+        safe_known_pending || return 1
+    fi
+    pending_text="version=$intent_version
+helper_sha256=$expected_helper_sha256
+agent_sha256=$expected_agent_sha256
+"
+    atomic_text "$pending" 600 "$pending_text"
 }
 
 inside_package_helper() {
@@ -56,9 +249,7 @@ package_directory_is_safe() {
     owner=${owner_mode%%:*}
     mode=${owner_mode#*:}
     [ "$owner" = 0 ] || return 1
-    case "$mode" in
-        ''|*[!0-7]*) return 1 ;;
-    esac
+    case "$mode" in ''|*[!0-7]*) return 1 ;; esac
     [ $((0$mode & 0022)) -eq 0 ]
 }
 
@@ -69,280 +260,568 @@ helper_namespace_has_package_paths() {
         && package_directory_is_safe "$package_doc" || return 1
     key_probe=
     doc_probe=
-    trap '/usr/bin/rm -f -- "${key_probe:-}" "${doc_probe:-}"' \
-        EXIT HUP INT TERM
-    if ! key_probe=$(/usr/bin/mktemp \
-        "$keyrings/.vonk-package-write.XXXXXX"); then
-        trap - EXIT HUP INT TERM
-        return 1
-    fi
-    if ! doc_probe=$(/usr/bin/mktemp \
-        "$package_doc/.vonk-package-write.XXXXXX"); then
-        /usr/bin/rm -f -- "$key_probe"
-        trap - EXIT HUP INT TERM
-        return 1
-    fi
-    if ! { [ -f "$key_probe" ] && [ ! -L "$key_probe" ] \
-        && [ "$(/usr/bin/stat -c %u:%a "$key_probe")" = 0:600 ] \
-        && [ -f "$doc_probe" ] && [ ! -L "$doc_probe" ] \
-        && [ "$(/usr/bin/stat -c %u:%a "$doc_probe")" = 0:600 ]; }; then
-        /usr/bin/rm -f -- "$key_probe" "$doc_probe"
-        trap - EXIT HUP INT TERM
-        return 1
-    fi
+    trap '/usr/bin/rm -f -- "${key_probe:-}" "${doc_probe:-}"' EXIT HUP INT TERM
+    key_probe=$(/usr/bin/mktemp "$keyrings/.vonk-package-write.XXXXXX") \
+        || return 1
+    doc_probe=$(/usr/bin/mktemp "$package_doc/.vonk-package-write.XXXXXX") \
+        || return 1
+    [ "$(/usr/bin/stat -c %u:%a "$key_probe")" = 0:600 ] \
+        && [ "$(/usr/bin/stat -c %u:%a "$doc_probe")" = 0:600 ] \
+        || return 1
     /usr/bin/rm -f -- "$key_probe" "$doc_probe"
     trap - EXIT HUP INT TERM
 }
 
-current_helper_main_pid() {
-    main_pid=$(/usr/bin/systemctl --system show --property=MainPID --value \
-        "$helper_unit")
-    case "$main_pid" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    [ "$main_pid" -gt 1 ] && [ -d "/proc/$main_pid" ] || return 1
-    printf '%s\n' "$main_pid"
-}
-
-ensure_bridge_directory() {
-    directory=$1
-    mode=$2
-    if [ -L "$directory" ] || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
-        return 1
-    fi
-    if [ ! -d "$directory" ]; then
-        /usr/bin/install -d -o root -g root -m "0$mode" "$directory"
-    fi
-    [ "$(/usr/bin/stat -c %u:%a "$directory")" = "0:$mode" ]
-}
-
-bridge_dropin_is_safe() {
-    [ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ] \
-        && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin")" = 0:644 ] \
-        && [ "$(/usr/bin/wc -l < "$bridge_dropin")" -eq 2 ] \
-        && grep -Fxq '[Service]' "$bridge_dropin" \
-        && grep -Fxq \
-            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-            "$bridge_dropin"
-}
-
-bridge_marker_is_safe() {
-    [ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ] \
-        && [ "$(/usr/bin/stat -c %u:%a "$bridge_main_pid")" = 0:600 ] \
-        && [ "$(/usr/bin/wc -l < "$bridge_main_pid")" -eq 1 ] \
-        && grep -Eq '^[0-9]+$' "$bridge_main_pid"
-}
-
-helper_has_effective_bridge_paths() {
-    effective_paths=$(/usr/bin/systemctl --system show \
-        --property=ReadWritePaths --value "$helper_unit")
-    printf '%s\n' "$effective_paths" | grep -Fq '/usr/share/keyrings' \
-        && printf '%s\n' "$effective_paths" \
-            | grep -Fq '/usr/share/doc/vonk-forge-agent'
-}
-
-stage_bridge() {
-    helper_main_pid=$1
-    ensure_bridge_directory "$bridge_dropin_dir" 755 || return 1
-    ensure_bridge_directory "$bridge_root" 700 || return 1
-    if [ -e "$bridge_dropin" ] || [ -L "$bridge_dropin" ]; then
-        bridge_dropin_is_safe || return 1
-    else
-        bridge_new=$(/usr/bin/mktemp \
-            "$bridge_dropin_dir/.20-package-upgrade-bridge.XXXXXX")
-        trap '/usr/bin/rm -f -- "$bridge_new"' EXIT HUP INT TERM
-        printf '%s\n' \
-            '[Service]' \
-            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-            > "$bridge_new"
-        /usr/bin/chown root:root "$bridge_new"
-        /usr/bin/chmod 0644 "$bridge_new"
-        /usr/bin/mv -f -- "$bridge_new" "$bridge_dropin"
-        trap - EXIT HUP INT TERM
-    fi
-    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
-        bridge_marker_is_safe || return 1
-    fi
-    /usr/bin/systemctl --system daemon-reload >/dev/null
-    marker_new=$(/usr/bin/mktemp "$bridge_root/.previous-main-pid.XXXXXX")
-    trap '/usr/bin/rm -f -- "$marker_new"' EXIT HUP INT TERM
-    printf '%s\n' "$helper_main_pid" > "$marker_new"
-    /usr/bin/chown root:root "$marker_new"
-    /usr/bin/chmod 0600 "$marker_new"
-    /usr/bin/mv -f -- "$marker_new" "$bridge_main_pid"
+validate_candidate_payload() {
+    candidate=$1
+    verify_root=$(/usr/bin/mktemp -d "$state_dir/.verify.XXXXXX")
+    trap '/usr/bin/rm -rf -- "$verify_root"' EXIT HUP INT TERM
+    /usr/bin/dpkg-deb --extract "$candidate" "$verify_root"
+    extracted_agent=$verify_root/usr/lib/vonk-forge/vonk-agent
+    extracted_helper=$verify_root/usr/lib/vonk-forge/vonk-agent-helper
+    [ -f "$extracted_agent" ] && [ ! -L "$extracted_agent" ] \
+        && [ -f "$extracted_helper" ] && [ ! -L "$extracted_helper" ] \
+        && [ "$(/usr/bin/sha256sum "$extracted_agent" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$extracted_helper" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_helper_sha256" ]
+    /usr/bin/rm -rf -- "$verify_root"
     trap - EXIT HUP INT TERM
 }
 
-schedule_bridge_restart() {
-    wait_pid=$1
-    wait_start=$2
-    bridge_job=vonk-forge-package-helper-upgrade-bridge.service
-    bridge_job_load=$(/usr/bin/systemctl --system show \
-        --property=LoadState --value "$bridge_job" 2>/dev/null || true)
-    bridge_job_state=$(/usr/bin/systemctl --system show \
-        --property=ActiveState --value "$bridge_job" 2>/dev/null || true)
-    case "$bridge_job_state" in
-        active|activating|deactivating) return 0 ;;
-    esac
-    if [ "$bridge_job_load" != not-found ] && [ -n "$bridge_job_load" ]; then
-        /usr/bin/systemctl --system reset-failed "$bridge_job" >/dev/null 2>&1 \
-            || true
-        collect_attempts=0
-        while [ "$collect_attempts" -lt 50 ]; do
-            bridge_job_load=$(/usr/bin/systemctl --system show \
-                --property=LoadState --value "$bridge_job" 2>/dev/null || true)
-            [ "$bridge_job_load" = not-found ] && break
-            /bin/sleep 0.1
-            collect_attempts=$((collect_attempts + 1))
-        done
-        [ "$bridge_job_load" = not-found ] || return 1
-    fi
-    # The single-quoted script must expand only inside the transient service.
-    # shellcheck disable=SC2016
-    /usr/bin/systemd-run --quiet --collect \
-        --unit="$bridge_job" \
-        --property=Type=exec \
-        --property=RuntimeMaxSec=180s \
-        --property=NoNewPrivileges=yes \
-        --property=PrivateTmp=yes \
-        --property=ProtectHome=yes \
-        --property=ProtectSystem=strict \
-        --property=IPAddressDeny=any \
-        --property=RestrictAddressFamilies=AF_UNIX \
-        /bin/sh -c '
-            set -eu
-            wait_pid=$1
-            wait_start=$2
-            attempts=0
-            while [ "$attempts" -lt 1200 ] \
-                && [ -r "/proc/$wait_pid/stat" ] \
-                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
-                    = "$wait_start" ]; do
-                /bin/sleep 0.1
-                attempts=$((attempts + 1))
-            done
-            if [ -r "/proc/$wait_pid/stat" ] \
-                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
-                    = "$wait_start" ]; then
-                exit 1
-            fi
-            /usr/bin/systemctl --system restart \
-                vonk-forge-package-helper.service >/dev/null
-        ' vonk-package-upgrade "$wait_pid" "$wait_start" >/dev/null
+stage_recovery_unit() {
+    unit_parent=$(/usr/bin/dirname "$unit")
+    ensure_root_directory "$unit_parent" 755 || return 1
+    unit_new=$(/usr/bin/mktemp "$unit_parent/.vonk-recovery-unit.XXXXXX")
+    trap '/usr/bin/rm -f -- "$unit_new"' EXIT HUP INT TERM
+    printf '%s' "$recovery_unit_base64" | /usr/bin/base64 -d > "$unit_new"
+    [ "$(/usr/bin/sha256sum "$unit_new" | /usr/bin/cut -d' ' -f1)" \
+        = "$recovery_unit_sha256" ] || return 1
+    /usr/bin/chown root:root "$unit_new"
+    /usr/bin/chmod 0644 "$unit_new"
+    /usr/bin/sync -f "$unit_new"
+    /usr/bin/mv -f -- "$unit_new" "$unit"
+    /usr/bin/sync -f "$unit_parent"
+    trap - EXIT HUP INT TERM
 }
 
-case "${1:-}" in
-install|upgrade)
-    package_action=1
-    old_version=${2:-}
-    ;;
-abort-upgrade)
-    # The old package's abort path must remain available to dpkg recovery.
-    package_action=0
-    old_version=
-    ;;
-*)
-    package_action=0
-    old_version=
-    ;;
-esac
+stage_agent_gate() {
+    ensure_root_directory "$agent_gate_dir" 755 || return 1
+    gate_new=$(/usr/bin/mktemp "$agent_gate_dir/.vonk-agent-gate.XXXXXX") \
+        || return 1
+    trap '/usr/bin/rm -f -- "$gate_new"' EXIT HUP INT TERM
+    printf '%s' "$agent_gate_base64" | /usr/bin/base64 -d > "$gate_new"
+    [ "$(/usr/bin/sha256sum "$gate_new" | /usr/bin/cut -d' ' -f1)" \
+        = "$agent_gate_sha256" ] || return 1
+    /usr/bin/chown root:root "$gate_new"
+    /usr/bin/chmod 0644 "$gate_new"
+    /usr/bin/sync -f "$gate_new"
+    /usr/bin/mv -f -- "$gate_new" "$agent_gate"
+    /usr/bin/sync -f "$agent_gate_dir"
+    trap - EXIT HUP INT TERM
+}
 
-if [ -n "$old_version" ]; then
-    if dpkg --compare-versions "$new_version" lt "$old_version"; then
-        echo "vonk-forge-agent: refusing downgrade from $old_version to $new_version" >&2
-        exit 1
+arm_controller_recovery() {
+    # Bootstrap trust boundary: dev335's signed helper verifies this agent-owned
+    # path before dpkg opens it. This script revalidates the opened candidate and
+    # takes a stable root-owned copy, but cannot remove that old-protocol TOCTOU.
+    # See docs/spark-package-upgrade-recovery.md.
+    case "$PPID" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$PPID/exe" ] && [ -r "/proc/$PPID/cmdline" ] \
+        && [ "$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg ] \
+        || return 1
+    command_file=$(/usr/bin/mktemp /tmp/.vonk-dpkg-command.XXXXXX)
+    trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file"
+    [ "$(/usr/bin/wc -l < "$command_file")" -eq 4 ] \
+        && [ "$(/usr/bin/sed -n '1p' "$command_file")" = /usr/bin/dpkg ] \
+        && [ "$(/usr/bin/sed -n '2p' "$command_file")" = --install ] \
+        && [ "$(/usr/bin/sed -n '3p' "$command_file")" = --force-confold ] \
+        || return 1
+    candidate=$(/usr/bin/sed -n '4p' "$command_file")
+    /usr/bin/rm -f -- "$command_file"
+    trap - EXIT HUP INT TERM
+    candidate_custody=legacy
+    custody_root=/run/vonk-forge-package-candidates
+    case "$candidate" in
+        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb) ;;
+        "$custody_root"/*/[0-9a-f]*.deb)
+            invocation_dir=$(/usr/bin/dirname "$candidate") || return 1
+            [ "$(/usr/bin/dirname "$invocation_dir")" = "$custody_root" ] \
+                || return 1
+            invocation=${invocation_dir##*/}
+            case "$invocation" in *[!0-9a-f]*|'') return 1 ;; esac
+            [ "${#invocation}" -eq 32 ] || return 1
+            safe_root_directory "$custody_root" 700 \
+                && safe_root_directory "$invocation_dir" 700 \
+                || return 1
+            candidate_custody=root
+            ;;
+        *) return 1 ;;
+    esac
+    package_digest=${candidate##*/}
+    package_digest=${package_digest%.deb}
+    valid_digest "$package_digest" || return 1
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+    candidate_before=$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z "$candidate") \
+        || return 1
+    if [ "$candidate_custody" = root ]; then
+        expected_candidate_metadata=0:0:600:1
+    else
+        agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+        agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
+        expected_candidate_metadata=$agent_uid:$agent_gid:600:1
     fi
+    [ "$(/usr/bin/stat -Lc %u:%g:%a:%h "$candidate")" \
+        = "$expected_candidate_metadata" ] || return 1
+    package_bytes=$(/usr/bin/stat -Lc %s "$candidate") || return 1
+    case "$package_bytes" in ''|*[!0-9]*|0) return 1 ;; esac
+    [ "$(/usr/bin/dpkg-deb --field "$candidate" Package)" = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$candidate" Version)" = "$target_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$candidate" Architecture)" \
+            = "$target_architecture" ] \
+        && [ "$(/usr/bin/dpkg --print-architecture)" = "$target_architecture" ] \
+        || return 1
+    ensure_root_directory "$state_parent" 755 || return 1
+    ensure_root_directory "$state_dir" 700 || return 1
+    if [ -e "$intent" ] || [ -L "$intent" ]; then
+        read_intent \
+            && [ "$intent_version" = "$target_version" ] \
+            && [ "$intent_architecture" = "$target_architecture" ] \
+            && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
+            && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
+            && safe_cached_package \
+            && safe_root_file "$runner" 555 \
+            && safe_root_file "$unit" 644 \
+            && [ "$(/usr/bin/sha256sum "$runner" | /usr/bin/cut -d' ' -f1)" \
+                = "$expected_runner_sha256" ] \
+            && [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
+                = "$expected_unit_sha256" ] \
+            || return 1
+        /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+        /usr/bin/systemctl --system reset-failed "$unit_name" \
+            >/dev/null 2>&1 || true
+        /usr/bin/systemctl --system --no-block start "$unit_name" >/dev/null \
+            || return 1
+        # Never allow this second dpkg to race the immutable recovery owner.
+        return 1
+    fi
+    if [ -e "$lock" ] || [ -L "$lock" ]; then
+        safe_root_file "$lock" 600 || return 1
+    else
+        : > "$lock"
+        /usr/bin/chown root:root "$lock"
+        /usr/bin/chmod 0600 "$lock"
+        /usr/bin/sync -f "$lock"
+        /usr/bin/sync -f "$state_dir"
+    fi
+    exec 9>> "$lock"
+    /usr/bin/flock -x 9 || return 1
+    [ ! -e "$intent" ] && [ ! -L "$intent" ] || return 1
+    cached_package=$state_dir/$package_digest.deb
+    if [ -e "$cached_package" ] || [ -L "$cached_package" ]; then
+        safe_root_file "$cached_package" 600 \
+            && [ "$(/usr/bin/stat -c %s "$cached_package")" = "$package_bytes" ] \
+            && [ "$(/usr/bin/sha256sum "$cached_package" \
+                | /usr/bin/cut -d' ' -f1)" = "$package_digest" ] \
+            || return 1
+    else
+        cached_new=$(/usr/bin/mktemp "$state_dir/.package.XXXXXX")
+        trap '/usr/bin/rm -f -- "$cached_new"' EXIT HUP INT TERM
+        /usr/bin/cp --reflink=never -- "$candidate" "$cached_new"
+        candidate_after=$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z \
+            "$candidate") || return 1
+        [ "$candidate_before" = "$candidate_after" ] \
+            && [ "$(/usr/bin/sha256sum "$candidate" \
+                | /usr/bin/cut -d' ' -f1)" = "$package_digest" ] \
+            && [ "$(/usr/bin/sha256sum "$cached_new" \
+                | /usr/bin/cut -d' ' -f1)" = "$package_digest" ] \
+            && [ "$(/usr/bin/stat -c %s "$cached_new")" = "$package_bytes" ] \
+            || return 1
+        /usr/bin/chown root:root "$cached_new"
+        /usr/bin/chmod 0600 "$cached_new"
+        /usr/bin/sync -f "$cached_new"
+        /usr/bin/mv -- "$cached_new" "$cached_package"
+        /usr/bin/sync -f "$state_dir"
+        trap - EXIT HUP INT TERM
+    fi
+    validate_candidate_payload "$cached_package" || return 1
+
+    runner_parent=$(/usr/bin/dirname "$runner")
+    ensure_root_directory "$runner_parent" 755 || return 1
+    [ -f "$0" ] && [ ! -L "$0" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$0")" = 0:0:755:1 ] \
+        || return 1
+    atomic_install "$0" "$runner" 555 || return 1
+    runner_sha256=$(/usr/bin/sha256sum "$runner" | /usr/bin/cut -d' ' -f1)
+    valid_digest "$runner_sha256" || return 1
+    stage_recovery_unit || return 1
+    [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
+        = "$recovery_unit_sha256" ] || return 1
+    stage_agent_gate || return 1
+    [ "$(/usr/bin/sha256sum "$agent_gate" | /usr/bin/cut -d' ' -f1)" \
+        = "$agent_gate_sha256" ] || return 1
+    ensure_root_directory "$socket_dropin_dir" 755 || return 1
+    dropin_text='[Unit]
+Wants=vonk-forge-package-upgrade-recover.service
+'
+    atomic_text "$socket_dropin" 644 "$dropin_text" || return 1
+    /usr/bin/systemctl --system is-enabled --quiet "$helper_socket" || return 1
+
+    boot_id=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id)
+    valid_boot_id "$boot_id" || return 1
+    dpkg_start=$(process_start "$PPID") || return 1
+    recovery_nonce=$(/usr/bin/openssl rand -hex 32) || return 1
+    valid_digest "$recovery_nonce" || return 1
+    intent_version=$target_version
+    expected_helper_sha256=$target_helper_sha256
+    expected_agent_sha256=$target_agent_sha256
+    intent_text="schema_version=1
+package=$package_name
+target_version=$target_version
+architecture=$target_architecture
+package_sha256=$package_digest
+package_bytes=$package_bytes
+agent_sha256=$target_agent_sha256
+helper_sha256=$target_helper_sha256
+runner_sha256=$runner_sha256
+unit_sha256=$recovery_unit_sha256
+request_boot_id=$boot_id
+dpkg_pid=$PPID
+dpkg_start_time=$dpkg_start
+recovery_nonce=$recovery_nonce
+"
+    atomic_text "$intent" 600 "$intent_text" || return 1
+    blocker_text="schema_version=1
+target_version=$target_version
+helper_sha256=$target_helper_sha256
+agent_sha256=$target_agent_sha256
+"
+    atomic_text "$agent_blocker" 600 "$blocker_text" || return 1
+    /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+    fragment=$(/usr/bin/systemctl --system show --property=FragmentPath --value \
+        "$unit_name" 2>/dev/null || true)
+    [ "$(/usr/bin/readlink -f "$fragment" 2>/dev/null || true)" \
+        = "$(/usr/bin/readlink -f "$unit")" ] || return 1
+    /usr/bin/systemctl --system reset-failed "$unit_name" >/dev/null 2>&1 || true
+    /usr/bin/systemctl --system --no-block start "$unit_name" >/dev/null \
+        || return 1
+    pending_text="version=$target_version
+helper_sha256=$target_helper_sha256
+agent_sha256=$target_agent_sha256
+"
+    atomic_text "$pending" 600 "$pending_text" || return 1
+}
+
+query_package_state() {
+    package_state=$(/usr/bin/dpkg-query -W \
+        -f='${db:Status-Abbrev}\n${Version}\n' "$package_name" 2>/dev/null) \
+        || return 1
+    [ "$(printf '%s\n' "$package_state" | /usr/bin/wc -l)" -eq 2 ] || return 1
+    package_status=$(printf '%s\n' "$package_state" \
+        | /usr/bin/sed -n '1s/^\(..\).*$/\1/p')
+    installed_version=$(printf '%s\n' "$package_state" | /usr/bin/sed -n '2p')
+    valid_version "$installed_version"
+}
+
+wait_for_original_dpkg() {
+    current_boot_id=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id)
+    valid_boot_id "$current_boot_id" || return 1
+    [ "$current_boot_id" = "$request_boot_id" ] || return 0
+    attempts=0
+    while [ "$attempts" -lt 2400 ]; do
+        current_start=$(process_start "$request_dpkg_pid" 2>/dev/null || true)
+        [ "$current_start" = "$request_dpkg_start" ] || return 0
+        /bin/sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    return 1
+}
+
+prove_installed_payload() {
+    safe_root_file /usr/lib/vonk-forge/vonk-agent-helper 555 \
+        && safe_root_file /usr/lib/vonk-forge/vonk-agent 555 \
+        && safe_root_file "$runner" 555 \
+        && safe_root_file "$unit" 644 \
+        && safe_root_file "$agent_gate" 644 \
+        && [ "$(/usr/bin/sha256sum /usr/lib/vonk-forge/vonk-agent-helper \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_helper_sha256" ] \
+        && [ "$(/usr/bin/sha256sum /usr/lib/vonk-forge/vonk-agent \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$runner" | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_runner_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$agent_gate" | /usr/bin/cut -d' ' -f1)" \
+            = "$agent_gate_sha256" ]
+}
+
+safe_legacy_bridge_file() {
+    bridge_file=$1
+    safe_root_file "$bridge_file" 644 \
+        && [ "$(/usr/bin/wc -l < "$bridge_file")" -eq 2 ] \
+        && grep -Fxq '[Service]' "$bridge_file" \
+        && grep -Fxq \
+            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            "$bridge_file"
+}
+
+retire_legacy_bridge() {
+    safe_root_file "$installed_helper_unit" 644 \
+        && grep -Fxq \
+            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            "$installed_helper_unit" || return 1
+    for bridge_file in "$legacy_bridge" "$legacy_bridge_retired"; do
+        if [ -e "$bridge_file" ] || [ -L "$bridge_file" ]; then
+            safe_legacy_bridge_file "$bridge_file" || return 1
+            /usr/bin/rm -- "$bridge_file"
+        fi
+    done
+    if [ -d "$legacy_bridge_dir" ] && [ ! -L "$legacy_bridge_dir" ]; then
+        /usr/bin/sync -f "$legacy_bridge_dir"
+        /usr/bin/rmdir --ignore-fail-on-non-empty "$legacy_bridge_dir" \
+            2>/dev/null || true
+    fi
+    if [ -e "$legacy_bridge_marker" ] || [ -L "$legacy_bridge_marker" ]; then
+        safe_root_file "$legacy_bridge_marker" 600 \
+            && [ "$(/usr/bin/wc -l < "$legacy_bridge_marker")" -eq 1 ] \
+            && grep -Eq '^[0-9]+$' "$legacy_bridge_marker" || return 1
+        /usr/bin/rm -- "$legacy_bridge_marker"
+        /usr/bin/sync -f "$legacy_bridge_runtime"
+        /usr/bin/rmdir --ignore-fail-on-non-empty "$legacy_bridge_runtime" \
+            2>/dev/null || true
+    fi
+}
+
+prove_running_unit() {
+    service=$1
+    expected_digest=$2
+    [ "$(/usr/bin/systemctl --system show --property=ActiveState --value \
+        "$service")" = active ] || return 1
+    service_pid=$(/usr/bin/systemctl --system show --property=MainPID --value \
+        "$service")
+    valid_pid "$service_pid" && [ "$service_pid" -gt 1 ] || return 1
+    service_start=$(process_start "$service_pid") || return 1
+    running_digest=$(/usr/bin/sha256sum "/proc/$service_pid/exe" \
+        | /usr/bin/cut -d' ' -f1) || return 1
+    [ "$running_digest" = "$expected_digest" ]
+}
+
+write_receipt() {
+    activated_at=$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
+    boot_id=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id)
+    valid_boot_id "$boot_id" || return 1
+    receipt_text="schema_version=2
+version=$intent_version
+package_sha256=$package_sha256
+helper_sha256=$expected_helper_sha256
+agent_sha256=$expected_agent_sha256
+boot_id=$boot_id
+activated_at=$activated_at
+helper_main_pid=$service_pid
+helper_start_time=$service_start
+intent_sha256=$intent_snapshot
+"
+    atomic_text "$receipt" 600 "$receipt_text"
+}
+
+safe_durable_receipt() {
+    safe_root_file "$receipt" 600 \
+        && [ "$(/usr/bin/wc -l < "$receipt")" -eq 10 ] \
+        && /usr/bin/sed -n '1p' "$receipt" | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '2p' "$receipt" \
+            | grep -Fxq "version=$intent_version" \
+        && /usr/bin/sed -n '3p' "$receipt" \
+            | grep -Fxq "package_sha256=$package_sha256" \
+        && /usr/bin/sed -n '4p' "$receipt" \
+            | grep -Fxq "helper_sha256=$expected_helper_sha256" \
+        && /usr/bin/sed -n '5p' "$receipt" \
+            | grep -Fxq "agent_sha256=$expected_agent_sha256" \
+        && /usr/bin/sed -n '6p' "$receipt" \
+            | grep -Eq '^boot_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+        && /usr/bin/sed -n '7p' "$receipt" \
+            | grep -Eq '^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
+        && /usr/bin/sed -n '8p' "$receipt" \
+            | grep -Eq '^helper_main_pid=[0-9]+$' \
+        && /usr/bin/sed -n '9p' "$receipt" \
+            | grep -Eq '^helper_start_time=[0-9]+$' \
+        && /usr/bin/sed -n '10p' "$receipt" \
+            | grep -Fxq "intent_sha256=$intent_snapshot"
+}
+
+allow_agent_start() {
+    if [ ! -e "$intent" ] && [ ! -L "$intent" ]; then
+        return 0
+    fi
+    read_intent || return 1
+    [ "$intent_version" = "$target_version" ] \
+        && [ "$intent_architecture" = "$target_architecture" ] \
+        && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
+        && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
+        || return 1
+    if [ -e "$agent_blocker" ] || [ -L "$agent_blocker" ]; then
+        return 1
+    fi
+    intent_snapshot=$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)
+    valid_digest "$intent_snapshot" \
+        && safe_durable_receipt \
+        && query_package_state \
+        && [ "$package_status" = ii ] \
+        && [ "$installed_version" = "$intent_version" ] \
+        && safe_root_file /usr/lib/vonk-forge/vonk-agent 555 \
+        && [ "$(/usr/bin/sha256sum /usr/lib/vonk-forge/vonk-agent \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_agent_sha256" ]
+}
+
+recover_upgrade() {
+    safe_root_directory "$state_dir" 700 || unsafe_state 'state directory'
+    safe_root_file "$lock" 600 || unsafe_state 'serialization lock'
+    exec 9>> "$lock"
+    /usr/bin/flock -x 9 || temporary_failure 'cannot acquire serialization lock'
+    read_intent || unsafe_state 'intent'
+    [ "$intent_version" = "$target_version" ] \
+        && [ "$intent_architecture" = "$target_architecture" ] \
+        && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
+        && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
+        && [ "$expected_unit_sha256" = "$recovery_unit_sha256" ] \
+        || unsafe_state 'intent does not belong to installed recovery runner'
+    safe_cached_package || unsafe_state 'cached package'
+    intent_snapshot=$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)
+    valid_digest "$intent_snapshot" || unsafe_state 'intent digest'
+    normalize_pending_gate || unsafe_state 'pending gate normalization'
+    wait_for_original_dpkg || temporary_failure 'original dpkg is still active'
+    /usr/bin/systemctl --system stop "$agent_unit" >/dev/null 2>&1 || true
+    /usr/bin/systemctl --system stop "$helper_unit" >/dev/null 2>&1 || true
+
+    if query_package_state; then
+        if /usr/bin/dpkg --compare-versions "$installed_version" gt "$intent_version"; then
+            unsafe_state 'newer installed package would be downgraded'
+        fi
+    else
+        package_status=absent
+        installed_version=
+    fi
+    repair=install
+    if [ "$installed_version" = "$intent_version" ]; then
+        case "$package_status" in
+            ii) repair=none ;;
+            iU|iF) repair=configure ;;
+            *) repair=install ;;
+        esac
+    fi
+    case "$repair" in
+        none) ;;
+        configure)
+            VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+                /usr/bin/dpkg --force-confold --configure "$package_name" \
+                || temporary_failure 'named package configure failed'
+            ;;
+        install)
+            VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+                /usr/bin/dpkg --install --force-confold "$cached_package" \
+                || temporary_failure 'exact cached package install failed'
+            ;;
+    esac
+    query_package_state || temporary_failure 'package database is unavailable'
+    [ "$package_status" = ii ] && [ "$installed_version" = "$intent_version" ] \
+        || temporary_failure 'named package is not fully installed'
+    prove_installed_payload || unsafe_state 'installed package identity'
+    retire_legacy_bridge || unsafe_state 'legacy bridge evidence'
+    /usr/bin/systemctl --system daemon-reload >/dev/null \
+        || temporary_failure 'systemd reload failed'
+    /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
+        || temporary_failure 'helper restart failed'
+    prove_running_unit "$helper_unit" "$expected_helper_sha256" \
+        || temporary_failure 'running helper identity proof failed'
+    write_receipt || temporary_failure 'receipt commit failed'
+    [ "$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)" \
+        = "$intent_snapshot" ] || unsafe_state 'intent changed before gate retirement'
+    if [ -e "$pending" ] || [ -L "$pending" ]; then
+        safe_pending || unsafe_state 'pending gate'
+        /usr/bin/rm -- "$pending"
+        /usr/bin/sync -f "$state_parent"
+    fi
+    if [ -e "$agent_blocker" ] || [ -L "$agent_blocker" ]; then
+        safe_agent_blocker || unsafe_state 'agent start blocker'
+        /usr/bin/rm -- "$agent_blocker"
+        /usr/bin/sync -f "$state_dir"
+    else
+        safe_durable_receipt || unsafe_state 'agent start release evidence'
+    fi
+    /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
+        || temporary_failure 'agent restart failed'
+    /bin/sleep 1
+    prove_running_unit "$agent_unit" "$expected_agent_sha256" \
+        || temporary_failure 'running agent identity proof failed'
+    prove_running_unit "$helper_unit" "$expected_helper_sha256" \
+        || temporary_failure 'helper identity changed during activation'
+    [ "$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)" \
+        = "$intent_snapshot" ] || unsafe_state 'intent changed before retirement'
+    /usr/bin/rm -- "$intent"
+    /usr/bin/sync -f "$state_dir"
+    /usr/bin/rm -f -- "$cached_package"
+    /usr/bin/sync -f "$state_dir"
+    if [ -e "$socket_dropin" ] || [ -L "$socket_dropin" ]; then
+        safe_root_file "$socket_dropin" 644 || unsafe_state 'socket recovery drop-in'
+        if ! { [ "$(/usr/bin/wc -l < "$socket_dropin")" -eq 2 ] \
+            && grep -Fxq '[Unit]' "$socket_dropin" \
+            && grep -Fxq 'Wants=vonk-forge-package-upgrade-recover.service' \
+                "$socket_dropin"; }; then
+            unsafe_state 'socket recovery drop-in contents'
+        fi
+        /usr/bin/rm -- "$socket_dropin"
+        /usr/bin/sync -f "$socket_dropin_dir"
+        /usr/bin/systemctl --system daemon-reload >/dev/null || true
+    fi
+}
+
+if [ "${1:-}" = recover ]; then
+    recover_upgrade
+    exit 0
 fi
 
-inside_helper=0
+if [ "${1:-}" = allow-agent-start ]; then
+    allow_agent_start
+    exit $?
+fi
+
+case "${1:-}" in
+    install|upgrade) package_action=1; old_version=${2:-} ;;
+    abort-upgrade) package_action=0; old_version= ;;
+    *) package_action=0; old_version= ;;
+esac
+
+if [ -n "$old_version" ] \
+    && dpkg --compare-versions "$target_version" lt "$old_version"; then
+    echo "vonk-forge-agent: refusing downgrade from $old_version to $target_version" >&2
+    exit 1
+fi
+
+if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
+    read_intent || unsafe_state 'recursive maintainer script intent'
+    if ! { [ "$VONK_FORGE_UPGRADE_RECOVERY_NONCE" = "$recovery_nonce" ] \
+        && [ "$intent_version" = "$target_version" ] \
+        && [ "$intent_architecture" = "$target_architecture" ] \
+        && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
+        && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
+        && safe_cached_package; }; then
+        unsafe_state 'recursive maintainer script binding'
+    fi
+    exit 0
+fi
+
 if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
     && [ -d /run/systemd/system ] \
     && inside_package_helper; then
-    inside_helper=1
-fi
-
-if [ "$package_action" -eq 1 ] \
-    && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
-    && [ -d /run/systemd/system ] \
-    && { [ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]; }; then
-    write_preunpack_pending || {
-        echo 'vonk-forge-agent: cannot record the pre-unpack helper upgrade gate' >&2
+    arm_controller_recovery || {
+        echo 'vonk-forge-agent: cannot durably arm the signed controller upgrade' >&2
         exit 1
     }
-fi
-
-needs_bridge=0
-if [ "$inside_helper" -eq 1 ]; then
-    # A failed earlier unpack can replace the base unit without restarting the
-    # helper. Prove this inherited mount namespace by writing both exact
-    # package directories; never infer writability from the on-disk unit.
-    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ] \
-        || ! helper_namespace_has_package_paths; then
-        needs_bridge=1
-    fi
-fi
-
-# Development packages predating this bridge sandboxed dpkg away from two
-# package-owned /usr/share paths. A signed upgrade invoked by that old helper
-# cannot unpack its release key or evidence documents. Stage only those exact
-# paths in a transient drop-in, stop before dpkg can partially unpack, and have
-# PID 1 restart the helper after this dpkg process has exited. The controller's
-# bounded retry then runs under the bridge and can install the permanent unit.
-if [ "$needs_bridge" -eq 1 ]; then
-    helper_main_pid=$(current_helper_main_pid) || {
-        echo 'vonk-forge-agent: cannot identify the package helper for safe upgrade bridging' >&2
-        exit 1
-    }
-    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
-        bridge_marker_is_safe || {
-            echo 'vonk-forge-agent: package-helper upgrade bridge state is unsafe' >&2
-            exit 1
-        }
-        previous_main_pid=$(/usr/bin/sed -n '1p' "$bridge_main_pid")
-        case "$previous_main_pid" in
-            ''|*[!0-9]*)
-                echo 'vonk-forge-agent: package-helper upgrade bridge state is invalid' >&2
-                exit 1
-                ;;
-        esac
-        if [ "$helper_main_pid" != "$previous_main_pid" ] \
-            && bridge_dropin_is_safe \
-            && helper_has_effective_bridge_paths \
-            && helper_namespace_has_package_paths; then
-            # The old helper has restarted with the exact bridge loaded. Leave
-            # it in place until the new package's postinst activates the
-            # permanent unit and schedules cleanup outside this dpkg process.
-            exit 0
-        fi
-    fi
-    case "$PPID" in
-        ''|*[!0-9]*)
-            echo 'vonk-forge-agent: cannot identify dpkg for safe helper restart' >&2
-            exit 1
-            ;;
-    esac
-    if [ ! -r "/proc/$PPID/stat" ]; then
-        echo 'vonk-forge-agent: cannot inspect dpkg for safe helper restart' >&2
+    if ! helper_namespace_has_package_paths; then
+        echo 'vonk-forge-agent: durable recovery armed outside the inherited helper sandbox' >&2
         exit 1
     fi
-    dpkg_start=$(/usr/bin/awk '{ print $22 }' "/proc/$PPID/stat")
-    case "$dpkg_start" in
-        ''|*[!0-9]*)
-            echo 'vonk-forge-agent: dpkg process identity is invalid' >&2
-            exit 1
-            ;;
-    esac
-    stage_bridge "$helper_main_pid" || {
-        echo 'vonk-forge-agent: cannot stage the package-helper upgrade bridge' >&2
-        exit 1
-    }
-    schedule_bridge_restart "$PPID" "$dpkg_start" || {
-        echo 'vonk-forge-agent: cannot schedule the package-helper upgrade bridge' >&2
-        exit 1
-    }
-    echo 'vonk-forge-agent: package-helper upgrade bridge staged; retry the signed controller upgrade' >&2
-    exit 1
 fi
 
 exit 0
