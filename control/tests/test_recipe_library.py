@@ -4,13 +4,19 @@ import base64
 import copy
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
 import pytest
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.recipe_contract import recipe_content_sha256
-from vonk_control.recipe_library import RecipeLibraryClient, RecipeLibraryError
+from vonk_control.recipe_library import (
+    RecipeLibraryClient,
+    RecipeLibraryError,
+    RecipeLibrarySnapshot,
+    RecipeLibrarySourceContext,
+)
 from vonk_control.source_bundles import generate_source_bundle
 
 FIXTURE = Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json"
@@ -29,6 +35,20 @@ def _contents_document_payload(document: dict[str, object]) -> dict[str, object]
         "size": len(content),
         "encoding": "base64",
         "content": base64.b64encode(content).decode(),
+    }
+
+
+def _recipe_index(document: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "repository": "CarstVaartjes/vonk-forge-recipes",
+        "recipes": [
+            {
+                "source_path": "recipes/synthetic-tiny-openai.json",
+                "content_sha256": recipe_content_sha256(document),
+                "document": document,
+            }
+        ],
     }
 
 
@@ -106,6 +126,366 @@ def test_recipe_library_uses_one_digest_bound_index_and_caches_it() -> None:
         "/repos/CarstVaartjes/vonk-forge-recipes/commits/main",
         "/repos/CarstVaartjes/vonk-forge-recipes/contents/catalog-index.json",
     ]
+
+
+def test_recipe_library_initial_transient_failure_remains_unavailable() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503)
+
+    client = RecipeLibraryClient(transport=httpx.MockTransport(handler))
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        client.list()
+
+    assert exc_info.value.code == "recipe_library.unavailable"
+    assert calls == 1
+
+
+def test_recipe_library_uses_validated_stale_snapshot_during_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    commit = "a" * 40
+    clock = [0.0]
+    unavailable = False
+    calls: list[str] = []
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if unavailable:
+            return httpx.Response(503)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler),
+        cache_ttl_seconds=5.0,
+        stale_retry_interval_seconds=10.0,
+    )
+    current = client.list()
+    unavailable = True
+    clock[0] = 6.0
+
+    stale = client.list()
+
+    assert stale is current
+    assert stale.commit == commit
+    assert stale.items[0].library_commit == commit
+    assert stale.items[0].content_sha256 == recipe_content_sha256(document)
+    assert len(calls) == 3
+
+
+def test_recipe_library_suppresses_retries_until_stale_retry_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clock = [0.0]
+    unavailable = False
+    calls = 0
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if unavailable:
+            return httpx.Response(503)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "a" * 40})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler),
+        cache_ttl_seconds=5.0,
+        stale_retry_interval_seconds=10.0,
+    )
+    current = client.list()
+    unavailable = True
+    clock[0] = 6.0
+    assert client.list() is current
+    assert calls == 3
+
+    clock[0] = 15.999
+    assert client.list() is current
+    assert calls == 3
+
+    clock[0] = 16.0
+    assert client.list() is current
+    assert calls == 4
+
+
+def test_recipe_library_recovers_to_new_commit_and_invalidates_hydration_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    new_document = copy.deepcopy(old_document)
+    new_document["metadata"]["title"] = "Synthetic Tiny OpenAI refreshed"
+    clock = [0.0]
+    state = "old"
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state == "unavailable":
+            return httpx.Response(503)
+        commit = "a" * 40 if state == "old" else "b" * 40
+        document = old_document if state == "old" else new_document
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler),
+        cache_ttl_seconds=5.0,
+        stale_retry_interval_seconds=10.0,
+    )
+    old = client.list()
+    client._hydrated_items[(old.commit, old.items[0].uri)] = old.items[0]
+    client._hydrated_bundles["a" * 64] = b"old bundle"
+
+    state = "unavailable"
+    clock[0] = 6.0
+    assert client.list() is old
+
+    state = "new"
+    clock[0] = 16.0
+    recovered = client.list()
+
+    assert recovered is not old
+    assert recovered.commit == "b" * 40
+    assert recovered.items[0].library_commit == "b" * 40
+    assert recovered.items[0].content_sha256 == recipe_content_sha256(new_document)
+    assert client._hydrated_items == {}
+    assert client._hydrated_bundles == {}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-RateLimit-Remaining": "0"},
+        {"Retry-After": "60"},
+    ],
+)
+def test_recipe_library_uses_stale_snapshot_for_header_proven_rate_limit_403(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clock = [0.0]
+    rate_limited = False
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if rate_limited:
+            return httpx.Response(403, headers=headers)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "a" * 40})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler), cache_ttl_seconds=5.0
+    )
+    current = client.list()
+    rate_limited = True
+    clock[0] = 6.0
+
+    assert client.list() is current
+
+
+def test_recipe_library_fails_closed_when_validated_snapshot_exceeds_max_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clock = [0.0]
+    unavailable = False
+    calls = 0
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if unavailable:
+            return httpx.Response(503)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "a" * 40})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler),
+        cache_ttl_seconds=5.0,
+        stale_retry_interval_seconds=300.0,
+        max_stale_seconds=20.0,
+    )
+    current = client.list()
+    unavailable = True
+    clock[0] = 6.0
+    assert client.list() is current
+    clock[0] = 19.999
+    assert client.list() is current
+    assert calls == 3
+
+    clock[0] = 20.0
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        client.list()
+
+    assert exc_info.value.code == "recipe_library.unavailable"
+    assert calls == 4
+
+
+def test_recipe_library_clamps_max_stale_window() -> None:
+    transport = httpx.MockTransport(lambda _request: httpx.Response(503))
+
+    default = RecipeLibraryClient(transport=transport)
+    below_ttl = RecipeLibraryClient(
+        transport=transport, cache_ttl_seconds=60.0, max_stale_seconds=-1.0
+    )
+    above_limit = RecipeLibraryClient(
+        transport=transport, max_stale_seconds=30 * 24 * 60 * 60
+    )
+
+    assert default._max_stale_seconds == 24 * 60 * 60
+    assert below_ttl._max_stale_seconds == 60.0
+    assert above_limit._max_stale_seconds == 7 * 24 * 60 * 60
+
+
+def test_recipe_library_clamps_oversize_ttl_and_expires_at_hard_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clock = [0.0]
+    unavailable = False
+    calls = 0
+    hard_limit = 7 * 24 * 60 * 60
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if unavailable:
+            return httpx.Response(503)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "a" * 40})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler),
+        cache_ttl_seconds=30 * 24 * 60 * 60,
+        max_stale_seconds=30 * 24 * 60 * 60,
+    )
+    current = client.list()
+    unavailable = True
+
+    assert client._cache_ttl_seconds == hard_limit
+    assert client._max_stale_seconds == hard_limit
+    clock[0] = hard_limit - 0.001
+    assert client.list() is current
+    assert calls == 2
+
+    clock[0] = hard_limit
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        client.list()
+
+    assert exc_info.value.code == "recipe_library.unavailable"
+    assert calls == 3
+
+
+def test_recipe_library_late_old_hydration_cannot_poison_new_same_uri_item() -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    commit = "a" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": commit})
+        return httpx.Response(
+            200, json=_contents_document_payload(_recipe_index(document))
+        )
+
+    client = RecipeLibraryClient(transport=httpx.MockTransport(handler))
+    listed = client.list().items[0]
+    bundle = b"validated source bundle"
+    bundle_digest = hashlib.sha256(bundle).hexdigest()
+    context = RecipeLibrarySourceContext("context", bundle_digest, len(bundle), ())
+    old_item = replace(listed, source_context=context)
+    new_item = replace(old_item, library_commit="b" * 40)
+    client._cached_snapshot = RecipeLibrarySnapshot("b" * 40, (new_item,))
+    client._hydrated_bundles[bundle_digest] = bundle
+
+    # The old fetch reached hydration only after the current snapshot advanced.
+    late_old = client._hydrate_source_bundle(old_item)
+    current = client._hydrate_source_bundle(new_item)
+
+    assert late_old.library_commit == "a" * 40
+    assert current.library_commit == "b" * 40
+    assert current.source_bundle == bundle
+    assert current is not late_old
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        ("rejected", "recipe_library.request_rejected"),
+        ("forbidden", "recipe_library.request_rejected"),
+        ("redirect", "recipe_library.redirect_forbidden"),
+        ("invalid", "recipe_library.response_invalid"),
+        ("digest", "recipe_library.digest_mismatch"),
+    ],
+)
+def test_recipe_library_does_not_mask_non_transient_refresh_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    expected_code: str,
+) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clock = [0.0]
+    refreshing = False
+    monkeypatch.setattr("vonk_control.recipe_library.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not refreshing:
+            if request.url.path.endswith("/commits/main"):
+                return httpx.Response(200, json={"sha": "a" * 40})
+            return httpx.Response(
+                200, json=_contents_document_payload(_recipe_index(document))
+            )
+        if failure in {"rejected", "forbidden"}:
+            return httpx.Response(401 if failure == "rejected" else 403)
+        if failure == "redirect":
+            return httpx.Response(302)
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "b" * 40})
+        if failure == "invalid":
+            return httpx.Response(200, content=b"not JSON")
+        index = _recipe_index(document)
+        index["recipes"][0]["content_sha256"] = "0" * 64
+        return httpx.Response(200, json=_contents_document_payload(index))
+
+    client = RecipeLibraryClient(
+        transport=httpx.MockTransport(handler), cache_ttl_seconds=5.0
+    )
+    client.list()
+    refreshing = True
+    clock[0] = 6.0
+
+    with pytest.raises(RecipeLibraryError) as exc_info:
+        client.list()
+
+    assert exc_info.value.code == expected_code
 
 
 @pytest.mark.parametrize(
