@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 
 from .agent_jobs import AgentJobService
+from .agent_upgrade_status import RECOVERABLE_AGENT_UPGRADE_REASONS
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
 _PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
@@ -32,20 +33,10 @@ _HELPER_BRIDGE_RUNTIME_MAX = timedelta(seconds=180)
 _HELPER_STOP_TIMEOUT = timedelta(seconds=15)
 _HELPER_BRIDGE_DISPATCH_MARGIN = timedelta(seconds=45)
 _HELPER_BRIDGE_RECOVERY_BACKOFF = (
-    _HELPER_BRIDGE_RUNTIME_MAX
-    + _HELPER_STOP_TIMEOUT
-    + _HELPER_BRIDGE_DISPATCH_MARGIN
+    _HELPER_BRIDGE_RUNTIME_MAX + _HELPER_STOP_TIMEOUT + _HELPER_BRIDGE_DISPATCH_MARGIN
 )
 _TARGET_PROTOCOL_VERSION = 3
-_RECOVERABLE_HELPER_BRIDGE_FAILURES = frozenset(
-    {
-        "agent upgrade request is invalid",
-        "agent upgrade helper is unavailable",
-        "agent upgrade helper rejected the request",
-        "agent upgrade helper rejected the request: operation_failed",
-        "agent upgrade did not restart the service",
-    }
-)
+_RECOVERABLE_HELPER_BRIDGE_FAILURES = RECOVERABLE_AGENT_UPGRADE_REASONS
 _RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
     "agent upgrade did not restart the service"
 }
@@ -438,20 +429,14 @@ class AgentUpgradeService:
                     operation.retry_disposition = "retry"
                     operation.retry_disposition_attempt = operation.current_attempt
                     operation.updated_at = now
-                    result = attempt.result
-                    reason = (
-                        result.get("reason") if isinstance(result, Mapping) else None
-                    )
                     # Operator resume is a new dispatch decision. For an
-                    # ambiguous helper failure it must establish a fresh full
-                    # safety fence, even if an older attempt deadline already
-                    # elapsed. This prevents the resumed request from
-                    # overlapping an orphaned dpkg or maintainer script.
-                    not_before = (
-                        now + _HELPER_BRIDGE_RECOVERY_BACKOFF
-                        if reason in _RECOVERABLE_HELPER_BRIDGE_FAILURES
-                        else now
-                    )
+                    # attempted install it must establish a fresh full safety
+                    # fence regardless of the stored helper result. Old agents
+                    # can omit or reshape that result, and even a success
+                    # acknowledgement is not proof that the new runtime took
+                    # over. This prevents the resumed request from overlapping
+                    # an orphaned dpkg or maintainer script.
+                    not_before = now + _HELPER_BRIDGE_RECOVERY_BACKOFF
                     attempt.lease_deadline = max(
                         _aware(attempt.lease_deadline), _aware(not_before)
                     )

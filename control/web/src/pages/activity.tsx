@@ -207,7 +207,7 @@ function CopyableValue({label, value}: {label: string; value?: string | null}) {
     <dt>{label}</dt>
     <dd className="activity-copy-value"><code>{value}</code><button type="button" className="activity-copy" aria-describedby={statusId} onClick={() => void copy()} aria-label={`Copy ${label.toLowerCase()}`}>{copyState === "copied" ? "Copied" : "Copy"}</button></dd>
     {copyState === "failed" && <dd className="activity-copy-error">Clipboard access is unavailable. Select the value to copy it.</dd>}
-    <dd className="sr-only" id={statusId} role="status" aria-live="polite">{copyState === "copied" ? `${label} copied` : copyState === "failed" ? `Could not copy ${label.toLocaleLowerCase()}` : ""}</dd>
+    <dd className="sr-only" id={statusId} aria-live="polite">{copyState === "copied" ? `${label} copied` : copyState === "failed" ? `Could not copy ${label.toLocaleLowerCase()}` : ""}</dd>
   </div>;
 }
 
@@ -251,6 +251,13 @@ function TargetSummary({compact = false, event}: {compact?: boolean; event: Acti
 }
 
 const LIVE_JOB_STATES = new Set(["compensating", "pending", "planned", "queued", "running", "starting", "stopping"]);
+
+function jobUpdatesAutomatically(detail: JobDetail): boolean {
+  return LIVE_JOB_STATES.has(detail.state) || (
+    detail.state === "waiting-for-operator"
+    && (detail.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false)
+  );
+}
 
 function friendlyTarget(target: string, names: Map<string, string>): string {
   return names.get(target) || unavailableTargetLabel(target);
@@ -320,7 +327,7 @@ function JobProgressDetails({
   }, [api, event.request_id, onUpdate]);
 
   useEffect(() => {
-    if (!open || !detail || !LIVE_JOB_STATES.has(detail.state)) return undefined;
+    if (!open || !detail || !jobUpdatesAutomatically(detail)) return undefined;
     const interval = window.setInterval(() => void loadDetail(true), 5_000);
     return () => window.clearInterval(interval);
   }, [detail, loadDetail, open]);
@@ -369,7 +376,7 @@ function JobProgressDetails({
           <div><span>Current state</span><strong>{titleCase(detail.state)}</strong></div>
           <button type="button" className="button secondary" disabled={loading || resuming} onClick={() => void loadDetail()}>{loading ? "Refreshing…" : "Refresh details"}</button>
         </header>
-        {LIVE_JOB_STATES.has(detail.state) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>Updates automatically while this operation is active.</p>}
+        {jobUpdatesAutomatically(detail) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>Updates automatically while this operation is active.</p>}
         {detail.status_reason && <div className="activity-job-reason"><span>State reason</span><strong>{detail.status_reason}</strong></div>}
         <section className="activity-job-progress" aria-label="Operation progress">
           <div><span>Completed</span><strong>{detail.progress.completed}</strong></div>

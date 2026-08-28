@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
@@ -925,7 +925,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                     "build_digest": old_build,
                 },
                 "raw_reason": "agent upgrade request is invalid",
-                "retry_not_before": now.isoformat(),
+                "retry_not_before": None,
                 "retry_queued": False,
             }
         ],
@@ -959,6 +959,73 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     assert projected.agent_upgrade_diagnostics is not None
     assert projected.agent_upgrade_diagnostics.targets[0].raw_reason == (
         "agent upgrade request is invalid"
+    )
+
+    with sessions.begin() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert operation is not None
+        operation.retry_disposition = "retry"
+        operation.retry_disposition_attempt = operation.current_attempt
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+        )
+        assert attempt is not None
+        attempt.lease_deadline = now + timedelta(seconds=240)
+
+    queued = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
+    assert queued is not None
+    assert queued["targets"][0]["retry_queued"] is True
+    assert (
+        queued["targets"][0]["retry_not_before"]
+        == (now + timedelta(seconds=240)).isoformat()
+    )
+    assert queued["next_action"] is not None
+    assert "controller-managed retry" in queued["next_action"]
+
+    with sessions.begin() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        node = session.get(AgentNode, NODE_ID)
+        assert operation is not None and node is not None
+        # Matching the two headline digests is deliberately weaker than the
+        # controller's accepted success gate.
+        node.binary_digest = expected_binary
+        node.build_digest = expected_build
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+
+    matching_digests = services.job_operations(
+        job.id, None, 20
+    ).agent_upgrade_diagnostics
+    assert matching_digests is not None
+    assert matching_digests["targets"][0]["target_proven"] is False
+    assert matching_digests["targets"][0]["retry_not_before"] is None
+
+    with sessions.begin() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+        )
+        assert operation is not None and attempt is not None
+        attempt.result = {"reason": "agent upgrade helper is unavailable"}
+
+    specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
+    assert specific is not None
+    assert specific["legacy_generic_ambiguous"] is False
+    assert specific["next_action"] is not None
+    assert (
+        "Resume queues the retry behind a new safety delay" in specific["next_action"]
     )
 
 

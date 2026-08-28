@@ -19,6 +19,7 @@ from vonk_agent_protocol import canonical_message
 
 from .agent_upgrade_status import (
     LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
 )
@@ -411,23 +412,30 @@ def _agent_upgrade_diagnostics(
     operations = list(
         session.scalars(
             select(AgentOperation)
-            .where(AgentOperation.parent_job_id == job_id)
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                AgentOperation.node_id.in_(job.targets),
+            )
             .order_by(AgentOperation.created_at, AgentOperation.id)
+            .limit(64)
         )
     )
     operations_by_node = {operation.node_id: operation for operation in operations}
-    operations_by_id = {operation.id: operation for operation in operations}
     attempts = {
         attempt.operation_id: attempt
         for attempt in session.scalars(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id.in_(
-                    [operation.id for operation in operations]
-                )
+            select(AgentOperationAttempt)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
             )
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                AgentOperation.node_id.in_(job.targets),
+                AgentOperationAttempt.attempt == AgentOperation.current_attempt,
+            )
+            .limit(64)
         )
-        if attempt.operation_id in operations_by_id
-        and operations_by_id[attempt.operation_id].current_attempt == attempt.attempt
     }
     nodes = {
         node.node_id: node
@@ -453,11 +461,11 @@ def _agent_upgrade_diagnostics(
             if isinstance(candidate, str):
                 raw_reason = redact_text(candidate)[:1024]
         node = nodes.get(node_id)
-        target_proven = bool(
-            node is not None
-            and node.binary_digest == expected_binary
-            and node.build_digest == expected_build
-        )
+        # The controller only transitions an upgrade operation to succeeded
+        # after _contact_proves_target accepts authenticated contact plus the
+        # complete runtime and result evidence. Matching digests alone is not
+        # the success gate and must never be projected as proof here.
+        target_proven = bool(operation is not None and operation.state == "succeeded")
         unresolved_generic = bool(
             not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
         )
@@ -467,9 +475,11 @@ def _agent_upgrade_diagnostics(
             and operation.retry_disposition == "retry"
             and operation.retry_disposition_attempt == operation.current_attempt
         )
-        retry_queued_any = retry_queued_any or (unresolved_generic and retry_queued)
+        retry_queued_any = retry_queued_any or retry_queued
         retry_not_before = (
-            None if attempt is None else _aware(attempt.lease_deadline).isoformat()
+            _aware(attempt.lease_deadline).isoformat()
+            if attempt is not None and retry_queued
+            else None
         )
         if unresolved_generic and operator_summary is None and raw_reason is not None:
             operator_summary = operator_agent_upgrade_reason(
@@ -510,7 +520,15 @@ def _agent_upgrade_diagnostics(
         "legacy_generic_ambiguous": legacy_generic_ambiguous,
         "next_action": (
             agent_upgrade_next_action(retry_queued=retry_queued_any)
-            if legacy_generic_ambiguous
+            if any(
+                not target["target_proven"]
+                and target["attempts"]
+                and (
+                    target["state"] == "waiting-for-operator"
+                    or target["raw_reason"] in RECOVERABLE_AGENT_UPGRADE_REASONS
+                )
+                for target in targets
+            )
             else None
         ),
         "operator_summary": operator_summary,

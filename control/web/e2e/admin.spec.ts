@@ -9,7 +9,17 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
 }
 
 async function expectNoDocumentOverflow(page: Page) {
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    const viewport = document.documentElement.clientWidth;
+    if (document.documentElement.scrollWidth <= viewport) return [];
+    return [...document.querySelectorAll("body *")]
+      .map(element => ({
+        selector: `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).trim().replace(/\s+/g, ".")}` : ""}`,
+        right: Math.round(element.getBoundingClientRect().right),
+      }))
+      .filter(element => element.right > viewport)
+      .slice(0, 8);
+  })).toEqual([]);
 }
 
 async function attachScreenshot(page: Page, testInfo: TestInfo, name: string) {
@@ -65,25 +75,70 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
 
 test("Activity combines friendly audit history and current operations", async ({page}) => {
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
+  const targetId = `spk_${"1".repeat(32)}`;
+  const expectedBinary = "b".repeat(64);
+  const expectedBuild = `sha256:${"c".repeat(64)}`;
+  let detailRequests = 0;
   await page.route("**/api/v1/audit", route => route.fulfill({json: {events: [{
     request_id: requestId,
     actor: "admin",
     action: "recipe.start",
     authority_revision: "a".repeat(64),
     occurred_at: "2026-08-24T08:55:00Z",
-    targets: [`spk_${"1".repeat(32)}`],
+    targets: [targetId],
   }]}}));
   await page.route("**/api/v1/jobs?*", route => route.fulfill({json: {
-    jobs: [{id: "operation-install", kind: "recipe-install", state: "running", created_at: "2026-08-24T08:58:00Z"}],
+    jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-24T08:58:00Z"}],
     next_cursor: null,
     total: 1,
   }}));
+  await page.route("**/api/v1/jobs/upgrade-1?*", route => {
+    detailRequests += 1;
+    return route.fulfill({json: {
+      id: "upgrade-1",
+      kind: "agent-upgrade",
+      state: "waiting-for-operator",
+      authority_revision: "a".repeat(64),
+      targets: [targetId],
+      target_next_cursor: null,
+      target_total: 1,
+      current_attempt: 1,
+      status_reason: "agent upgrade helper is unavailable",
+      reconciliation_id: null,
+      operations: [{id: "upgrade-step", graph_operation_id: null, node_id: targetId, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 3, progress: null, updated_at: "2026-08-24T08:59:30Z"}],
+      operation_next_cursor: null,
+      operation_total: 1,
+      progress: {completed: 0, failed: 0, running: 0, total: 1},
+      agent_upgrade_diagnostics: {
+        expected_identity: {version: "0.1.0~dev.350+g15f9faf7c5bf", binary_digest: expectedBinary, build_digest: expectedBuild},
+        targets: [{
+          node_id: targetId,
+          state: "waiting-for-operator",
+          attempts: 3,
+          target_proven: false,
+          observed_identity: {version: "0.1.0~dev.335+glegacy", binary_digest: "d".repeat(64), build_digest: `sha256:${"e".repeat(64)}`},
+          raw_reason: "agent upgrade helper is unavailable",
+          retry_not_before: "2026-08-24T09:03:30Z",
+          retry_queued: true,
+        }],
+        legacy_generic_ambiguous: false,
+        next_action: "Wait for the controller-managed retry behind its safety delay; it will not dispatch before the reported retry time. Do not manually resume the rollout again.",
+        operator_summary: null,
+      },
+    }});
+  });
 
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", {name: "Activity"})).toBeVisible();
   await expect(page.getByRole("heading", {name: "Started recipe"})).toBeVisible();
-  await expect(page.getByRole("heading", {name: "Recipe Install · Running"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Agent Upgrade · Waiting for operator"})).toBeVisible();
+  await page.getByText("View operation progress").click();
+  await expect(page.getByText("Retry queued behind safety delay")).toBeVisible();
+  await expect(page.getByText("Controller retry not before")).toBeVisible();
+  await expect(page.getByText("Updates automatically while this operation is active.")).toBeVisible();
+  await expect(page.getByRole("button", {name: "Queue retry after inspection"})).toHaveCount(0);
+  await expect.poll(() => detailRequests, {timeout: 6_500}).toBeGreaterThanOrEqual(2);
   await expect(page.getByText(requestId)).toBeHidden();
   await page.getByRole("button", {name: /admin/i}).click();
   await expect(page.getByRole("group", {name: "Operator actions"})).toBeVisible();

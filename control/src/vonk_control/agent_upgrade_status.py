@@ -12,6 +12,14 @@ LEGACY_GENERIC_AGENT_UPGRADE_REASONS = frozenset(
     }
 )
 
+RECOVERABLE_AGENT_UPGRADE_REASONS = frozenset(
+    {
+        *LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+        "agent upgrade helper is unavailable",
+        "agent upgrade did not restart the service",
+    }
+)
+
 
 def agent_upgrade_next_action(*, retry_queued: bool) -> str:
     if retry_queued:
