@@ -438,7 +438,23 @@ class AgentUpgradeService:
                     operation.retry_disposition = "retry"
                     operation.retry_disposition_attempt = operation.current_attempt
                     operation.updated_at = now
-                    attempt.lease_deadline = now
+                    result = attempt.result
+                    reason = (
+                        result.get("reason") if isinstance(result, Mapping) else None
+                    )
+                    # Operator resume is a new dispatch decision. For an
+                    # ambiguous helper failure it must establish a fresh full
+                    # safety fence, even if an older attempt deadline already
+                    # elapsed. This prevents the resumed request from
+                    # overlapping an orphaned dpkg or maintainer script.
+                    not_before = (
+                        now + _HELPER_BRIDGE_RECOVERY_BACKOFF
+                        if reason in _RECOVERABLE_HELPER_BRIDGE_FAILURES
+                        else now
+                    )
+                    attempt.lease_deadline = max(
+                        _aware(attempt.lease_deadline), _aware(not_before)
+                    )
             elif not active:
                 if len(stored_operations) == len(order) and all(
                     operation.state == "succeeded" for operation in stored_operations
@@ -540,11 +556,12 @@ class AgentUpgradeService:
             attempt.state = "waiting-for-operator"
         operation.retry_disposition = "retry" if retry else None
         operation.retry_disposition_attempt = attempt.attempt if retry else None
-        if retry:
+        if preserve_failed_attempt:
             # The package preinst asks PID 1 to restart the old sandboxed helper
-            # only after the failed dpkg process exits. Persist the full bridge
-            # runtime, helper stop timeout, and dispatch margin so an immediate
-            # agent poll cannot race that asynchronous restart.
+            # only after the failed dpkg process exits. Every ambiguous helper
+            # failure persists the full bridge runtime, helper stop timeout, and
+            # dispatch margin. The automatic retry and any later operator resume
+            # must both respect this durable not-before fence.
             # AgentOperationAttempt is already the durable owner of attempt
             # timing, including after controller restarts.
             attempt.lease_deadline = now + _HELPER_BRIDGE_RECOVERY_BACKOFF

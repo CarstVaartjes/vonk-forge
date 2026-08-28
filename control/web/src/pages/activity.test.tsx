@@ -244,6 +244,74 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
 
+test("explains an unresolved legacy agent upgrade without guessing its failure stage", async () => {
+  const expectedBinary = "b".repeat(64);
+  const expectedBuild = `sha256:${"c".repeat(64)}`;
+  const oldBinary = "d".repeat(64);
+  const oldBuild = `sha256:${"e".repeat(64)}`;
+  const nextAction = "Keep the rollout paused and inspect the Spark package-helper and dpkg recovery state before resuming. When ready, Resume queues the retry behind a new safety delay; it does not dispatch immediately. Do not advance to another Spark until this Spark reports the exact target identity.";
+  const loadJobs = vi.fn().mockResolvedValue({
+    jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-15T11:58:00Z"}],
+    next_cursor: null,
+    total: 1,
+  });
+  const loadJob = vi.fn().mockResolvedValue({
+    id: "upgrade-1",
+    kind: "agent-upgrade",
+    state: "waiting-for-operator",
+    authority_revision: "a".repeat(64),
+    targets: [TARGET_ID],
+    target_next_cursor: null,
+    target_total: 1,
+    current_attempt: 1,
+    status_reason: "The exact target identity was not proven.",
+    reconciliation_id: null,
+    operations: [{id: "upgrade-step", graph_operation_id: null, node_id: TARGET_ID, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 2, progress: null, updated_at: "2026-08-15T11:59:30Z"}],
+    operation_next_cursor: null,
+    operation_total: 1,
+    progress: {completed: 0, failed: 0, running: 0, total: 1},
+    agent_upgrade_diagnostics: {
+      expected_identity: {version: "0.1.0~dev.350+g15f9faf7c5bf", binary_digest: expectedBinary, build_digest: expectedBuild},
+      targets: [{
+        node_id: TARGET_ID,
+        state: "waiting-for-operator",
+        attempts: 2,
+        target_proven: false,
+        observed_identity: {version: "0.1.0", binary_digest: oldBinary, build_digest: oldBuild},
+        raw_reason: "agent upgrade request is invalid",
+        retry_not_before: "2026-08-15T12:03:30Z",
+        retry_queued: false,
+      }],
+      legacy_generic_ambiguous: true,
+      next_action: nextAction,
+      operator_summary: "The exact target identity was not proven.",
+    },
+  });
+  const user = userEvent.setup();
+  render(<ActivityPage api={api(undefined, loadJobs, loadJob)} now={NOW}/>);
+
+  await screen.findByRole("heading", {name: "Agent Upgrade · Waiting for operator"});
+  await user.click(screen.getByText("View operation progress"));
+
+  const diagnosis = await screen.findByRole("region", {name: "Agent upgrade diagnosis"});
+  expect(diagnosis).toHaveTextContent("0.1.0~dev.350+g15f9faf7c5bf");
+  expect(diagnosis).toHaveTextContent("2 install attempts · exact target not reported");
+  expect(diagnosis).toHaveTextContent("Observed version0.1.0");
+  expect(diagnosis).toHaveTextContent("Legacy helper response is ambiguous");
+  expect(diagnosis).toHaveTextContent("does not prove that authorization or download failed");
+  expect(within(diagnosis).getByText("Retry not before")).toBeVisible();
+  expect(diagnosis.querySelector("time")).toHaveAttribute("datetime", "2026-08-15T12:03:30Z");
+  expect(screen.getByText(nextAction)).toBeVisible();
+  const queueRetry = screen.getByRole("button", {name: "Queue retry after inspection"});
+  expect(queueRetry).toBeVisible();
+  expect(screen.queryByText("Current attempt")).not.toBeInTheDocument();
+  expect(screen.getByText("agent upgrade request is invalid")).not.toBeVisible();
+  await user.click(within(diagnosis).getByText("Raw helper evidence"));
+  expect(screen.getByText("agent upgrade request is invalid")).toBeVisible();
+  await user.click(queueRetry);
+  expect(await screen.findByText("Retry queued. It will not dispatch before the reported retry time.")).toBeVisible();
+});
+
 test("shows a retryable operation-detail failure without offering resume", async () => {
   const loadJob = vi.fn().mockRejectedValueOnce(new Error("operation projection unavailable")).mockResolvedValueOnce({
     id: "operation-1", kind: "recipe-install", state: "failed", authority_revision: "a".repeat(64), targets: [], target_next_cursor: null, target_total: 0, current_attempt: 1, status_reason: "worker exited", reconciliation_id: null, operations: [], operation_next_cursor: null, operation_total: 0, progress: {completed: 0, failed: 0, running: 0, total: 0},

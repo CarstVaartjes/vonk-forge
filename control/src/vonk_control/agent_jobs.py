@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
 from .logging import redact_text
 from .models import (
@@ -1648,6 +1649,30 @@ class AgentJobService:
                 if not isinstance(reason, str):
                     reason = attempt.result.get("error_code")
                 if isinstance(reason, str):
+                    if job.kind == "agent-upgrade":
+                        package = job.payload.get("package")
+                        node = session.get(AgentNode, operation.node_id)
+                        if isinstance(package, Mapping):
+                            reason = operator_agent_upgrade_reason(
+                                node_id=operation.node_id,
+                                attempt_count=operation.current_attempt,
+                                package=package,
+                                observed_semantic_version=(
+                                    None if node is None else node.semantic_version
+                                ),
+                                observed_binary_digest=(
+                                    None if node is None else node.binary_digest
+                                ),
+                                observed_build_digest=(
+                                    None if node is None else node.build_digest
+                                ),
+                                raw_reason=reason,
+                                retry_queued=(
+                                    operation.retry_disposition == _RETRY_DISPOSITION
+                                    and operation.retry_disposition_attempt
+                                    == operation.current_attempt
+                                ),
+                            )
                     job.status_reason = redact_text(reason)[:1024]
                     return
         job.status_reason = None

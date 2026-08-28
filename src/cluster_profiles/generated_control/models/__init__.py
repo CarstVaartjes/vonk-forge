@@ -3,9 +3,12 @@
 from .agent_summary import AgentSummary
 from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
 from .agent_upgrade_apply_request_strategy import AgentUpgradeApplyRequestStrategy
+from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
+from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
 from .agent_upgrade_package_request import AgentUpgradePackageRequest
 from .agent_upgrade_preview_request import AgentUpgradePreviewRequest
 from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestStrategy
+from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
 from .agents_response import AgentsResponse
 from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
 from .apply_request import ApplyRequest
@@ -312,9 +315,12 @@ __all__ = (
     "AgentSummary",
     "AgentUpgradeApplyRequest",
     "AgentUpgradeApplyRequestStrategy",
+    "AgentUpgradeDiagnosticsResponse",
+    "AgentUpgradeIdentityResponse",
     "AgentUpgradePackageRequest",
     "AgentUpgradePreviewRequest",
     "AgentUpgradePreviewRequestStrategy",
+    "AgentUpgradeTargetDiagnosticsResponse",
     "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
     "ApplyRequest",
     "ArtifactFileDeclaration",

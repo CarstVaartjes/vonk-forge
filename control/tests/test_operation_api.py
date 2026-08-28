@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
+from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -24,6 +25,7 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
+    AgentOperationAttempt,
     AgentPresence,
     Base,
     Job,
@@ -114,9 +116,7 @@ class ProjectedFleet:
             points=[],
         )
 
-    def update_display_name(
-        self, node_id: str, display_name: str
-    ) -> FleetNodeIdentity:
+    def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
         self.profile_calls.append((node_id, display_name))
         if node_id != NODE_ID:
             raise KeyError(node_id)
@@ -396,6 +396,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "agent_upgrade_diagnostics": None,
         "authority_revision": COMMIT,
         "current_attempt": 1,
         "id": "11111111-1111-4111-8111-111111111111",
@@ -807,6 +808,158 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
             break
 
     assert len(found) == len(set(found)) == 23
+
+
+def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 28, 21, 23, tzinfo=UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'upgrade-diagnostics.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    expected_binary = "b" * 64
+    expected_build = "sha256:" + "c" * 64
+    old_binary = "d" * 64
+    old_build = "sha256:" + "e" * 64
+    package = {
+        "architecture": "linux-arm64",
+        "package_bytes": 5_539_780,
+        "package_sha256": "f" * 64,
+        "package_signature": "1" * 128,
+        "package_url": "https://install.vonkforge.ai/example.deb",
+        "package_version": "0.1.0~dev.350+g15f9faf7c5bf",
+        "schema_version": 1,
+        "target_binary_digest": expected_binary,
+        "target_build_digest": expected_build,
+    }
+    job = Job(
+        request_id="33333333-3333-4333-8333-333333333333",
+        kind="agent-upgrade",
+        state="waiting-for-operator",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_ID],
+        payload_digest="a" * 64,
+        payload={
+            "node_order": [NODE_ID],
+            "package": package,
+            "strategy": "one-at-a-time",
+        },
+        current_attempt=1,
+        status_reason="operator-facing explanation",
+        created_at=now,
+        updated_at=now,
+    )
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_ID,
+                state="active",
+                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+                semantic_version="0.1.0",
+                binary_digest=old_binary,
+                build_digest=old_build,
+            )
+        )
+        session.add(
+            AgentCertificate(
+                serial="serial-upgrade",
+                node_id=NODE_ID,
+                not_before=now - timedelta(days=1),
+                not_after=now + timedelta(days=1),
+                fingerprint="fingerprint-upgrade",
+            )
+        )
+        session.add(job)
+        session.flush()
+        operation = AgentOperation(
+            parent_job_id=job.id,
+            node_id=NODE_ID,
+            kind="agent.upgrade.v1",
+            payload_digest="f" * 64,
+            payload=package,
+            authority_revision=COMMIT,
+            state="waiting-for-operator",
+            current_attempt=2,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(operation)
+        session.flush()
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=2,
+                fence="44444444-4444-4444-8444-444444444444",
+                lease_deadline=now,
+                agent_certificate_serial="serial-upgrade",
+                state="failed",
+                result={"reason": "agent upgrade request is invalid"},
+            )
+        )
+    services = operation_api.durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+
+    page = services.job_operations(job.id, None, 20)
+    diagnostics = page.agent_upgrade_diagnostics
+
+    assert diagnostics == {
+        "expected_identity": {
+            "version": "0.1.0~dev.350+g15f9faf7c5bf",
+            "binary_digest": expected_binary,
+            "build_digest": expected_build,
+        },
+        "targets": [
+            {
+                "node_id": NODE_ID,
+                "state": "waiting-for-operator",
+                "attempts": 2,
+                "target_proven": False,
+                "observed_identity": {
+                    "version": "0.1.0",
+                    "binary_digest": old_binary,
+                    "build_digest": old_build,
+                },
+                "raw_reason": "agent upgrade request is invalid",
+                "retry_not_before": now.isoformat(),
+                "retry_queued": False,
+            }
+        ],
+        "legacy_generic_ambiguous": True,
+        "next_action": (
+            "Keep the rollout paused and inspect the Spark package-helper and dpkg "
+            "recovery state before resuming. When ready, Resume queues the retry "
+            "behind a new safety delay; it does not dispatch immediately. Do not "
+            "advance to another Spark until this Spark reports the exact target "
+            "identity."
+        ),
+        "operator_summary": operator_agent_upgrade_reason(
+            node_id=NODE_ID,
+            attempt_count=2,
+            package=package,
+            observed_semantic_version="0.1.0",
+            observed_binary_digest=old_binary,
+            observed_build_digest=old_build,
+            raw_reason="agent upgrade request is invalid",
+            retry_queued=False,
+        ),
+    }
+    projected = operation_api.job_response(
+        job,
+        page,
+        target_cursor=0,
+        limit=20,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+    assert projected.status_reason == diagnostics["operator_summary"]
+    assert projected.agent_upgrade_diagnostics is not None
+    assert projected.agent_upgrade_diagnostics.targets[0].raw_reason == (
+        "agent upgrade request is invalid"
+    )
 
 
 def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
