@@ -705,6 +705,48 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
         assert session.get(Job, job.id).state == "queued"
 
 
+def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'upgrade-resume.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    job = Job(
+        request_id="33333333-3333-4333-8333-333333333333",
+        kind="agent-upgrade",
+        state="waiting-for-operator",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_ID],
+        payload_digest="e" * 64,
+        payload={"immutable": "upgrade-plan"},
+        current_attempt=0,
+        created_at=now,
+        updated_at=now,
+    )
+    with sessions.begin() as session:
+        session.add(job)
+    resumed: list[str] = []
+    services = operation_api.durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        resume_agent_upgrade=resumed.append,
+    )
+
+    services.resume_job(job.id)
+
+    assert resumed == [job.id]
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        assert stored.state == "waiting-for-operator"
+        assert stored.payload == {"immutable": "upgrade-plan"}
+        assert stored.current_attempt == 0
+
+
 def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) -> None:
     now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     engine = create_engine(f"sqlite:///{tmp_path / 'operation-pages.sqlite'}")

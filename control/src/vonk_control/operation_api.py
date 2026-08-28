@@ -702,6 +702,7 @@ def durable_operation_services(
     clock: Callable[[], datetime],
     cursors: CursorCodec,
     stale_after_seconds: int = 150,
+    resume_agent_upgrade: Callable[[str], None] | None = None,
 ) -> OperationApiServices:
     """Build bounded projections over database state and the active route bundle."""
 
@@ -712,11 +713,25 @@ def durable_operation_services(
         stale_after_seconds=stale_after_seconds,
         cursors=cursors,
     )
+
+    def resume_job(job_id: str) -> None:
+        with sessions() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise KeyError(job_id)
+            kind = job.kind
+        if kind == "agent-upgrade":
+            if resume_agent_upgrade is None:
+                raise ValueError("agent upgrade resume is unavailable")
+            resume_agent_upgrade(job_id)
+            return
+        projection.resume_job(job_id)
+
     return OperationApiServices(
         endpoint=projection.endpoint,
         agents=projection.agents,
         job_operations=projection.job_operations,
-        resume_job=projection.resume_job,
+        resume_job=resume_job,
     )
 
 

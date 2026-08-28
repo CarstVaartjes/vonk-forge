@@ -247,6 +247,26 @@ def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
     assert jobs.get(retry.job_id).state == "failed"
 
 
+def test_generic_worker_claim_skips_agent_owned_upgrade_jobs(service) -> None:
+    jobs, _ = service
+    upgrade = jobs.enqueue(
+        "agent-upgrade",
+        "operator",
+        "abc",
+        ["spk_1"],
+        {"immutable": "upgrade-plan"},
+    )
+    install = jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
+
+    attempt = jobs.claim("worker", 10)
+
+    assert attempt is not None and attempt.job_id == install.id
+    stored = jobs.get(upgrade.id)
+    assert stored.state == "queued"
+    assert stored.current_attempt == 0
+    assert stored.payload == {"immutable": "upgrade-plan"}
+
+
 def test_concurrent_operator_resume_has_one_winner(service) -> None:
     jobs, _ = service
     jobs.enqueue("install", "operator", "abc", ["spk_1"], {})

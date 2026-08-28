@@ -1495,6 +1495,7 @@ def production_app() -> FastAPI:
             Path("/routes"),
             clock=clock,
             cursors=cursor_codec,
+            resume_agent_upgrade=agent_upgrades.resume,
         ),
         catalog=catalog_service,
         global_catalog=global_catalog,

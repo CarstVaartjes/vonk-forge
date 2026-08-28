@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
+from vonk_control.jobs import AttemptFence, JobService, StaleAttempt
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -16,6 +17,7 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
+    JobAttempt,
 )
 
 NODE_A = "spk_" + "a" * 32
@@ -242,6 +244,463 @@ def test_same_binary_packaging_only_release_can_use_bridge_retry(tmp_path) -> No
         assert operation is not None
         assert operation.retry_disposition == "retry"
         assert operation.retry_disposition_attempt == 1
+
+
+def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audit(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "operator-resume", clock=clock
+    )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, "agent upgrade request is invalid")
+    clock.advance(seconds=10)
+    second = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(second, "agent upgrade helper is unavailable")
+
+    with sessions() as session:
+        before = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert before is not None and operation is not None
+        immutable = (
+            before.authority_revision,
+            before.payload_digest,
+            dict(before.payload),
+            list(before.targets),
+            before.current_attempt,
+            operation.id,
+            operation.payload_digest,
+            dict(operation.payload),
+            operation.current_attempt,
+        )
+        attempt_audit = list(
+            session.execute(
+                select(
+                    AgentOperationAttempt.attempt,
+                    AgentOperationAttempt.state,
+                    AgentOperationAttempt.result,
+                )
+                .where(AgentOperationAttempt.operation_id == operation.id)
+                .order_by(AgentOperationAttempt.attempt)
+            )
+        )
+
+    upgrades.resume(job.id)
+
+    with sessions() as session:
+        resumed = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert resumed is not None and operation is not None
+        assert resumed.state == "queued"
+        assert resumed.status_reason is None
+        assert (
+            resumed.authority_revision,
+            resumed.payload_digest,
+            dict(resumed.payload),
+            list(resumed.targets),
+            resumed.current_attempt,
+            operation.id,
+            operation.payload_digest,
+            dict(operation.payload),
+            operation.current_attempt,
+        ) == immutable
+        assert operation.state == "waiting-for-operator"
+        assert operation.retry_disposition == "retry"
+        assert operation.retry_disposition_attempt == 2
+        assert (
+            list(
+                session.execute(
+                    select(
+                        AgentOperationAttempt.attempt,
+                        AgentOperationAttempt.state,
+                        AgentOperationAttempt.result,
+                    )
+                    .where(AgentOperationAttempt.operation_id == operation.id)
+                    .order_by(AgentOperationAttempt.attempt)
+                )
+            )
+            == attempt_audit
+        )
+
+    # The generic worker queue must never consume an agent-owned rollout.
+    assert JobService(sessions, clock=clock).claim("worker", 30) is None
+    third = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert third.operation_id == second.operation_id
+    assert third.attempt == 3
+
+
+def test_resume_recovers_legacy_worker_failure_by_exact_identity_without_reinstall(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "legacy-worker-exact", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+
+    upgrades.resume(job.id)
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=NEW_IDENTITY,
+        )
+        is None
+    )
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
+        )
+        attempts = list(
+            session.scalars(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id
+                )
+            )
+        )
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        assert parent is not None and parent.state == "queued"
+        assert operation is not None and operation.state == "succeeded"
+        assert operation.current_attempt == 1
+        assert len(attempts) == 1 and attempts[0].fence == child.fence
+        assert worker_attempt is not None and worker_attempt.state == "failed"
+        assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
+
+
+def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "legacy-worker-stale", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+
+    upgrades.resume(job.id)
+    clock.advance(seconds=31)
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        attempts = list(
+            session.scalars(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id
+                )
+            )
+        )
+        assert parent is not None and parent.state == "waiting-for-operator"
+        assert operation is not None and operation.state == "waiting-for-operator"
+        assert operation.current_attempt == 1
+        assert len(attempts) == 1
+        assert attempts[0].fence == child.fence
+        assert attempts[0].state == "expired"
+
+
+def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "legacy-worker-not-stale", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    _record_legacy_worker_running(sessions, job.id, clock())
+
+    with pytest.raises(ValueError, match="dispatch is still active"):
+        upgrades.resume(job.id)
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        assert parent is not None and parent.state == "running"
+        assert operation is not None and operation.state == "running"
+        assert operation.current_attempt == 1
+        assert worker_attempt is not None and worker_attempt.state == "running"
+        assert child.attempt == 1
+
+
+def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "legacy-worker-expired", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    _record_legacy_worker_running(sessions, job.id, clock())
+    clock.advance(seconds=31)
+
+    upgrades.resume(job.id)
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        child_attempts = list(
+            session.scalars(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id
+                )
+            )
+        )
+        assert parent is not None and parent.state == "queued"
+        assert worker_attempt is not None and worker_attempt.state == "expired"
+        assert operation is not None and operation.state == "running"
+        assert operation.current_attempt == 1
+        assert len(child_attempts) == 1 and child_attempts[0].fence == child.fence
+
+    # An old identity cannot reclaim the uncertain mutation. The existing child
+    # is quiesced for another explicit operator decision without attempt 2.
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert parent is not None and parent.state == "waiting-for-operator"
+        assert operation is not None and operation.current_attempt == 1
+        assert operation.state == "waiting-for-operator"
+
+
+def test_waiting_upgrade_resume_rejects_live_legacy_worker_fence(tmp_path) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "waiting-live-worker", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    worker_fence = _record_legacy_worker_running(sessions, job.id, clock())
+    operations.fail(child, "agent upgrade helper is unavailable")
+
+    with pytest.raises(ValueError, match="dispatch is still active"):
+        upgrades.resume(job.id)
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert parent is not None and parent.state == "waiting-for-operator"
+        assert worker_attempt is not None and worker_attempt.state == "running"
+        assert operation is not None and operation.current_attempt == 1
+        assert worker_fence.attempt == 1
+
+
+def test_waiting_upgrade_resume_expires_legacy_worker_fence_before_retry(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "waiting-expired-worker", clock=clock
+    )
+    child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    worker_fence = _record_legacy_worker_running(sessions, job.id, clock())
+    operations.fail(child, "agent upgrade helper is unavailable")
+    clock.advance(seconds=31)
+
+    upgrades.resume(job.id)
+
+    with pytest.raises(StaleAttempt, match="stale"):
+        JobService(sessions, clock=clock).fail(
+            worker_fence, "unsupported job kind: agent-upgrade"
+        )
+    retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert retry.attempt == 2
+    with sessions() as session:
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        assert worker_attempt is not None and worker_attempt.state == "expired"
+
+
+def test_resume_rejects_all_at_once_subset_topology(tmp_path) -> None:
+    sessions, _operations, upgrades, job = _rollout(
+        tmp_path, "topology-all-subset", strategy="all-at-once"
+    )
+    with sessions.begin() as session:
+        parent = session.get(Job, job.id)
+        operation_b = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_B,
+            )
+        )
+        assert parent is not None and operation_b is not None
+        parent.state = "waiting-for-operator"
+        parent.status_reason = "operator review"
+        session.delete(operation_b)
+
+    with pytest.raises(ValueError, match="topology"):
+        upgrades.resume(job.id)
+    with sessions() as session:
+        assert session.get(Job, job.id).state == "waiting-for-operator"
+
+
+def test_resume_rejects_one_at_a_time_non_prefix_topology(tmp_path) -> None:
+    sessions, _operations, upgrades, job = _rollout(tmp_path, "topology-non-prefix")
+    with sessions.begin() as session:
+        parent = session.get(Job, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert parent is not None and operation is not None
+        parent.state = "waiting-for-operator"
+        parent.status_reason = "operator review"
+        operation.node_id = NODE_B
+
+    with pytest.raises(ValueError, match="topology"):
+        upgrades.resume(job.id)
+    with sessions() as session:
+        assert session.get(Job, job.id).state == "waiting-for-operator"
+
+
+def test_resume_rejects_unsucceeded_earlier_sequential_child(tmp_path) -> None:
+    sessions, operations, upgrades, job = _rollout(tmp_path, "topology-earlier-active")
+    _upgrade_node(operations, NODE_A, "serial-a")
+    with sessions.begin() as session:
+        parent = session.get(Job, job.id)
+        operation_a = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id,
+                AgentOperation.node_id == NODE_A,
+            )
+        )
+        assert parent is not None and operation_a is not None
+        parent.state = "waiting-for-operator"
+        parent.status_reason = "operator review"
+        operation_a.state = "waiting-for-operator"
+
+    with pytest.raises(ValueError, match="topology"):
+        upgrades.resume(job.id)
+    with sessions() as session:
+        assert session.get(Job, job.id).state == "waiting-for-operator"
+
+
+def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
+    tmp_path,
+) -> None:
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "late-worker-completed", strategy="all-at-once"
+    )
+    _upgrade_node(operations, NODE_A, "serial-a")
+    _upgrade_node(operations, NODE_B, "serial-b")
+    _record_legacy_worker_dispatch_failure(
+        sessions, job.id, datetime(2026, 8, 27, tzinfo=UTC)
+    )
+
+    upgrades.resume(job.id)
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        child_states = list(
+            session.scalars(
+                select(AgentOperation.state)
+                .where(AgentOperation.parent_job_id == job.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        worker_attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.job_id == job.id)
+        )
+        assert parent is not None and parent.state == "succeeded"
+        assert parent.status_reason is None
+        assert child_states == ["succeeded", "succeeded"]
+        assert worker_attempt is not None and worker_attempt.state == "failed"
+
+
+def test_resume_continues_succeeded_sequential_prefix_after_late_worker_failure(
+    tmp_path,
+) -> None:
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "late-worker-prefix", clock=clock
+    )
+    _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    with sessions.begin() as session:
+        node_b = session.get(AgentNode, NODE_B)
+        assert node_b is not None
+        node_b.capabilities = ["agent.runtime.rust.v1"]
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=NEW_IDENTITY,
+        )
+        is None
+    )
+    with sessions.begin() as session:
+        node_b = session.get(AgentNode, NODE_B)
+        assert node_b is not None
+        node_b.capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
+        node_b.last_seen_at = clock()
+    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+
+    upgrades.resume(job.id)
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        operations_by_node = {
+            operation.node_id: operation
+            for operation in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            )
+        }
+        assert parent is not None and parent.state == "queued"
+        assert set(operations_by_node) == {NODE_A, NODE_B}
+        assert operations_by_node[NODE_A].state == "succeeded"
+        assert operations_by_node[NODE_B].state == "queued"
+        assert operations_by_node[NODE_B].current_attempt == 0
 
 
 @pytest.mark.parametrize(
@@ -669,6 +1128,67 @@ def _operation_nodes(sessions, job_id: str) -> list[str]:
                 .where(AgentOperation.parent_job_id == job_id)
                 .order_by(AgentOperation.created_at, AgentOperation.id)
             )
+        )
+
+
+def _record_legacy_worker_dispatch_failure(
+    sessions,
+    job_id: str,
+    now: datetime,
+) -> None:
+    with sessions.begin() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None
+        parent.state = "failed"
+        parent.status_reason = "unsupported job kind: agent-upgrade"
+        parent.current_attempt = 1
+        parent.updated_at = now
+        session.add(
+            JobAttempt(
+                job_id=job_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                worker_id="legacy-worker",
+                lease_deadline=now + timedelta(seconds=30),
+                state="failed",
+            )
+        )
+
+
+def _record_legacy_worker_running(
+    sessions,
+    job_id: str,
+    now: datetime,
+) -> AttemptFence:
+    with sessions.begin() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None
+        parent.state = "running"
+        parent.status_reason = None
+        parent.current_attempt = 1
+        parent.updated_at = now
+        fence = str(uuid.uuid4())
+        deadline = now + timedelta(seconds=30)
+        session.add(
+            JobAttempt(
+                job_id=job_id,
+                attempt=1,
+                fence=fence,
+                worker_id="legacy-worker",
+                lease_deadline=deadline,
+                state="running",
+            )
+        )
+        return AttemptFence(
+            job_id=job_id,
+            attempt=1,
+            fence=fence,
+            worker_id="legacy-worker",
+            lease_deadline=deadline,
+            kind=parent.kind,
+            payload=dict(parent.payload),
+            authority_revision=parent.authority_revision,
+            targets=tuple(parent.targets),
         )
 
 

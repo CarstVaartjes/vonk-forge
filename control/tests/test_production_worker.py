@@ -47,6 +47,27 @@ def test_production_worker_fails_unknown_generic_work(
     assert persisted.current_attempt == 1
 
 
+def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
+    tmp_path,
+) -> None:
+    jobs = _jobs(tmp_path)
+    job = jobs.enqueue("agent-upgrade", "operator", "a" * 40, [], {})
+
+    assert (
+        Worker(
+            jobs,
+            "worker",
+            {},
+            reconciliations=None,
+        ).run_once()
+        is False
+    )
+    persisted = jobs.get(job.id)
+    assert persisted.state == "queued"
+    assert persisted.status_reason is None
+    assert persisted.current_attempt == 0
+
+
 def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> None:
     calls: list[str] = []
 
