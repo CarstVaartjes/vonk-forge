@@ -13,11 +13,24 @@ async function expectNoDocumentOverflow(page: Page) {
     const viewport = document.documentElement.clientWidth;
     if (document.documentElement.scrollWidth <= viewport) return [];
     return [...document.querySelectorAll("body *")]
-      .map(element => ({
-        selector: `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).trim().replace(/\s+/g, ".")}` : ""}`,
-        right: Math.round(element.getBoundingClientRect().right),
-      }))
-      .filter(element => element.right > viewport)
+      .map(element => {
+        const rect = element.getBoundingClientRect();
+        const path: string[] = [];
+        for (let current: Element | null = element; current && current !== document.body; current = current.parentElement) {
+          const classes = current.getAttribute("class")?.trim().replace(/\s+/g, ".");
+          path.unshift(`${current.tagName.toLowerCase()}${classes ? `.${classes}` : ""}`);
+        }
+        return {
+          path: path.join(" > "),
+          text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 96) || "",
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        };
+      })
+      .filter(element => element.right > viewport + 0.5)
       .slice(0, 8);
   })).toEqual([]);
 }
