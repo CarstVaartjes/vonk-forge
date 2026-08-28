@@ -7,10 +7,11 @@ function publicRecipe(slug: string, overrides: Record<string, unknown> = {}) {
   return {
     publisher: "vonk-forge", slug, title: `${slug} production recipe`, description: `A digest-bound ${slug} recipe.`, tags: [slug],
     uri: `vonk://catalog/vonk-forge/${slug}@sha256:${digest(slug)}`, content_sha256: digest(slug),
-    model_publisher: "models", model_slug: slug, model_title: slug, source_owner: "MiaLabs",
+    model_publisher: "models", model_slug: slug, model_title: slug,
+    model_version_publisher: "models", model_version_slug: `${slug}-fp8`, model_version_title: `${slug} FP8`, source_owner: "MiaLabs",
     source_repository: `https://github.com/MiaLabs/${slug}`, capabilities: ["chat", "reasoning"],
     qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
-    qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "FP8",
+    qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "FP8", quantizations: ["FP8"],
     execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
     execution_readiness_detail: "This recipe explicitly declares a complete executable runtime contract; fleet compatibility and operator review still apply.",
     execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64),
