@@ -298,12 +298,9 @@ def test_package_helper_upgrade_bridge_is_narrow_bounded_and_retryable() -> None
     assert preinst.index(
         "/usr/bin/sync -f /var/lib/vonk-forge"
     ) < preunpack_gate
-    live_gate_guard = preinst.rfind(
-        'if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]',
-        0,
-        preunpack_gate,
-    )
-    assert live_gate_guard >= 0
+    assert preinst.index('package_action=1') < preunpack_gate
+    assert preinst.index('inside_helper=0') < preunpack_gate
+    assert '[ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]' in preinst
 
     assert "vonk-forge-package-helper-upgrade-finish.service" in postinst
     assert "--property=ActiveState" in postinst
@@ -338,12 +335,41 @@ def test_package_helper_upgrade_bridge_is_narrow_bounded_and_retryable() -> None
     assert "--property=ReadWritePaths --value" in preinst
 
 
+def test_upgrade_bridge_uses_inherited_namespace_not_the_unpacked_unit() -> None:
+    preinst = PREINST.read_text()
+
+    assert "helper_unit_has_package_paths" not in preinst
+    assert "helper_unit_path=" not in preinst
+    assert "helper_namespace_has_package_paths" in preinst
+    assert 'keyrings=/usr/share/keyrings' in preinst
+    assert 'package_doc=/usr/share/doc/vonk-forge-agent' in preinst
+    assert '"$keyrings/.vonk-package-write.XXXXXX"' in preinst
+    assert '"$package_doc/.vonk-package-write.XXXXXX"' in preinst
+    assert preinst.count("helper_namespace_has_package_paths") >= 3
+    acceptance = preinst.index(
+        'if [ "$helper_main_pid" != "$previous_main_pid" ]'
+    )
+    acceptance_end = preinst.index("exit 0", acceptance)
+    acceptance_block = preinst[acceptance:acceptance_end]
+    assert "bridge_dropin_is_safe" in acceptance_block
+    assert "helper_has_effective_bridge_paths" in acceptance_block
+    assert "helper_namespace_has_package_paths" in acceptance_block
+    assert 'package_action=1\n    old_version=${2:-}' in preinst
+    assert 'if [ -n "$old_version" ]; then' in preinst
+    assert preinst.index('if [ -n "$old_version" ]; then') < preinst.index(
+        "inside_helper=0"
+    )
+    assert '[ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]' in preinst
+
+
 def test_package_helper_upgrade_bridge_fails_closed_on_unsafe_runtime_state() -> None:
     preinst = PREINST.read_text()
     postinst = POSTINST.read_text()
 
     for unsafe_guard in (
         '[ -L "$directory" ]',
+        '[ -d "$directory" ] && [ ! -L "$directory" ]',
+        '[ $((0$mode & 0022)) -eq 0 ]',
         '[ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ]',
         'stat -c %u:%a "$bridge_dropin"',
         '[ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ]',

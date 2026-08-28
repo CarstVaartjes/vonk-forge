@@ -1,14 +1,23 @@
 import hashlib
 import json
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
+from vonk_control.agent_upgrades import (
+    _HELPER_BRIDGE_DISPATCH_MARGIN,
+    _HELPER_BRIDGE_RECOVERY_BACKOFF,
+    _HELPER_BRIDGE_RUNTIME_MAX,
+    _HELPER_STOP_TIMEOUT,
+    AgentUpgradeConflict,
+    AgentUpgradeService,
+)
 from vonk_control.jobs import AttemptFence, JobService, StaleAttempt
 from vonk_control.models import (
     AgentCertificate,
@@ -49,6 +58,7 @@ NEW_IDENTITY = {
     "binary_digest": PACKAGE["target_binary_digest"],
     "build_digest": PACKAGE["target_build_digest"],
 }
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Clock:
@@ -122,7 +132,7 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
         assert stored is not None and stored.state == "succeeded"
 
 
-def test_legacy_helper_bridge_failure_gets_exactly_one_bounded_retry(
+def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
     tmp_path,
 ) -> None:
     clock = Clock()
@@ -151,7 +161,7 @@ def test_legacy_helper_bridge_failure_gets_exactly_one_bounded_retry(
         deadline = attempt.lease_deadline
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
-        assert deadline == clock() + timedelta(seconds=10)
+        assert deadline == clock() + timedelta(seconds=240)
         assert stored is not None and stored.state == "waiting-for-operator"
 
     # The durable not-before gate survives repeated polls without consuming the
@@ -166,7 +176,7 @@ def test_legacy_helper_bridge_failure_gets_exactly_one_bounded_retry(
         )
         is None
     )
-    clock.advance(seconds=9)
+    clock.advance(seconds=239)
     assert (
         operations.claim(
             NODE_A,
@@ -225,6 +235,31 @@ def test_legacy_helper_bridge_failure_gets_exactly_one_bounded_retry(
     assert _operation_nodes(sessions, job.id) == [NODE_A]
 
 
+def test_bridge_retry_backoff_covers_package_runtime_stop_and_dispatch_budget(
+) -> None:
+    preinst = (REPOSITORY_ROOT / "packaging/debian/preinst").read_text()
+    helper_unit = (
+        REPOSITORY_ROOT
+        / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+    runtime_match = re.search(r"--property=RuntimeMaxSec=(\d+)s", preinst)
+    stop_match = re.search(r"^TimeoutStopSec=(\d+)s$", helper_unit, re.MULTILINE)
+
+    assert runtime_match is not None
+    assert stop_match is not None
+    assert _HELPER_BRIDGE_RUNTIME_MAX == timedelta(
+        seconds=int(runtime_match.group(1))
+    )
+    assert _HELPER_STOP_TIMEOUT == timedelta(seconds=int(stop_match.group(1)))
+    assert _HELPER_BRIDGE_DISPATCH_MARGIN == timedelta(seconds=45)
+    assert _HELPER_BRIDGE_RECOVERY_BACKOFF == timedelta(seconds=240)
+    assert _HELPER_BRIDGE_RECOVERY_BACKOFF == (
+        _HELPER_BRIDGE_RUNTIME_MAX
+        + _HELPER_STOP_TIMEOUT
+        + _HELPER_BRIDGE_DISPATCH_MARGIN
+    )
+
+
 def test_same_binary_packaging_only_release_can_use_bridge_retry(tmp_path) -> None:
     clock = Clock()
     sessions, operations, _upgrades, job = _rollout(
@@ -255,7 +290,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
     )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
-    clock.advance(seconds=10)
+    clock.advance(seconds=240)
     second = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(second, "agent upgrade helper is unavailable")
 
@@ -748,7 +783,18 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
     )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
-    clock.advance(seconds=10)
+    clock.advance(seconds=120)
+    assert (
+        operations.claim(
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    clock.advance(seconds=120)
     second = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     assert second.attempt == 2
     operations.fail(second, "agent upgrade helper is unavailable")
@@ -763,9 +809,9 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
         is None
     )
 
-    # The retry may race a delayed helper restart and report helper unavailable.
-    # It is not claimable a third time, but the restarted agent's exact
-    # authenticated identity can still reconcile it and make Spark B runnable.
+    # A second helper failure is not claimable a third time, but the restarted
+    # agent's exact authenticated identity can still reconcile it and make the
+    # still-polling Spark B runnable.
     assert (
         operations.claim(
             NODE_A,
@@ -968,7 +1014,7 @@ def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
         assert stored is not None and stored.state == "waiting-for-operator"
         assert attempts == [1, 1]
 
-    clock.advance(seconds=10)
+    clock.advance(seconds=240)
     second_a = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     second_b = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     assert second_a.attempt == second_b.attempt == 2
