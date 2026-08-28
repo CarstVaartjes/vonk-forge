@@ -271,11 +271,14 @@ runs:
         FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
         HAS_STATE: ${{ steps.state.outputs.has_state }}
         KEYRING: ${{ steps.package.outputs.keyring }}
+        PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         ARM64_PACKAGE: ${{ inputs.arm64_package }}
         AMD64_PACKAGE: ${{ inputs.amd64_package }}
         REPOSITORY: ${{ steps.package.outputs.repository }}
         RESTORED: ${{ steps.state.outputs.restored }}
         SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         export GNUPGHOME="$RUNNER_TEMP/gnupg"

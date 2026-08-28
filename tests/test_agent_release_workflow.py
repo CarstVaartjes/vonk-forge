@@ -889,6 +889,21 @@ def test_development_apt_state_is_compacted_before_snapshot_and_after_switch() -
     assert 'if [[ "$CHANNEL" == dev ]]' not in local
 
 
+def test_apt_generation_receipt_environment_matches_prepare_step() -> None:
+    prepare = apt_step("Prepare committed or recoverable private state")
+    generation = apt_step("Generate missing aptly state or public tree")
+    receipt_environment = {
+        "PACKAGES_JSON": "${{ steps.package.outputs.packages_json }}",
+        "SOURCE_SHA": "${{ inputs.source_sha }}",
+        "VERSION": "${{ inputs.version }}",
+    }
+
+    for name, value in receipt_environment.items():
+        binding = f"{name}: {value}"
+        assert binding in prepare
+        assert binding in generation
+
+
 def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> None:
     text = apt_workflow()
     prepare = apt_step("Prepare committed or recoverable private state")
