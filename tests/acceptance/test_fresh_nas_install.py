@@ -165,6 +165,7 @@ def nas_responses(
         ("Reserved NAS LAN IP: ", nas_ip),
         ("Trusted Spark management CIDRs: ", "0.0.0.0/0"),
         ("Direct GPU fabric CIDRs []: ", ""),
+        ("Operator jurisdiction (uppercase country code, or EU): ", "NL"),
         *((f"{label}: ", value) for label, value in hostnames.items()),
         ("Vonk Forge administrator password (leave blank to generate): ", ""),
         ("Tailscale OAuth client ID: ", oauth_client_id),
