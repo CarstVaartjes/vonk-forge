@@ -90,9 +90,11 @@ export type PublicRecipe = {
   publisher: string; slug: string; title: string; description: string; tags: string[];
   uri: string; content_sha256: string;
   model_publisher: string; model_slug: string; model_title: string;
+  model_version_publisher: string; model_version_slug: string; model_version_title: string;
   source_owner: string | null; source_repository: string | null;
   capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged";
   qualification_basis: PublicRecipeQualificationBasis; qualification_detail: string; precision: string | null;
+  quantizations: string[];
   execution_readiness: PublicRecipeExecutionReadiness; execution_readiness_basis: PublicRecipeExecutionReadinessBasis; execution_readiness_detail: string;
   execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
   topology_name: string; topology_mode: string; node_count: number;

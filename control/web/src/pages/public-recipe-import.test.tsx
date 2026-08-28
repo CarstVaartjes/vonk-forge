@@ -5,7 +5,7 @@ import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {PublicRecipeImportPage, parsePublicRecipeImportUrl, publicRecipeImportUrl, publicRecipeMatches, type PublicRecipeFilters} from "./public-recipe-import";
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", modelType: "", model: "", sourceOwner: "", repository: "", sparks: "", runtime: "", precision: "", topology: "",
+  query: "", modelType: "", model: "", modelVersion: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
@@ -14,9 +14,10 @@ function recipe(slug: string, overrides: Partial<PublicRecipe> = {}): PublicReci
     publisher: "vonk-forge", slug, title: `${slug} recipe`, description: `Recipe for ${slug}`, tags: [slug],
     uri: `vonk://catalog/vonk-forge/${slug}@sha256:${slug.padEnd(64, "0").slice(0, 64)}`,
     content_sha256: slug.padEnd(64, "0").slice(0, 64), model_publisher: "models", model_slug: slug,
-    model_title: slug, source_owner: "MiaLabs", source_repository: `https://github.com/MiaLabs/${slug}`,
+    model_title: slug, model_version_publisher: "models", model_version_slug: `${slug}-v1`, model_version_title: `${slug} v1`,
+    source_owner: "MiaLabs", source_repository: `https://github.com/MiaLabs/${slug}`,
     capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
-    qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "BF16",
+    qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "BF16", quantizations: ["BF16"],
     execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
     execution_readiness_detail: "The immutable recipe declares a complete executable contract.",
     execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64),
@@ -67,10 +68,10 @@ async function advanceRequestTime(milliseconds: number) {
   });
 }
 
-it("round-trips validated URL state with model type, readiness, source owner, and repeated capabilities", () => {
-  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&creator=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", sourceOwner: "MiaLabs", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&source_owner=MiaLabs&sparks=4%2B&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+it("round-trips the shared catalog filter vocabulary", () => {
+  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&creator=MiaLabs&quantization=NVFP4&updated=30&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", model: "models/glm", modelVersion: "models/glm-v1", sourceOwner: "MiaLabs", quantization: "NVFP4", updated: "30", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&creator=MiaLabs&sparks=4%2B&quantization=NVFP4&updated=30&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
   expect(parsePublicRecipeImportUrl("/library/import?model_type=bogus").filters.modelType).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
@@ -81,6 +82,10 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   const both = recipe("both", {node_count: 4, capabilities: ["chat", "vision"]});
   const chat = recipe("chat", {node_count: 3, capabilities: ["chat"]});
   render(<Harness api={apiFor([both, chat])}/>);
+  expect(await screen.findByRole("combobox", {name: "Filter by model version"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by quantization"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by recipe creator"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by updated date"})).toBeVisible();
   await userEvent.click(await screen.findByRole("button", {name: "More filters"}));
   const sparks = await screen.findByRole("combobox", {name: "Filter by required Sparks"});
   expect(within(sparks).getAllByRole("option").map(option => option.getAttribute("value"))).toEqual(["", "1", "2", "3", "4+"]);
@@ -191,7 +196,7 @@ it("falls back to declared count and mode when projected topology details disagr
 
 it("compares up to three recipes in an accessible human-readable table", async () => {
   const alpha = recipe("Alpha");
-  const beta = recipe("Beta", {node_count: 2, precision: "FP8"});
+  const beta = recipe("Beta", {node_count: 2, precision: "FP8", quantizations: ["FP8"]});
   render(<Harness api={apiFor([alpha, beta])}/>);
   await userEvent.click(await screen.findByRole("checkbox", {name: /Compare.*Alpha/}));
   await userEvent.click(screen.getByRole("checkbox", {name: /Compare.*Beta/}));
@@ -204,16 +209,16 @@ it("compares up to three recipes in an accessible human-readable table", async (
   expect(within(table).getByRole("row", {name: /Sparks 1 Spark 2 Sparks/})).toBeVisible();
 });
 
-it("hydrates legacy creator and original-repository filters under truthful source-owner naming", async () => {
+it("combines recipe creator and original repository filters", async () => {
   const alpha = recipe("Alpha", {source_owner: "MiaLabs", capabilities: ["chat"]});
   const beta = recipe("Beta", {source_owner: "MiaLabs", capabilities: ["vision"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Explicitly accepted."});
   render(<Harness api={apiFor([alpha, beta])} initialUrl={`/library/import?creator=MiaLabs&repository=${encodeURIComponent(alpha.source_repository!)}&more=1`}/>);
   expect(await screen.findByRole("heading", {name: "Alpha", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "Beta", level: 3})).not.toBeInTheDocument();
-  expect(screen.getByRole("combobox", {name: "Filter by source owner"})).toHaveValue("MiaLabs");
+  expect(screen.getByRole("combobox", {name: "Filter by recipe creator"})).toHaveValue("MiaLabs");
   expect(screen.getByRole("combobox", {name: "Filter by original repository"})).toHaveValue(alpha.source_repository);
   expect(screen.getByRole("checkbox", {name: /Vision0/})).toBeDisabled();
-  expect(screen.getByRole("button", {name: /Source owner: MiaLabs/})).toBeVisible();
+  expect(screen.getByRole("button", {name: /Creator: MiaLabs/})).toBeVisible();
   expect(screen.getByRole("button", {name: /Repository: MiaLabs\/Alpha/})).toBeVisible();
 });
 

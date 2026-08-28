@@ -54,11 +54,15 @@ class PublicRecipeListItem:
             model_publisher (str):
             model_slug (str):
             model_title (str):
+            model_version_publisher (str):
+            model_version_slug (str):
+            model_version_title (str):
             node_count (int):
             publisher (str):
             qualification (PublicRecipeListItemQualification):
             qualification_basis (PublicRecipeListItemQualificationBasis):
             qualification_detail (str):
+            quantizations (list[str]):
             runtime_distribution (str):
             slug (str):
             source_bundle_sha256 (str):
@@ -91,11 +95,15 @@ class PublicRecipeListItem:
     model_publisher: str
     model_slug: str
     model_title: str
+    model_version_publisher: str
+    model_version_slug: str
+    model_version_title: str
     node_count: int
     publisher: str
     qualification: PublicRecipeListItemQualification
     qualification_basis: PublicRecipeListItemQualificationBasis
     qualification_detail: str
+    quantizations: list[str]
     runtime_distribution: str
     slug: str
     source_bundle_sha256: str
@@ -156,6 +164,12 @@ class PublicRecipeListItem:
 
         model_title = self.model_title
 
+        model_version_publisher = self.model_version_publisher
+
+        model_version_slug = self.model_version_slug
+
+        model_version_title = self.model_version_title
+
         node_count = self.node_count
 
         publisher = self.publisher
@@ -165,6 +179,10 @@ class PublicRecipeListItem:
         qualification_basis: str = self.qualification_basis
 
         qualification_detail = self.qualification_detail
+
+        quantizations = self.quantizations
+
+
 
         runtime_distribution = self.runtime_distribution
 
@@ -241,11 +259,15 @@ class PublicRecipeListItem:
             "model_publisher": model_publisher,
             "model_slug": model_slug,
             "model_title": model_title,
+            "model_version_publisher": model_version_publisher,
+            "model_version_slug": model_version_slug,
+            "model_version_title": model_version_title,
             "node_count": node_count,
             "publisher": publisher,
             "qualification": qualification,
             "qualification_basis": qualification_basis,
             "qualification_detail": qualification_detail,
+            "quantizations": quantizations,
             "runtime_distribution": runtime_distribution,
             "slug": slug,
             "source_bundle_sha256": source_bundle_sha256,
@@ -329,6 +351,12 @@ class PublicRecipeListItem:
 
         model_title = d.pop("model_title")
 
+        model_version_publisher = d.pop("model_version_publisher")
+
+        model_version_slug = d.pop("model_version_slug")
+
+        model_version_title = d.pop("model_version_title")
+
         node_count = d.pop("node_count")
 
         publisher = d.pop("publisher")
@@ -344,6 +372,9 @@ class PublicRecipeListItem:
 
 
         qualification_detail = d.pop("qualification_detail")
+
+        quantizations = cast(list[str], d.pop("quantizations"))
+
 
         runtime_distribution = d.pop("runtime_distribution")
 
@@ -439,11 +470,15 @@ class PublicRecipeListItem:
             model_publisher=model_publisher,
             model_slug=model_slug,
             model_title=model_title,
+            model_version_publisher=model_version_publisher,
+            model_version_slug=model_version_slug,
+            model_version_title=model_version_title,
             node_count=node_count,
             publisher=publisher,
             qualification=qualification,
             qualification_basis=qualification_basis,
             qualification_detail=qualification_detail,
+            quantizations=quantizations,
             runtime_distribution=runtime_distribution,
             slug=slug,
             source_bundle_sha256=source_bundle_sha256,

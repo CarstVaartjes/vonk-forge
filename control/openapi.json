@@ -5558,6 +5558,22 @@
             "title": "Model Title",
             "type": "string"
           },
+          "model_version_publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Version Publisher",
+            "type": "string"
+          },
+          "model_version_slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Version Slug",
+            "type": "string"
+          },
+          "model_version_title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model Version Title",
+            "type": "string"
+          },
           "node_count": {
             "minimum": 1.0,
             "title": "Node Count",
@@ -5604,6 +5620,14 @@
             "minLength": 1,
             "title": "Qualification Detail",
             "type": "string"
+          },
+          "quantizations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Quantizations",
+            "type": "array"
           },
           "release_released_at": {
             "anyOf": [
@@ -5725,6 +5749,9 @@
           "model_publisher",
           "model_slug",
           "model_title",
+          "model_version_publisher",
+          "model_version_slug",
+          "model_version_title",
           "capabilities",
           "qualification",
           "qualification_basis",
@@ -5732,6 +5759,7 @@
           "execution_readiness",
           "execution_readiness_basis",
           "execution_readiness_detail",
+          "quantizations",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",
@@ -5966,6 +5994,22 @@
             "title": "Model Title",
             "type": "string"
           },
+          "model_version_publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Version Publisher",
+            "type": "string"
+          },
+          "model_version_slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Model Version Slug",
+            "type": "string"
+          },
+          "model_version_title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model Version Title",
+            "type": "string"
+          },
           "node_count": {
             "minimum": 1.0,
             "title": "Node Count",
@@ -6012,6 +6056,14 @@
             "minLength": 1,
             "title": "Qualification Detail",
             "type": "string"
+          },
+          "quantizations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Quantizations",
+            "type": "array"
           },
           "release_released_at": {
             "anyOf": [
@@ -6141,6 +6193,9 @@
           "model_publisher",
           "model_slug",
           "model_title",
+          "model_version_publisher",
+          "model_version_slug",
+          "model_version_title",
           "capabilities",
           "qualification",
           "qualification_basis",
@@ -6148,6 +6203,7 @@
           "execution_readiness",
           "execution_readiness_basis",
           "execution_readiness_detail",
+          "quantizations",
           "execution_harness",
           "runtime_distribution",
           "source_bundle_sha256",

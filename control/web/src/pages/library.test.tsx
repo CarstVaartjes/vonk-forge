@@ -19,6 +19,9 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   model_publisher: "qwen",
   model_slug: "qwen-3-5",
   model_title: "Qwen 3.5",
+  model_version_publisher: "qwen",
+  model_version_slug: "qwen-3-5-bf16",
+  model_version_title: "Qwen 3.5 BF16",
   source_owner: "QwenLM",
   source_repository: "https://github.com/QwenLM/Qwen3",
   capabilities: ["chat"],
@@ -29,6 +32,7 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   execution_readiness_basis: "explicit-executable-metadata",
   execution_readiness_detail: "This immutable recipe declares a complete executable contract.",
   precision: "BF16",
+  quantizations: ["BF16"],
   execution_harness: "vllm-openai",
   runtime_distribution: "vllm-0-27-1",
   source_bundle_sha256: "9".repeat(64),
@@ -866,6 +870,8 @@ test("loads the current default catalog recipes when public import opens", async
         title: "Qwen Vision · two Sparks",
         uri: "vonk://catalog/vonk-forge/qwen-vision-pair@sha256:" + "d".repeat(64),
         content_sha256: "d".repeat(64),
+        model_version_slug: "qwen-3-5-vision-bf16",
+        model_version_title: "Qwen 3.5 Vision BF16",
         capabilities: ["chat", "vision"],
         node_count: 2,
         topology_mode: "tensor-parallel",
@@ -881,11 +887,15 @@ test("loads the current default catalog recipes when public import opens", async
         model_publisher: "wan-ai",
         model_slug: "wan-2-2",
         model_title: "Wan 2.2",
+        model_version_publisher: "wan-ai",
+        model_version_slug: "wan-2-2-fp8",
+        model_version_title: "Wan 2.2 FP8",
         source_owner: "MiaAI-Lab",
         source_repository: "https://github.com/MiaAI-Lab/wan-spark",
         capabilities: ["video"],
         runtime_distribution: "diffusers-0-40",
         precision: "FP8",
+        quantizations: ["FP8"],
         node_count: 4,
         topology_mode: "distributed",
         topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "worker", count: 3, endpoint_owner: false}],
@@ -900,6 +910,8 @@ test("loads the current default catalog recipes when public import opens", async
         model_publisher: "qwen",
         model_slug: "qwen-audio",
         model_title: "Qwen Audio",
+        model_version_slug: "qwen-audio-bf16",
+        model_version_title: "Qwen Audio BF16",
         capabilities: ["audio"],
         runtime_distribution: "pytorch-2-13",
         node_count: 5,
@@ -950,7 +962,7 @@ test("loads the current default catalog recipes when public import opens", async
   await user.click(screen.getByRole("button", {name: "Clear all"}));
   expect(localStatus).toHaveValue("");
 
-  const sourceOwner = screen.getByRole("combobox", {name: "Filter by source owner"});
+  const sourceOwner = screen.getByRole("combobox", {name: "Filter by recipe creator"});
   expect(within(sourceOwner).getByRole("option", {name: /^MiaAI-Lab \(/})).toBeVisible();
   await user.selectOptions(sourceOwner, "MiaAI-Lab");
   expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
@@ -992,7 +1004,7 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.queryByRole("heading", {name: /Wan 2\.2/, level: 3})).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Clear all"}));
-  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by precision"}), "FP8");
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by quantization"}), "FP8");
   expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: /Qwen Audio/, level: 3})).not.toBeInTheDocument();
 
