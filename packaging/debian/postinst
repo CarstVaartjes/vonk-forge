@@ -14,6 +14,26 @@ bridge_main_pid=$bridge_root/previous-main-pid
 bridge_retired=$bridge_dropin_dir/20-package-upgrade-bridge.conf.retired
 helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
 helper_receipt=/var/lib/vonk-forge/helper-upgrade.receipt
+upgrade_intent=/var/lib/vonk-forge/package-upgrade/intent
+
+durable_intent_is_safe() {
+    [ -d /var/lib/vonk-forge/package-upgrade ] \
+        && [ ! -L /var/lib/vonk-forge/package-upgrade ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a \
+            /var/lib/vonk-forge/package-upgrade)" = 0:0:700 ] \
+        && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
+            = 0:0:600:1 ] \
+        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 14 ] \
+        && /usr/bin/sed -n '1p' "$upgrade_intent" \
+            | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$upgrade_intent" \
+            | grep -Fxq 'package=vonk-forge-agent' \
+        && /usr/bin/sed -n '3p' "$upgrade_intent" \
+            | grep -Fxq "target_version=$package_version" \
+        && /usr/bin/sed -n '14p' "$upgrade_intent" \
+            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$'
+}
 
 write_helper_pending() {
     [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
@@ -267,8 +287,10 @@ schedule_permanent_helper_restart() {
             if [ -e "$helper_receipt" ] || [ -L "$helper_receipt" ]; then
                 [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
                     && [ "$(/usr/bin/stat -c %u:%a "$helper_receipt")" = 0:600 ] \
-                    && [ "$(/usr/bin/wc -l < "$helper_receipt")" -eq 8 ] \
-                    && /usr/bin/sed -n "1p" "$helper_receipt" \
+                    || exit 1
+                receipt_lines=$(/usr/bin/wc -l < "$helper_receipt")
+                if [ "$receipt_lines" -eq 8 ]; then
+                    /usr/bin/sed -n "1p" "$helper_receipt" \
                         | grep -Fxq "schema_version=1" \
                     && /usr/bin/sed -n "2p" "$helper_receipt" \
                         | grep -Eq "^version=[0-9A-Za-z.+~:-]+$" \
@@ -285,6 +307,31 @@ schedule_permanent_helper_restart() {
                     && /usr/bin/sed -n "8p" "$helper_receipt" \
                         | grep -Eq "^helper_start_time=[0-9]+$" \
                     || exit 1
+                elif [ "$receipt_lines" -eq 10 ]; then
+                    /usr/bin/sed -n "1p" "$helper_receipt" \
+                        | grep -Fxq "schema_version=2" \
+                    && /usr/bin/sed -n "2p" "$helper_receipt" \
+                        | grep -Eq "^version=[0-9A-Za-z.+~:-]+$" \
+                    && /usr/bin/sed -n "3p" "$helper_receipt" \
+                        | grep -Eq "^package_sha256=[0-9a-f]{64}$" \
+                    && /usr/bin/sed -n "4p" "$helper_receipt" \
+                        | grep -Eq "^helper_sha256=[0-9a-f]{64}$" \
+                    && /usr/bin/sed -n "5p" "$helper_receipt" \
+                        | grep -Eq "^agent_sha256=[0-9a-f]{64}$" \
+                    && /usr/bin/sed -n "6p" "$helper_receipt" \
+                        | grep -Eq "^boot_id=[0-9a-f-]+$" \
+                    && /usr/bin/sed -n "7p" "$helper_receipt" \
+                        | grep -Eq "^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
+                    && /usr/bin/sed -n "8p" "$helper_receipt" \
+                        | grep -Eq "^helper_main_pid=[0-9]+$" \
+                    && /usr/bin/sed -n "9p" "$helper_receipt" \
+                        | grep -Eq "^helper_start_time=[0-9]+$" \
+                    && /usr/bin/sed -n "10p" "$helper_receipt" \
+                        | grep -Eq "^intent_sha256=[0-9a-f]{64}$" \
+                    || exit 1
+                else
+                    exit 1
+                fi
             fi
             receipt_new=$(/usr/bin/mktemp \
                 /var/lib/vonk-forge/.helper-upgrade-receipt.XXXXXX)
@@ -469,12 +516,33 @@ if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
     }
     pending_present=1
 fi
+durable_recovery=0
+if [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
+    durable_intent_is_safe || {
+        echo 'vonk-forge-agent: durable package upgrade intent is unsafe' >&2
+        exit 1
+    }
+    if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
+        grep -Fxq \
+            "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" \
+            "$upgrade_intent" || {
+            echo 'vonk-forge-agent: package recovery nonce does not match intent' >&2
+            exit 1
+        }
+    fi
+    durable_recovery=1
+elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
+    echo 'vonk-forge-agent: package recovery intent is missing' >&2
+    exit 1
+fi
 needs_finisher=0
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ] \
+    && [ "$durable_recovery" -ne 1 ] \
     && { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; }; then
     needs_finisher=1
 fi
-if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ]; then
+if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ] \
+    && [ "$durable_recovery" -ne 1 ]; then
     echo 'vonk-forge-agent: interrupted helper activation requires a live systemd configure retry' >&2
     exit 1
 fi
