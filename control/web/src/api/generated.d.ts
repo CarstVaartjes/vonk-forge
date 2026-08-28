@@ -3075,6 +3075,12 @@ export interface components {
             model_slug: string;
             /** Model Title */
             model_title: string;
+            /** Model Version Publisher */
+            model_version_publisher: string;
+            /** Model Version Slug */
+            model_version_slug: string;
+            /** Model Version Title */
+            model_version_title: string;
             /** Node Count */
             node_count: number;
             /** Precision */
@@ -3093,6 +3099,8 @@ export interface components {
             qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
             /** Qualification Detail */
             qualification_detail: string;
+            /** Quantizations */
+            quantizations: string[];
             /** Release Released At */
             release_released_at?: string | null;
             /** Release Version */
@@ -3185,6 +3193,12 @@ export interface components {
             model_slug: string;
             /** Model Title */
             model_title: string;
+            /** Model Version Publisher */
+            model_version_publisher: string;
+            /** Model Version Slug */
+            model_version_slug: string;
+            /** Model Version Title */
+            model_version_title: string;
             /** Node Count */
             node_count: number;
             /** Precision */
@@ -3203,6 +3217,8 @@ export interface components {
             qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
             /** Qualification Detail */
             qualification_detail: string;
+            /** Quantizations */
+            quantizations: string[];
             /** Release Released At */
             release_released_at?: string | null;
             /** Release Version */

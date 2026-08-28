@@ -285,6 +285,9 @@ class PublicRecipeListItem(StrictModel):
     model_publisher: str = Field(pattern=_SLUG)
     model_slug: str = Field(pattern=_SLUG)
     model_title: str = Field(min_length=1, max_length=120)
+    model_version_publisher: str = Field(pattern=_SLUG)
+    model_version_slug: str = Field(pattern=_SLUG)
+    model_version_title: str = Field(min_length=1, max_length=120)
     source_owner: str | None = Field(default=None, min_length=1, max_length=120)
     source_repository: str | None = Field(default=None, min_length=1, max_length=512)
     capabilities: list[PublicRecipeCapability] = Field(max_length=8)
@@ -295,6 +298,7 @@ class PublicRecipeListItem(StrictModel):
     execution_readiness_basis: PublicRecipeExecutionReadinessBasis
     execution_readiness_detail: str = Field(min_length=1, max_length=256)
     precision: str | None = Field(default=None, min_length=2, max_length=24)
+    quantizations: list[str] = Field(max_length=16)
     execution_harness: str = Field(pattern=_SLUG)
     runtime_distribution: str = Field(pattern=_SLUG)
     source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -484,24 +488,26 @@ def _public_recipe_metadata(
 ) -> dict[str, object]:
     model_version = document.get("model")
     model_version = model_version if isinstance(model_version, Mapping) else {}
-    model_publisher = str(model_version.get("publisher", "unknown"))
-    model_slug = str(model_version.get("slug", "unknown"))
+    model_version_publisher = str(model_version.get("publisher", "unknown"))
+    model_version_slug = str(model_version.get("slug", "unknown"))
+    model_version_title = model_version_slug
+    model_publisher = model_version_publisher
+    model_slug = model_version_slug
     model_title = model_slug
     model_reference: Mapping[str, object] | None = None
-    model_version_title = ""
     for dependency in dependencies:
         identity = dependency.get("identity")
         if (
             dependency.get("kind") == "model-version"
             and isinstance(identity, Mapping)
-            and identity.get("publisher") == model_publisher
-            and identity.get("slug") == model_slug
+            and identity.get("publisher") == model_version_publisher
+            and identity.get("slug") == model_version_slug
         ):
             value = dependency.get("model")
             model_reference = value if isinstance(value, Mapping) else None
             metadata = dependency.get("metadata")
             if isinstance(metadata, Mapping):
-                model_version_title = str(metadata.get("title", ""))
+                model_version_title = str(metadata.get("title", model_version_slug)) or model_version_slug
             break
     if model_reference is not None:
         referenced_publisher = model_reference.get("publisher")
@@ -555,15 +561,28 @@ def _public_recipe_metadata(
         capabilities.add("3d")
 
     title = str(metadata.get("title", ""))
-    precision_text = " ".join((*tags, title.lower(), model_version_title.lower()))
-    precision = next(
-        (
-            value.upper()
-            for value in ("nvfp4", "bf16", "fp8", "fp4", "int8", "int4")
-            if value in precision_text
-        ),
-        None,
-    )
+    precision_tokens = set(tags)
+    precision_tokens.update(re.findall(r"[a-z0-9]+", f"{title} {model_version_title}".lower()))
+    quantizations = [
+        value.upper() if value != "torchao" else "TorchAO"
+        for value in (
+            "nvfp4",
+            "bf16",
+            "fp8",
+            "fp4",
+            "fp16",
+            "int8",
+            "int4",
+            "exl3",
+            "aqlm",
+            "awq",
+            "gptq",
+            "gguf",
+            "torchao",
+        )
+        if value in precision_tokens
+    ]
+    precision = quantizations[0] if quantizations else None
     source_owner, source_repository = _public_recipe_source(document)
     qualification, qualification_basis, qualification_detail = (
         _public_recipe_qualification(tags)
@@ -590,6 +609,9 @@ def _public_recipe_metadata(
         "model_publisher": model_publisher,
         "model_slug": model_slug,
         "model_title": model_title,
+        "model_version_publisher": model_version_publisher,
+        "model_version_slug": model_version_slug,
+        "model_version_title": model_version_title,
         "source_owner": source_owner,
         "source_repository": source_repository,
         "capabilities": [
@@ -604,6 +626,7 @@ def _public_recipe_metadata(
         "execution_readiness_basis": execution_readiness_basis,
         "execution_readiness_detail": execution_readiness_detail,
         "precision": precision,
+        "quantizations": quantizations,
         "topology_roles": topology_roles,
         "fabric": {
             "connectivity": raw_fabric.get("connectivity", "none"),
