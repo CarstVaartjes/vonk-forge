@@ -89,7 +89,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            fuse-overlayfs podman uidmap
+            aptly fuse-overlayfs podman uidmap
+      - name: Test bounded aptly state compaction
+        run: >-
+          uv run --python 3.12 --frozen --with pytest==9.1.1
+          pytest -q tests/scripts/test_agent_apt_compaction_integration.py
       - name: Test Spark rootless Podman OCI import
         run: >-
           cargo test --locked -p vonk-agent --test recipe_builder

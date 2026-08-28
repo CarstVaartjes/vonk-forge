@@ -34,9 +34,19 @@ CHANNELS = {
 COMMIT_RE = re.compile(r"^versions/([^/]+)/commit\.json$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SEMVER_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+DEVELOPMENT_VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{12}$"
+)
 BY_HASH_DIGEST_LENGTHS = {"MD5Sum": 32, "SHA1": 40, "SHA256": 64, "SHA512": 128}
 MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
+APTLY_PACKAGE_FORMAT = (
+    "{{.Package}}\t{{.Version}}\t{{.Architecture}}\t{{.SHA256}}"
+)
+REPOSITORIES = {"dev": "vonk-forge-dev", "stable": "vonk-forge"}
+RETAINED_PREDECESSORS = {"dev": 0, "stable": 2}
 RCLONE_SECRET_ENVIRONMENT = (
     "RCLONE_CONFIG_R2_ACCESS_KEY_ID",
     "RCLONE_CONFIG_R2_SECRET_ACCESS_KEY",
@@ -160,8 +170,14 @@ def _member_name(member: tarfile.TarInfo) -> str:
 def validate_bundle(
     raw: bytes, kind: str, expected_receipt: dict[str, Any] | None = None
 ) -> ValidatedBundle:
-    if kind not in {"state", "public"} or not 1 <= len(raw) <= MAX_BUNDLE_BYTES:
+    if kind not in {"state", "public"}:
         raise StateError("bundle is invalid")
+    if not raw:
+        raise StateError(f"{kind} bundle is empty")
+    if len(raw) > MAX_BUNDLE_BYTES:
+        raise StateError(
+            f"{kind} bundle exceeds {MAX_BUNDLE_BYTES} byte limit: {len(raw)} bytes"
+        )
     root = "aptly" if kind == "state" else "public"
     files: dict[str, bytes] = {}
     directories: set[str] = set()
@@ -541,8 +557,24 @@ def publish_committed(
     release_gpg = f"dists/{receipt['distribution']}/Release.gpg"
     inrelease = f"dists/{receipt['distribution']}/InRelease"
     commit_objects = {release, release_gpg, inrelease}
+    immutable_objects = {
+        name
+        for name in public_files
+        if name.startswith("pool/")
+        or name.startswith(f"dists/{receipt['distribution']}/")
+        and "/by-hash/" in name
+    }
+    for name in sorted(immutable_objects):
+        existing = public_store.list(name)
+        if existing == [name]:
+            if public_store.read(name) != public_files[name]:
+                raise StateError(f"immutable public object conflict: {name}")
+        elif existing:
+            raise StateError(f"immutable public object path conflict: {name}")
+    for name in sorted(immutable_objects):
+        _write_immutable(public_store, name, public_files[name])
     upload_order = [
-        *sorted(set(public_files) - commit_objects),
+        *sorted(set(public_files) - commit_objects - immutable_objects),
         *(name for name in (release, release_gpg) if name in public_files),
         inrelease,
     ]
@@ -670,6 +702,352 @@ def _write_private(path: Path, raw: bytes) -> None:
     path.chmod(0o600)
 
 
+def _validated_regular_file(path: Path, description: str) -> Path:
+    if path.is_symlink():
+        raise StateError(f"{description} is invalid")
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise StateError(f"{description} is invalid")
+    return resolved
+
+
+def _run_aptly(
+    config: Path, *arguments: str, allow_no_results: bool = False
+) -> str:
+    completed = subprocess.run(
+        ["aptly", f"-config={config}", *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        if (
+            allow_no_results
+            and completed.returncode == 1
+            and not completed.stdout
+            and completed.stderr.strip() == "ERROR: no results"
+        ):
+            return ""
+        operation = " ".join(arguments[:2])
+        details = [
+            line.strip()
+            for line in completed.stderr.splitlines()
+            if line.strip()
+        ]
+        detail = f": {details[-1][:512]}" if details else ""
+        raise StateError(
+            f"aptly {operation} failed with exit code {completed.returncode}{detail}"
+        )
+    return completed.stdout
+
+
+def _parse_aptly_package_records(
+    output: str,
+) -> set[tuple[str, str, str, str]]:
+    records: set[tuple[str, str, str, str]] = set()
+    for line in output.splitlines():
+        fields = tuple(line.split("\t"))
+        if (
+            len(fields) != 4
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]*", fields[0]) is None
+            or not fields[1]
+            or any(character.isspace() for character in fields[1])
+            or fields[2] not in {"amd64", "arm64"}
+            or SHA256_RE.fullmatch(fields[3]) is None
+            or fields in records
+        ):
+            raise StateError("aptly package set is invalid")
+        records.add(fields)
+    return records
+
+
+def _aptly_package_records(
+    config: Path,
+    scope: str,
+    name: str,
+    query: str | None = "Name (= vonk-forge-agent)",
+) -> set[tuple[str, str, str, str]]:
+    arguments = [
+        scope,
+        "search",
+        f"-format={APTLY_PACKAGE_FORMAT}",
+        name,
+    ]
+    if query is not None:
+        arguments.append(query)
+    return _parse_aptly_package_records(
+        _run_aptly(config, *arguments, allow_no_results=True)
+    )
+
+
+def _repository_records(config: Path, repository: str) -> set[tuple[str, str, str, str]]:
+    records = _aptly_package_records(config, "repo", repository)
+    if records != _aptly_package_records(config, "repo", repository, None):
+        raise StateError("aptly repository contains unexpected packages")
+    return records
+
+
+def _version_pattern(channel: str) -> re.Pattern[str]:
+    return DEVELOPMENT_VERSION_RE if channel == "dev" else SEMVER_RE
+
+
+def _group_complete_versions(
+    records: set[tuple[str, str, str, str]], channel: str
+) -> dict[str, set[tuple[str, str, str, str]]]:
+    versions: dict[str, set[tuple[str, str, str, str]]] = {}
+    pattern = _version_pattern(channel)
+    for record in records:
+        package, version, _architecture, _digest = record
+        if package != "vonk-forge-agent" or pattern.fullmatch(version) is None:
+            raise StateError("aptly repository package identity is invalid")
+        versions.setdefault(version, set()).add(record)
+    for version_records in versions.values():
+        if len(version_records) != 2 or {
+            record[2] for record in version_records
+        } != {"amd64", "arm64"}:
+            raise StateError("aptly repository has an incomplete package version")
+    return versions
+
+
+def _sorted_versions(versions: set[str]) -> list[str]:
+    return sorted(versions, key=cmp_to_key(_compare_versions))
+
+
+def _expected_current_records(
+    publication: dict[str, Any]
+) -> set[tuple[str, str, str, str]]:
+    return {
+        (
+            "vonk-forge-agent",
+            publication["version"],
+            architecture,
+            publication["packages"][architecture]["sha256"],
+        )
+        for architecture in ("amd64", "arm64")
+    }
+
+
+def _validate_bounded_records(
+    records: set[tuple[str, str, str, str]], publication: dict[str, Any]
+) -> None:
+    versions = _group_complete_versions(records, publication["channel"])
+    current = publication["version"]
+    if versions.get(current) != _expected_current_records(publication):
+        raise StateError("current aptly package set does not match publication receipt")
+    ordered = _sorted_versions(set(versions))
+    if ordered[-1] != current:
+        raise StateError("current aptly version is not the repository high water")
+    if len(ordered) > RETAINED_PREDECESSORS[publication["channel"]] + 1:
+        raise StateError("aptly repository retention is unbounded")
+
+
+def _debian_control_paragraphs(raw: bytes) -> list[dict[str, str]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise StateError("aptly Packages index is invalid") from error
+    paragraphs: list[dict[str, str]] = []
+    for raw_paragraph in text.strip().split("\n\n"):
+        if not raw_paragraph:
+            continue
+        fields: dict[str, str] = {}
+        current: str | None = None
+        for line in raw_paragraph.splitlines():
+            if line.startswith((" ", "\t")):
+                if current is None:
+                    raise StateError("aptly Packages index is invalid")
+                fields[current] += f"\n{line}"
+                continue
+            name, separator, value = line.partition(":")
+            if (
+                not separator
+                or not name
+                or name in fields
+                or re.fullmatch(r"[A-Za-z0-9-]+", name) is None
+            ):
+                raise StateError("aptly Packages index is invalid")
+            fields[name] = value.lstrip()
+            current = name
+        paragraphs.append(fields)
+    return paragraphs
+
+
+def _public_package_records(
+    publication: dict[str, Any], public_directory: Path
+) -> set[tuple[str, str, str, str]]:
+    if public_directory.is_symlink():
+        raise StateError("aptly public directory is invalid")
+    root = public_directory.resolve()
+    if not root.is_dir():
+        raise StateError("aptly public directory is invalid")
+    records: set[tuple[str, str, str, str]] = set()
+    required = {"Package", "Version", "Architecture", "Filename", "SHA256"}
+    for architecture in ("amd64", "arm64"):
+        index = _validated_regular_file(
+            root
+            / "dists"
+            / publication["distribution"]
+            / "main"
+            / f"binary-{architecture}"
+            / "Packages",
+            "aptly Packages index",
+        )
+        if not index.is_relative_to(root):
+            raise StateError("aptly Packages index is invalid")
+        for fields in _debian_control_paragraphs(index.read_bytes()):
+            if not required.issubset(fields):
+                raise StateError("aptly Packages index is incomplete")
+            if (
+                fields["Package"] != "vonk-forge-agent"
+                or fields["Architecture"] != architecture
+                or SHA256_RE.fullmatch(fields["SHA256"]) is None
+            ):
+                raise StateError("aptly Packages index package is invalid")
+            filename = Path(fields["Filename"])
+            if (
+                filename.is_absolute()
+                or filename.as_posix() != fields["Filename"]
+                or any(part in {"", ".", ".."} for part in filename.parts)
+                or filename.name
+                != f"vonk-forge-agent_{fields['Version']}_{architecture}.deb"
+            ):
+                raise StateError("aptly Packages index filename is invalid")
+            package_path = _validated_regular_file(
+                root / filename, "aptly published package"
+            )
+            if (
+                not package_path.is_relative_to(root)
+                or sha256(package_path.read_bytes()) != fields["SHA256"]
+            ):
+                raise StateError("aptly published package hash is invalid")
+            record = (
+                fields["Package"],
+                fields["Version"],
+                architecture,
+                fields["SHA256"],
+            )
+            if record in records:
+                raise StateError("aptly Packages index has a duplicate package")
+            records.add(record)
+    return records
+
+
+def compact_aptly_state(
+    receipt: dict[str, Any],
+    config: Path,
+    repository: str,
+    package_directory: Path,
+    public_directory: Path,
+    phase: str,
+) -> None:
+    publication = _validate_receipt(receipt)
+    channel = publication["channel"]
+    if repository != REPOSITORIES[channel]:
+        raise StateError("aptly repository does not match channel")
+    if phase not in {"prepare", "finalize"}:
+        raise StateError("aptly state compaction phase is invalid")
+    config = _validated_regular_file(config, "aptly config")
+    if package_directory.is_symlink():
+        raise StateError("package directory is invalid")
+    package_directory = package_directory.resolve()
+    if not package_directory.is_dir():
+        raise StateError("package directory is invalid")
+
+    package_paths: dict[str, Path] = {}
+    expected_current = _expected_current_records(publication)
+    for architecture in ("amd64", "arm64"):
+        package = publication["packages"][architecture]
+        path = _validated_regular_file(
+            package_directory / package["filename"], "agent package"
+        )
+        if (
+            path.parent != package_directory
+            or sha256(path.read_bytes()) != package["sha256"]
+        ):
+            raise StateError("agent package does not match publication receipt")
+        package_paths[architecture] = path
+
+    if phase == "prepare":
+        before = _repository_records(config, repository)
+        versions = _group_complete_versions(before, channel)
+        current = publication["version"]
+        if current in versions and versions[current] != expected_current:
+            raise StateError("current aptly package set conflicts with publication receipt")
+        historical = _sorted_versions(set(versions) - {current})
+        if historical and _compare_versions(current, historical[-1]) <= 0:
+            raise StateError("refusing to roll back aptly repository")
+        retained_versions = set(historical[-RETAINED_PREDECESSORS[channel] :])
+        if RETAINED_PREDECESSORS[channel] == 0:
+            retained_versions = set()
+        for version in historical:
+            if version not in retained_versions:
+                _run_aptly(
+                    config,
+                    "repo",
+                    "remove",
+                    repository,
+                    f"Name (= vonk-forge-agent), $Version (= '{version}')",
+                )
+        remaining = _repository_records(config, repository)
+        expected = set().union(
+            *(versions[version] for version in retained_versions)
+        )
+        if current in versions:
+            expected |= expected_current
+        if remaining != expected:
+            raise StateError("aptly repository pruning did not match retention policy")
+        if current not in versions:
+            for architecture in ("amd64", "arm64"):
+                _run_aptly(
+                    config,
+                    "repo",
+                    "add",
+                    repository,
+                    str(package_paths[architecture]),
+                )
+        compacted = _repository_records(config, repository)
+        if compacted != expected | expected_current:
+            raise StateError("compacted aptly repository is invalid")
+        _validate_bounded_records(compacted, publication)
+        return
+
+    snapshots = _run_aptly(config, "snapshot", "list", "-raw").splitlines()
+    if (
+        publication["snapshot"] not in snapshots
+        or len(snapshots) != len(set(snapshots))
+        or any(
+            not name or any(character.isspace() for character in name)
+            for name in snapshots
+        )
+    ):
+        raise StateError("aptly snapshot set is invalid")
+    current_records = _repository_records(config, repository)
+    _validate_bounded_records(current_records, publication)
+    snapshot_records = _aptly_package_records(
+        config, "snapshot", publication["snapshot"], None
+    )
+    if snapshot_records != current_records:
+        raise StateError("current aptly snapshot does not match compacted repository")
+    if _public_package_records(publication, public_directory) != current_records:
+        raise StateError("published aptly package matrix does not match snapshot")
+    for snapshot in sorted(set(snapshots) - {publication["snapshot"]}):
+        _run_aptly(config, "snapshot", "drop", snapshot)
+
+    _run_aptly(config, "db", "cleanup")
+    remaining = _run_aptly(config, "snapshot", "list", "-raw").splitlines()
+    if remaining != [publication["snapshot"]]:
+        raise StateError("cleaned aptly snapshot set is invalid")
+    cleaned = _repository_records(config, repository)
+    _validate_bounded_records(cleaned, publication)
+    if (
+        _aptly_package_records(
+            config, "snapshot", publication["snapshot"], None
+        )
+        != cleaned
+    ):
+        raise StateError("cleaned aptly snapshot does not match compacted repository")
+
+
 def extract_bundle(
     raw: bytes,
     kind: str,
@@ -755,8 +1133,15 @@ def _publish(receipt: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("prepare", "bundle", "commit", "publish"))
+    parser.add_argument(
+        "command", choices=("prepare", "compact", "bundle", "commit", "publish")
+    )
     parser.add_argument("--work-dir")
+    parser.add_argument("--aptly-config", type=Path)
+    parser.add_argument("--repository")
+    parser.add_argument("--package-dir", type=Path)
+    parser.add_argument("--public-dir", type=Path)
+    parser.add_argument("--phase", choices=("prepare", "finalize"))
     arguments = parser.parse_args(argv)
     try:
         receipt = _receipt_from_environment()
@@ -766,6 +1151,23 @@ def main(argv: list[str] | None = None) -> int:
             work = _work_directory(arguments.work_dir)
         if arguments.command == "prepare":
             _prepare(work, receipt)
+        elif arguments.command == "compact":
+            if (
+                arguments.aptly_config is None
+                or arguments.repository is None
+                or arguments.package_dir is None
+                or arguments.public_dir is None
+                or arguments.phase is None
+            ):
+                raise StateError("aptly compaction arguments are required")
+            compact_aptly_state(
+                receipt,
+                arguments.aptly_config,
+                arguments.repository,
+                arguments.package_dir,
+                arguments.public_dir,
+                arguments.phase,
+            )
         elif arguments.command == "bundle":
             _bundle(work, receipt)
         elif arguments.command == "commit":

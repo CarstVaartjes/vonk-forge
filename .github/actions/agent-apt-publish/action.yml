@@ -266,6 +266,7 @@ runs:
       if: steps.state.outputs.needs_generation == 'true'
       shell: bash
       env:
+        CHANNEL: ${{ inputs.channel }}
         DISTRIBUTION: ${{ steps.package.outputs.distribution }}
         FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
         HAS_STATE: ${{ steps.state.outputs.has_state }}
@@ -293,9 +294,13 @@ runs:
             aptly -config="$config" repo create \
               -distribution="$DISTRIBUTION" -component=main "$REPOSITORY"
           fi
-          for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"; do
-            aptly -config="$config" repo add "$REPOSITORY" "dist/$package"
-          done
+          scripts/agent-apt-state compact \
+            --work-dir "$work" \
+            --aptly-config "$config" \
+            --repository "$REPOSITORY" \
+            --package-dir dist \
+            --public-dir "$work/public" \
+            --phase prepare
           aptly -config="$config" snapshot create "$SNAPSHOT" \
             from repo "$REPOSITORY"
         fi
@@ -357,6 +362,13 @@ runs:
         for architecture in amd64 arm64; do
           test -s "$distribution_root/main/binary-$architecture/Packages"
         done
+        scripts/agent-apt-state compact \
+          --work-dir "$work" \
+          --aptly-config "$config" \
+          --repository "$REPOSITORY" \
+          --package-dir dist \
+          --public-dir "$work/public" \
+          --phase finalize
 
     - name: Build any missing immutable bundles
       shell: bash
