@@ -141,7 +141,7 @@ export function App({api}: {api: ControlApi}) {
       ? <PublicRecipeImportPage api={api as ControlApi & CatalogApi} url={url} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
       : pathname === "/library/create"
         ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy} onDirtyChange={setDraftDirty}/>
-      : <LibraryPage api={api} path={pathname} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
+      : <LibraryPage api={api} path={url} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
     activity: <ActivityPage api={api}/>,
   }[page] : <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
     <p className="fleet-kicker">Unknown workspace</p>

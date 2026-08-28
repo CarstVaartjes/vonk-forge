@@ -9,6 +9,7 @@ import {LibraryActionDialog} from "./library-action-dialog";
 import {actionName} from "./library-action-types";
 import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
+import {LibraryProfileComposer} from "./library-profile-composer";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
@@ -62,12 +63,13 @@ function nextActionCopy(name: LibraryActionName): {description: string; title: s
   return {title: `Review ${name.toLocaleLowerCase()}`, description: "Review the current server-authoritative plan before changing lifecycle state."};
 }
 
-export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy}: {
+export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
   api: LibraryApi;
   detail: LibraryRecipeDetail;
   onBusyChange?(busy: boolean): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
+  preferredNodeId?: string;
 }) {
   const [review, setReview] = useState<LibraryActionReview>();
   const [operation, setOperation] = useState<LibraryOperation>();
@@ -146,6 +148,7 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
           ? <button type="button" className="button" disabled={actionBlocked} onClick={event => openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>Review {recommendedName}</button>
           : <button type="button" className="button secondary" onClick={() => document.getElementById("recipe-placement")?.scrollIntoView({block: "start"})}>{placementRecommendation ? "Choose a Spark group" : "Review placement"}</button>}
     </section>
+    <LibraryProfileComposer api={api} detail={detail} preferredNodeId={preferredNodeId}/>
     <section className="library-section library-primary-control" aria-label="Lifecycle overview">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
       <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">
@@ -168,7 +171,7 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
       </div>
     </section>
     {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
-    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy}/>
+    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy} preferredNodeId={preferredNodeId}/>
     {visual && <>
       <LibraryRecipeVisual document={visual}/>
       <section className="library-section" aria-label="Topology and resources">

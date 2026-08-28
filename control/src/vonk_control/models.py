@@ -586,6 +586,107 @@ class AgentNodeProfile(Base):
     labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
 
 
+class FleetProfile(Base):
+    """Named complete desired recipe placements for a set of Sparks."""
+
+    __tablename__ = "fleet_profiles"
+    __table_args__ = (
+        CheckConstraint(
+            "length(name) BETWEEN 1 AND 120",
+            name="ck_fleet_profiles_name_length",
+        ),
+        CheckConstraint(
+            "length(description) <= 1000",
+            name="ck_fleet_profiles_description_length",
+        ),
+        CheckConstraint(
+            "installation_policy IN ('keep-cached','exact')",
+            name="ck_fleet_profiles_installation_policy",
+        ),
+        CheckConstraint(
+            "length(CAST(assignments AS TEXT)) BETWEEN 2 AND 131072",
+            name="ck_fleet_profiles_assignments_size",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(
+        String(1000), nullable=False, default="", server_default=""
+    )
+    installation_policy: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="keep-cached", server_default="keep-cached"
+    )
+    assignments: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    favorite: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class FleetProfileApplication(Base):
+    """Restart-safe application of one digest-bound Fleet profile preview."""
+
+    __tablename__ = "fleet_profile_applications"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued','running','waiting-for-operator','succeeded','failed','cancelled')",
+            name="ck_fleet_profile_applications_state",
+        ),
+        CheckConstraint(
+            _lower_hex("profile_digest", 64),
+            name="ck_fleet_profile_applications_profile_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("plan_digest", 64),
+            name="ck_fleet_profile_applications_plan_digest",
+        ),
+        CheckConstraint(
+            "current_step >= 0",
+            name="ck_fleet_profile_applications_current_step",
+        ),
+        CheckConstraint(
+            "length(CAST(plan AS TEXT)) BETWEEN 2 AND 262144",
+            name="ck_fleet_profile_applications_plan_size",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    request_key: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    profile_id: Mapped[str] = mapped_column(
+        ForeignKey("fleet_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    profile_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_operation_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    progress: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    result: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    status_reason: Mapped[str | None] = mapped_column(String(512))
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class NodeMutationLease(Base):
     """Exclusive durable ownership of one node's mutations and route state."""
 

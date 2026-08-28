@@ -134,7 +134,6 @@ export function NodeDetail({
   return <aside className="node-detail" role="complementary" aria-labelledby={headingId}>
     <header className="node-detail-heading">
       <div>
-        <p className="node-eyebrow">Node detail</p>
         <h3 id={headingId}>{name} details</h3>
         {secondaryName && <p>{secondaryName}</p>}
       </div>
@@ -155,7 +154,7 @@ export function NodeDetail({
     </section>
 
     <section aria-labelledby={`${headingId}-recipes`}>
-      <h4 id={`${headingId}-recipes`}>Recipes</h4>
+      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Inspect what is running or cached here, then choose a compatible recipe for this Spark.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Manage models on this Spark</a></div>
       <div className="detail-recipe-columns">
         <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
         <section aria-label={`Installed recipes in ${name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>

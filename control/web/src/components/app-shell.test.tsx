@@ -58,11 +58,11 @@ test("provides browser-equivalent local storage semantics", () => {
   expect(localStorage.key(0)).toBeNull();
 });
 
-test("exposes Fleet, Library, and Activity as primary navigation", () => {
+test("keeps Fleet and Library as the two primary operating views", () => {
   render(<AppShell activeRoute="fleet" onNavigate={() => undefined}>{null}</AppShell>);
   expect(screen.getByRole("link", {name: "Fleet"})).toBeVisible();
   expect(screen.getByRole("link", {name: "Library"})).toBeVisible();
-  expect(screen.getByRole("link", {name: "Activity"})).toBeVisible();
+  expect(screen.queryByRole("link", {name: "Activity"})).not.toBeInTheDocument();
   expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   expect(screen.queryByText("Catalog")).not.toBeInTheDocument();
   expect(screen.queryByText("Packages")).not.toBeInTheDocument();
@@ -97,7 +97,6 @@ test("keeps the focused workspace routes in primary navigation while preserving 
   const routes = new Map([
     ["Fleet", "/fleet"],
     ["Library", "/library"],
-    ["Activity", "/activity"],
   ]);
   for (const [name, href] of routes) {
     expect(within(primary).getByRole("link", {name})).toHaveAttribute("href", href);
@@ -137,7 +136,7 @@ test("keeps focus inside the mobile sheet and closes it on Escape", async () => 
   const close = screen.getByRole("button", {name: "Close system navigation"});
   close.focus();
   await user.keyboard("{Shift>}{Tab}{/Shift}");
-  expect(screen.getByRole("link", {name: "Activity"})).toHaveFocus();
+  expect(screen.getByRole("link", {name: "Library"})).toHaveFocus();
   await user.keyboard("{Escape}");
 
   expect(screen.queryByRole("dialog", {name: "Navigation"})).not.toBeInTheDocument();
@@ -184,7 +183,6 @@ test("renders a focused recovery page for unsupported URLs", async () => {
   expect(document.title).toBe("Page not found · Vonk Forge");
   expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", {name: "Library"})).not.toHaveAttribute("aria-current");
-  expect(screen.getByRole("link", {name: "Activity"})).not.toHaveAttribute("aria-current");
   expect(location.pathname).toBe("/unsupported-route");
 
   await user.click(screen.getByRole("link", {name: "Go to Fleet"}));
@@ -192,14 +190,12 @@ test("renders a focused recovery page for unsupported URLs", async () => {
   expect(document.title).toBe("Fleet · Vonk Forge");
 });
 
-test("navigates to Activity as a first-class route", async () => {
+test("supports Activity as a secondary administrative route", async () => {
+  history.replaceState(null, "", "/activity");
   render(<App api={apiFixture}/>);
-  const user = userEvent.setup();
-
-  await user.click(screen.getByRole("link", {name: "Activity"}));
 
   expect(await screen.findByRole("heading", {name: "Activity"})).toBeVisible();
-  expect(screen.getByRole("link", {name: "Activity"})).toHaveAttribute("aria-current", "page");
+  expect(screen.queryByRole("link", {name: "Activity"})).not.toBeInTheDocument();
   expect(location.pathname).toBe("/activity");
 });
 
@@ -346,7 +342,7 @@ test("makes shell routes visibly and keyboard disabled while navigation is locke
   const user = userEvent.setup();
   render(<AppShell activeRoute="library" navigationLocked onNavigate={onNavigate}>{null}</AppShell>);
 
-  for (const name of ["Fleet", "Library", "Activity"]) {
+  for (const name of ["Fleet", "Library"]) {
     const link = screen.getByRole("link", {name});
     expect(link).toHaveAttribute("aria-disabled", "true");
     expect(link).toHaveAttribute("tabindex", "-1");

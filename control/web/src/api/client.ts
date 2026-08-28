@@ -13,6 +13,11 @@ import type {
   EnrollmentListResponse,
   FleetEvidenceResponse,
   FleetNodeIdentity,
+  FleetProfile,
+  FleetProfileApplication,
+  FleetProfileInput,
+  FleetProfileList,
+  FleetProfilePreview,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -281,6 +286,60 @@ export class ApiClient implements ControlApi {
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
     return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+  }
+
+  async fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profiles", {signal}));
+  }
+
+  async fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}", {
+      params: {path: {profile_id: profileId}},
+      signal,
+    }));
+  }
+
+  async createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles", {body: input, signal}));
+  }
+
+  async updateFleetProfile(profileId: string, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.PUT("/api/v1/fleet-profiles/{profile_id}", {
+      params: {path: {profile_id: profileId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async deleteFleetProfile(profileId: string, signal?: AbortSignal): Promise<void> {
+    const {response} = await this.generated.DELETE("/api/v1/fleet-profiles/{profile_id}", {
+      params: {path: {profile_id: profileId}},
+      signal,
+    });
+    if (!response.ok) throw new ApiError(response.status, `Control API returned ${response.status}`);
+  }
+
+  async previewFleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfilePreview> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/preview", {
+      params: {path: {profile_id: profileId}},
+      body: {},
+      signal,
+    }));
+  }
+
+  async applyFleetProfile(profileId: string, planDigest: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/apply", {
+      params: {path: {profile_id: profileId}},
+      body: {plan_digest: planDigest, request_key: crypto.randomUUID()},
+      signal,
+    }));
+  }
+
+  async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profile-applications/{application_id}", {
+      params: {path: {application_id: applicationId}},
+      signal,
+    }));
   }
 
   async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
