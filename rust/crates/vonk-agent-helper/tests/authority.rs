@@ -234,10 +234,20 @@ struct RecordingRunner {
     runtime_running: Arc<Mutex<bool>>,
 }
 
+#[derive(Debug)]
+struct CandidateEvidence {
+    path: PathBuf,
+    bytes: Vec<u8>,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    links: u64,
+}
+
 #[derive(Clone, Default)]
 struct AdversarialPackageRunner {
     calls: SharedCalls,
-    observed_candidates: Arc<Mutex<Vec<(PathBuf, Vec<u8>, u32, u32, u32, u64)>>>,
+    observed_candidates: Arc<Mutex<Vec<CandidateEvidence>>>,
     source_swap: Arc<Mutex<Option<(PathBuf, PathBuf)>>>,
     fail_dpkg: Arc<Mutex<bool>>,
 }
@@ -263,14 +273,18 @@ impl CommandRunner for AdversarialPackageRunner {
             };
             let candidate = PathBuf::from(&arguments[candidate_index]);
             let metadata = fs::metadata(&candidate).map_err(|error| error.to_string())?;
-            self.observed_candidates.lock().unwrap().push((
-                candidate,
-                fs::read(&arguments[candidate_index]).map_err(|error| error.to_string())?,
-                metadata.uid(),
-                metadata.gid(),
-                metadata.mode() & 0o777,
-                metadata.nlink(),
-            ));
+            self.observed_candidates
+                .lock()
+                .unwrap()
+                .push(CandidateEvidence {
+                    path: candidate,
+                    bytes: fs::read(&arguments[candidate_index])
+                        .map_err(|error| error.to_string())?,
+                    uid: metadata.uid(),
+                    gid: metadata.gid(),
+                    mode: metadata.mode() & 0o777,
+                    links: metadata.nlink(),
+                });
         }
         if executable == std::path::Path::new("/usr/bin/dpkg-deb") {
             if let Some((replacement, incoming)) = self.source_swap.lock().unwrap().take() {
@@ -1229,15 +1243,15 @@ fn root_custody_closes_the_agent_path_swap_race_and_compiles_exact_dpkg_argv() {
 
     let observed = runner.observed_candidates.lock().unwrap();
     assert_eq!(observed.len(), 3);
-    let candidate = observed[0].0.clone();
-    for (path, bytes, uid, gid, mode, links) in observed.iter() {
-        assert_eq!(path, &candidate);
-        assert_eq!(bytes, body);
+    let candidate = observed[0].path.clone();
+    for evidence in observed.iter() {
+        assert_eq!(evidence.path, candidate);
+        assert_eq!(evidence.bytes, body);
         assert_eq!(
-            (*uid, *gid),
+            (evidence.uid, evidence.gid),
             (package_owner, fs::metadata(&roots.data).unwrap().gid())
         );
-        assert_eq!((*mode, *links), (0o600, 1));
+        assert_eq!((evidence.mode, evidence.links), (0o600, 1));
     }
     let relative = candidate.strip_prefix(&roots.package_custody).unwrap();
     let components = relative
