@@ -62,6 +62,16 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         help="Limit qualification to an exact recipe identity; repeatable",
     )
     parser.add_argument(
+        "--node-id",
+        action="append",
+        default=[],
+        metavar="SPARK_ID",
+        help=(
+            "Restrict an explicitly selected single-Spark campaign to this "
+            "controller node; repeatable"
+        ),
+    )
+    parser.add_argument(
         "--cleanup",
         choices=("none", "stop", "uninstall"),
         default="stop",
@@ -126,6 +136,7 @@ def run(argv: list[str] | None = None) -> dict[str, object]:
         operation_timeout_seconds=args.operation_timeout_seconds,
         poll_interval_seconds=args.poll_interval_seconds,
         selected_recipes=frozenset(args.recipe),
+        allowed_node_ids=frozenset(args.node_id),
     )
     policy = load_policy(args.policy)
     fixtures = FixtureRegistry.packaged(args.fixture_manifest)

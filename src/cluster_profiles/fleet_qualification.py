@@ -28,6 +28,7 @@ _JOB_ADAPTERS = frozenset(
     {"artifact-job", "audio-job", "image-job", "mesh-job", "video-job"}
 )
 _CONTROLLER_DISK_FLOOR_BYTES = 10_000_000_000
+_NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
 _EU_JURISDICTIONS = frozenset(
     {
         "AT",
@@ -168,6 +169,7 @@ class RunnerOptions:
     operation_timeout_seconds: float = 7_200
     poll_interval_seconds: float = 5
     selected_recipes: frozenset[str] = frozenset()
+    allowed_node_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         jurisdiction = self.jurisdiction
@@ -187,6 +189,13 @@ class RunnerOptions:
             raise QualificationError("operation timeout must be between 1 and 86400")
         if not 0.1 <= self.poll_interval_seconds <= 60:
             raise QualificationError("poll interval must be between 0.1 and 60")
+        if any(
+            not isinstance(node_id, str) or _NODE_ID.fullmatch(node_id) is None
+            for node_id in self.allowed_node_ids
+        ):
+            raise QualificationError("node pins must be exact controller Spark IDs")
+        if self.allowed_node_ids and not self.selected_recipes:
+            raise QualificationError("node-pinned campaigns require explicit recipes")
 
 
 class EvidenceLedger:
@@ -725,6 +734,24 @@ def build_plan(
     public = client.request("GET", "/api/v1/catalog/public-recipes")
     recipes = _list(public.get("recipes"), "public recipes")
     online_nodes = _fleet_nodes(fleet)
+    authority_node_ids = {
+        node_id
+        for node in (
+            _object(raw, "fleet node")
+            for raw in _list(fleet.get("nodes"), "fleet nodes")
+        )
+        if isinstance((node_id := node.get("id")), str)
+    }
+    unknown_node_ids = sorted(options.allowed_node_ids - authority_node_ids)
+    if unknown_node_ids:
+        raise QualificationError(
+            f"pinned Spark is not in controller authority: {unknown_node_ids[0]}"
+        )
+    campaign_online_nodes = [
+        node
+        for node in online_nodes
+        if not options.allowed_node_ids or node.get("id") in options.allowed_node_ids
+    ]
     fleet_fingerprint = _fleet_fingerprint(fleet)
     items: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -740,6 +767,10 @@ def build_plan(
         if key in policy:
             blockers.append(policy[key])
         node_count = recipe.get("node_count")
+        if options.allowed_node_ids and node_count != 1:
+            raise QualificationError(
+                f"node-pinned campaign recipe must require exactly one Spark: {key}"
+            )
         if (
             not isinstance(node_count, int)
             or isinstance(node_count, bool)
@@ -760,18 +791,18 @@ def build_plan(
                     f"Recipe requires {node_count} Sparks; this qualification fleet supports one or two.",
                 )
             )
-        elif node_count > len(online_nodes):
+        elif node_count > len(campaign_online_nodes):
             blockers.append(
                 Blocker(
                     "topology",
                     "topology.insufficient_online_nodes",
-                    f"Recipe requires {node_count} online Sparks; fleet currently has {len(online_nodes)}.",
+                    f"Recipe requires {node_count} online Sparks; campaign node allowlist currently has {len(campaign_online_nodes)} online.",
                 )
             )
         required_memory = recipe.get("maximum_runtime_memory_bytes_per_node")
         available_memory = [
             value
-            for node in online_nodes
+            for node in campaign_online_nodes
             if (value := _node_available_memory(node)) is not None
         ]
         if (
@@ -1020,6 +1051,11 @@ def build_plan(
             "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
             "selected_recipes": sorted(options.selected_recipes),
+            **(
+                {"allowed_node_ids": sorted(options.allowed_node_ids)}
+                if options.allowed_node_ids
+                else {}
+            ),
             "fixture_manifest_sha256": (
                 fixtures.manifest_sha256 if fixtures is not None else None
             ),
@@ -1041,6 +1077,11 @@ def build_plan(
         "options": {
             "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
+            **(
+                {"allowed_node_ids": sorted(options.allowed_node_ids)}
+                if options.allowed_node_ids
+                else {}
+            ),
             "fixture_manifest_sha256": (
                 fixtures.manifest_sha256 if fixtures is not None else None
             ),
@@ -1555,6 +1596,43 @@ class QualificationRunner:
         self._preflight_blocked: set[str] = set()
         self._preflight_failed: set[str] = set()
 
+    def _node_allowed(self, node_id: object) -> bool:
+        return isinstance(node_id, str) and (
+            not self.options.allowed_node_ids
+            or node_id in self.options.allowed_node_ids
+        )
+
+    def _candidate_allowed(self, candidate: Mapping[str, object]) -> bool:
+        node_ids = candidate.get("node_ids")
+        return (
+            isinstance(node_ids, list)
+            and bool(node_ids)
+            and all(self._node_allowed(node_id) for node_id in node_ids)
+        )
+
+    def _uncertain_installation_blocks(
+        self, installation: object, revision_id: str
+    ) -> bool:
+        if (
+            not isinstance(installation, Mapping)
+            or installation.get("recipe_revision_id") != revision_id
+            or installation.get("state") not in {"partial", "failed", "installing"}
+        ):
+            return False
+        if not self.options.allowed_node_ids:
+            return True
+        node_ids = installation.get("node_ids")
+        if (
+            not isinstance(node_ids, list)
+            or not node_ids
+            or any(
+                not isinstance(node_id, str) or _NODE_ID.fullmatch(node_id) is None
+                for node_id in node_ids
+            )
+        ):
+            return True
+        return bool(self.options.allowed_node_ids.intersection(node_ids))
+
     def _record_preview(
         self, digest: str, key: str, step: str, preview: Mapping[str, object]
     ) -> None:
@@ -1654,7 +1732,7 @@ class QualificationRunner:
         for node in _fleet_nodes(fleet):
             node_id = node.get("id")
             free = _node_allocatable_disk(node)
-            if isinstance(node_id, str) and isinstance(free, int):
+            if self._node_allowed(node_id) and isinstance(free, int):
                 self._capacity_remaining[node_id] = free
                 self._capacity_artifacts[node_id] = set()
         for record in self.ledger.records:
@@ -1768,7 +1846,10 @@ class QualificationRunner:
             candidates = [
                 _object(value, "placement recommendation")
                 for value in recommendations
-                if isinstance(value, Mapping) and value.get("eligible") is True
+                if isinstance(value, Mapping)
+                and value.get("eligible") is True
+                and self._candidate_allowed(value)
+                and len(value.get("node_ids", [])) == item.get("node_count")
             ]
             if not candidates:
                 blocker = {
@@ -1791,9 +1872,7 @@ class QualificationRunner:
                 else []
             )
             if isinstance(installations, list) and any(
-                isinstance(value, Mapping)
-                and value.get("recipe_revision_id") == revision_id
-                and value.get("state") in {"partial", "failed", "installing"}
+                self._uncertain_installation_blocks(value, revision_id)
                 for value in installations
             ):
                 blocker = {
@@ -1816,7 +1895,7 @@ class QualificationRunner:
         current_allocatable = {
             node_id: _node_allocatable_disk(node)
             for node in _fleet_nodes(fleet)
-            if isinstance((node_id := node.get("id")), str)
+            if self._node_allowed(node_id := node.get("id"))
         }
         existing = [
             _object(record.get("payload"), "capacity plan payload")
@@ -1931,7 +2010,7 @@ class QualificationRunner:
         for node in _fleet_nodes(fleet):
             node_id = node.get("id")
             free = _node_allocatable_disk(node)
-            if isinstance(node_id, str) and isinstance(free, int):
+            if self._node_allowed(node_id) and isinstance(free, int):
                 remaining[node_id] = free
                 artifact_providers[node_id] = {}
         if not remaining and jobs:
@@ -2401,7 +2480,7 @@ class QualificationRunner:
             "baseline_free_bytes_by_node": {
                 node_id: _node_available_disk(node)
                 for node in _fleet_nodes(fleet)
-                if isinstance((node_id := node.get("id")), str)
+                if self._node_allowed(node_id := node.get("id"))
             },
             "baseline_reserved_bytes_by_node": {
                 node_id: (
@@ -2410,12 +2489,12 @@ class QualificationRunner:
                     else 0
                 )
                 for node in _fleet_nodes(fleet)
-                if isinstance((node_id := node.get("id")), str)
+                if self._node_allowed(node_id := node.get("id"))
             },
             "baseline_allocatable_bytes_by_node": {
                 node_id: _node_allocatable_disk(node)
                 for node in _fleet_nodes(fleet)
-                if isinstance((node_id := node.get("id")), str)
+                if self._node_allowed(node_id := node.get("id"))
             },
             "assignments": solution,
             "execution_order": solution_order,
@@ -2503,9 +2582,15 @@ class QualificationRunner:
         projection = _object(placement[0], "placement projection")
         recommendations = _list(projection.get("recommendations"), "recommendations")
         eligible = [
-            _object(item, "placement recommendation")
-            for item in recommendations
-            if isinstance(item, Mapping) and item.get("eligible") is True
+            _object(recommendation, "placement recommendation")
+            for recommendation in recommendations
+            if isinstance(recommendation, Mapping)
+            and recommendation.get("eligible") is True
+            and self._candidate_allowed(recommendation)
+            and (
+                not isinstance(item.get("node_count"), int)
+                or len(recommendation.get("node_ids", [])) == item.get("node_count")
+            )
         ]
         if not eligible:
             evidence = {
@@ -2797,6 +2882,8 @@ class QualificationRunner:
             or intent_options.get("jurisdiction") != self.options.jurisdiction
             or intent_options.get("selected_recipes")
             != sorted(self.options.selected_recipes)
+            or intent_options.get("allowed_node_ids", [])
+            != sorted(self.options.allowed_node_ids)
         ):
             raise QualificationError("runner options do not match campaign intent")
         manifest_digest = intent_options.get("fixture_manifest_sha256")
@@ -3460,6 +3547,10 @@ class QualificationRunner:
         node_ids = selected.get("node_ids")
         if not isinstance(node_ids, list) or len(node_ids) != item.get("node_count"):
             raise QualificationError(f"{key} placement node identities are invalid")
+        if not all(self._node_allowed(node_id) for node_id in node_ids):
+            raise QualificationError(
+                f"{key} placement escaped the campaign node allowlist"
+            )
 
         mapping_id = selected.get("mapping_id")
         if not isinstance(mapping_id, str):
