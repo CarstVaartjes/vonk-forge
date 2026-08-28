@@ -135,6 +135,7 @@ def _recipe(
     revision_number: int = 1,
     lifecycle: str = "resolved",
     recipe_id: str | None = None,
+    model_version_document: dict | None = None,
 ) -> tuple[LocalRecipe, LocalRecipeRevision | None]:
     identifier = recipe_id or _uuid(value)
     recipe = session.get(LocalRecipe, identifier)
@@ -153,7 +154,11 @@ def _recipe(
     if document is None:
         return recipe, None
     if "model" in document:
-        _ensure_catalog_entities(session, document)
+        _ensure_catalog_entities(
+            session,
+            document,
+            model_version_document=model_version_document,
+        )
     revision = LocalRecipeRevision(
         id=_uuid(1_000 + value * 10 + revision_number),
         recipe_id=identifier,
@@ -171,7 +176,12 @@ def _recipe(
     return recipe, revision
 
 
-def _ensure_catalog_entities(session: Session, document: dict) -> None:
+def _ensure_catalog_entities(
+    session: Session,
+    document: dict,
+    *,
+    model_version_document: dict | None = None,
+) -> None:
     def reference(kind: str, slug: str, digest: str) -> dict[str, str]:
         return {
             "kind": kind,
@@ -188,7 +198,11 @@ def _ensure_catalog_entities(session: Session, document: dict) -> None:
     entities = (
         ("model-group", group, {}),
         ("model", model, {"model_group": group}),
-        ("model-version", model_version, {"model": model}),
+        (
+            "model-version",
+            model_version,
+            model_version_document or {"model": model},
+        ),
         ("execution-harness", harness, {}),
         (
             "runtime-distribution",
@@ -330,9 +344,7 @@ def _projection(sessions: sessionmaker[Session]) -> LibraryProjection:
 def test_runtime_memory_excludes_the_separate_system_reserve() -> None:
     _engine, sessions = _database()
     document = _document(family="reserve-floor", title="Reserve floor")
-    document["topology"]["roles"][0]["resources"]["memory"][
-        "system_reserve_bytes"
-    ] = 80
+    document["topology"]["roles"][0]["resources"]["memory"]["system_reserve_bytes"] = 80
     with sessions.begin() as session:
         _recipe(
             session,
@@ -353,9 +365,7 @@ def test_runtime_memory_excludes_the_separate_system_reserve() -> None:
 def test_low_memory_blocks_load_but_retains_mapping_preview() -> None:
     _engine, sessions = _database()
     document = _document(family="load-only-blocker", title="Load only blocker")
-    document["topology"]["roles"][0]["resources"]["memory"][
-        "system_reserve_bytes"
-    ] = 80
+    document["topology"]["roles"][0]["resources"]["memory"]["system_reserve_bytes"] = 80
     with sessions.begin() as session:
         _recipe(
             session,
@@ -638,7 +648,10 @@ def test_root_separates_same_slug_model_versions_by_portable_identity() -> None:
 
     models = _projection(sessions).list().models
 
-    assert [(model.model.publisher, model.model.slug, model.model.content_sha256) for model in models] == [
+    assert [
+        (model.model.publisher, model.model.slug, model.model.content_sha256)
+        for model in models
+    ] == [
         ("alpha", "shared-model", "1" * 64),
         ("beta", "shared-model", "2" * 64),
     ]
@@ -669,7 +682,9 @@ def test_non_v1_revision_schema_fails_closed_in_library_projection() -> None:
     assert summary.unlinked_recipes[0].selected_revision is None
     assert detail.selected_revision is None
     assert detail.visual_recipe is None
-    assert "recipe.schema_version_unsupported" in {reason.code for reason in detail.reasons}
+    assert "recipe.schema_version_unsupported" in {
+        reason.code for reason in detail.reasons
+    }
 
 
 def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> None:
@@ -1256,7 +1271,7 @@ def test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services() -> 
     second = list(statements)
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(first) == len(second) == 21
+    assert len(first) == len(second) == 22
     for table in (
         "local_recipes",
         "cluster_mappings",
@@ -1313,12 +1328,71 @@ def test_valid_long_v1_visual_fields_are_bounded_without_profile_projection() ->
     assert "recipe.visual_text_truncated" in {item.code for item in detail.reasons}
 
 
-def test_visual_projection_keeps_non_openai_interface_path_without_endpoint_fields() -> None:
+def test_visual_projection_exposes_sorted_signed_artifact_include_paths() -> None:
+    _engine, sessions = _database()
+    document = _document(family="subset-identity", title="Subset identity")
+    artifact = document["artifacts"][0]
+    artifact["include_paths"] = [
+        "config.json",
+        "weights/model-00001.safetensors",
+        "weights/model-00002.safetensors",
+    ]
+    validate_recipe(document)
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            61,
+            slug="subset-identity",
+            title="Subset identity",
+            document=document,
+        )
+
+    projected = _projection(sessions).detail(_uuid(61)).visual_recipe.artifacts[0]
+
+    assert projected.repository == artifact["repository"]
+    assert projected.revision == artifact["revision"]
+    assert projected.include_paths == [
+        "config.json",
+        "weights/model-00001.safetensors",
+        "weights/model-00002.safetensors",
+    ]
+
+
+def test_visual_projection_keeps_non_openai_interface_path_without_endpoint_fields() -> (
+    None
+):
     """Break caught: job interfaces fail visual projection without an OpenAI port."""
 
     _engine, sessions = _database()
     document = _document(family="image-job", title="Image job")
-    document["interfaces"] = [{"adapter": "image-job", "path": "/generate"}]
+    document["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 64 * 1024**2,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Generated image",
+                        "description": "The generated PNG image.",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 64 * 1024**2,
+                        "max_total_bytes": 64 * 1024**2,
+                    }
+                ],
+            },
+        }
+    ]
+    document["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3_600,
+    }
     document["validation"]["validators"] = [
         {"interface": "image-job", "checks": ["job.completed"]}
     ]
@@ -1335,10 +1409,199 @@ def test_visual_projection_keeps_non_openai_interface_path_without_endpoint_fiel
     interface = _projection(sessions).detail(_uuid(601)).visual_recipe.interfaces[0]
 
     assert interface.adapter == "image-job"
-    assert interface.path == "/generate"
+    assert interface.path == "/outputs"
     assert interface.port is None
     assert interface.model_aliases == []
     assert interface.health_path is None
+    assert interface.timeout_seconds == 3_600
+
+
+def test_visual_projection_exposes_exact_job_contract_and_bounded_model_license() -> (
+    None
+):
+    _engine, sessions = _database()
+    document = _document(family="restricted-mesh", title="Restricted mesh")
+    document["parameters"] = [
+        {
+            "name": "seed",
+            "description": "Deterministic generation seed",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 2**31 - 1,
+            "change_effect": "restart",
+        },
+        {
+            "name": "quality",
+            "description": "Mesh quality preset",
+            "type": "enum",
+            "default": "balanced",
+            "allowed_values": ["fast", "balanced"],
+            "change_effect": "restart",
+        },
+    ]
+    document["runtime"]["arguments"].append(
+        {"name": "output-mime", "value": "model/gltf-binary"}
+    )
+    document["runtime"]["arguments"][0]["parameter"] = "seed"
+    document["interfaces"] = [
+        {
+            "adapter": "mesh-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["image/png", "image/jpeg"],
+                "max_bytes": 32 * 1024**2,
+                "slots": [
+                    {
+                        "id": "reference",
+                        "label": "Reference images",
+                        "description": "One or two object reference images.",
+                        "media_types": ["image/png", "image/jpeg"],
+                        "extensions": [".jpg", ".png"],
+                        "min_files": 1,
+                        "max_files": 2,
+                        "max_file_bytes": 16 * 1024**2,
+                        "max_total_bytes": 32 * 1024**2,
+                    }
+                ],
+            },
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 512 * 1024**2,
+                "slots": [
+                    {
+                        "id": "mesh",
+                        "label": "Generated mesh",
+                        "description": "The generated binary glTF mesh.",
+                        "media_types": ["model/gltf-binary"],
+                        "extensions": [".glb"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 512 * 1024**2,
+                        "max_total_bytes": 512 * 1024**2,
+                    }
+                ],
+            },
+        }
+    ]
+    document["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3_600,
+    }
+    document["runtime"]["security"]["mounts"].append(
+        {"source": "inputs", "target": "/inputs", "read_only": True}
+    )
+    document["validation"]["validators"] = [
+        {"interface": "mesh-job", "checks": ["artifact.mime.model-gltf-binary"]}
+    ]
+    validate_recipe(document)
+    model_version_document = {
+        "model": {
+            "kind": "model",
+            "publisher": "vonk-forge",
+            "slug": "synthetic-tiny",
+            "content_sha256": "e" * 64,
+        },
+        "license": {
+            "spdx": "LicenseRef-Upstream",
+            "territorial_restrictions": {
+                "denied_jurisdictions": ["EU", "GB", "KR"],
+                "notice": "Use is unavailable in the listed territories.",
+            },
+            "internal_note": "must not escape the bounded DTO",
+        },
+        "unbounded_upstream_metadata": {"secret": "not projected"},
+    }
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            603,
+            slug="restricted-mesh",
+            title="Restricted mesh",
+            document=document,
+            model_version_document=model_version_document,
+        )
+
+    visual = _projection(sessions).detail(_uuid(603)).visual_recipe
+    assert visual is not None
+    assert [parameter.model_dump() for parameter in visual.parameters] == [
+        {
+            "name": "seed",
+            "description": "Deterministic generation seed",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 2**31 - 1,
+            "allowed_values": [],
+            "pattern": None,
+            "change_effect": "restart",
+        },
+        {
+            "name": "quality",
+            "description": "Mesh quality preset",
+            "type": "enum",
+            "default": "balanced",
+            "minimum": None,
+            "maximum": None,
+            "allowed_values": ["fast", "balanced"],
+            "pattern": None,
+            "change_effect": "restart",
+        },
+    ]
+    interface = visual.interfaces[0]
+    assert interface.timeout_seconds == 3_600
+    assert interface.input is not None
+    assert interface.input.model_dump() == {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png", "image/jpeg"],
+        "max_bytes": 32 * 1024**2,
+        "min_files": 1,
+        "max_files": 2,
+        "slots": [
+            {
+                "id": "reference",
+                "label": "Reference images",
+                "description": "One or two object reference images.",
+                "media_types": ["image/png", "image/jpeg"],
+                "extensions": [".jpg", ".png"],
+                "min_files": 1,
+                "max_files": 2,
+                "max_file_bytes": 16 * 1024**2,
+                "max_total_bytes": 32 * 1024**2,
+            }
+        ],
+    }
+    assert interface.output is not None
+    assert interface.output.model_dump() == {
+        "path": "/outputs",
+        "allowed_media_types": ["model/gltf-binary"],
+        "max_total_bytes": 512 * 1024**2,
+        "slots": [
+            {
+                "id": "mesh",
+                "label": "Generated mesh",
+                "description": "The generated binary glTF mesh.",
+                "media_types": ["model/gltf-binary"],
+                "extensions": [".glb"],
+                "min_files": 1,
+                "max_files": 1,
+                "max_file_bytes": 512 * 1024**2,
+                "max_total_bytes": 512 * 1024**2,
+            }
+        ],
+    }
+    assert visual.model_license is not None
+    assert visual.model_license.model_dump() == {
+        "territorial_restrictions": {
+            "denied_jurisdictions": ["EU", "GB", "KR"],
+            "notice": "Use is unavailable in the listed territories.",
+        }
+    }
+    assert set(visual.model_license.model_dump()) == {"territorial_restrictions"}
 
 
 def test_job_only_recipe_does_not_offer_an_openai_load_action() -> None:
@@ -1346,9 +1609,39 @@ def test_job_only_recipe_does_not_offer_an_openai_load_action() -> None:
 
     _engine, sessions = _database()
     document = _document(family="artifact-job", title="Artifact job")
-    document["interfaces"] = [{"adapter": "artifact-job", "path": "/result"}]
+    document["interfaces"] = [
+        {
+            "adapter": "artifact-job",
+            "path": "/outputs",
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 64 * 1024**2,
+                "slots": [
+                    {
+                        "id": "artifact",
+                        "label": "Generated artifact",
+                        "description": "The generated binary artifact.",
+                        "media_types": ["application/octet-stream"],
+                        "extensions": [".bin"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 64 * 1024**2,
+                        "max_total_bytes": 64 * 1024**2,
+                    }
+                ],
+            },
+        }
+    ]
+    document["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3_600,
+    }
     document["validation"]["validators"] = [
-        {"interface": "artifact-job", "checks": ["job.completed"]}
+        {
+            "interface": "artifact-job",
+            "checks": ["artifact.mime.application-octet-stream"],
+        }
     ]
     validate_recipe(document)
     with sessions.begin() as session:
@@ -1363,7 +1656,13 @@ def test_job_only_recipe_does_not_offer_an_openai_load_action() -> None:
         node = _node(session, 1)
         _operational_group(session, revision, (node,), value=602, installed=True)
 
-    targets = _projection(sessions).detail(_uuid(602)).placement[0].recommendations[0].preview_targets
+    targets = (
+        _projection(sessions)
+        .detail(_uuid(602))
+        .placement[0]
+        .recommendations[0]
+        .preview_targets
+    )
 
     assert [target.kind for target in targets] == ["mapping", "install"]
 
@@ -1602,7 +1901,7 @@ def test_active_run_lineage_precedes_512_newer_operational_rows_without_more_que
     detail = _projection(sessions).detail(_uuid(64))
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(statements) == 21
+    assert len(statements) == 22
     assert active["run_id"] in {item.run_id for item in detail.operational_state.runs}
     assert active["installation_id"] in {
         item.installation_id for item in detail.operational_state.installations

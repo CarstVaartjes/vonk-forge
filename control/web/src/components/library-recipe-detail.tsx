@@ -12,6 +12,7 @@ import {LibraryOperationProgress, operationSettled} from "./library-operation-pr
 import {LibraryProfileComposer} from "./library-profile-composer";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
+import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import "./library-recipe-detail.css";
 
@@ -63,6 +64,19 @@ function nextActionCopy(name: LibraryActionName): {description: string; title: s
   return {title: `Review ${name.toLocaleLowerCase()}`, description: "Review the current server-authoritative plan before changing lifecycle state."};
 }
 
+function useNarrowViewport(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof window !== "undefined" && window.matchMedia?.(query).matches === true);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+  return matches;
+}
+
 export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
   api: LibraryApi;
   detail: LibraryRecipeDetail;
@@ -74,6 +88,8 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
   const [review, setReview] = useState<LibraryActionReview>();
   const [operation, setOperation] = useState<LibraryOperation>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Load");
+  const narrowViewport = useNarrowViewport("(max-width: 520px)");
+  const [mobileQualificationOpen, setMobileQualificationOpen] = useState(false);
   const canonicalPreviewKey = [
     detail.recipe.recipe_id,
     detail.selected_revision?.id ?? "",
@@ -148,7 +164,13 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
           ? <button type="button" className="button" disabled={actionBlocked} onClick={event => openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>Review {recommendedName}</button>
           : <button type="button" className="button secondary" onClick={() => document.getElementById("recipe-placement")?.scrollIntoView({block: "start"})}>{placementRecommendation ? "Choose a Spark group" : "Review placement"}</button>}
     </section>
+    <ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange}/>
     <LibraryProfileComposer api={api} detail={detail} preferredNodeId={preferredNodeId}/>
+    <details className="recipe-qualification-disclosure" open={!narrowViewport || mobileQualificationOpen} onToggle={event => {
+      if (narrowViewport && event.currentTarget.open !== mobileQualificationOpen) setMobileQualificationOpen(event.currentTarget.open);
+    }}>
+      <summary><span><strong>Technical qualification</strong><small>Lifecycle, placement, runtime and topology</small></span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
+      <div className="recipe-qualification-body">
     <section className="library-section library-primary-control" aria-label="Lifecycle overview">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
       <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">
@@ -195,6 +217,8 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
       onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
       resetToken={canonicalPreviewKey}
     />}
+      </div>
+    </details>
     {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onBusyChange={onBusyChange} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
   </div>;
 }

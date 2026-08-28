@@ -1,9 +1,8 @@
 import logging
 
+import vonk_control.logging as control_logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-import vonk_control.logging as control_logging
 from vonk_control.logging import DatabaseJobLogStore, log_event, redact_text
 from vonk_control.models import Base, JobLogEntry
 
@@ -11,8 +10,11 @@ from vonk_control.models import Base, JobLogEntry
 def test_structured_logger_redacts_secrets(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="test-control"):
         log_event(
-            logging.getLogger("test-control"), "job.failed", service="control-worker",
-            request_id="request", token="secret-value",
+            logging.getLogger("test-control"),
+            "job.failed",
+            service="control-worker",
+            request_id="request",
+            token="secret-value",
             stderr="Authorization: Bearer abc123 password=hunter2",
         )
     assert "secret-value" not in caplog.text

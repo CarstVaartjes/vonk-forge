@@ -83,6 +83,7 @@ _NEXT_AGENT_CAPABILITIES = _REQUIRED_AGENT_CAPABILITIES | frozenset(
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",
+        "recipe.job.run.v1",
         "recipe.start",
         "recipe.stop",
         "recipe.uninstall",
@@ -609,9 +610,11 @@ class AgentReconciliationService:
                         and owner.current_phase
                         in {"completed", "failed", "cancelled", "waiting-for-operator"}
                     )
-                    if not predecessor_handoff and self._ensure_node_lease(
-                        session, reconciliation, graph
-                    ) is None:
+                    if (
+                        not predecessor_handoff
+                        and self._ensure_node_lease(session, reconciliation, graph)
+                        is None
+                    ):
                         return False
                     session.add(
                         RoutePublication(
@@ -640,7 +643,10 @@ class AgentReconciliationService:
                                 RoutePublicationOwner.singleton_id == 1
                             )
                         )
-                        return owner_id != reconciliation.id or publication.generation is None
+                        return (
+                            owner_id != reconciliation.id
+                            or publication.generation is None
+                        )
                 if phase == "routes-withdrawn":
                     if not self._targets_are_active(session, graph):
                         self._quiesce_for_unavailable_target(
@@ -1502,9 +1508,7 @@ class AgentReconciliationService:
             # withdrawing its route.  Finalize only that explicit terminal
             # handoff, then acquire the successor lease; held or active
             # predecessors remain a hard conflict.
-            rows = self._node_leases._rows(
-                session, tuple(sorted(graph.targets))
-            )
+            rows = self._node_leases._rows(session, tuple(sorted(graph.targets)))
             if not rows:
                 return None
             owners = {(row.owner_kind, row.owner_id, row.fence) for row in rows}
@@ -1536,9 +1540,7 @@ class AgentReconciliationService:
                 "held" if any(row.state == "held" for row in rows) else "releasing",
             )
             if predecessor_grant.state == "held":
-                self._node_leases.mark_releasing_in_session(
-                    session, predecessor_grant
-                )
+                self._node_leases.mark_releasing_in_session(session, predecessor_grant)
             self._node_leases.release_in_session(
                 session,
                 NodeLeaseGrant(

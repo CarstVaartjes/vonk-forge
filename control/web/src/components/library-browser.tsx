@@ -249,7 +249,7 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
       <button type="button" className="button secondary" onClick={onClearSearch}>Clear Library search</button>
     </section>}
 
-    {viewMode === "browse" && (!hasSearch || hasVisibleResults) && <div className={`library-browser route-${route.kind}`}>
+    {viewMode === "browse" && (!hasSearch || hasVisibleResults) && <div className={`library-browser route-${route.kind}${detail?.visual_recipe?.interfaces.some(item => item.adapter !== "openai") ? " has-artifact-workspace" : ""}`}>
       <section className="library-pane library-models" aria-label="Models">
         <div className="library-pane-heading"><div><p className="library-step">1</p><h3>Models</h3></div><small>Derived from recipes</small></div>
         <div className="library-list">

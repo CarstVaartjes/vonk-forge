@@ -191,6 +191,7 @@ class VisualArtifact(_StrictModel):
     kind: Text64
     repository: Text256
     revision: Text128
+    include_paths: list[Text512] = Field(max_length=256)
     download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     roles: list[Text64] = Field(max_length=64)
@@ -204,12 +205,105 @@ class VisualRuntime(_StrictModel):
     stop_timeout_seconds: int = Field(ge=1, le=86_400)
 
 
+class VisualRecipeParameter(_StrictModel):
+    name: Text64
+    description: Text512
+    type: Literal["string", "integer", "boolean", "enum"]
+    default: DisplayScalar
+    minimum: int | None = Field(
+        default=None,
+        ge=-_MAX_SIGNED_BIGINT,
+        le=_MAX_SIGNED_BIGINT,
+    )
+    maximum: int | None = Field(
+        default=None,
+        ge=-_MAX_SIGNED_BIGINT,
+        le=_MAX_SIGNED_BIGINT,
+    )
+    allowed_values: list[DisplayScalar] = Field(default_factory=list, max_length=128)
+    pattern: Annotated[str, StringConstraints(max_length=256)] | None = None
+    change_effect: Literal["rebuild", "reinstall", "restart"]
+
+
+class VisualInputSlot(_StrictModel):
+    id: Annotated[
+        str,
+        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"),
+    ]
+    label: Text64
+    description: Text256
+    media_types: list[Text128] = Field(min_length=1, max_length=16)
+    extensions: list[
+        Annotated[
+            str,
+            StringConstraints(pattern=r"^\.[a-z0-9][a-z0-9._-]{0,15}$"),
+        ]
+    ] = Field(max_length=16)
+    min_files: int = Field(ge=0, le=32)
+    max_files: int = Field(ge=1, le=32)
+    max_file_bytes: int = Field(ge=1, le=512 * 1024**2)
+    max_total_bytes: int = Field(ge=1, le=1024**3)
+
+
+class VisualInterfaceInput(_StrictModel):
+    path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    required: bool
+    media_types: list[Text128] = Field(min_length=1, max_length=16)
+    max_bytes: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
+    min_files: int = Field(ge=0, le=32)
+    max_files: int = Field(ge=1, le=32)
+    slots: list[VisualInputSlot] = Field(default_factory=list, max_length=32)
+
+
+class VisualOutputSlot(_StrictModel):
+    id: Annotated[
+        str,
+        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"),
+    ]
+    label: Text64
+    description: Text256
+    media_types: list[Text128] = Field(min_length=1, max_length=16)
+    extensions: list[
+        Annotated[
+            str,
+            StringConstraints(pattern=r"^\.[a-z0-9][a-z0-9._-]{0,15}$"),
+        ]
+    ] = Field(min_length=1, max_length=16)
+    min_files: int = Field(ge=0, le=32)
+    max_files: int = Field(ge=1, le=32)
+    max_file_bytes: int = Field(ge=1, le=1024**3)
+    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+
+
+class VisualInterfaceOutput(_StrictModel):
+    path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    allowed_media_types: list[Text128] = Field(max_length=16)
+    max_total_bytes: int | None = Field(default=None, ge=1, le=2 * 1024**3)
+    slots: list[VisualOutputSlot] = Field(default_factory=list, max_length=32)
+
+
 class VisualInterface(_StrictModel):
     adapter: Text64
     port: int | None = Field(default=None, ge=1, le=65_535)
     model_aliases: list[Text128] = Field(default_factory=list, max_length=64)
-    health_path: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
+    health_path: (
+        Annotated[str, StringConstraints(min_length=1, max_length=512)] | None
+    ) = None
     path: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
+    timeout_seconds: int | None = Field(default=None, ge=1, le=3_600)
+    input: VisualInterfaceInput | None = None
+    output: VisualInterfaceOutput | None = None
+
+
+class VisualTerritorialRestrictions(_StrictModel):
+    denied_jurisdictions: list[
+        Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+    ] = Field(min_length=1, max_length=32)
+    notice: Annotated[str, StringConstraints(min_length=1, max_length=1_000)]
+
+
+class VisualModelLicense(_StrictModel):
+    territorial_restrictions: VisualTerritorialRestrictions | None = None
 
 
 class VisualValidation(_StrictModel):
@@ -228,8 +322,10 @@ class VisualRecipeDocument(_StrictModel):
     identity: VisualIdentity
     metadata: VisualMetadata
     model: VisualCatalogIdentity
+    model_license: VisualModelLicense | None
     execution: VisualExecution
     build: VisualBuild
+    parameters: list[VisualRecipeParameter] = Field(max_length=128)
     artifacts: list[VisualArtifact] = Field(max_length=128)
     runtime: VisualRuntime
     interfaces: list[VisualInterface] = Field(max_length=64)

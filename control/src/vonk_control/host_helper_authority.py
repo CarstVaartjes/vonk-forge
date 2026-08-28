@@ -147,15 +147,15 @@ class HostHelperGrantIssuer:
 class HostRuntimeAuthorityService:
     """Bind a narrow host-runtime grant to one live agent attempt."""
 
-    _ACTION_KINDS: ClassVar[
-        dict[ContainerRuntimeAction, frozenset[str]]
-    ] = {
+    _ACTION_KINDS: ClassVar[dict[ContainerRuntimeAction, frozenset[str]]] = {
         ContainerRuntimeAction.IMAGE_IMPORT: frozenset({"recipe.image.import.v1"}),
         ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
         ContainerRuntimeAction.RUN_INSPECT: frozenset({"recipe.start"}),
-        ContainerRuntimeAction.START: frozenset({"recipe.start"}),
+        ContainerRuntimeAction.START: frozenset({"recipe.start", "recipe.job.run.v1"}),
         # A start attempt may stop its own managed run when readiness fails.
-        ContainerRuntimeAction.STOP: frozenset({"recipe.start", "recipe.stop"}),
+        ContainerRuntimeAction.STOP: frozenset(
+            {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
+        ),
     }
 
     def __init__(

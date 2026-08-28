@@ -487,6 +487,19 @@ def test_progress_and_result_are_fenced_node_messages() -> None:
     assert result.state == "succeeded"
 
 
+def test_cancelled_result_is_a_typed_terminal_agent_state() -> None:
+    raw = valid_attempt() | {
+        "state": "cancelled",
+        "result": {"reason": "controller cancellation requested"},
+    }
+
+    result = AgentResult.parse(raw)
+
+    assert result.state == "cancelled"
+    assert schema("agent-result.schema.json").is_valid(raw)
+    assert validate_schema_message("agent-result.schema.json", raw).state == "cancelled"
+
+
 def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
     with pytest.raises(AgentProtocolError, match="large"):
         AgentResult.parse(
@@ -513,6 +526,7 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "recipe.image.import.v1",
         "recipe.install",
         "recipe.start",
+        "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
     }

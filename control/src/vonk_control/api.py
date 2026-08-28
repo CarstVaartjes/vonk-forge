@@ -49,6 +49,9 @@ from .agent_api import (
     active_agent_identity,
     install_agent_routes,
 )
+from .artifact_blob_store import ArtifactBlobStore
+from .artifact_job_api import install_artifact_job_routes
+from .artifact_jobs import ArtifactJobService
 from .audit import AuditRecord, IdentityHistoryRecord
 from .auth import (
     MUTATION_ROLES,
@@ -107,6 +110,12 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 _LOGIN_PATH = "/api/v1/auth/login"
 _TELEMETRY_PATH = "/agent/v1/telemetry"
 _MAX_TELEMETRY_BODY_BYTES = 64 * 1024
+_ARTIFACT_INPUT_UPLOAD = re.compile(
+    r"/api/v1/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
+)
+_ARTIFACT_OUTPUT_UPLOAD = re.compile(
+    r"/agent/v1/recipe-jobs/[0-9a-f-]{36}/outputs/[0-9a-f]{64}\Z"
+)
 
 
 class _DuplicateJsonKey(ValueError):
@@ -448,6 +457,7 @@ def create_app(
     recipe_library: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
@@ -548,10 +558,26 @@ def create_app(
             request.method == "PUT"
             and _RECIPE_IMAGE_UPLOAD.fullmatch(request.url.path) is not None
         )
+        artifact_input_upload = (
+            request.method == "PUT"
+            and _ARTIFACT_INPUT_UPLOAD.fullmatch(request.url.path) is not None
+        )
+        artifact_output_upload = (
+            request.method == "PUT"
+            and _ARTIFACT_OUTPUT_UPLOAD.fullmatch(request.url.path) is not None
+        )
         telemetry_ingest = (
             request.method == "POST" and request.url.path == _TELEMETRY_PATH
         )
-        maximum = MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
+        maximum = (
+            MAX_RECIPE_IMAGE_BYTES
+            if recipe_image_upload
+            else 512 * 1024**2
+            if artifact_input_upload
+            else 1024**3
+            if artifact_output_upload
+            else 1_048_576
+        )
         if telemetry_ingest:
             response = await call_next(request)
         elif (
@@ -694,6 +720,11 @@ def create_app(
         actor_dependency=authenticated_actor,
         audits=audits,
         service=recipe_operations,
+    )
+    install_artifact_job_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=artifact_jobs,
     )
 
     @app.get("/api/v1/healthz")
@@ -1344,11 +1375,13 @@ def production_app() -> FastAPI:
             sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
+            operator_jurisdiction=settings.operator_jurisdiction,
         ),
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
             memory_floor_bytes=4_000_000_000,
+            operator_jurisdiction=settings.operator_jurisdiction,
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
@@ -1360,6 +1393,17 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
+    artifact_jobs = ArtifactJobService(
+        sessions,
+        recipe_operations=recipe_operations,
+        blob_store=ArtifactBlobStore(
+            settings.state_path / "artifact-jobs" / "blobs",
+            max_stored_bytes=settings.artifact_job_storage_max_bytes,
+        ),
+        clock=clock,
+        retention_seconds=settings.artifact_job_retention_seconds,
+    )
+    artifact_jobs.reconcile_storage()
     from .fleet_profiles import FleetProfileService
 
     fleet_profiles = FleetProfileService(
@@ -1382,6 +1426,7 @@ def production_app() -> FastAPI:
     )
 
     def consume_agent_result(session, operation, attempt, message) -> None:
+        artifact_jobs.consume_agent_result(session, operation, attempt, message)
         recipe_operations.consume_agent_result(session, operation, attempt, message)
         agent_upgrades.consume_agent_result(session, operation, attempt, message)
 
@@ -1468,6 +1513,7 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         recipe_operations=recipe_operations,
+        artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         agent_upgrades=agent_upgrades,
     )

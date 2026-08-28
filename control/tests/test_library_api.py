@@ -199,6 +199,39 @@ def test_library_openapi_has_stable_operations_typed_models_and_bearer_security(
         )
 
 
+def test_library_openapi_exposes_bounded_job_and_territorial_contracts() -> None:
+    client, _operator, _library = _client()
+    schemas = client.app.openapi()["components"]["schemas"]
+
+    for component in (
+        "VisualRecipeParameter",
+        "VisualInputSlot",
+        "VisualInterfaceInput",
+        "VisualInterfaceOutput",
+        "VisualModelLicense",
+        "VisualTerritorialRestrictions",
+    ):
+        assert schemas[component]["additionalProperties"] is False
+
+    recipe = schemas["VisualRecipeDocument"]["properties"]
+    assert recipe["parameters"]["items"] == {
+        "$ref": "#/components/schemas/VisualRecipeParameter"
+    }
+    assert "model_license" in recipe
+    restriction_properties = schemas["VisualTerritorialRestrictions"]["properties"]
+    assert set(restriction_properties) == {"denied_jurisdictions", "notice"}
+    assert set(schemas["VisualInterfaceInput"]["properties"]) == {
+        "path",
+        "required",
+        "media_types",
+        "max_bytes",
+        "min_files",
+        "max_files",
+        "slots",
+    }
+    assert "timeout_seconds" in schemas["VisualInterface"]["properties"]
+
+
 def test_library_openapi_reason_schema_has_a_unique_strict_identity() -> None:
     """Library responses must not collide with Fleet in generated clients."""
 

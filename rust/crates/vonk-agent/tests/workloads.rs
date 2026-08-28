@@ -6,7 +6,7 @@ use std::{
     fs,
     io::{Read, Write},
     net::{IpAddr, TcpListener},
-    os::unix::fs::symlink,
+    os::unix::fs::{PermissionsExt, symlink},
     path::Path,
     thread,
     time::Duration,
@@ -18,7 +18,7 @@ use vonk_agent::{
     oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
-        ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, LifecycleSpec,
+        ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, JobSpec, LifecycleSpec,
         ModelDependencySpec, MountSpec, Placement, PlacementEnvironmentSpec, RuntimeArgument,
         RuntimeEnvironment, RuntimeSpec, SecuritySpec, TopologySpec, WorkloadIdentitySpec,
         WorkloadSpec,
@@ -65,6 +65,41 @@ impl ProcessRunner for FakeRunner {
 struct BudgetRunner {
     inner: FakeRunner,
     budgets: RefCell<Vec<u64>>,
+}
+
+struct SelectorRunner {
+    calls: RefCell<Vec<(Program, Vec<String>)>>,
+}
+
+impl ProcessRunner for SelectorRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        _timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.calls.borrow_mut().push((program, arguments.to_vec()));
+        if program == Program::Curl {
+            let destination = arguments
+                .windows(2)
+                .find(|values| values[0] == "--output")
+                .map(|values| &values[1])
+                .unwrap();
+            if destination.ends_with(".huggingface-model.json") {
+                fs::write(
+                    destination,
+                    br#"{"siblings":[{"rfilename":"selected/weights.bin","lfs":{"sha256":"9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"}},{"rfilename":"unused/duplicate.bin","lfs":{"sha256":"9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"}}]}"#,
+                )?;
+            } else {
+                fs::write(destination, b"weights")?;
+            }
+        }
+        Ok(ProcessOutput {
+            success: true,
+            stdout: b"200\t\n".to_vec(),
+            stderr: vec![],
+        })
+    }
 }
 
 struct ObservationRunner {
@@ -148,6 +183,7 @@ fn spec() -> WorkloadSpec {
             kind: "huggingface.snapshot".to_owned(),
             repository: "publisher/model".to_owned(),
             revision: "b".repeat(40),
+            include_paths: vec![],
             download_bytes: 7,
             installed_bytes: 7,
             mount: ArtifactMountSpec {
@@ -156,12 +192,13 @@ fn spec() -> WorkloadSpec {
             },
             roles: vec!["entrypoint".to_owned(), "worker".to_owned()],
         }],
-        endpoint: EndpointSpec {
+        endpoint: Some(EndpointSpec {
             protocol: "openai".to_owned(),
             port: 8000,
             model_aliases: vec!["model".to_owned()],
             health_path: "/v1/models".to_owned(),
-        },
+        }),
+        job: None,
         security: SecuritySpec {
             devices: vec!["nvidia.com/gpu=all".to_owned()],
             capabilities: vec![],
@@ -236,8 +273,8 @@ fn legacy_ds4_spec() -> WorkloadSpec {
             secret: None,
         },
     ];
-    workload.endpoint.port = 8080;
-    workload.endpoint.model_aliases = vec!["deepseek-v4-flash".to_owned()];
+    workload.endpoint.as_mut().unwrap().port = 8080;
+    workload.endpoint.as_mut().unwrap().model_aliases = vec!["deepseek-v4-flash".to_owned()];
     workload.lifecycle.stop_timeout_seconds = 120;
     workload.artifacts[0] = ArtifactSpec {
         id: "target".to_owned(),
@@ -248,6 +285,7 @@ fn legacy_ds4_spec() -> WorkloadSpec {
         ),
         revision: "sha256:ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 86_720_111_488,
         installed_bytes: 86_720_111_488,
         mount: ArtifactMountSpec {
@@ -731,6 +769,334 @@ fn canonical_runtime_mounts_are_order_independent() {
 }
 
 #[test]
+fn endpointless_job_is_attached_and_uses_only_same_run_io_mounts() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let mut workload = spec();
+    workload.endpoint = None;
+    workload.job = Some(JobSpec {
+        interface: "image-job".to_owned(),
+        input: Some(serde_json::json!({"path": "/inputs", "required": true})),
+        output_path: "/outputs".to_owned(),
+        timeout_seconds: 3600,
+    });
+    workload.security.mounts.insert(
+        1,
+        MountSpec {
+            source: "inputs".to_owned(),
+            target: "/inputs".to_owned(),
+            read_only: true,
+        },
+    );
+    workload.validate().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let arguments = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .start_arguments(
+        &workload,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        run_id,
+        &Placement {
+            endpoint_address: None,
+            rank: 0,
+            role: "entrypoint".to_owned(),
+            world_size: 1,
+            local_address: None,
+            master_address: None,
+            master_port: None,
+            port: 1024,
+            reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+        },
+    )
+    .unwrap();
+
+    let expected_name = format!("vonk-{run_id}");
+    assert!(
+        arguments
+            .windows(2)
+            .any(|values| values[0] == "--name" && values[1] == expected_name)
+    );
+    assert!(
+        !arguments
+            .iter()
+            .any(|value| value == "--detach" || value == "--publish")
+    );
+    assert!(
+        arguments
+            .iter()
+            .any(|value| value == "VONK_JOB_TIMEOUT_SECONDS=3600")
+    );
+    assert!(
+        arguments
+            .iter()
+            .any(|value| value.ends_with(&format!("/runs/{run_id}/inputs,dst=/inputs,readonly")))
+    );
+    assert!(
+        arguments
+            .iter()
+            .any(|value| value.ends_with(&format!("/runs/{run_id}/outputs,dst=/outputs")))
+    );
+
+    let mut writable_input = workload.clone();
+    writable_input.security.mounts[1].read_only = false;
+    assert!(writable_input.validate().is_err());
+    let mut hooked_job = workload.clone();
+    hooked_job.lifecycle.pre_start = vec![vec!["/bin/true".to_owned()]];
+    assert!(hooked_job.validate().is_err());
+    let mut service_and_job = workload;
+    service_and_job.endpoint = spec().endpoint;
+    assert!(service_and_job.validate().is_err());
+}
+
+#[test]
+fn job_request_timeout_is_bounded_by_the_installed_recipe_ceiling() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+    let mut workload = spec();
+    workload.endpoint = None;
+    workload.job = Some(JobSpec {
+        interface: "image-job".to_owned(),
+        input: None,
+        output_path: "/outputs".to_owned(),
+        timeout_seconds: 3600,
+    });
+    workload.security.mounts.insert(
+        1,
+        MountSpec {
+            source: "inputs".to_owned(),
+            target: "/inputs".to_owned(),
+            read_only: true,
+        },
+    );
+    workload.validate().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let placement = Placement {
+        endpoint_address: None,
+        rank: 0,
+        role: "entrypoint".to_owned(),
+        world_size: 1,
+        local_address: None,
+        master_address: None,
+        master_port: None,
+        port: 1024,
+        reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+    };
+
+    for timeout in [0, 3601] {
+        let job_id = if timeout == 0 {
+            "45ea6921-50c9-4971-be2a-4cd04ce05069"
+        } else {
+            "55ea6921-50c9-4971-be2a-4cd04ce05069"
+        };
+        assert!(
+            runtime
+                .prepare_job_start(
+                    &workload,
+                    installation_id,
+                    job_id,
+                    &placement,
+                    &serde_json::json!({}),
+                    timeout,
+                )
+                .is_err()
+        );
+        assert!(!directory.path().join("runs").join(job_id).exists());
+    }
+
+    let job_id = "65ea6921-50c9-4971-be2a-4cd04ce05069";
+    runtime.job_input_destination(job_id, "input.txt").unwrap();
+    let plan = runtime
+        .prepare_job_start(
+            &workload,
+            installation_id,
+            job_id,
+            &placement,
+            &serde_json::json!({"seed": 7}),
+            120,
+        )
+        .unwrap();
+
+    assert!(
+        plan.main
+            .iter()
+            .any(|value| value == "VONK_JOB_TIMEOUT_SECONDS=120")
+    );
+    assert!(
+        !plan
+            .main
+            .iter()
+            .any(|value| value == "VONK_JOB_TIMEOUT_SECONDS=3600")
+    );
+    let runtime_contract: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            directory
+                .path()
+                .join("run-metadata")
+                .join(job_id)
+                .join("runtime.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(runtime_contract["job"]["timeout_seconds"], 120);
+}
+
+#[test]
+fn sequential_jobs_under_one_logical_run_have_distinct_scopes_and_cleanup() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+    let first_job = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let second_job = "55ea6921-50c9-4971-be2a-4cd04ce05069";
+    let first_input = runtime
+        .job_input_destination(first_job, "input.txt")
+        .unwrap();
+    let second_input = runtime
+        .job_input_destination(second_job, "input.txt")
+        .unwrap();
+    assert!(
+        runtime
+            .job_input_destination(first_job, "manifest.json")
+            .is_err()
+    );
+    fs::write(&first_input, b"first").unwrap();
+    fs::write(&second_input, b"second").unwrap();
+    runtime
+        .verify_job_inputs(first_job, &["input.txt".to_owned()])
+        .unwrap();
+    runtime
+        .verify_job_inputs(second_job, &["input.txt".to_owned()])
+        .unwrap();
+    let first_manifest = br#"{"files":[{"media_type":"text/plain","name":"input.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":5,"slot":"input"}],"schema_version":1,"total_bytes":5}"#;
+    let second_manifest = br#"{"files":[{"media_type":"text/plain","name":"input.txt","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":6,"slot":"input"}],"schema_version":1,"total_bytes":6}"#;
+    runtime
+        .write_job_input_manifest(
+            first_job,
+            &["input.txt".to_owned()],
+            first_manifest,
+            &hex::encode(Sha256::digest(first_manifest)),
+        )
+        .unwrap();
+    runtime
+        .write_job_input_manifest(
+            second_job,
+            &["input.txt".to_owned()],
+            second_manifest,
+            &hex::encode(Sha256::digest(second_manifest)),
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read(
+            directory
+                .path()
+                .join("runs")
+                .join(first_job)
+                .join("inputs/manifest.json")
+        )
+        .unwrap(),
+        first_manifest
+    );
+    assert_eq!(
+        fs::read(
+            directory
+                .path()
+                .join("runs")
+                .join(second_job)
+                .join("inputs/manifest.json")
+        )
+        .unwrap(),
+        second_manifest
+    );
+    assert_eq!(
+        fs::metadata(
+            directory
+                .path()
+                .join("runs")
+                .join(first_job)
+                .join("inputs/manifest.json")
+        )
+        .unwrap()
+        .permissions()
+        .mode()
+            & 0o777,
+        0o400
+    );
+    fs::create_dir(
+        directory
+            .path()
+            .join("runs")
+            .join(first_job)
+            .join("outputs"),
+    )
+    .unwrap();
+    fs::create_dir(
+        directory
+            .path()
+            .join("runs")
+            .join(second_job)
+            .join("outputs"),
+    )
+    .unwrap();
+    fs::write(
+        directory
+            .path()
+            .join("runs")
+            .join(first_job)
+            .join("outputs/first.txt"),
+        b"first",
+    )
+    .unwrap();
+    fs::write(
+        directory
+            .path()
+            .join("runs")
+            .join(second_job)
+            .join("outputs/second.txt"),
+        b"second",
+    )
+    .unwrap();
+
+    runtime.cleanup_job_scope(first_job).unwrap();
+    assert!(!directory.path().join("runs").join(first_job).exists());
+    assert_eq!(fs::read(second_input).unwrap(), b"second");
+    assert!(
+        directory
+            .path()
+            .join("runs")
+            .join(second_job)
+            .join("outputs/second.txt")
+            .is_file()
+    );
+    let unsafe_job = "65ea6921-50c9-4971-be2a-4cd04ce05069";
+    let outside = directory.path().join("outside-job-data");
+    fs::create_dir(&outside).unwrap();
+    symlink(&outside, directory.path().join("runs").join(unsafe_job)).unwrap();
+    assert!(runtime.cleanup_job_scope(unsafe_job).is_err());
+    assert!(outside.is_dir());
+}
+
+#[test]
 fn mutable_artifact_revisions_are_rejected_at_the_agent_boundary() {
     let mut workload = spec();
     workload.artifacts[0].revision = "main".to_owned();
@@ -919,7 +1285,7 @@ fn persisted_legacy_built_in_ds4_identity_uses_its_exact_port() {
         "a1dbca13724678dbce47a1caff4a7ae4b6c557a6ac6ca5c0e3a99733fcc3f2b0".to_owned();
     legacy.identity.runtime_distribution_sha256 =
         "73e2ec403510447cfbc067d0bdba20cfd941bd741e8b90a764edef3bae83c12a".to_owned();
-    legacy.endpoint.port = 8080;
+    legacy.endpoint.as_mut().unwrap().port = 8080;
     *legacy.runtime.entrypoint.last_mut().unwrap() = "8080".to_owned();
     write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
 
@@ -931,7 +1297,7 @@ fn persisted_legacy_built_in_ds4_identity_uses_its_exact_port() {
     .load_spec(installation_id)
     .unwrap();
 
-    assert_eq!(loaded.endpoint.port, 8080);
+    assert_eq!(loaded.endpoint.unwrap().port, 8080);
     assert_eq!(loaded.runtime.entrypoint.last().unwrap(), "8080");
     assert_eq!(loaded.artifacts[0].mount.target, "/models/target");
     assert_eq!(loaded.artifacts[1].mount.target, "/models/drafter");
@@ -1099,7 +1465,7 @@ fn persisted_legacy_mount_compatibility_rejects_non_ds4_or_inexact_paths() {
                     .unwrap();
                 legacy.runtime.entrypoint[batch + 1] = "1".to_owned();
             }
-            "endpoint" => legacy.endpoint.port = 8000,
+            "endpoint" => legacy.endpoint.as_mut().unwrap().port = 8000,
             _ => unreachable!(),
         }
         write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
@@ -1184,6 +1550,81 @@ fn installation_records_and_rechecks_a_content_manifest() {
     fs::write(weights, b"tampered").unwrap();
 
     assert!(runtime.verify_installation(installation_id).is_err());
+}
+
+#[test]
+fn huggingface_snapshot_selectors_download_only_selected_siblings_and_bind_the_budget() {
+    let runner = SelectorRunner {
+        calls: RefCell::new(vec![]),
+    };
+    let directory = tempdir().unwrap();
+    let mut workload = spec();
+    workload.artifacts[0].include_paths = vec!["selected/".to_owned()];
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+    runtime
+        .install(&workload, "cb555393-764b-4eb6-8f15-b416d289428f", DIGEST)
+        .unwrap();
+
+    let calls = runner.calls.borrow();
+    assert!(calls.iter().any(|(_, arguments)| {
+        arguments
+            .iter()
+            .any(|value| value.contains("selected/weights.bin"))
+    }));
+    assert!(!calls.iter().any(|(_, arguments)| {
+        arguments
+            .iter()
+            .any(|value| value.contains("unused/duplicate.bin"))
+    }));
+    drop(calls);
+
+    let mut missing = spec();
+    missing.artifacts[0].include_paths = vec!["missing/file.bin".to_owned()];
+    assert!(
+        OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .install(&missing, "db555393-764b-4eb6-8f15-b416d289428f", DIGEST,)
+        .is_err()
+    );
+}
+
+#[test]
+fn snapshot_selectors_are_safe_sorted_and_huggingface_only() {
+    let mut workload = spec();
+    workload.artifacts[0].include_paths =
+        vec!["transformer/".to_owned(), "vae/config.json".to_owned()];
+    workload.validate().unwrap();
+
+    for selector in [
+        "../weights",
+        "weights*",
+        "/absolute",
+        "dir//file",
+        "dir/./file",
+    ] {
+        let mut invalid = workload.clone();
+        invalid.artifacts[0].include_paths = vec![selector.to_owned()];
+        assert!(invalid.validate().is_err(), "accepted {selector}");
+    }
+    let mut unsorted = workload.clone();
+    unsorted.artifacts[0].include_paths.reverse();
+    assert!(unsorted.validate().is_err());
+    let mut too_many = workload.clone();
+    too_many.artifacts[0].include_paths = (0..257)
+        .map(|index| format!("selected/{index:03}.bin"))
+        .collect();
+    assert!(too_many.validate().is_err());
+    let mut non_hf = workload;
+    non_hf.artifacts[0].kind = "http.file".to_owned();
+    non_hf.artifacts[0].revision = format!("sha256:{DIGEST}");
+    assert!(non_hf.validate().is_err());
 }
 
 #[test]
@@ -1372,6 +1813,7 @@ fn http_artifacts_reject_private_hosts_before_curl_runs() {
         repository: "https://127.0.0.1/private".to_owned(),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1424,6 +1866,7 @@ fn http_artifacts_reject_embedded_credentials_before_curl_runs() {
         repository: "https://user:password@93.184.216.34/artifact".to_owned(),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1473,6 +1916,7 @@ fn http_artifacts_reject_more_than_five_explicit_redirects() {
         repository: "https://93.184.216.34/artifact".to_owned(),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1520,6 +1964,7 @@ fn http_artifacts_are_https_only_and_byte_limited_without_implicit_redirects() {
         repository: "https://93.184.216.34/artifact".to_owned(),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1570,6 +2015,7 @@ fn http_artifacts_use_the_immutable_url_basename_and_manifest_key() {
         repository: format!("https://93.184.216.34/releases/{DS4_FILE}"),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1631,6 +2077,7 @@ fn verify_installation_migrates_valid_legacy_http_cache_without_redownloading() 
         repository: format!("https://93.184.216.34/releases/{DS4_FILE}"),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1716,6 +2163,7 @@ fn verify_installation_repairs_interrupted_http_cache_migration() {
         repository: format!("https://93.184.216.34/releases/{DS4_FILE}"),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1815,6 +2263,7 @@ fn http_artifacts_reject_unsafe_or_missing_url_basenames_before_curl_runs() {
             repository: repository.clone(),
             revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
                 .to_owned(),
+            include_paths: vec![],
             download_bytes: 7,
             installed_bytes: 7,
             mount: ArtifactMountSpec {
@@ -1870,6 +2319,7 @@ fn oci_artifacts_reject_private_registry_hosts_before_oras_runs() {
         kind: "oci.artifact".to_owned(),
         repository: "127.0.0.1/private/artifact".to_owned(),
         revision: format!("sha256:{DIGEST}"),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -1931,6 +2381,7 @@ fn oci_artifacts_run_under_the_declared_staging_budget() {
         repository: "ghcr.io/vonkforge/public-artifact".to_owned(),
         revision: "sha256:9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
             .to_owned(),
+        include_paths: vec![],
         download_bytes: 7,
         installed_bytes: 7,
         mount: ArtifactMountSpec {
@@ -2299,7 +2750,8 @@ fn managed_recipe_run_snapshot_rejects_malformed_entries_and_skips_corrupt_recor
                     8101,
                 );
                 let mut workload = spec();
-                workload.endpoint.health_path = "/v1/models\r\nInjected: true".to_owned();
+                workload.endpoint.as_mut().unwrap().health_path =
+                    "/v1/models\r\nInjected: true".to_owned();
                 fs::write(
                     directory
                         .path()

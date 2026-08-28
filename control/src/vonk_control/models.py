@@ -2002,6 +2002,122 @@ class RunNode(Base):
     )
 
 
+class ArtifactJobBlob(Base):
+    """Immutable content-addressed bytes staged for or returned by a recipe job."""
+
+    __tablename__ = "artifact_job_blobs"
+    __table_args__ = (
+        CheckConstraint(_lower_hex("sha256", 64), name="ck_artifact_job_blobs_digest"),
+        CheckConstraint("size_bytes >= 0", name="ck_artifact_job_blobs_size"),
+    )
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ArtifactJob(Base):
+    """Persisted controller authority for one artifact-producing run invocation."""
+
+    __tablename__ = "artifact_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "interface IN ('audio-job','video-job','image-job','mesh-job','artifact-job')",
+            name="ck_artifact_jobs_interface",
+        ),
+        CheckConstraint(
+            "state IN ('draft','ready','queued','running','cancelling','waiting-for-operator','succeeded','failed','cancelled')",
+            name="ck_artifact_jobs_state",
+        ),
+        CheckConstraint(
+            "input_total_bytes >= 0 AND timeout_seconds BETWEEN 1 AND 3600",
+            name="ck_artifact_jobs_limits",
+        ),
+        CheckConstraint(
+            _lower_hex("input_manifest_sha256", 64),
+            name="ck_artifact_jobs_input_manifest",
+        ),
+        CheckConstraint(
+            _lower_hex("contract_sha256", 64),
+            name="ck_artifact_jobs_contract",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("output_manifest_sha256", 64),
+            name="ck_artifact_jobs_output_manifest",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("recipe_runs.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    operation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="RESTRICT"), unique=True, index=True
+    )
+    request_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    interface: Mapped[str] = mapped_column(String(24), nullable=False)
+    parameters: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    output_limits: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    compiled_contract: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    contract_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    input_manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    input_manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_total_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    output_manifest_sha256: Mapped[str | None] = mapped_column(String(64))
+    output_manifest: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    result_evidence: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    status_reason: Mapped[str | None] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ArtifactJobFile(Base):
+    __tablename__ = "artifact_job_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_job_id", "direction", "name", name="uq_artifact_job_file_name"
+        ),
+        CheckConstraint(
+            "direction IN ('input','output')", name="ck_artifact_job_files_direction"
+        ),
+        CheckConstraint("size_bytes >= 0", name="ck_artifact_job_files_size"),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    artifact_job_id: Mapped[str] = mapped_column(
+        ForeignKey("artifact_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    slot: Mapped[str | None] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(129), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    blob_sha256: Mapped[str] = mapped_column(
+        ForeignKey("artifact_job_blobs.sha256", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class ResourceReservation(Base):
     __tablename__ = "resource_reservations"
     __table_args__ = (

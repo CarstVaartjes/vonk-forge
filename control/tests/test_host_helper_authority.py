@@ -112,6 +112,7 @@ def runtime_service(
     lease_seconds: int = 60,
     operation_kind: str = "recipe.start",
     operation_payload: dict[str, object] | None = None,
+    cancel_requested: bool = False,
 ) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -138,10 +139,11 @@ def runtime_service(
                 kind=operation_kind,
                 state="running",
                 actor="admin",
-                authority_revision="b"  * 64,
+                authority_revision="b" * 64,
                 targets=[node_id],
                 payload_digest="c" * 64,
                 payload={},
+                result={"cancel_requested": True} if cancel_requested else None,
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -154,7 +156,7 @@ def runtime_service(
                 kind=operation_kind,
                 payload_digest="d" * 64,
                 payload=operation_payload or {},
-                authority_revision="b"  * 64,
+                authority_revision="b" * 64,
                 state="running",
                 current_attempt=2,
                 created_at=NOW,
@@ -175,7 +177,9 @@ def runtime_service(
     return HostRuntimeAuthorityService(sessions, issuer(), clock=lambda: NOW)
 
 
-def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package() -> None:
+def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package() -> (
+    None
+):
     package = {"package_sha256": "a" * 64, "package_signature": "b" * 128}
     service = runtime_service(
         operation_kind="agent.upgrade.v1",
@@ -239,6 +243,28 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         certificate_serial="certificate-1",
     )
     assert inspect.claims.operation.values["action"] == "run-inspect"
+
+
+@pytest.mark.parametrize(
+    "action", (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP)
+)
+def test_job_run_cancellation_keeps_exact_start_and_stop_authority_live(
+    action: ContainerRuntimeAction,
+) -> None:
+    service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
+
+    grant = service.issue_grant(
+        node_id="spk_" + "1" * 32,
+        job_id="20000000-0000-4000-8000-000000000002",
+        operation_id="30000000-0000-4000-8000-000000000003",
+        attempt=2,
+        fence="40000000-0000-4000-8000-000000000004",
+        action=action,
+        request_sha256="e" * 64,
+        certificate_serial="certificate-1",
+    )
+
+    assert grant.claims.operation.values["action"] == action.value
 
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:

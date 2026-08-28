@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
+from .legal_admission import operator_jurisdiction as validate_operator_jurisdiction
+from .legal_admission import territorial_admission
 from .models import (
     AgentNode,
     ClusterMapping,
@@ -75,11 +78,15 @@ class RunAdmissionService:
         *,
         inventory_max_age: int = 300,
         memory_floor_bytes: int = 4_000_000_000,
+        operator_jurisdiction: str | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._max_age = inventory_max_age
         self._floor = memory_floor_bytes
+        self._operator_jurisdiction = validate_operator_jurisdiction(
+            operator_jurisdiction
+        )
 
     def plan_run(
         self,
@@ -110,9 +117,20 @@ class RunAdmissionService:
             if revision is None or revision.lifecycle != "resolved":
                 raise ValueError("recipe revision is unavailable")
             try:
-                resolve_recipe_entities(session, revision.document)
+                resolved_entities = resolve_recipe_entities(session, revision.document)
             except RecipeRuntimeSpecError as error:
                 raise ValueError("exact recipe dependencies are unavailable") from error
+            model_version = resolved_entities.get("model_version")
+            model_document = getattr(model_version, "document", None)
+            if not isinstance(model_document, Mapping):
+                raise ValueError(  # noqa: TRY004
+                    "exact model license authority is unavailable"
+                )
+            legal_admission = territorial_admission(
+                model_document,
+                self._operator_jurisdiction,
+                operation="run",
+            )
             mapping_nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode)
@@ -169,11 +187,24 @@ class RunAdmissionService:
             ),
             None,
         )
-        if not isinstance(interface, dict) or not isinstance(
+        artifact_interfaces = [
+            value
+            for value in interfaces
+            if isinstance(value, dict)
+            and value.get("adapter")
+            in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
+        ]
+        logical_job = interface is None and len(artifact_interfaces) == 1
+        if logical_job:
+            if len(ordered) != 1:
+                raise TypeError("artifact job recipes currently require one node")
+            port = 1024
+        elif not isinstance(interface, dict) or not isinstance(
             interface.get("port"), int
         ):
-            raise TypeError("recipe OpenAI interface is invalid")
-        port = int(interface["port"])
+            raise TypeError("recipe interface is invalid")
+        else:
+            port = int(interface["port"])
         multi_node = len(ordered) > 1
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
@@ -185,6 +216,10 @@ class RunAdmissionService:
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
+            if legal_admission.blocker is not None:
+                blockers.append(AdmissionReason(*legal_admission.blocker))
+            if legal_admission.warning is not None:
+                warnings.append(AdmissionReason(*legal_admission.warning))
             snapshot = snapshots.get(placement.node_id)
             if (
                 placement.node_id,
@@ -244,12 +279,16 @@ class RunAdmissionService:
                     )
                     or 0
                 )
-                occupied = session.scalar(
-                    select(ResourceReservation.id).where(
-                        ResourceReservation.node_id == placement.node_id,
-                        ResourceReservation.kind == "port",
-                        ResourceReservation.resource_key == str(port),
-                        ResourceReservation.state == "active",
+                occupied = (
+                    None
+                    if logical_job
+                    else session.scalar(
+                        select(ResourceReservation.id).where(
+                            ResourceReservation.node_id == placement.node_id,
+                            ResourceReservation.kind == "port",
+                            ResourceReservation.resource_key == str(port),
+                            ResourceReservation.state == "active",
+                        )
                     )
                 )
                 rendezvous_occupied = (
@@ -451,6 +490,14 @@ class RunAdmissionService:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
             raise RunPlanConflict("run.dependencies_stale") from error
+        interfaces = revision.document.get("interfaces")
+        logical_job = (
+            isinstance(interfaces, list)
+            and len(interfaces) == 1
+            and isinstance(interfaces[0], Mapping)
+            and interfaces[0].get("adapter")
+            in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
+        )
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,
@@ -517,9 +564,13 @@ class RunAdmissionService:
             ):
                 raise RunPlanConflict("memory capacity changed while reserving")
             ports = (
-                (node.port,)
-                if node.rendezvous_port is None
-                else (node.port, node.rendezvous_port)
+                ()
+                if logical_job
+                else (
+                    (node.port,)
+                    if node.rendezvous_port is None
+                    else (node.port, node.rendezvous_port)
+                )
             )
             for reserved_port in ports:
                 if (
@@ -568,9 +619,13 @@ class RunAdmissionService:
                 )
             )
             ports = (
-                (node.port,)
-                if node.rendezvous_port is None
-                else (node.port, node.rendezvous_port)
+                ()
+                if logical_job
+                else (
+                    (node.port,)
+                    if node.rendezvous_port is None
+                    else (node.port, node.rendezvous_port)
+                )
             )
             for reserved_port in ports:
                 session.add(

@@ -202,7 +202,10 @@ impl StateStore {
         state: &str,
         result: Value,
     ) -> Result<AgentResult, StateError> {
-        if !matches!(state, "succeeded" | "failed" | "waiting-for-operator") {
+        if !matches!(
+            state,
+            "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
+        ) {
             return Err(StateError::ResultState);
         }
         let transaction = self

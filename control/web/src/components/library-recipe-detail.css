@@ -133,7 +133,7 @@
   align-items: start;
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   padding-right: 0.5rem;
   position: relative;
@@ -143,10 +143,10 @@
   background: var(--border-strong);
   content: "";
   height: 2px;
-  left: 1.15rem;
+  left: 0.85rem;
   position: absolute;
   right: -0.35rem;
-  top: 0.55rem;
+  top: 0.42rem;
   z-index: 0;
 }
 
@@ -180,6 +180,8 @@
   display: grid;
   gap: 0.12rem;
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .lifecycle-stage > div > span {
@@ -199,6 +201,18 @@
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   padding: 0.8rem;
+}
+
+.recipe-qualification-disclosure {
+  margin-top: 1rem;
+}
+
+.recipe-qualification-disclosure > summary {
+  display: none;
+}
+
+.recipe-qualification-body {
+  min-width: 0;
 }
 
 .library-operation > div {
@@ -782,6 +796,50 @@
 
   .lifecycle-stage:nth-child(2)::after {
     display: none;
+  }
+
+  .recipe-qualification-disclosure {
+    border-top: 1px solid var(--border);
+    padding-top: 0.4rem;
+  }
+
+  .recipe-qualification-disclosure > summary {
+    align-items: center;
+    color: var(--mint-strong);
+    cursor: pointer;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    list-style: none;
+    min-height: 52px;
+    padding: 0.6rem 0;
+  }
+
+  .recipe-qualification-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .recipe-qualification-disclosure > summary span,
+  .recipe-qualification-disclosure > summary small {
+    display: block;
+  }
+
+  .recipe-qualification-disclosure > summary small {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    margin-top: 0.12rem;
+  }
+
+  .recipe-qualification-disclosure > summary svg {
+    flex: 0 0 auto;
+    height: 1rem;
+    transition: transform 160ms cubic-bezier(.16, 1, .3, 1);
+    width: 1rem;
+  }
+
+  .recipe-qualification-disclosure[open] > summary svg {
+    transform: rotate(180deg);
   }
 }
 

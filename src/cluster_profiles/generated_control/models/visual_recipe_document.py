@@ -7,16 +7,19 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
+from typing import cast, Union
 from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.visual_metadata import VisualMetadata
   from ..models.visual_provenance import VisualProvenance
   from ..models.visual_catalog_identity import VisualCatalogIdentity
+  from ..models.visual_recipe_parameter import VisualRecipeParameter
   from ..models.visual_execution import VisualExecution
   from ..models.visual_build import VisualBuild
   from ..models.visual_artifact import VisualArtifact
   from ..models.visual_identity import VisualIdentity
+  from ..models.visual_model_license import VisualModelLicense
   from ..models.visual_validation import VisualValidation
   from ..models.visual_runtime import VisualRuntime
   from ..models.visual_interface import VisualInterface
@@ -40,6 +43,8 @@ class VisualRecipeDocument:
             interfaces (list['VisualInterface']):
             metadata (VisualMetadata):
             model (VisualCatalogIdentity):
+            model_license (Union['VisualModelLicense', None]):
+            parameters (list['VisualRecipeParameter']):
             provenance (VisualProvenance):
             runtime (VisualRuntime):
             schema_version (Literal[1]):
@@ -53,6 +58,8 @@ class VisualRecipeDocument:
     interfaces: list['VisualInterface']
     metadata: 'VisualMetadata'
     model: 'VisualCatalogIdentity'
+    model_license: Union['VisualModelLicense', None]
+    parameters: list['VisualRecipeParameter']
     provenance: 'VisualProvenance'
     runtime: 'VisualRuntime'
     schema_version: Literal[1]
@@ -66,10 +73,12 @@ class VisualRecipeDocument:
         from ..models.visual_metadata import VisualMetadata
         from ..models.visual_provenance import VisualProvenance
         from ..models.visual_catalog_identity import VisualCatalogIdentity
+        from ..models.visual_recipe_parameter import VisualRecipeParameter
         from ..models.visual_execution import VisualExecution
         from ..models.visual_build import VisualBuild
         from ..models.visual_artifact import VisualArtifact
         from ..models.visual_identity import VisualIdentity
+        from ..models.visual_model_license import VisualModelLicense
         from ..models.visual_validation import VisualValidation
         from ..models.visual_runtime import VisualRuntime
         from ..models.visual_interface import VisualInterface
@@ -97,6 +106,19 @@ class VisualRecipeDocument:
 
         model = self.model.to_dict()
 
+        model_license: Union[None, dict[str, Any]]
+        if isinstance(self.model_license, VisualModelLicense):
+            model_license = self.model_license.to_dict()
+        else:
+            model_license = self.model_license
+
+        parameters = []
+        for parameters_item_data in self.parameters:
+            parameters_item = parameters_item_data.to_dict()
+            parameters.append(parameters_item)
+
+
+
         provenance = self.provenance.to_dict()
 
         runtime = self.runtime.to_dict()
@@ -116,6 +138,8 @@ class VisualRecipeDocument:
             "interfaces": interfaces,
             "metadata": metadata,
             "model": model,
+            "model_license": model_license,
+            "parameters": parameters,
             "provenance": provenance,
             "runtime": runtime,
             "schema_version": schema_version,
@@ -131,10 +155,12 @@ class VisualRecipeDocument:
         from ..models.visual_metadata import VisualMetadata
         from ..models.visual_provenance import VisualProvenance
         from ..models.visual_catalog_identity import VisualCatalogIdentity
+        from ..models.visual_recipe_parameter import VisualRecipeParameter
         from ..models.visual_execution import VisualExecution
         from ..models.visual_build import VisualBuild
         from ..models.visual_artifact import VisualArtifact
         from ..models.visual_identity import VisualIdentity
+        from ..models.visual_model_license import VisualModelLicense
         from ..models.visual_validation import VisualValidation
         from ..models.visual_runtime import VisualRuntime
         from ..models.visual_interface import VisualInterface
@@ -184,6 +210,34 @@ class VisualRecipeDocument:
 
 
 
+        def _parse_model_license(data: object) -> Union['VisualModelLicense', None]:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                model_license_type_0 = VisualModelLicense.from_dict(data)
+
+
+
+                return model_license_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['VisualModelLicense', None], data)
+
+        model_license = _parse_model_license(d.pop("model_license"))
+
+
+        parameters = []
+        _parameters = d.pop("parameters")
+        for parameters_item_data in (_parameters):
+            parameters_item = VisualRecipeParameter.from_dict(parameters_item_data)
+
+
+
+            parameters.append(parameters_item)
+
+
         provenance = VisualProvenance.from_dict(d.pop("provenance"))
 
 
@@ -211,6 +265,8 @@ class VisualRecipeDocument:
             interfaces=interfaces,
             metadata=metadata,
             model=model,
+            model_license=model_license,
+            parameters=parameters,
             provenance=provenance,
             runtime=runtime,
             schema_version=schema_version,

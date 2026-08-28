@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
+from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
@@ -30,12 +32,15 @@ def test_production_worker_fails_unknown_generic_work(
     jobs = _jobs(tmp_path)
     job = jobs.enqueue("probe", "operator", "a" * 40, [], {})
 
-    assert Worker(
-        jobs,
-        "worker",
-        {},
-        reconciliations=None,
-    ).run_once() is True
+    assert (
+        Worker(
+            jobs,
+            "worker",
+            {},
+            reconciliations=None,
+        ).run_once()
+        is True
+    )
     persisted = jobs.get(job.id)
     assert persisted.state == "failed"
     assert persisted.status_reason == "unsupported job kind: probe"
@@ -72,7 +77,8 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 6, tzinfo=UTC)
+    current = datetime(2026, 8, 6, tzinfo=UTC)
+    clock = lambda: current
     jobs = JobService(sessions, clock=clock)
     route_root = tmp_path / "routes"
     publisher = AtomicRouteBundlePublisher(
@@ -111,6 +117,11 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         clock=clock,
         authority=Authority(),
         worker_id="control-worker-test",
+        artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=16 * 1024**3,
+        artifact_job_retention_seconds=7 * 24 * 60 * 60,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=1000,
     )
 
     assert not hasattr(worker, "_updates")
@@ -126,6 +137,15 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         worker._housekeeping._maintenance,
         telemetry_maintenance.TelemetryMaintenance,
     )
+    assert isinstance(worker._artifact_housekeeping, ArtifactMaintenanceCadence)
+    assert worker._artifact_housekeeping._batch_limit == 1000
+    worker._artifact_housekeeping()
+    current += timedelta(seconds=3600)
+    worker._artifact_housekeeping()
+    maintenance_state = json.loads(
+        (tmp_path / "artifact-jobs" / "blobs" / ".maintenance.json").read_text()
+    )
+    assert maintenance_state["last_success_at"] == current.isoformat()
     assert worker._recipes._fleet_profiles is not None
     assert worker._recipes._fleet_profiles._recipe_operations is not None
 
@@ -143,12 +163,18 @@ def test_production_worker_settings_load_only_worker_authority_secrets(
     monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     monkeypatch.setenv("VONK_INTERNAL_API_URL", "http://control-api:8000")
+    monkeypatch.setenv("VONK_STATE_PATH", str(tmp_path / "state"))
 
     settings = WorkerSettings.from_env_and_secrets()
 
     assert settings.database_url == database.read_text()
     assert settings.internal_api_token == b"w" * 32
     assert settings.internal_api_url == "http://control-api:8000"
+    assert settings.state_path == tmp_path / "state"
+    assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
+    assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
+    assert settings.artifact_job_reconcile_interval_seconds == 3600
+    assert settings.artifact_job_reconcile_batch_limit == 1000
     for forbidden in (
         "repository_path",
         "git_signing_key_path",
@@ -179,4 +205,40 @@ def test_production_worker_settings_reject_raw_or_cross_origin_authority(
     monkeypatch.delenv("VONK_WORKER_API_TOKEN")
     monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     with pytest.raises(SettingsError, match="fixed HTTP origin"):
+        WorkerSettings.from_env_and_secrets()
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        (
+            "VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS",
+            "59",
+            "reconciliation interval",
+        ),
+        (
+            "VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT",
+            "10001",
+            "batch limit",
+        ),
+    ],
+)
+def test_production_worker_settings_bound_artifact_maintenance(
+    tmp_path,
+    monkeypatch,
+    name,
+    value,
+    message,
+) -> None:
+    database = tmp_path / "database-url"
+    token = tmp_path / "worker-api-token"
+    database.write_text("postgresql://control:test@postgres/control")
+    token.write_text("w" * 32)
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
+    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
+    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(SettingsError, match=message):
         WorkerSettings.from_env_and_secrets()

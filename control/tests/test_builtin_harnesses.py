@@ -814,6 +814,60 @@ def test_vllm_accepts_bounded_nemotron_dspark_options() -> None:
     )
 
 
+@pytest.mark.parametrize("backend", ["FLASH_ATTN", "FLASHINFER", "TRITON_ATTN"])
+def test_vllm_accepts_reviewed_attention_backends(backend: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "attention-backend", "value": backend}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--attention-backend") + 1] == (
+        backend
+    )
+
+
+@pytest.mark.parametrize("backend", ["auto", "flashinfer", "TRITON_MLA"])
+def test_vllm_rejects_unreviewed_attention_backends(backend: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "attention-backend", "value": backend}
+    )
+
+    with pytest.raises(HarnessCompileError, match="value is invalid"):
+        _compile("vllm", recipe=recipe)
+
+
+@pytest.mark.parametrize(
+    ("name", "flag"),
+    [
+        ("enable-chunked-prefill", "--enable-chunked-prefill"),
+        ("disable-chunked-prefill", "--no-enable-chunked-prefill"),
+    ],
+)
+def test_vllm_accepts_explicit_chunked_prefill_control(name: str, flag: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append({"name": name, "value": True})
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert flag in projection.command
+
+
+def test_vllm_rejects_conflicting_chunked_prefill_controls() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "enable-chunked-prefill", "value": True},
+            {"name": "disable-chunked-prefill", "value": True},
+        ]
+    )
+
+    with pytest.raises(HarnessCompileError, match="chunked prefill controls conflict"):
+        _compile("vllm", recipe=recipe)
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [("moe-backend", "triton"), ("mamba-cache-mode", "all")],
@@ -845,7 +899,15 @@ def test_vllm_accepts_bounded_offline_multimodal_recipe_arguments() -> None:
     recipe["runtime"]["arguments"].extend(
         [
             {"name": "allowed-local-media-path", "value": "/inputs"},
-            {"name": "limit-mm-per-prompt", "value": '{"image":4,"video":1}'},
+            {
+                "name": "limit-mm-per-prompt",
+                "value": '{"image":4,"video":1,"audio":1}',
+            },
+            {
+                "name": "media-io-kwargs",
+                "value": '{"video":{"fps":2,"num_frames":256}}',
+            },
+            {"name": "video-pruning-rate", "value": "0.5"},
             {"name": "chat-template-content-format", "value": "openai"},
             {"name": "generation-config", "value": "auto"},
             {"name": "mm-processor-cache-gb", "value": 0},
@@ -863,14 +925,27 @@ def test_vllm_accepts_bounded_offline_multimodal_recipe_arguments() -> None:
     assert projection.command[projection.command.index("--generation-config") + 1] == (
         "auto"
     )
+    assert (
+        projection.command[projection.command.index("--limit-mm-per-prompt") + 1]
+        == '{"image":4,"video":1,"audio":1}'
+    )
+    assert (
+        projection.command[projection.command.index("--media-io-kwargs") + 1]
+        == '{"video":{"fps":2,"num_frames":256}}'
+    )
+    assert (
+        projection.command[projection.command.index("--video-pruning-rate") + 1]
+        == "0.5"
+    )
 
 
 @pytest.mark.parametrize(
     "value",
     [
         "{}",
-        '{"audio":1}',
+        '{"document":1}',
         '{"image":17}',
+        '{"audio":17}',
         '{"image":true}',
         '{"image":1,"image":2}',
     ],
@@ -879,6 +954,41 @@ def test_vllm_rejects_unbounded_or_ambiguous_multimodal_limits(value: str) -> No
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append(
         {"name": "limit-mm-per-prompt", "value": value}
+    )
+
+    with pytest.raises(HarnessCompileError, match="argument value"):
+        _compile("vllm", recipe=recipe)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "{}",
+        '{"audio":{"sample_rate":16000}}',
+        '{"video":{}}',
+        '{"video":{"fps":0}}',
+        '{"video":{"fps":61}}',
+        '{"video":{"fps":true}}',
+        '{"video":{"num_frames":0}}',
+        '{"video":{"num_frames":257}}',
+        '{"video":{"num_frames":1.5}}',
+        '{"video":{"fps":2,"unknown":1}}',
+        '{"video":{"fps":2,"fps":3}}',
+    ],
+)
+def test_vllm_rejects_unsafe_media_io_kwargs(value: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append({"name": "media-io-kwargs", "value": value})
+
+    with pytest.raises(HarnessCompileError, match="argument value"):
+        _compile("vllm", recipe=recipe)
+
+
+@pytest.mark.parametrize("value", ["-0.01", "1", "nan", "1e999"])
+def test_vllm_rejects_invalid_video_pruning_rate(value: str) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "video-pruning-rate", "value": value}
     )
 
     with pytest.raises(HarnessCompileError, match="argument value"):
@@ -996,7 +1106,10 @@ def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
                 "value": "/opt/vonk/templates/glm53-chat-template-mm.jinja",
             },
             {"name": "limit-mm-per-prompt", "value": '{"image":4,"video":1}'},
-            {"name": "speculative-config", "value": '{"method":"mtp","num_speculative_tokens":4}'},
+            {
+                "name": "speculative-config",
+                "value": '{"method":"mtp","num_speculative_tokens":4}',
+            },
             {"name": "tool-call-parser", "value": "glm47"},
             {"name": "reasoning-parser", "value": "glm45"},
             {"name": "enable-auto-tool-choice", "value": True},
@@ -1006,7 +1119,10 @@ def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
     projection = _compile("vllm", recipe=recipe)
 
     assert projection.command[projection.command.index("--block-size") + 1] == "7168"
-    assert projection.command[projection.command.index("--kv-cache-memory") + 1] == "9663676416"
+    assert (
+        projection.command[projection.command.index("--kv-cache-memory") + 1]
+        == "9663676416"
+    )
     assert "--enforce-eager" in projection.command
     assert "--skip-mm-profiling" in projection.command
     assert projection.command[projection.command.index("--chat-template") + 1] == (
@@ -1174,7 +1290,10 @@ def test_sglang_accepts_qwen38_flash_next_profile() -> None:
             {"name": "disable-cuda-graph-padding", "value": True},
             {"name": "disable-radix-cache", "value": True},
             {"name": "sampling-backend", "value": "pytorch"},
-            {"name": "default-chat-template-kwargs", "value": '{"enable_thinking":false}'},
+            {
+                "name": "default-chat-template-kwargs",
+                "value": '{"enable_thinking":false}',
+            },
             {"name": "enable-metrics", "value": True},
             {"name": "enable-cache-report", "value": True},
         ]
@@ -1190,10 +1309,16 @@ def test_sglang_accepts_qwen38_flash_next_profile() -> None:
         0,
     )
 
-    assert projection.command[projection.command.index("--speculative-num-steps") + 1] == "3"
+    assert (
+        projection.command[projection.command.index("--speculative-num-steps") + 1]
+        == "3"
+    )
     assert "--enable-linear-replayssm-spec" in projection.command
     assert "--ple-offload-embedding" in projection.command
-    assert projection.command[projection.command.index("--tool-call-parser") + 1] == "qwen3_coder"
+    assert (
+        projection.command[projection.command.index("--tool-call-parser") + 1]
+        == "qwen3_coder"
+    )
 
 
 @pytest.mark.parametrize("missing", ["patch", "capability", "profile"])

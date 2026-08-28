@@ -70,6 +70,54 @@ export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
 export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
 export type LibraryOperation = components["schemas"]["OperationResponse"];
 export type LibraryRunStatus = components["schemas"]["RunStatusResponse"];
+export type ArtifactJobInterface = "audio-job" | "video-job" | "image-job" | "mesh-job" | "artifact-job";
+export type ArtifactJobFile = {name: string; media_type: string; size_bytes: number; sha256: string};
+export type ArtifactJobInputFile = ArtifactJobFile & {slot: string};
+export type ArtifactJobOutputLimits = {
+  max_files: number;
+  max_file_bytes: number;
+  max_total_bytes: number;
+  allowed_media_types: string[];
+};
+export type ArtifactJobCreateInput = {
+  interface: ArtifactJobInterface;
+  parameters: Record<string, string | number | boolean>;
+  inputs: ArtifactJobInputFile[];
+  output_limits: ArtifactJobOutputLimits;
+  timeout_seconds: number;
+};
+export type ArtifactJob = {
+  id: string;
+  run_id: string;
+  operation_id: string | null;
+  interface: ArtifactJobInterface;
+  state: "draft" | "ready" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  contract_sha256: string;
+  compiled_contract: Record<string, unknown>;
+  input_manifest_sha256: string;
+  input_total_bytes: number;
+  input_declarations: ArtifactJobInputFile[];
+  input_files: ArtifactJobInputFile[];
+  output_limits: ArtifactJobOutputLimits;
+  output_manifest_sha256: string | null;
+  output_files: ArtifactJobFile[];
+  result_evidence: {elapsed_milliseconds?: number; peak_memory_bytes?: number} | null;
+  status_reason: string | null;
+  timeout_seconds: number;
+  created_at: string;
+  updated_at: string;
+};
+export type ArtifactJobList = {jobs: ArtifactJob[]};
+export type ArtifactJobCapabilities = {
+  schema_version: 1;
+  transport: {
+    max_input_files: number; max_input_file_bytes: number; max_input_total_bytes: number;
+    max_output_files: number; max_output_file_bytes: number; max_output_total_bytes: number;
+    max_timeout_seconds: number; reserved_input_names: string[];
+  };
+  storage: {max_stored_bytes: number; used_bytes: number; remaining_bytes: number};
+};
+export type ArtifactTransferProgress = {loaded: number; total: number};
 export type FleetProfile = components["schemas"]["FleetProfileView"];
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
@@ -155,6 +203,16 @@ export interface LibraryApi {
   retryLibraryOperation(operationId: string, signal?: AbortSignal): Promise<LibraryOperation>;
   libraryRunStatus(runId: string, signal?: AbortSignal): Promise<LibraryRunStatus>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
+  artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
+  artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
+  createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob>;
+  uploadArtifactJobInput(jobId: string, file: ArtifactJobInputFile, content: Blob, signal?: AbortSignal, onProgress?: (progress: ArtifactTransferProgress) => void): Promise<ArtifactJob>;
+  finalizeArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  artifactJobResultUrl(jobId: string, sha256: string): string;
 }
 export interface ControlApi extends LibraryApi {
   fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;

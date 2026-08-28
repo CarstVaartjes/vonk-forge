@@ -642,6 +642,7 @@ fn typed_site_values_reject_invalid_addresses_cidrs_hostnames_and_origins() {
             {"env": "NAS_LAN_IP", "prompt": "NAS IP", "validation": "ipv4"},
             {"env": "VONK_MANAGEMENT_CIDRS", "prompt": "Management CIDRs", "validation": "cidr_list"},
             {"env": "VONK_DIRECT_FABRIC_CIDRS", "prompt": "Fabric CIDRs", "default": "", "validation": "optional_cidr_list"},
+            {"env": "VONK_OPERATOR_JURISDICTION", "prompt": "Jurisdiction", "validation": "jurisdiction"},
             {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
           ],
           "secrets": [],
@@ -660,7 +661,7 @@ fn typed_site_values_reject_invalid_addresses_cidrs_hostnames_and_origins() {
     .expect("valid typed payload");
     let temporary = tempdir().expect("temporary directory");
     let input = Cursor::new(
-        b"not-an-ip\n192.168.1.231\n192.168.1.0/99\n192.168.1.0/24,100.64.0.0/10\n\nhttps://bad/path\ncontrol.example.test\nyes\nhttp://dashboard.example.test\nhttps://dashboard.example.test\n".to_vec(),
+        b"not-an-ip\n192.168.1.231\n192.168.1.0/99\n192.168.1.0/24,100.64.0.0/10\n\nnl\nZZ\nNL\nhttps://bad/path\ncontrol.example.test\nyes\nhttp://dashboard.example.test\nhttps://dashboard.example.test\n".to_vec(),
     );
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(input, &mut output);
@@ -678,6 +679,7 @@ fn typed_site_values_reject_invalid_addresses_cidrs_hostnames_and_origins() {
         "NAS_LAN_IP=192.168.1.231\n\
 VONK_MANAGEMENT_CIDRS=\"192.168.1.0/24,100.64.0.0/10\"\n\
 VONK_DIRECT_FABRIC_CIDRS=\n\
+VONK_OPERATOR_JURISDICTION=NL\n\
 VONK_CONTROL_HOSTNAME=control.example.test\n\
 COMPOSE_PROFILES=hermes\n\
 HERMES_DASHBOARD_ORIGIN=https://dashboard.example.test\n"
@@ -687,7 +689,7 @@ HERMES_DASHBOARD_ORIGIN=https://dashboard.example.test\n"
             .expect("UTF-8 prompts")
             .matches("The value is invalid.")
             .count()
-            >= 4
+            >= 5
     );
 }
 

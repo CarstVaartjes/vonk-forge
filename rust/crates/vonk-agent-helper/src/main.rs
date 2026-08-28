@@ -5,6 +5,11 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rustix::net::sockopt::socket_peercred;
@@ -22,6 +27,24 @@ const DATA_ROOT: &str = "/var/lib/vonk-forge";
 const AGENT_DATA_ROOT: &str = "/var/lib/vonk-forge-agent";
 const RUNTIME_REQUEST_ROOT: &str = "/run/vonk-forge-agent/runtime-requests";
 const AGENT_GROUP: &str = "vonk-agent";
+const MAX_CONCURRENT_REQUESTS: usize = 8;
+
+struct WorkerPermit(Arc<AtomicUsize>);
+
+impl Drop for WorkerPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn acquire_worker(counter: &Arc<AtomicUsize>) -> Option<WorkerPermit> {
+    counter
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            (current < MAX_CONCURRENT_REQUESTS).then_some(current + 1)
+        })
+        .ok()
+        .map(|_| WorkerPermit(Arc::clone(counter)))
+}
 
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +53,8 @@ struct HelperResponse<'a> {
     request_id: Option<String>,
     status: &'a str,
     evidence_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
 }
 
 fn main() {
@@ -45,18 +70,20 @@ fn run() -> Result<(), String> {
     let group_gid = group_gid(Path::new("/etc/group"), AGENT_GROUP)?;
     let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
     let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
-    let verifier = GrantVerifier::new(&grant_key, group_gid).map_err(display)?;
-    let executor = OperationExecutor::new(
-        ManagedRoots::under(Path::new(DATA_ROOT))
-            .with_agent_data(Path::new(AGENT_DATA_ROOT))
-            .with_runtime_requests(Path::new(RUNTIME_REQUEST_ROOT)),
-        &release_key,
-        ProcessCommandRunner,
-        Some(0),
-    )
-    .map_err(display)?
-    .with_package_owner(agent_uid)
-    .with_runtime_request_owner(agent_uid);
+    let verifier = Arc::new(GrantVerifier::new(&grant_key, group_gid).map_err(display)?);
+    let executor = Arc::new(
+        OperationExecutor::new(
+            ManagedRoots::under(Path::new(DATA_ROOT))
+                .with_agent_data(Path::new(AGENT_DATA_ROOT))
+                .with_runtime_requests(Path::new(RUNTIME_REQUEST_ROOT)),
+            &release_key,
+            ProcessCommandRunner,
+            Some(0),
+        )
+        .map_err(display)?
+        .with_package_owner(agent_uid)
+        .with_runtime_request_owner(agent_uid),
+    );
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {
@@ -67,25 +94,48 @@ fn run() -> Result<(), String> {
         return Err("systemd socket name is invalid".to_owned());
     }
     let listener: UnixListener = descriptor.into();
+    let workers = Arc::new(AtomicUsize::new(0));
+    let node_id: Arc<str> = Arc::from(node_id);
     for connection in listener.incoming() {
         match connection {
             Ok(mut stream) => {
-                if let Err(error) = handle(&mut stream, &verifier, &executor, &node_id) {
-                    let response = HelperResponse {
-                        schema_version: 1,
-                        request_id: None,
-                        status: "rejected",
-                        evidence_sha256: None,
-                    };
-                    let body = vonk_agent_protocol::canonical_json(&response).map_err(display)?;
-                    let _ = write_frame(&mut stream, &body);
-                    eprintln!("vonk-agent-helper: request rejected: {error}");
+                let Some(permit) = acquire_worker(&workers) else {
+                    reject(&mut stream, "concurrent request limit reached");
+                    continue;
+                };
+                let verifier = Arc::clone(&verifier);
+                let executor = Arc::clone(&executor);
+                let node_id = Arc::clone(&node_id);
+                if let Err(error) = thread::Builder::new()
+                    .name("vonk-helper-request".to_owned())
+                    .spawn(move || {
+                        let _permit = permit;
+                        if let Err(error) = handle(&mut stream, &verifier, &executor, &node_id) {
+                            reject(&mut stream, &error);
+                        }
+                    })
+                {
+                    eprintln!("vonk-agent-helper: request worker failed: {error}");
                 }
             }
             Err(error) => eprintln!("vonk-agent-helper: accept failed: {error}"),
         }
     }
     Ok(())
+}
+
+fn reject(stream: &mut UnixStream, error: &str) {
+    let response = HelperResponse {
+        schema_version: 1,
+        request_id: None,
+        status: "rejected",
+        evidence_sha256: None,
+        exit_code: None,
+    };
+    if let Ok(body) = vonk_agent_protocol::canonical_json(&response) {
+        let _ = write_frame(stream, &body);
+    }
+    eprintln!("vonk-agent-helper: request rejected: {error}");
 }
 
 fn handle(
@@ -120,6 +170,7 @@ fn handle(
         request_id: Some(request.claims.request_id.to_string()),
         status: &outcome.status,
         evidence_sha256: Some(outcome.evidence_sha256),
+        exit_code: outcome.exit_code,
     };
     let body = vonk_agent_protocol::canonical_json(&response).map_err(display)?;
     write_frame(stream, &body).map_err(display)
@@ -266,4 +317,26 @@ fn display(error: impl std::fmt::Display) -> String {
 #[allow(dead_code)]
 fn _classify_protocol_error(error: HelperError) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_CONCURRENT_REQUESTS, acquire_worker};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn helper_request_concurrency_is_bounded_and_reusable() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let permits = (0..MAX_CONCURRENT_REQUESTS)
+            .map(|_| acquire_worker(&counter).unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(acquire_worker(&counter).is_none());
+        drop(permits);
+        assert_eq!(counter.load(Ordering::Acquire), 0);
+        assert!(acquire_worker(&counter).is_some());
+    }
 }

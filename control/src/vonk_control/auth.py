@@ -40,18 +40,14 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/fleet-profiles/{profile_id}/preview"): frozenset(
         {"administrator"}
     ),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset(
-        {"administrator"}
-    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are
     # part of the same explicitly audited authorization surface.
     ("POST", "/api/v1/catalog/recipes"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/entities"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/entities/{entity_id}/draft"): frozenset(
-        {"administrator"}
-    ),
+    ("PUT", "/api/v1/catalog/entities/{entity_id}/draft"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/entities/{entity_id}/resolve"): frozenset(
         {"administrator"}
     ),
@@ -68,9 +64,7 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/catalog/imports/global"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset(
-        {"administrator"}
-    ),
+    ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset({"administrator"}),
     ("PUT", "/api/v1/catalog/recipes/{recipe_id}/publication-report"): frozenset(
         {"administrator"}
     ),
@@ -94,6 +88,22 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/job-runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/runs/{run_id}/artifact-jobs"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("PUT", "/api/v1/artifact-jobs/{job_id}/inputs/{name}"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/artifact-jobs/{job_id}/finalize"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/artifact-jobs/{job_id}/submit"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/artifact-jobs/{job_id}/cancel"): frozenset(
+        {"operator", "administrator"}
+    ),
     ("POST", "/api/v1/recipes/stop-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/uninstall-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
@@ -118,6 +128,7 @@ class Actor:
     def __post_init__(self) -> None:
         if not self.subject.strip() or self.role not in _ROLES:
             raise AuthError("invalid authenticated actor")
+
 
 _CAPABILITY_ROLES: dict[str, frozenset[str]] = {
     "fleet:enroll": frozenset({"administrator"}),

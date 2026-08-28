@@ -44,6 +44,9 @@ vonkctl fleet enroll --apply
 vonkctl fleet re-enroll
 vonkctl fleet re-enroll spk_0123456789abcdef0123456789abcdef --apply
 vonkctl fleet revoke spk_0123456789abcdef0123456789abcdef --apply
+vonkctl fleet upgrade candidate --json
+vonkctl fleet upgrade preview --strategy one-at-a-time --json
+vonkctl fleet upgrade apply --strategy one-at-a-time --plan-digest DIGEST --apply
 ```
 
 `fleet telemetry --range` accepts the same `1h`, `24h`, `7d`, and `31d`
@@ -52,6 +55,13 @@ windows as the node cards. Explicit `--start`, `--end`, `--resolution`, and
 `fleet re-enroll` replaces a Spark certificate while preserving its identity;
 pass a node ID to bind the grant or omit it for the web controller's generic
 re-enrollment flow.
+
+`fleet upgrade` rolls out the controller's current signed agent package over
+the enrolled relay; it does not require SSH access to a Spark. Preview the exact
+eligible nodes and package first, then apply that returned plan digest. The
+default `one-at-a-time` strategy waits for each Spark to return healthy before
+continuing. Repeat `--node-id SPARK_ID` to target a subset; omitting it selects
+every eligible Spark.
 
 ## Library and public catalog
 
@@ -116,6 +126,98 @@ Apply commands generate an idempotency UUID automatically. Supply
 `--request-key UUID` when a caller needs to retain and reuse it after an
 uncertain outcome. Use `library operation show`, `library operation retry`, and
 `library run` to follow progress and recovery.
+
+## Artifact-producing recipe jobs
+
+Image, image-editing, video, audio, mesh, and generic artifact recipes use the
+bounded recipe-job protocol rather than an OpenAI service endpoint. Activate
+the installed recipe with `library job activate`; this reserves its capacity
+without trying to start a long-lived OpenAI service on the Spark. The apply
+response's `owner_id` is the logical `RUN_ID` used by the remaining commands.
+
+```bash
+vonkctl library job capabilities --json
+vonkctl library job activate preview \
+  --installation-id INSTALLATION_ID --alias image-worker --json
+vonkctl library job activate apply \
+  --installation-id INSTALLATION_ID --alias image-worker \
+  --plan-digest DIGEST --apply --json
+```
+
+`job capabilities` reports the controller's exact transfer ceilings, reserved
+input names, and current artifact-store maximum, usage, and remaining bytes.
+Apply-time `create` and `launch` fetch this preflight automatically and report
+whether the distinct local input bytes fit without relying on content-addressed
+blob reuse. The controller remains authoritative because an already stored
+digest may allow a job even when raw remaining capacity is smaller.
+
+Once the artifact recipe run is active, `library job launch` performs the
+complete create, input upload, finalize, and submit sequence. It remains a dry
+run until `--apply` is explicit:
+
+```bash
+vonkctl library job launch RUN_ID \
+  --interface image-job \
+  --parameters parameters.json \
+  --input prompt prompt.txt text/plain ./prompt.txt \
+  --input source source.png image/png ./source.png \
+  --output-media-type image/png \
+  --max-output-files 1 \
+  --max-output-file-bytes 1073741824 \
+  --max-output-total-bytes 1073741824 \
+  --timeout-seconds 3600 --json
+
+vonkctl library job launch RUN_ID \
+  --interface image-job \
+  --input prompt prompt.txt text/plain ./prompt.txt \
+  --output-media-type image/png \
+  --apply --json
+```
+
+`create` and `launch` generate an idempotency UUID for draft creation. Supply
+`--request-key UUID` and retain it when a caller needs to retry after an
+uncertain create response without duplicating the job.
+
+Inputs are declared from local regular, non-symlink files. The CLI streams each
+file to calculate its exact SHA-256 and size, then rechecks that identity during
+upload. Repeat `--input SLOT NAME MEDIA_TYPE PATH` for up to 32 inputs. `SLOT`
+maps the file to the recipe contract's named input (for example, `prompt`,
+`source`, or `audio`). Each input is limited to 512 MiB and the combined input
+manifest to 1 GiB. The controller allows at most 32 outputs, 1 GiB per output,
+and 2 GiB total. MIME types must be lowercase and explicit; the CLI does not
+guess them from extensions.
+
+Each stage is also available independently, so an interrupted launch can be
+inspected and resumed without creating another job:
+
+```bash
+vonkctl library job create RUN_ID --interface video-job \
+  --input prompt prompt.txt text/plain ./prompt.txt \
+  --output-media-type video/mp4 --apply --json
+vonkctl library job upload JOB_ID \
+  --input prompt prompt.txt text/plain ./prompt.txt --apply --json
+vonkctl library job finalize JOB_ID --apply --json
+vonkctl library job submit JOB_ID --apply --json
+vonkctl library job list RUN_ID --json
+vonkctl library job status JOB_ID --json
+vonkctl library job result JOB_ID --json
+vonkctl library job cancel JOB_ID --reason "operator requested" --apply --json
+```
+
+Result downloads always begin by loading the controller's successful result
+manifest. A dry run shows the exact names, sizes, media types, digests, and
+destinations. `--apply` streams every selected file into a private temporary
+file in the destination directory, verifies its size, MIME type, response
+digest, and content SHA-256, then publishes it atomically. Existing files are
+not replaced unless `--overwrite` is explicit.
+
+```bash
+mkdir -p ./outputs
+vonkctl library job download JOB_ID --output-directory ./outputs --json
+vonkctl library job download JOB_ID --output-directory ./outputs --apply --json
+vonkctl library job download JOB_ID --output-directory ./outputs \
+  --sha256 DIGEST --overwrite --apply --json
+```
 
 ## Activity
 

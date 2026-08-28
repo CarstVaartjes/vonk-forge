@@ -12,6 +12,7 @@ dependencies = [
   "attrs==26.1.0",
   "httpx==0.28.1",
   "jsonschema>=4.23",
+  "pillow==12.3.0",
   "python-dateutil==2.9.0.post0",
   "securesystemslib[crypto]==1.4.0",
   "tuf==7.0.0",
@@ -19,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 vonkctl = "cluster_profiles.cli:main"
+vonk-fleet-qualify = "cluster_profiles.fleet_qualification_cli:main"
 
 [dependency-groups]
 dev = ["hatchling==1.31.0", "pytest==9.1.1", "pyyaml==6.0.3"]

@@ -23,8 +23,8 @@ from vonk_control.harnesses.registry import (
     HarnessRegistry,
     TrustedBuiltinComposition,
 )
-from vonk_control.workload_helper_authority import WorkloadObjectReceiptIssuer
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_control.workload_helper_authority import WorkloadObjectReceiptIssuer
 
 
 def harness_document(

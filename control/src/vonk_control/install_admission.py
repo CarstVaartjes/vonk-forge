@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .artifact_sizes import ArtifactSizeError, ArtifactSizeResolver
 from .inventory_repository import InventoryRepository
+from .legal_admission import operator_jurisdiction as validate_operator_jurisdiction
+from .legal_admission import territorial_admission
 from .models import (
     AgentNode,
     ClusterMapping,
@@ -79,12 +82,16 @@ class InstallAdmissionService:
         sizes: ArtifactSizeResolver,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
+        operator_jurisdiction: str | None = None,
     ) -> None:
         self._sessions = sessions
         self._sizes = sizes
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
+        self._operator_jurisdiction = validate_operator_jurisdiction(
+            operator_jurisdiction
+        )
 
     def plan_install(
         self,
@@ -137,9 +144,20 @@ class InstallAdmissionService:
             )
             document = revision.document
             try:
-                resolve_recipe_entities(session, document)
+                resolved_entities = resolve_recipe_entities(session, document)
             except RecipeRuntimeSpecError as error:
                 raise ValueError("exact recipe dependencies are unavailable") from error
+            model_version = resolved_entities.get("model_version")
+            model_document = getattr(model_version, "document", None)
+            if not isinstance(model_document, Mapping):
+                raise ValueError(  # noqa: TRY004
+                    "exact model license authority is unavailable"
+                )
+            legal_admission = territorial_admission(
+                model_document,
+                self._operator_jurisdiction,
+                operation="install",
+            )
             try:
                 validate_topology(
                     document,
@@ -184,6 +202,10 @@ class InstallAdmissionService:
         for mapping_node in mapping_nodes:
             blockers: list[AdmissionReason] = []
             warnings: list[AdmissionReason] = []
+            if legal_admission.blocker is not None:
+                blockers.append(AdmissionReason(*legal_admission.blocker))
+            if legal_admission.warning is not None:
+                warnings.append(AdmissionReason(*legal_admission.warning))
             role = role_by_name.get(mapping_node.role)
             if role is None or not isinstance(role.get("resources"), dict):
                 raise TypeError("mapping role is absent from recipe topology")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -7,7 +8,7 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
-from vonk_control.install_admission import InstallNodePlan, InstallPlan
+from vonk_control.install_admission import AdmissionReason, InstallNodePlan, InstallPlan
 from vonk_control.recipe_action_plans import (
     ActionReason,
     StopNodeImpact,
@@ -388,6 +389,39 @@ def test_preview_install_and_run_expose_exact_capacity_math() -> None:
     assert run.json()["alias"] == "qwen"
     assert _recipes.calls[-1] == ("preview_run", (INSTALLATION, "qwen"))
     assert len(install.json()["plan_digest"]) == 64
+
+
+def test_preview_install_exposes_bounded_legal_admission_error() -> None:
+    client, headers, recipes, _audits = setup()
+    blocker = AdmissionReason(
+        "install.license_jurisdiction_required",
+        "This model has territorial license restrictions. Configure "
+        "VONK_OPERATOR_JURISDICTION before installation or execution; admission "
+        "fails closed while it is unset.",
+    )
+    recipes.install_plan = replace(
+        recipes.install_plan,
+        allowed=False,
+        nodes=(
+            replace(
+                recipes.install_plan.nodes[0],
+                allowed=False,
+                blockers=(blocker,),
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/recipes/install-plans/preview",
+        headers=headers(),
+        json={"mapping_id": MAPPING, "recipe_build_id": BUILD},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert response.json()["nodes"][0]["blockers"] == [
+        {"code": blocker.code, "detail": blocker.detail}
+    ]
 
 
 def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:

@@ -23,6 +23,7 @@ from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
     AgentOperation,
     AgentPresence,
+    ArtifactJob,
     InstallationNode,
     Job,
     LocalRecipeRevision,
@@ -115,6 +116,7 @@ class RecipeRunStatus:
 class RecipeRunObservation:
     run_id: str
     ready: bool
+
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
@@ -708,6 +710,149 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
+    def enqueue_one_shot_job_in_session(
+        self,
+        session: Session,
+        *,
+        artifact_job_id: str,
+        run_id: str,
+        node_id: str,
+        payload: Mapping[str, object],
+        actor: str,
+        request_id: str,
+        authority_digest: str,
+        now: datetime,
+    ) -> Job:
+        """Enqueue one fenced job without changing the service run lifecycle."""
+        run = session.get(RecipeRun, run_id, with_for_update=True)
+        if run is None or run.state != "running":
+            raise RecipeOperationConflict("recipe run is not accepting jobs")
+        node = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == run_id,
+                RunNode.node_id == node_id,
+                RunNode.state == "running",
+            )
+        )
+        if node is None:
+            raise RecipeOperationConflict("recipe job target is not running")
+        return self._queue_in_session(
+            session,
+            kind="recipe.job.run.v1",
+            owner_kind="artifact-job",
+            owner_id=artifact_job_id,
+            plan_digest=run.plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=((node_id, payload),),
+            authority_digest=authority_digest,
+            now=now,
+        )
+
+    def notify_agents(self) -> None:
+        self._agent_jobs.notify_available()
+
+    def activate_job_run(
+        self,
+        plan: RunPlan,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView:
+        """Reserve an installed artifact recipe without starting a service container."""
+        if plan_digest != plan.plan_digest:
+            raise RecipeOperationConflict(
+                "submitted plan digest does not match preview"
+            )
+        existing = self._idempotent(request_id, "recipe.job.activate.v1", plan_digest)
+        if existing is not None:
+            return existing
+        now = self._clock()
+        with self._sessions.begin() as session:
+            installation = session.get(RecipeInstallation, plan.installation_id)
+            revision = (
+                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+                if installation is not None
+                else None
+            )
+            interfaces = (
+                revision.document.get("interfaces")
+                if revision is not None and isinstance(revision.document, Mapping)
+                else None
+            )
+            adapters = (
+                [
+                    item.get("adapter")
+                    for item in interfaces
+                    if isinstance(item, Mapping)
+                ]
+                if isinstance(interfaces, list)
+                else []
+            )
+            artifact_adapters = {
+                "audio-job",
+                "video-job",
+                "image-job",
+                "mesh-job",
+                "artifact-job",
+            }
+            if len(adapters) != 1 or adapters[0] not in artifact_adapters:
+                raise RecipeOperationConflict("recipe is not an artifact job recipe")
+            topology = (
+                revision.document.get("topology") if revision is not None else None
+            )
+            if not isinstance(topology, Mapping) or topology.get("node_count") != 1:
+                raise RecipeOperationConflict(
+                    "artifact job recipes currently require a single-node topology"
+                )
+            try:
+                run_id = self._run_admission.accept_run_in_session(
+                    session, plan, actor=actor, now=now
+                )
+            except (RuntimeError, ValueError) as error:
+                raise RecipeOperationConflict(str(error)) from error
+            run = session.get(RecipeRun, run_id)
+            assert run is not None and revision is not None
+            run.state = "running"
+            run.route_state = "withdrawn"
+            run.plan = {**run.plan, "execution_mode": "one-shot-jobs"}
+            run.updated_at = now
+            nodes = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            for node in nodes:
+                node.state = "running"
+                node.updated_at = now
+            payload = {
+                "schema_version": 1,
+                "owner_kind": "run",
+                "owner_id": run_id,
+                "plan_digest": plan.plan_digest,
+                "execution_mode": "one-shot-jobs",
+            }
+            job = Job(
+                id=str(uuid.uuid4()),
+                request_id=request_id,
+                kind="recipe.job.activate.v1",
+                state="succeeded",
+                actor=actor,
+                authority_revision=revision.content_sha256 or "",
+                targets=sorted(node.node_id for node in nodes),
+                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+                payload=payload,
+                result={"activated": True},
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(job)
+            session.flush()
+            return self._view(job)
+
     def preview_stop(self, run_id: str) -> StopPlan:
         with self._sessions() as session:
             return self._stop_plan_in_session(session, run_id, lock=False)
@@ -729,6 +874,14 @@ class RecipeOperationService:
         )
         if existing is not None:
             return existing
+        logical = self._stop_logical_job_run(
+            run_id,
+            plan_digest=plan_digest,
+            actor=actor,
+            request_id=request_id,
+        )
+        if logical is not None:
+            return logical
         now = self._clock()
         try:
             transaction = (
@@ -759,13 +912,9 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
-                revision = session.get(
-                    LocalRecipeRevision, admitted.recipe_revision_id
-                )
+                revision = session.get(LocalRecipeRevision, admitted.recipe_revision_id)
                 if revision is None:
-                    raise RecipeOperationConflict(
-                        "recipe run topology is unavailable"
-                    )
+                    raise RecipeOperationConflict("recipe run topology is unavailable")
                 stop_order = _topology_order(revision.document, "stop_order")
                 run.state = "stopping"
                 run.updated_at = now
@@ -1207,6 +1356,8 @@ class RecipeOperationService:
         job = session.get(Job, operation.parent_job_id)
         if job is None or not job.kind.startswith("recipe."):
             return
+        if job.kind == "recipe.job.run.v1":
+            return
         state = getattr(message, "state", None)
         result = getattr(message, "result", None)
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
@@ -1492,9 +1643,7 @@ class RecipeOperationService:
                     recovery_error = error
                 if recovery is not None and not failed:
                     phases, marker = recovery
-                    installation = session.get(
-                        RecipeInstallation, run.installation_id
-                    )
+                    installation = session.get(RecipeInstallation, run.installation_id)
                     revision = (
                         session.get(
                             LocalRecipeRevision, installation.recipe_revision_id
@@ -1570,19 +1719,139 @@ class RecipeOperationService:
             if job is None or not job.kind.startswith("recipe."):
                 raise RecipeOperationConflict("recipe operation is not cancellable")
             if job.state == "cancelled":
-                return self._view(job)
+                previous = job.result if isinstance(job.result, Mapping) else {}
+                if (
+                    previous.get("cancel_request_id") == request_id
+                    and previous.get("reason") == cancellation_reason
+                    and previous.get("cancel_actor") == actor
+                ):
+                    return self._view(job)
+                raise RecipeOperationConflict(
+                    "cancellation request key was already used differently"
+                )
             if job.state not in {"queued", "running"}:
                 raise RecipeOperationConflict("recipe operation is not cancellable")
-            children = tuple(session.scalars(select(AgentOperation).where(AgentOperation.parent_job_id == job.id)))
+            previous = job.result if isinstance(job.result, Mapping) else {}
+            if previous.get("cancel_requested") is True:
+                if (
+                    previous.get("cancel_request_id") == request_id
+                    and previous.get("reason") == cancellation_reason
+                    and previous.get("cancel_actor") == actor
+                ):
+                    return self._view(job)
+                raise RecipeOperationConflict(
+                    "cancellation request key was already used differently"
+                )
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == job.id)
+                    .with_for_update(of=AgentOperation)
+                )
+            )
+            if job.kind == "recipe.job.run.v1" and any(
+                child.state == "running" for child in children
+            ):
+                job.result = {
+                    **previous,
+                    "cancel_requested": True,
+                    "cancel_request_id": request_id,
+                    "cancel_actor": actor,
+                    "reason": cancellation_reason,
+                }
+                job.status_reason = cancellation_reason
+                job.updated_at = now
+                return self._view(job)
             for child in children:
                 if child.state not in _TERMINAL_JOB_STATES:
                     child.state = "cancelled"
                     child.updated_at = now
             job.state = "cancelled"
             job.status_reason = cancellation_reason
-            job.result = {**(dict(job.result) if isinstance(job.result, Mapping) else {}), "cancelled": True, "reason": cancellation_reason, "recovery": "retry creates a new operation"}
+            job.result = {
+                **(dict(job.result) if isinstance(job.result, Mapping) else {}),
+                "cancelled": True,
+                "cancel_requested": True,
+                "cancel_request_id": request_id,
+                "cancel_actor": actor,
+                "reason": cancellation_reason,
+                "recovery": "retry creates a new operation",
+            }
             job.updated_at = now
         return self.get(operation_id)
+
+    def _stop_logical_job_run(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView | None:
+        now = self._clock()
+        with self._sessions() as session:
+            existing_run = session.get(RecipeRun, run_id)
+            if (
+                existing_run is None
+                or existing_run.plan.get("execution_mode") != "one-shot-jobs"
+            ):
+                return None
+        with self._sessions.begin() as session:
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is None or run.plan.get("execution_mode") != "one-shot-jobs":
+                raise RecipeOperationConflict(
+                    "logical recipe run changed while stopping"
+                )
+            admitted = self._stop_plan_in_session(session, run_id, lock=True)
+            if not admitted.allowed or admitted.plan_digest != plan_digest:
+                raise RecipeOperationConflict("stop plan is stale or blocked")
+            installation = session.get(RecipeInstallation, run.installation_id)
+            revision = (
+                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+                if installation is not None
+                else None
+            )
+            if revision is None or revision.content_sha256 is None:
+                raise RecipeOperationConflict("recipe revision is unavailable")
+            nodes = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            for node in nodes:
+                node.state = "stopped"
+                node.updated_at = now
+            run.state = "stopped"
+            run.route_state = "withdrawn"
+            run.stopped_at = now
+            run.updated_at = now
+            self._release(session, "run", run_id, now)
+            payload = {
+                "schema_version": 1,
+                "owner_kind": "run",
+                "owner_id": run_id,
+                "plan_digest": plan_digest,
+                "execution_mode": "one-shot-jobs",
+            }
+            job = Job(
+                id=str(uuid.uuid4()),
+                request_id=request_id,
+                kind="recipe.stop",
+                state="succeeded",
+                actor=actor,
+                authority_revision=revision.content_sha256,
+                targets=sorted(node.node_id for node in nodes),
+                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+                payload=payload,
+                result={"stopped": True},
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(job)
+            session.flush()
+            return self._view(job)
 
     def _stop_plan_in_session(
         self, session: Session, run_id: str, *, lock: bool
@@ -1593,6 +1862,28 @@ class RecipeOperationService:
         run = session.scalar(run_statement)
         if run is None:
             raise RecipeOperationConflict("recipe run does not exist")
+        if run.plan.get("execution_mode") == "one-shot-jobs":
+            active_artifact_job = session.scalar(
+                select(ArtifactJob.id)
+                .where(
+                    ArtifactJob.run_id == run_id,
+                    ArtifactJob.state.in_(
+                        {
+                            "draft",
+                            "ready",
+                            "queued",
+                            "running",
+                            "cancelling",
+                            "waiting-for-operator",
+                        }
+                    ),
+                )
+                .limit(1)
+            )
+            if active_artifact_job is not None:
+                raise RecipeOperationConflict(
+                    "artifact job session has an active job; cancel or finish it before stopping"
+                )
 
         installation_statement = select(RecipeInstallation).where(
             RecipeInstallation.id == run.installation_id

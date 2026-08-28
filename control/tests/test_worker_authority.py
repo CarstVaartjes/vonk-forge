@@ -20,8 +20,8 @@ from vonk_control.route_runtime import (
 )
 from vonk_control.worker_authority import (
     HttpWorkerAuthority,
-    WorkerAuthorityService,
     WorkerAuthorityError,
+    WorkerAuthorityService,
     install_worker_authority_routes,
     worker_document_signature,
 )
@@ -43,13 +43,15 @@ def _client(*, eligible: bool = True) -> TestClient:
         current_revision=lambda: COMMIT,
         revision_eligible=lambda value: eligible and value == COMMIT,
         reconciliation_input=lambda reconciliation_id: (
-            COMMIT,
-            PLAN_DIGEST,
-            (ROUTE,),
-            "e" * 64,
-        )
-        if reconciliation_id == RECONCILIATION_ID
-        else (_ for _ in ()).throw(ValueError("unknown reconciliation")),
+            (
+                COMMIT,
+                PLAN_DIGEST,
+                (ROUTE,),
+                "e" * 64,
+            )
+            if reconciliation_id == RECONCILIATION_ID
+            else (_ for _ in ()).throw(ValueError("unknown reconciliation"))
+        ),
         current_fleet_evidence=lambda: "e" * 64,
         clock=lambda: 100,
     )
@@ -77,20 +79,21 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
         ],
     }
 
-    assert client.post(
-        "/internal/v1/authority/evaluate", json=body
-    ).status_code == 401
-    assert client.post(
-        "/internal/v1/authority/evaluate",
-        headers={
-            "x-vonk-worker-signature": worker_document_signature(
-                b"x" * 32,
-                body,
-                purpose="request",
-            )
-        },
-        json=body,
-    ).status_code == 401
+    assert client.post("/internal/v1/authority/evaluate", json=body).status_code == 401
+    assert (
+        client.post(
+            "/internal/v1/authority/evaluate",
+            headers={
+                "x-vonk-worker-signature": worker_document_signature(
+                    b"x" * 32,
+                    body,
+                    purpose="request",
+                )
+            },
+            json=body,
+        ).status_code
+        == 401
+    )
     response = client.post(
         "/internal/v1/authority/evaluate",
         headers={
@@ -107,7 +110,11 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     assert response.json()["revision"] == COMMIT
     assert response.json()["nonce"] == "0" * 32
     assert response.json()["expires_at"] == 115
-def test_internal_worker_authority_fails_closed_before_repository_policy_output() -> None:
+
+
+def test_internal_worker_authority_fails_closed_before_repository_policy_output() -> (
+    None
+):
     client = _client(eligible=False)
     body = {
         "schema_version": 1,
@@ -386,9 +393,7 @@ def test_repository_head_change_during_policy_evaluation_fails_closed() -> None:
             "e" * 64,
         ),
         current_fleet_evidence=lambda: "e" * 64,
-        deployments=lambda revision, _routes: (
-            policy_calls.append(revision) or ()
-        ),
+        deployments=lambda revision, _routes: policy_calls.append(revision) or (),
         clock=lambda: 100,
     )
 
@@ -466,9 +471,10 @@ def test_worker_reports_explicit_signed_fleet_evidence_authority_loss() -> None:
     )
     authority.prefetch(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ())
 
-    assert authority.authorization_reason(
-        RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ()
-    ) == "fleet acceptance evidence changed since planning"
+    assert (
+        authority.authorization_reason(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ())
+        == "fleet acceptance evidence changed since planning"
+    )
 
 
 @pytest.mark.parametrize("mismatch", ("reconciliation", "revision", "plan", "route"))
@@ -620,7 +626,9 @@ def test_failed_second_prefetch_cannot_reuse_first_positive_cache() -> None:
         authority.authorized(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, ())
 
 
-@pytest.mark.parametrize("fault", ("signature", "nonce", "expired", "redirect", "oversized"))
+@pytest.mark.parametrize(
+    "fault", ("signature", "nonce", "expired", "redirect", "oversized")
+)
 def test_worker_rejects_tampered_stale_redirected_or_oversized_authority(
     fault: str,
 ) -> None:
@@ -679,14 +687,15 @@ def test_worker_rejects_tampered_stale_redirected_or_oversized_authority(
 
 def test_worker_http_client_disables_environment_proxies() -> None:
     source = (
-        Path(__file__).resolve().parents[1]
-        / "src/vonk_control/worker_authority.py"
+        Path(__file__).resolve().parents[1] / "src/vonk_control/worker_authority.py"
     ).read_text()
 
     assert "ProxyHandler({})" in source
 
 
-def test_external_caddy_listener_denies_internal_worker_routes_before_fallback() -> None:
+def test_external_caddy_listener_denies_internal_worker_routes_before_fallback() -> (
+    None
+):
     root = Path(__file__).resolve().parents[2]
     caddy = (root / "deploy/compose/Caddyfile").read_text()
     tailnet = caddy.split(":8080 {", 1)[1].split(

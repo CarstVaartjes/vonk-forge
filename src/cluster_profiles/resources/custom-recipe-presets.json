@@ -235,7 +235,7 @@
           }
         ]
       },
-      "interfaces": [{"adapter": "image-job", "path": "/generate"}],
+      "interfaces": [{"adapter": "image-job", "path": "/outputs", "output": {"path": "/outputs", "max_total_bytes": 1073741824, "slots": [{"id": "image", "label": "Image", "description": "Generated image.", "media_types": ["image/png"], "extensions": [".png"], "min_files": 1, "max_files": 1, "max_file_bytes": 1073741824, "max_total_bytes": 1073741824}]}}],
       "validation": {"validators": [{"interface": "image-job", "checks": ["endpoint.healthy", "image.generate"]}]}
     }
   }

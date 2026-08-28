@@ -52,6 +52,12 @@ import type {
   LibraryMappingPreviewInput,
   LibraryStopApplyInput,
   LibraryUninstallApplyInput,
+  ArtifactJob,
+  ArtifactJobCapabilities,
+  ArtifactJobCreateInput,
+  ArtifactJobInputFile,
+  ArtifactJobList,
+  ArtifactTransferProgress,
 } from "./types";
 
 function csrfToken(): string | undefined {
@@ -467,6 +473,85 @@ export class ApiClient implements ControlApi {
       params: {path: {job_id: jobId}, query: {}},
       signal,
     }));
+  }
+
+  artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList> {
+    return this.request(`/api/v1/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
+  }
+
+  artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
+    return this.request("/api/v1/artifact-jobs/capabilities", {signal});
+  }
+
+  createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    });
+  }
+
+  async uploadArtifactJobInput(jobId: string, file: ArtifactJobInputFile, content: Blob, signal?: AbortSignal, onProgress?: (progress: ArtifactTransferProgress) => void): Promise<ArtifactJob> {
+    const path = `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/inputs/${encodeURIComponent(file.name)}`;
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      const abort = () => request.abort();
+      const finish = () => signal?.removeEventListener("abort", abort);
+      request.open("PUT", path);
+      request.responseType = "json";
+      request.withCredentials = true;
+      request.setRequestHeader("Accept", "application/json");
+      request.setRequestHeader("Content-Type", file.media_type);
+      request.setRequestHeader("X-Content-SHA256", file.sha256);
+      const csrf = csrfToken();
+      if (csrf) request.setRequestHeader("X-CSRF-Token", csrf);
+      request.upload.onprogress = event => onProgress?.({loaded: event.loaded, total: event.lengthComputable ? event.total : content.size});
+      request.onabort = () => { finish(); reject(new DOMException("Artifact upload cancelled", "AbortError")); };
+      request.onerror = () => { finish(); reject(new ApiError(0, "Artifact upload failed before the controller responded")); };
+      request.onload = () => {
+        finish();
+        try { this.requireAuthentication(new Response(null, {status: request.status})); }
+        catch (error) { reject(error); return; }
+        if (request.status < 200 || request.status >= 300) {
+          const response = request.response as {detail?: unknown} | null;
+          reject(new ApiError(request.status, response?.detail === undefined ? `Control API returned ${request.status}` : formatApiDetail(response.detail)));
+          return;
+        }
+        resolve(request.response as ArtifactJob);
+      };
+      if (signal?.aborted) { request.abort(); return; }
+      signal?.addEventListener("abort", abort, {once: true});
+      request.send(content);
+    });
+  }
+
+  finalizeArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {method: "POST", signal});
+  }
+
+  submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", signal});
+  }
+
+  artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}`, {signal});
+  }
+
+  cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({reason}),
+      signal,
+    });
+  }
+
+  artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
+  }
+
+  artifactJobResultUrl(jobId: string, sha256: string): string {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
+    return `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
   }
 
   async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {

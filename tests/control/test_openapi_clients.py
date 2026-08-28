@@ -56,15 +56,13 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
         "listAgentEnrollments": ("200", "EnrollmentListResponse"),
     }
     for operation_id, (status_code, component) in successes.items():
-        response_schema = operations[operation_id]["responses"][status_code][
-            "content"
-        ]["application/json"]["schema"]
-        assert response_schema == {
-            "$ref": f"#/components/schemas/{component}"
-        }
-        assert schema["components"]["schemas"][component][
-            "additionalProperties"
-        ] is False
+        response_schema = operations[operation_id]["responses"][status_code]["content"][
+            "application/json"
+        ]["schema"]
+        assert response_schema == {"$ref": f"#/components/schemas/{component}"}
+        assert (
+            schema["components"]["schemas"][component]["additionalProperties"] is False
+        )
     assert "approveAgentEnrollment" not in operations
     assert "rejectAgentEnrollment" not in operations
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
@@ -78,16 +76,14 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
         for status_code in statuses:
             assert operations[operation_id]["responses"][status_code]["content"][
                 "application/json"
-            ]["schema"] == {
-                "$ref": "#/components/schemas/BoundedErrorResponse"
-            }
+            ]["schema"] == {"$ref": "#/components/schemas/BoundedErrorResponse"}
     bounded_error = schema["components"]["schemas"]["BoundedErrorResponse"]
     assert bounded_error["additionalProperties"] is False
     assert bounded_error["properties"]["detail"]["maxLength"] == 256
 
-    progress = schema["components"]["schemas"]["JobOperationResponse"][
-        "properties"
-    ]["progress"]
+    progress = schema["components"]["schemas"]["JobOperationResponse"]["properties"][
+        "progress"
+    ]
     assert any(
         option.get("$ref") == "#/components/schemas/JobOperationProgress"
         for option in progress["anyOf"]
@@ -114,15 +110,44 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
         "slug",
         "content_sha256",
     }
-    assert components["RecipeRevisionSummary"]["properties"]["schema_version"][
-        "const"
-    ] == 1
+    assert (
+        components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
+        == 1
+    )
 
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
     assert "schema_version: 1;" in typescript
     python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
     assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
+
+
+def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operations = _operations(schema)
+
+    upload = operations["uploadArtifactJobInput"]
+    assert upload["x-vonk-streaming-transport"] is True
+    assert upload["requestBody"] == {
+        "required": True,
+        "content": {
+            "application/octet-stream": {
+                "schema": {"format": "binary", "type": "string"}
+            }
+        },
+    }
+
+    download = operations["downloadArtifactJobResult"]
+    assert download["x-vonk-streaming-transport"] is True
+    assert download["responses"]["200"]["content"] == {
+        "application/octet-stream": {"schema": {"format": "binary", "type": "string"}}
+    }
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert "uploadArtifactJobInput" not in typescript
+    assert "downloadArtifactJobResult" not in typescript
+    assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
+    assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
 
 def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
@@ -166,9 +191,7 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         },
     }
     operations = _operations(schema)
-    assert operations["streamFleetEvents"]["security"] == [
-        {"BrowserSession": []}
-    ]
+    assert operations["streamFleetEvents"]["security"] == [{"BrowserSession": []}]
     assert all(
         operation["security"] == [{"BearerAuth": []}]
         for operation_id, operation in operations.items()
@@ -209,12 +232,12 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         component = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
         assert component["additionalProperties"] is False
 
-    assert by_id["getFleetStatus"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert by_id["getNodeStatuses"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
+    assert by_id["getFleetStatus"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    assert by_id["getNodeStatuses"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FleetStatusResponse"}
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
@@ -235,15 +258,11 @@ def test_browser_auth_contract_declares_cookie_security_and_fixed_validation() -
     operations = _operations(schema)
 
     assert operations["loginBrowser"]["security"] == []
-    assert operations["getBrowserSession"]["security"] == [
-        {"BrowserSession": []}
-    ]
+    assert operations["getBrowserSession"]["security"] == [{"BrowserSession": []}]
     assert operations["logoutBrowser"]["security"] == [{"BrowserSession": []}]
     assert operations["loginBrowser"]["responses"]["422"]["content"][
         "application/json"
-    ]["schema"] == {
-        "$ref": "#/components/schemas/LoginRequestInvalid"
-    }
+    ]["schema"] == {"$ref": "#/components/schemas/LoginRequestInvalid"}
     assert schema["components"]["schemas"]["LoginRequestInvalid"] == {
         "additionalProperties": False,
         "properties": {
@@ -309,7 +328,9 @@ def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
     assert "alias: string;" in response_contract
 
 
-def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> None:
+def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> (
+    None
+):
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     detail = schema["LibraryRecipeDetail"]
     visual = schema["VisualRecipeDocument"]
@@ -321,12 +342,45 @@ def test_generated_library_contract_has_one_recipe_topology_and_strict_identitie
     assert "adapter" not in schema["VisualRuntime"]["properties"]
 
     typescript = TYPESCRIPT_CLIENT.read_text()
-    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[0]
+    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[
+        0
+    ]
     detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
     runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
     assert "topology_name" not in mapping_contract
     assert "topology:" in detail_contract and "profiles:" not in detail_contract
     assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+
+def test_generated_library_artifact_preserves_exact_huggingface_subset_identity() -> (
+    None
+):
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    include_paths = schema["VisualArtifact"]["properties"]["include_paths"]
+    assert include_paths["maxItems"] == 256
+    assert include_paths["items"]["maxLength"] == 512
+    assert "include_paths" in schema["VisualArtifact"]["required"]
+
+    from cluster_profiles.generated_control.models.visual_artifact import (
+        VisualArtifact,
+    )
+
+    subset = ["config.json", "weights/model-00001.safetensors"]
+    artifact = VisualArtifact(
+        download_bytes=1,
+        id="model",
+        include_paths=subset,
+        installed_bytes=1,
+        kind="huggingface.snapshot",
+        repository="publisher/model",
+        revision="a" * 40,
+        roles=["entrypoint"],
+    )
+    assert artifact.to_dict()["include_paths"] == subset
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    contract = typescript.split("VisualArtifact: {", 1)[1].split("};", 1)[0]
+    assert "include_paths: string[];" in contract
 
 
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:

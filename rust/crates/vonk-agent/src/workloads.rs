@@ -16,7 +16,10 @@ pub struct WorkloadSpec {
     pub model_dependencies: Vec<ModelDependencySpec>,
     pub runtime: RuntimeSpec,
     pub artifacts: Vec<ArtifactSpec>,
-    pub endpoint: EndpointSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<EndpointSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobSpec>,
     pub security: SecuritySpec,
     pub lifecycle: LifecycleSpec,
     pub topology: TopologySpec,
@@ -103,6 +106,8 @@ pub struct ArtifactSpec {
     pub kind: String,
     pub repository: String,
     pub revision: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include_paths: Vec<String>,
     pub download_bytes: u64,
     pub installed_bytes: u64,
     pub mount: ArtifactMountSpec,
@@ -123,6 +128,15 @@ pub struct EndpointSpec {
     pub port: u16,
     pub model_aliases: Vec<String>,
     pub health_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct JobSpec {
+    pub interface: String,
+    pub input: Option<serde_json::Value>,
+    pub output_path: String,
+    pub timeout_seconds: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -214,18 +228,31 @@ impl WorkloadSpec {
         {
             return Err(WorkloadError::Invalid("artifact mounts"));
         }
-        if self.endpoint.protocol != "openai"
-            || self.endpoint.port < 1024
-            || self.endpoint.model_aliases.is_empty()
-            || self.endpoint.health_path.len() > 256
-            || !self.endpoint.health_path.starts_with('/')
-            || self.endpoint.health_path.contains("..")
-        {
-            return Err(WorkloadError::Invalid("endpoint"));
+        match (&self.endpoint, &self.job) {
+            (Some(endpoint), None)
+                if endpoint.protocol == "openai"
+                    && endpoint.port >= 1024
+                    && !endpoint.model_aliases.is_empty()
+                    && endpoint.health_path.len() <= 256
+                    && endpoint.health_path.starts_with('/')
+                    && !endpoint.health_path.contains("..") => {}
+            (None, Some(job))
+                if matches!(
+                    job.interface.as_str(),
+                    "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job"
+                ) && job.input.as_ref().is_none_or(|input| {
+                    input.is_object()
+                        && input.get("path").and_then(serde_json::Value::as_str) == Some("/inputs")
+                }) && job.output_path == "/outputs"
+                    && (1..=3600).contains(&job.timeout_seconds)
+                    && self.lifecycle.pre_start.is_empty()
+                    && self.lifecycle.post_stop.is_empty() => {}
+            _ => return Err(WorkloadError::Invalid("workload interface")),
         }
         if self.security.privileged
             || !self.security.capabilities.is_empty()
-            || !canonical_runtime_mounts(&self.security.mounts)
+            || !canonical_runtime_mounts(&self.security.mounts, self.job.is_some())
+            || self.job.is_some() && self.security.host_network
             || self
                 .security
                 .devices
@@ -319,6 +346,12 @@ impl ArtifactSpec {
             || matches!(self.id.as_str(), "." | "..")
             || self.roles.is_empty()
             || self.roles.iter().any(|role| !valid_role(role))
+            || self.include_paths.len() > 256
+            || self.include_paths.iter().enumerate().any(|(index, path)| {
+                !valid_snapshot_selector(path)
+                    || self.include_paths[..index].iter().any(|seen| seen >= path)
+            })
+            || self.kind != "huggingface.snapshot" && !self.include_paths.is_empty()
             || !self.mount.read_only
             || (self.mount.target != "/models"
                 && self.mount.target != format!("/models/{}", self.id))
@@ -340,6 +373,21 @@ impl ArtifactSpec {
         }
         Ok(())
     }
+}
+
+fn valid_snapshot_selector(value: &str) -> bool {
+    let path = value.strip_suffix('/').unwrap_or(value);
+    !path.is_empty()
+        && path.len() <= 512
+        && !path.contains(['\\', '\0', '*', '?', '[', ']'])
+        && path.split('/').count() <= 32
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(part, "." | "..")
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 impl Placement {
@@ -445,11 +493,15 @@ fn numeric_non_root_user(value: &str) -> bool {
         && parts.next().is_none()
 }
 
-fn canonical_runtime_mounts(mounts: &[MountSpec]) -> bool {
-    mounts.len() == 2
+fn canonical_runtime_mounts(mounts: &[MountSpec], job: bool) -> bool {
+    mounts.len() == if job { 3 } else { 2 }
         && mounts
             .iter()
             .any(|mount| mount.source == "model" && mount.target == "/models" && mount.read_only)
+        && (!job
+            || mounts.iter().any(|mount| {
+                mount.source == "inputs" && mount.target == "/inputs" && mount.read_only
+            }))
         && mounts.iter().any(|mount| {
             mount.source == "outputs" && mount.target == "/outputs" && !mount.read_only
         })

@@ -315,7 +315,11 @@ impl CommandRunner for RecordingRunner {
         } else {
             Vec::new()
         };
-        Ok(CommandOutput { success, stdout })
+        Ok(CommandOutput {
+            success,
+            stdout,
+            exit_code: Some(if success { 0 } else { 1 }),
+        })
     }
 }
 

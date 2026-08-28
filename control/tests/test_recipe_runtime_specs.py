@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE_RECIPE = ROOT / "control/tests/fixtures/global/recipe-v1-minimal.json"
 VLLM_HARNESS = ROOT / "config/execution-harnesses/vllm.json"
 SGLANG_HARNESS = ROOT / "config/execution-harnesses/sglang.json"
+DIFFUSERS_HARNESS = ROOT / "config/execution-harnesses/diffusers.json"
 
 
 def _exact_builtin_inputs():
@@ -87,6 +88,30 @@ def _exact_builtin_inputs():
         "patch_bundle": None,
     }
     return document, resolved_entities
+
+
+def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    document["artifacts"][0]["include_paths"] = [
+        "text_encoder/model.safetensors",
+        "transformer/",
+    ]
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters=parameters,
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["artifacts"][0]["include_paths"] == [
+        "text_encoder/model.safetensors",
+        "transformer/",
+    ]
 
 
 def _distributed_sglang_runtime_inputs():
@@ -211,6 +236,85 @@ def _distributed_sglang_runtime_inputs():
             ),
             "patch_bundle": SimpleNamespace(
                 document=patch, content_sha256=patch_digest
+            ),
+        }
+    )
+    return document, resolved_entities
+
+
+def _exact_job_inputs():
+    document, resolved_entities = _exact_builtin_inputs()
+    harness = json.loads(DIFFUSERS_HARNESS.read_text(encoding="utf-8"))
+    harness_digest = catalog_content_sha256(harness)
+    distribution = copy.deepcopy(resolved_entities["runtime_distribution"].document)
+    distribution["identity"]["slug"] = "diffusers-arm64"
+    distribution["implements_harness"].update(
+        {"slug": "diffusers", "content_sha256": harness_digest}
+    )
+    distribution_digest = catalog_content_sha256(distribution)
+    document["execution"]["harness"].update(
+        {"slug": "diffusers", "content_sha256": harness_digest}
+    )
+    document["runtime"]["distribution"].update(
+        {"slug": "diffusers-arm64", "content_sha256": distribution_digest}
+    )
+    document["runtime"]["entrypoint"] = ["/opt/vonk/bin/diffusers-job"]
+    document["runtime"]["arguments"] = [
+        {"name": "pipeline", "value": "text-to-image"},
+        {"name": "output-mime", "value": "image/png"},
+    ]
+    document["runtime"]["security"]["mounts"] = [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "inputs", "target": "/inputs", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
+    document["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3600,
+    }
+    document["runtime"]["lifecycle"]["failure"] = {
+        "rank_loss": "not-applicable",
+        "recovery": "restart-entrypoint",
+    }
+    document["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["text/plain"],
+                "max_bytes": 16_384,
+            },
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 1_048_576,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Image",
+                        "description": "Generated image",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 1_048_576,
+                        "max_total_bytes": 1_048_576,
+                    }
+                ],
+            },
+        }
+    ]
+    document["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["artifact.mime.image-png"]}
+    ]
+    document["parameters"] = []
+    resolved_entities.update(
+        {
+            "harness": SimpleNamespace(document=harness, content_sha256=harness_digest),
+            "runtime_distribution": SimpleNamespace(
+                document=distribution, content_sha256=distribution_digest
             ),
         }
     )
@@ -351,6 +455,38 @@ def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
         spec["identity"]["patch_bundle_sha256"]
         == resolved_entities["patch_bundle"].content_sha256
     )
+
+
+def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
+    document, resolved_entities = _exact_job_inputs()
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters={},
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert "endpoint" not in spec
+    assert spec["job"] == {
+        "interface": "image-job",
+        "input": {
+            "path": "/inputs",
+            "required": True,
+            "media_types": ["text/plain"],
+            "max_bytes": 16_384,
+        },
+        "output_path": "/outputs",
+        "timeout_seconds": 3600,
+    }
+    assert spec["security"]["mounts"] == [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "inputs", "target": "/inputs", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
 
 
 def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,6 +25,9 @@ class _Client:
         self.calls: list[
             tuple[str, str, dict[str, object] | None, dict[str, object] | None]
         ] = []
+        self.uploads: list[tuple[str, Path, str, str, int]] = []
+        self.downloads: list[tuple[str, Path, str, str, int, bool]] = []
+        self.extra_headers: list[dict[str, str] | None] = []
 
     def request(
         self,
@@ -30,14 +35,57 @@ class _Client:
         path: str,
         payload: dict[str, object] | None = None,
         *,
+        extra_headers: dict[str, str] | None = None,
         query: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append((method, path, payload, query))
+        self.extra_headers.append(extra_headers)
         response = self.responses.get((method, path), {"ok": True})
         if isinstance(response, list):
             assert response, f"No fake responses remain for {method} {path}"
             return response.pop(0)
         return response
+
+    def upload_file(
+        self,
+        path: str,
+        source: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+    ) -> dict[str, object]:
+        self.uploads.append((path, source, media_type, expected_sha256, expected_size))
+        response = self.responses.get(("UPLOAD", path), {"state": "draft"})
+        assert not isinstance(response, list)
+        return response
+
+    def download_file(
+        self,
+        path: str,
+        destination: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        overwrite: bool,
+    ) -> dict[str, object]:
+        self.downloads.append(
+            (
+                path,
+                destination,
+                media_type,
+                expected_sha256,
+                expected_size,
+                overwrite,
+            )
+        )
+        return {
+            "destination": str(destination),
+            "media_type": media_type,
+            "sha256": expected_sha256,
+            "size_bytes": expected_size,
+        }
 
 
 def _invoke(client: _Client, *argv: str) -> tuple[int, dict[str, Any]]:
@@ -47,6 +95,28 @@ def _invoke(client: _Client, *argv: str) -> tuple[int, dict[str, Any]]:
             argv, control_client=client, request_id_factory=lambda: "request-1"
         )
     return result, json.loads(stdout.getvalue())
+
+
+def _artifact_capabilities(*, remaining: int = 16 * 1024**3) -> dict[str, object]:
+    maximum = 16 * 1024**3
+    return {
+        "schema_version": 1,
+        "transport": {
+            "max_input_files": 32,
+            "max_input_file_bytes": 512 * 1024**2,
+            "max_input_total_bytes": 1024**3,
+            "max_output_files": 32,
+            "max_output_file_bytes": 1024**3,
+            "max_output_total_bytes": 2 * 1024**3,
+            "max_timeout_seconds": 3_600,
+            "reserved_input_names": ["manifest.json"],
+        },
+        "storage": {
+            "max_stored_bytes": maximum,
+            "used_bytes": maximum - remaining,
+            "remaining_bytes": remaining,
+        },
+    }
 
 
 def test_public_recipe_list_exposes_and_applies_the_web_catalog_filters() -> None:
@@ -946,6 +1016,68 @@ def test_enrollment_grants_distinguish_new_and_replacement_certificates() -> Non
     }
 
 
+def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
+    node_id = "spk_" + "a" * 32
+    client = _Client(
+        {("POST", "/api/v1/agents/upgrades/preview"): {"plan_digest": "b" * 64}}
+    )
+
+    result, preview = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "preview",
+        "--node-id",
+        node_id,
+    )
+    assert result == 0
+    assert preview["plan_digest"] == "b" * 64
+    assert client.calls[-1][:3] == (
+        "POST",
+        "/api/v1/agents/upgrades/preview",
+        {"strategy": "one-at-a-time", "node_ids": [node_id]},
+    )
+
+    result, plan = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "apply",
+        "--node-id",
+        node_id,
+        "--plan-digest",
+        "b" * 64,
+    )
+    assert result == 0
+    assert plan["mode"] == "plan"
+    assert client.calls[-1][1] == "/api/v1/agents/upgrades/preview"
+
+    result, _applied = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "apply",
+        "--node-id",
+        node_id,
+        "--plan-digest",
+        "b" * 64,
+        "--apply",
+    )
+    assert result == 0
+    assert client.calls[-1][:3] == (
+        "POST",
+        "/api/v1/agents/upgrades",
+        {
+            "strategy": "one-at-a-time",
+            "node_ids": [node_id],
+            "plan_digest": "b" * 64,
+        },
+    )
+
+
 @pytest.mark.parametrize(
     "argv",
     [
@@ -954,10 +1086,352 @@ def test_enrollment_grants_distinguish_new_and_replacement_certificates() -> Non
         ("fleet", "enroll", "--ttl-seconds", "901"),
         ("fleet", "re-enroll", "spk_NOT_HEX"),
         ("fleet", "profile", "node", "--display-name", "   "),
+        ("fleet", "upgrade", "preview", "--node-id", "spk_NOT_HEX"),
     ],
 )
 def test_controller_rejects_out_of_contract_values(argv: tuple[str, ...]) -> None:
     result, payload = _invoke(_Client(), "--json", *argv)
 
+    assert result == 2
+    assert payload["error_type"] == "control_api"
+
+
+def test_artifact_job_create_declares_hashed_bounded_local_inputs(
+    tmp_path: Path,
+) -> None:
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_bytes(b"a small prompt\n")
+
+    result, plan = _invoke(
+        _Client(),
+        "--json",
+        "library",
+        "job",
+        "create",
+        "run/id",
+        "--interface",
+        "image-job",
+        "--input",
+        "prompt",
+        "prompt.txt",
+        "text/plain",
+        str(prompt),
+        "--output-media-type",
+        "image/png",
+    )
+
+    assert result == 0
+    assert plan["mode"] == "plan"
+    assert plan["steps"] == [
+        {
+            "method": "POST",
+            "path": "/api/v1/recipes/runs/run%2Fid/artifact-jobs",
+            "request_key": "request-1",
+            "body": {
+                "interface": "image-job",
+                "parameters": {},
+                "inputs": [
+                    {
+                        "slot": "prompt",
+                        "name": "prompt.txt",
+                        "media_type": "text/plain",
+                        "size_bytes": len(prompt.read_bytes()),
+                        "sha256": hashlib.sha256(prompt.read_bytes()).hexdigest(),
+                    }
+                ],
+                "output_limits": {
+                    "max_files": 1,
+                    "max_file_bytes": 1024**3,
+                    "max_total_bytes": 1024**3,
+                    "allowed_media_types": ["image/png"],
+                },
+                "timeout_seconds": 3_600,
+            },
+        }
+    ]
+
+
+def test_artifact_job_capabilities_surface_storage_headroom() -> None:
+    capabilities = _artifact_capabilities(remaining=123_456)
+    client = _Client({("GET", "/api/v1/artifact-jobs/capabilities"): capabilities})
+
+    result, payload = _invoke(client, "--json", "library", "job", "capabilities")
+
+    assert result == 0
+    assert payload == capabilities
+    assert client.calls == [("GET", "/api/v1/artifact-jobs/capabilities", None, None)]
+
+
+def test_artifact_job_list_finds_resumable_jobs_for_a_run() -> None:
+    client = _Client()
+
+    result, payload = _invoke(client, "--json", "library", "job", "list", "run/id")
+
+    assert result == 0
+    assert payload == {"ok": True}
+    assert client.calls == [
+        ("GET", "/api/v1/recipes/runs/run%2Fid/artifact-jobs", None, None)
+    ]
+
+
+def test_artifact_job_activation_uses_the_logical_job_run_route() -> None:
+    client = _Client(
+        {("POST", "/api/v1/recipes/run-plans/preview"): {"plan_digest": "a" * 64}}
+    )
+
+    result, preview = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "activate",
+        "preview",
+        "--installation-id",
+        "installation-1",
+        "--alias",
+        "image-worker",
+    )
+    assert result == 0
+    assert preview["plan_digest"] == "a" * 64
+    assert client.calls[-1][:3] == (
+        "POST",
+        "/api/v1/recipes/run-plans/preview",
+        {"installation_id": "installation-1", "alias": "image-worker"},
+    )
+
+    result, plan = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "activate",
+        "apply",
+        "--installation-id",
+        "installation-1",
+        "--alias",
+        "image-worker",
+        "--plan-digest",
+        "a" * 64,
+    )
+    assert result == 0
+    assert plan["mode"] == "plan"
+    assert client.calls[-1][1] == "/api/v1/recipes/run-plans/preview"
+
+    result, _response = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "activate",
+        "apply",
+        "--installation-id",
+        "installation-1",
+        "--alias",
+        "image-worker",
+        "--plan-digest",
+        "a" * 64,
+        "--apply",
+    )
+    assert result == 0
+    assert client.calls[-1][:3] == (
+        "POST",
+        "/api/v1/recipes/job-runs",
+        {
+            "installation_id": "installation-1",
+            "alias": "image-worker",
+            "plan_digest": "a" * 64,
+            "request_key": "request-1",
+        },
+    )
+
+
+def test_artifact_job_launch_runs_the_resumable_steps_in_order(tmp_path: Path) -> None:
+    source = tmp_path / "image.png"
+    source.write_bytes(b"not really a png")
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    create_path = "/api/v1/recipes/runs/run-1/artifact-jobs"
+    client = _Client(
+        {
+            ("GET", "/api/v1/artifact-jobs/capabilities"): _artifact_capabilities(),
+            ("POST", create_path): {"id": job_id, "state": "draft"},
+            ("POST", f"/api/v1/artifact-jobs/{job_id}/finalize"): {
+                "id": job_id,
+                "state": "ready",
+            },
+            ("POST", f"/api/v1/artifact-jobs/{job_id}/submit"): {
+                "id": job_id,
+                "state": "queued",
+            },
+        }
+    )
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "launch",
+        "run-1",
+        "--interface",
+        "image-job",
+        "--input",
+        "source",
+        "image.png",
+        "image/png",
+        str(source),
+        "--output-media-type",
+        "image/png",
+        "--apply",
+    )
+
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert result == 0
+    assert payload["job"]["state"] == "queued"
+    assert payload["steps_completed"] == 4
+    assert payload["storage_preflight"]["fits_without_server_reuse"] is True
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/v1/artifact-jobs/capabilities"),
+        ("POST", create_path),
+        ("POST", f"/api/v1/artifact-jobs/{job_id}/finalize"),
+        ("POST", f"/api/v1/artifact-jobs/{job_id}/submit"),
+    ]
+    assert client.uploads == [
+        (
+            f"/api/v1/artifact-jobs/{job_id}/inputs/image.png",
+            source,
+            "image/png",
+            digest,
+            len(source.read_bytes()),
+        )
+    ]
+    assert client.extra_headers[1] == {"X-Request-ID": "request-1"}
+
+
+def test_artifact_job_status_result_cancel_and_download_routes(tmp_path: Path) -> None:
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    digest = hashlib.sha256(b"result").hexdigest()
+    base = f"/api/v1/artifact-jobs/{job_id}"
+    metadata = {
+        "id": job_id,
+        "state": "succeeded",
+        "output_files": [
+            {
+                "name": "result.png",
+                "media_type": "image/png",
+                "size_bytes": 6,
+                "sha256": digest,
+            }
+        ],
+    }
+    client = _Client(
+        {
+            ("GET", base): metadata,
+            ("GET", f"{base}/result"): [metadata, metadata, metadata],
+        }
+    )
+
+    assert _invoke(client, "--json", "library", "job", "status", job_id)[0] == 0
+    assert _invoke(client, "--json", "library", "job", "result", job_id)[0] == 0
+    result, cancel_plan = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "cancel",
+        job_id,
+        "--reason",
+        "  operator requested  ",
+    )
+    assert result == 0
+    assert cancel_plan["body"] == {"reason": "operator requested"}
+
+    result, download_plan = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "download",
+        job_id,
+        "--output-directory",
+        str(tmp_path),
+    )
+    assert result == 0
+    assert download_plan["mode"] == "plan"
+    assert client.downloads == []
+
+    result, downloaded = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "download",
+        job_id,
+        "--output-directory",
+        str(tmp_path),
+        "--sha256",
+        digest,
+        "--apply",
+    )
+    assert result == 0
+    assert downloaded["downloads"][0]["sha256"] == digest
+    assert client.downloads == [
+        (
+            f"{base}/results/{digest}",
+            tmp_path / "result.png",
+            "image/png",
+            digest,
+            6,
+            False,
+        )
+    ]
+
+
+def test_artifact_job_rejects_symlink_input_and_unsafe_output_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.write_text("prompt")
+    symlink = tmp_path / "link"
+    symlink.symlink_to(source)
+    result, payload = _invoke(
+        _Client(),
+        "--json",
+        "library",
+        "job",
+        "upload",
+        "job-1",
+        "--input",
+        "prompt",
+        "prompt.txt",
+        "text/plain",
+        str(symlink),
+    )
+    assert result == 2
+    assert payload["error_type"] == "control_api"
+
+    client = _Client(
+        {
+            ("GET", "/api/v1/artifact-jobs/job-1/result"): {
+                "output_files": [
+                    {
+                        "name": "../escape.png",
+                        "media_type": "image/png",
+                        "size_bytes": 1,
+                        "sha256": "a" * 64,
+                    }
+                ]
+            }
+        }
+    )
+    result, payload = _invoke(
+        client,
+        "--json",
+        "library",
+        "job",
+        "download",
+        "job-1",
+        "--output-directory",
+        str(tmp_path),
+    )
     assert result == 2
     assert payload["error_type"] == "control_api"

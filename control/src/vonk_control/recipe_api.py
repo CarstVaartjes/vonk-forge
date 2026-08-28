@@ -37,6 +37,7 @@ RECIPE_OPERATION_IDS = {
     ("post", "/api/v1/recipes/installations"): "installRecipe",
     ("post", "/api/v1/recipes/run-plans/preview"): "previewRecipeRun",
     ("post", "/api/v1/recipes/runs"): "startRecipeRun",
+    ("post", "/api/v1/recipes/job-runs"): "activateRecipeJobRun",
     ("post", "/api/v1/recipes/stop-plans/preview"): "previewRecipeStop",
     (
         "post",
@@ -643,6 +644,37 @@ def install_recipe_operation_routes(
             return asdict(recipes().preview_uninstall(body.installation_id))
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+
+    @app.post(
+        "/api/v1/recipes/job-runs",
+        response_model=OperationResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="activateRecipeJobRun",
+    )
+    def activate_job_run(
+        body: RunRequest, request: Request, actor: Actor = authenticated
+    ):
+        administrator(actor)
+        try:
+            plan = recipes().preview_run(body.installation_id, body.alias)
+            value = recipes().activate_job_run(
+                plan,
+                plan_digest=body.plan_digest,
+                actor=actor.subject,
+                request_id=body.request_key,
+            )
+        except RecipeOperationConflict as error:
+            return conflict(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "recipe.job.activate",
+                None,
+                (value.owner_id, value.plan_digest, *value.nodes),
+            )
+        )
+        return operation(value)
 
     @app.post(
         "/api/v1/recipes/runs",

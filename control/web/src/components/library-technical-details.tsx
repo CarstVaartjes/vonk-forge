@@ -50,7 +50,7 @@ export function TechnicalDetails({items, label = "Technical details", compact = 
   }
 
   return <details className={`technical-details${compact ? " technical-details-compact" : ""}`} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{label}</summary>
+    <summary><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7.5h16M4 12h16M4 16.5h10" strokeLinecap="round"/></svg>{label}<svg className="technical-details-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
     {open && <><dl>
       {visibleItems.map(item => <div key={`${item.label}:${item.value}`}>
         <dt>{item.label}</dt>

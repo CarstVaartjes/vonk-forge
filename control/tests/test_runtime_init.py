@@ -153,31 +153,41 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
             "routes",
             "supervisor",
             "workload_publication",
+            "state",
         )
     }
-    ownership: dict[Path, tuple[int, int]] = {}
+    ownership: list[tuple[int, int]] = []
     monkeypatch.setattr(
         os,
         "fchown",
-        lambda descriptor, uid, gid: ownership.__setitem__(
-            Path(os.readlink(f"/proc/self/fd/{descriptor}")), (uid, gid)
-        ),
+        lambda _descriptor, uid, gid: ownership.append((uid, gid)),
     )
 
     prepare_shared_volumes(SharedRuntimePaths(**roots))
 
-    assert ownership == {
-        roots["routes"]: (10001, 10001),
-        roots["routes"] / "generations": (10001, 10001),
-        roots["supervisor"]: (10002, 10001),
-        roots["workload_publication"]: (10001, 10001),
-        roots["workload_publication"] / "metadata": (10003, 10001),
-        roots["workload_publication"] / "targets": (10003, 10001),
-    }
+    assert ownership == [
+        (10001, 10001),
+        (10001, 10001),
+        (10001, 10001),
+        (10002, 10001),
+        (10001, 10001),
+        (10003, 10001),
+        (10003, 10001),
+    ]
+    expected_paths = (
+        roots["state"],
+        roots["routes"],
+        roots["routes"] / "generations",
+        roots["supervisor"],
+        roots["workload_publication"],
+        roots["workload_publication"] / "metadata",
+        roots["workload_publication"] / "targets",
+    )
     assert {
         path.relative_to(tmp_path).as_posix(): path.stat().st_mode & 0o777
-        for path in ownership
+        for path in expected_paths
     } == {
+        "state": 0o750,
         "routes": 0o750,
         "routes/generations": 0o750,
         "supervisor": 0o750,
@@ -196,6 +206,7 @@ def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -
         routes=routes,
         supervisor=tmp_path / "supervisor",
         workload_publication=tmp_path / "workload-publication",
+        state=tmp_path / "state",
     )
 
     with pytest.raises(RuntimeSecretError, match="shared runtime directory is unsafe"):

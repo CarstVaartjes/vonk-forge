@@ -23,6 +23,7 @@ class SharedRuntimePaths:
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
     workload_publication: Path = Path("/workload-tuf")
+    state: Path = Path("/state")
 
 
 def read_runtime_secret(
@@ -313,6 +314,7 @@ def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
 def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     """Apply the existing per-consumer ownership contract to shared volumes."""
     paths = SharedRuntimePaths() if paths is None else paths
+    _directory(paths.state, 10001, 10001, 0o750)
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)

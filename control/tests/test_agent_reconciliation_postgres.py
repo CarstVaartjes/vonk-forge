@@ -2147,8 +2147,11 @@ def test_postgres_automatic_tick_does_not_preempt_running_owner_with_later_plan(
 
     assert service.tick() is False
     assert service.tick(later_id) is False
-    progress = operations.heartbeat(claim, {"phase": "still-authoritative"}, 60)
-    assert progress.progress == {"phase": "still-authoritative"}
+    directive = operations.heartbeat(claim, {"phase": "still-authoritative"}, 60)
+    assert directive.operation_id == claim.operation_id
+    assert directive.fence == claim.fence
+    assert directive.deadline > claim.deadline
+    assert directive.cancel_requested is False
 
     with sessions() as session:
         owner = session.get(RoutePublicationOwner, 1)
@@ -2163,6 +2166,7 @@ def test_postgres_automatic_tick_does_not_preempt_running_owner_with_later_plan(
         assert old is not None and old.current_phase == "dispatching"
         assert later is not None and later.current_phase == "planned"
         assert attempt is not None and attempt.state == "running"
+        assert attempt.progress == {"phase": "still-authoritative"}
 
 
 def test_postgres_automatic_ticks_do_not_starve_older_unsafe_expiry(

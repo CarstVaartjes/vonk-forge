@@ -217,6 +217,110 @@ it("requests bounded node telemetry history through the generated operation", as
   });
 });
 
+it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
+  const requests: Request[] = [];
+  let uploadBody: BodyInit | null | undefined;
+  document.cookie = "vonk_csrf=artifact-csrf; path=/";
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request);
+    return new Response(JSON.stringify({jobs: []}), {headers: {"Content-Type": "application/json"}, status: 200});
+  });
+  vi.stubGlobal("XMLHttpRequest", class {
+    readonly upload: {onprogress: ((event: ProgressEvent) => void) | null} = {onprogress: null};
+    onabort: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onload: (() => void) | null = null;
+    response: unknown = {id: "job-1", state: "draft"};
+    responseType = "";
+    status = 200;
+    withCredentials = false;
+    #headers = new Headers();
+    #method = "";
+    #url = "";
+    open(method: string, url: string) { this.#method = method; this.#url = url; }
+    setRequestHeader(name: string, value: string) { this.#headers.set(name, value); }
+    send(body: BodyInit | null) {
+      uploadBody = body;
+      requests.push(new Request(new URL(this.#url, location.origin), {method: this.#method, headers: this.#headers}));
+      const size = body instanceof Blob ? body.size : 0;
+      this.upload.onprogress?.(new ProgressEvent("progress", {lengthComputable: true, loaded: size, total: size}));
+      queueMicrotask(() => this.onload?.());
+    }
+    abort() { this.onabort?.(); }
+  });
+  const api = new ApiClient();
+  const file = {slot: "prompt", name: "prompt.txt", media_type: "text/plain", size_bytes: 5, sha256: "a".repeat(64)};
+  const create = {
+    interface: "image-job" as const,
+    parameters: {steps: 24},
+    inputs: [file],
+    output_limits: {max_files: 8, max_file_bytes: 1024, max_total_bytes: 2048, allowed_media_types: ["image/png"]},
+    timeout_seconds: 3600,
+  };
+
+  await api.artifactJobCapabilities();
+  await api.artifactJobsForRun("run-1");
+  await api.createArtifactJob("run-1", create);
+  const blob = new Blob(["hello"], {type: "text/plain"});
+  const progress = vi.fn();
+  await api.uploadArtifactJobInput("job-1", file, blob, undefined, progress);
+  await api.finalizeArtifactJob("job-1");
+  await api.submitArtifactJob("job-1");
+  await api.artifactJob("job-1");
+  await api.cancelArtifactJob("job-1", "Operator cancelled");
+  await api.artifactJobResult("job-1");
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["GET", "/api/v1/artifact-jobs/capabilities"],
+    ["GET", "/api/v1/recipes/runs/run-1/artifact-jobs"],
+    ["POST", "/api/v1/recipes/runs/run-1/artifact-jobs"],
+    ["PUT", "/api/v1/artifact-jobs/job-1/inputs/prompt.txt"],
+    ["POST", "/api/v1/artifact-jobs/job-1/finalize"],
+    ["POST", "/api/v1/artifact-jobs/job-1/submit"],
+    ["GET", "/api/v1/artifact-jobs/job-1"],
+    ["POST", "/api/v1/artifact-jobs/job-1/cancel"],
+    ["GET", "/api/v1/artifact-jobs/job-1/result"],
+  ]);
+  expect(requests[3].headers.get("Content-Type")).toBe("text/plain");
+  expect(requests[3].headers.get("X-Content-SHA256")).toBe(file.sha256);
+  expect(requests[3].headers.get("X-CSRF-Token")).toBe("artifact-csrf");
+  expect(uploadBody).toBe(blob);
+  expect(progress).toHaveBeenCalledWith({loaded: 5, total: 5});
+  expect(api.artifactJobResultUrl("job-1", "b".repeat(64))).toBe(`/api/v1/artifact-jobs/job-1/results/${"b".repeat(64)}`);
+  expect(() => api.artifactJobResultUrl("job-1", "../unsafe")).toThrow("Unsafe artifact result digest");
+});
+
+it("aborts an in-flight artifact upload without reading the Blob into JavaScript memory", async () => {
+  let aborted = false;
+  let sentBody: BodyInit | null = null;
+  vi.stubGlobal("XMLHttpRequest", class {
+    readonly upload = {onprogress: null};
+    onabort: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onload: (() => void) | null = null;
+    response: unknown = null;
+    responseType = "";
+    status = 0;
+    withCredentials = false;
+    open() {}
+    setRequestHeader() {}
+    send(body: BodyInit | null) { sentBody = body; }
+    abort() { aborted = true; this.onabort?.(); }
+  });
+  const controller = new AbortController();
+  const blob = new Blob([new Uint8Array(16 * 1024 * 1024)], {type: "audio/wav"});
+  const pending = new ApiClient().uploadArtifactJobInput("job-1", {
+    slot: "audio", name: "foley.wav", media_type: "audio/wav", size_bytes: blob.size, sha256: "a".repeat(64),
+  }, blob, controller.signal);
+
+  controller.abort();
+
+  await expect(pending).rejects.toMatchObject({name: "AbortError"});
+  expect(aborted).toBe(true);
+  expect(sentBody).toBe(blob);
+});
+
 it("uses exact browser-auth documents and the CSRF cookie for server logout", async () => {
   // Break caught: browser login drifts from the closed API document, or logout
   // omits the double-submit CSRF value while claiming to revoke the session.

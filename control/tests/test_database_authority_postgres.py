@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.database_authority import (
@@ -151,6 +153,9 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
         connection.exec_driver_sql("CREATE SCHEMA public")
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+    expected_migration_head = ScriptDirectory.from_config(
+        Config(str(config_path))
+    ).get_current_head()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         revisions = list(
@@ -169,7 +174,7 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
             connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
             ).scalar_one()
-            == "0003_agent_reenrollment_grants"
+            == expected_migration_head
         )
         assert (
             connection.exec_driver_sql(

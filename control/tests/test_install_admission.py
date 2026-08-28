@@ -30,7 +30,14 @@ from .test_catalog_service import _seed_recipe_dependencies
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 
 
-def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
+def setup(
+    tmp_path,
+    *,
+    free=200,
+    read_only=False,
+    observed_age=0,
+    denied_jurisdictions=(),
+):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
     Base.metadata.create_all(engine)
@@ -79,7 +86,11 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
     catalog = CatalogService(
         sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
     )
-    _seed_recipe_dependencies(catalog, document)
+    _seed_recipe_dependencies(
+        catalog,
+        document,
+        denied_jurisdictions=tuple(denied_jurisdictions),
+    )
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     resolved = catalog.resolve(draft.recipe_id, 1, "admin")
     mappings = ClusterMappingService(sessions)
@@ -136,6 +147,43 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     blocked = service.plan_install(mapping, build, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
+
+
+def test_territorial_license_install_admission_is_fail_closed(tmp_path) -> None:
+    sessions, now, _node, mapping, build, sizes = setup(
+        tmp_path,
+        denied_jurisdictions=("EU", "GB", "KR"),
+    )
+
+    unconfigured = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping, build, now=now)
+    assert unconfigured.allowed is False
+    assert unconfigured.nodes[0].blockers[0].code == (
+        "install.license_jurisdiction_required"
+    )
+    assert "VONK_OPERATOR_JURISDICTION" in unconfigured.nodes[0].blockers[0].detail
+
+    eu_member = InstallAdmissionService(
+        sessions,
+        sizes=sizes,
+        inventory_max_age=300,
+        disk_floor_bytes=10,
+        operator_jurisdiction="NL",
+    ).plan_install(mapping, build, now=now)
+    assert eu_member.allowed is False
+    assert eu_member.nodes[0].blockers[0].code == ("install.license_territory_denied")
+    assert "NL" in eu_member.nodes[0].blockers[0].detail
+
+    permitted = InstallAdmissionService(
+        sessions,
+        sizes=sizes,
+        inventory_max_age=300,
+        disk_floor_bytes=10,
+        operator_jurisdiction="US",
+    ).plan_install(mapping, build, now=now)
+    assert permitted.allowed is True
+    assert permitted.nodes[0].warnings[0].code == ("install.license_territory_checked")
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
