@@ -70,6 +70,14 @@ def _validated_limit(value: int, *, label: str) -> int:
     return value
 
 
+def _clamp_rollup_mean(minimum: float, mean: float, maximum: float) -> float:
+    """Keep floating-point aggregate error inside the observed value bounds."""
+
+    if minimum > maximum:
+        raise RuntimeError("telemetry rollup minimum exceeds maximum")
+    return max(minimum, min(mean, maximum))
+
+
 def _dirty_candidate_statement(
     resolution_seconds: RollupResolution,
     limit: int,
@@ -604,7 +612,7 @@ class TelemetryMaintenance:
                 metric_name=name,
                 sample_count=sample_count,
                 minimum=minimum,
-                mean=mean,
+                mean=_clamp_rollup_mean(minimum, mean, maximum),
                 maximum=maximum,
             )
             for name, sample_count, minimum, mean, maximum in metrics

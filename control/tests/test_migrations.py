@@ -134,6 +134,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0002_fleet_node_profile_events.py",
         "0003_agent_reenrollment_grants.py",
         "0004_artifact_jobs.py",
+        "0005_repair_fleet_profile_tables.py",
     ]
 
 
@@ -166,7 +167,94 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
+            == "0005_repair_fleet_profile_tables"
+        )
+
+
+def test_existing_database_missing_fleet_profile_tables_is_repaired(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.models import Base
+
+    url = f"sqlite:///{tmp_path / 'fleet-profile-repair.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0004_artifact_jobs")
+    engine = create_engine(url)
+
+    # Reproduce databases that applied the original 0001 before fleet profiles
+    # were added to that already-released baseline migration.
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE fleet_profile_applications"))
+        connection.execute(text("DROP TABLE fleet_profiles"))
+        assert (
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
             == "0004_artifact_jobs"
+        )
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {"fleet_profiles", "fleet_profile_applications"} <= set(
+        inspector.get_table_names()
+    )
+    assert {index["name"] for index in inspector.get_indexes("fleet_profiles")} == {
+        "ix_fleet_profiles_created_at",
+        "ix_fleet_profiles_updated_at",
+    }
+    assert {
+        index["name"] for index in inspector.get_indexes("fleet_profile_applications")
+    } == {
+        "ix_fleet_profile_applications_created_at",
+        "ix_fleet_profile_applications_current_operation_id",
+        "ix_fleet_profile_applications_profile_id",
+        "ix_fleet_profile_applications_state",
+    }
+    with engine.connect() as connection:
+        assert (
+            compare_metadata(MigrationContext.configure(connection), Base.metadata)
+            == []
+        )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO fleet_profiles
+                  (id, name, description, installation_policy, assignments,
+                   labels, favorite, created_by, created_at, updated_at)
+                VALUES
+                  ('profile', 'Qualification', '', 'keep-cached', '[]', '{}',
+                   0, 'admin', '2026-08-28 12:00:00', '2026-08-28 12:00:00')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO fleet_profile_applications
+                  (id, request_key, profile_id, profile_digest, plan_digest,
+                   state, plan, current_step, current_operation_id, progress,
+                   result, status_reason, actor, created_at, updated_at)
+                VALUES
+                  ('application', 'request', 'profile', :profile_digest,
+                   :plan_digest, 'queued', '{}', 0, NULL, '{}', NULL, NULL,
+                   'admin', '2026-08-28 12:00:00', '2026-08-28 12:00:00')
+                """
+            ),
+            {"profile_digest": "a" * 64, "plan_digest": "b" * 64},
+        )
+        assert (
+            connection.execute(
+                text("SELECT profile_id FROM fleet_profile_applications")
+            ).scalar_one()
+            == "profile"
+        )
+        assert (
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            == "0005_repair_fleet_profile_tables"
         )
 
 
