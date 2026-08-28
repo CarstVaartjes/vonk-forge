@@ -332,6 +332,7 @@ class JobService:
                 select(Job)
                 .where(
                     Job.reconciliation_id.is_(None),
+                    Job.kind != "agent-upgrade",
                     or_(
                         Job.state == "queued",
                         Job.id.in_(
@@ -340,7 +341,7 @@ class JobService:
                                 JobAttempt.lease_deadline < now,
                             )
                         ),
-                    )
+                    ),
                 )
                 .order_by(Job.created_at, Job.id)
                 .with_for_update(skip_locked=True)

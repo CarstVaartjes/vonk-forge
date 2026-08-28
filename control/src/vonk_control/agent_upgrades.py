@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 
 from .agent_jobs import AgentJobService
-from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
 _PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -36,6 +36,10 @@ _RECOVERABLE_HELPER_BRIDGE_FAILURES = frozenset(
 _RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
     "agent upgrade did not restart the service"
 }
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class AgentUpgradeConflict(RuntimeError):
@@ -250,6 +254,202 @@ class AgentUpgradeService:
                 self._enqueue_next(session, job)
         self._operations.notify_available()
         return job
+
+    def resume(self, job_id: str) -> None:
+        """Resume only the durable agent-operation side of an upgrade rollout."""
+
+        now = self._clock()
+        with self._sessions.begin() as session:
+            parent = session.scalar(
+                select(Job).where(Job.id == job_id).with_for_update(of=Job)
+            )
+            if parent is None:
+                raise KeyError(job_id)
+            if parent.kind != "agent-upgrade":
+                raise ValueError("job is not a resumable agent upgrade")
+            failed_dispatch = parent.state == "failed" and parent.status_reason == (
+                "unsupported job kind: agent-upgrade"
+            )
+            stale_dispatch = parent.state == "running"
+            if (
+                parent.state != "waiting-for-operator"
+                and not failed_dispatch
+                and not stale_dispatch
+            ):
+                raise ValueError("job is not a resumable agent upgrade")
+            worker_attempt = (
+                None
+                if parent.current_attempt == 0
+                else session.scalar(
+                    select(JobAttempt)
+                    .where(
+                        JobAttempt.job_id == parent.id,
+                        JobAttempt.attempt == parent.current_attempt,
+                    )
+                    .with_for_update(of=JobAttempt)
+                )
+            )
+            if parent.current_attempt > 0 and worker_attempt is None:
+                raise ValueError("agent upgrade worker dispatch audit is invalid")
+            if worker_attempt is not None and worker_attempt.state == "running":
+                if _aware(worker_attempt.lease_deadline) > _aware(now):
+                    raise ValueError("agent upgrade worker dispatch is still active")
+                worker_attempt.state = "expired"
+            if failed_dispatch or stale_dispatch:
+                if failed_dispatch and (
+                    worker_attempt is None or worker_attempt.state != "failed"
+                ):
+                    raise ValueError("failed agent upgrade dispatch audit is invalid")
+                if stale_dispatch and (
+                    worker_attempt is None or worker_attempt.state != "expired"
+                ):
+                    raise ValueError("agent upgrade worker dispatch is not stale")
+            package = parent.payload.get("package")
+            order = parent.payload.get("node_order")
+            strategy = parent.payload.get("strategy")
+            if (
+                set(parent.payload) != {"node_order", "package", "strategy"}
+                or not isinstance(package, dict)
+                or not isinstance(order, list)
+                or not order
+                or not all(isinstance(node_id, str) for node_id in order)
+                or len(order) != len(set(order))
+                or order != parent.targets
+                or strategy not in {"one-at-a-time", "all-at-once"}
+            ):
+                raise ValueError("stored agent upgrade plan is invalid")
+            try:
+                normalized_package = self._package(package)
+            except AgentUpgradeConflict as error:
+                raise ValueError("stored agent upgrade plan is invalid") from error
+            plan_digest = hashlib.sha256(
+                canonical_message(
+                    {
+                        "authority_revision": parent.authority_revision,
+                        "node_ids": order,
+                        "package": normalized_package,
+                        "strategy": strategy,
+                    }
+                )
+            ).hexdigest()
+            if parent.payload_digest != plan_digest:
+                raise ValueError("stored agent upgrade plan is invalid")
+            payload_digest = hashlib.sha256(canonical_message(package)).hexdigest()
+            stored_operations = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == parent.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                    .with_for_update(of=AgentOperation)
+                )
+            )
+            waiting = [
+                operation
+                for operation in stored_operations
+                if operation.state == "waiting-for-operator"
+            ]
+            active = [
+                operation
+                for operation in stored_operations
+                if operation.state in {"queued", "running"}
+            ]
+            if len({operation.node_id for operation in stored_operations}) != len(
+                stored_operations
+            ):
+                raise ValueError("stored agent upgrade operation is invalid")
+            for operation in stored_operations:
+                if (
+                    operation.kind != "agent.upgrade.v1"
+                    or operation.node_id not in order
+                    or operation.authority_revision != parent.authority_revision
+                    or operation.payload != package
+                    or operation.payload_digest != payload_digest
+                ):
+                    raise ValueError("stored agent upgrade operation is invalid")
+            materialized = {
+                operation.node_id: operation for operation in stored_operations
+            }
+            if strategy == "all-at-once":
+                if set(materialized) != set(order):
+                    raise ValueError("stored agent upgrade topology is invalid")
+            else:
+                expected_prefix = order[: len(materialized)]
+                if not materialized or set(materialized) != set(expected_prefix):
+                    raise ValueError("stored agent upgrade topology is invalid")
+                if any(
+                    materialized[node_id].state != "succeeded"
+                    for node_id in expected_prefix[:-1]
+                ):
+                    raise ValueError("stored agent upgrade topology is invalid")
+                if materialized[expected_prefix[-1]].state not in {
+                    "queued",
+                    "running",
+                    "succeeded",
+                    "waiting-for-operator",
+                }:
+                    raise ValueError("stored agent upgrade topology is invalid")
+            for operation in active:
+                if operation.state == "queued":
+                    if operation.current_attempt != 0:
+                        raise ValueError("stored agent upgrade attempt is invalid")
+                    continue
+                active_attempt = session.scalar(
+                    select(AgentOperationAttempt)
+                    .where(
+                        AgentOperationAttempt.operation_id == operation.id,
+                        AgentOperationAttempt.attempt == operation.current_attempt,
+                    )
+                    .with_for_update(of=AgentOperationAttempt)
+                )
+                if active_attempt is None or active_attempt.state != "running":
+                    raise ValueError("stored agent upgrade attempt is invalid")
+            parent.state = "queued"
+            parent.status_reason = None
+            parent.updated_at = now
+            if waiting:
+                for operation in waiting:
+                    attempt = session.scalar(
+                        select(AgentOperationAttempt)
+                        .where(
+                            AgentOperationAttempt.operation_id == operation.id,
+                            AgentOperationAttempt.attempt == operation.current_attempt,
+                        )
+                        .with_for_update(of=AgentOperationAttempt)
+                    )
+                    if attempt is None or attempt.state not in {
+                        "expired",
+                        "failed",
+                        "waiting-for-operator",
+                    }:
+                        raise ValueError("stored agent upgrade attempt is invalid")
+                    operation.retry_disposition = "retry"
+                    operation.retry_disposition_attempt = operation.current_attempt
+                    operation.updated_at = now
+                    attempt.lease_deadline = now
+            elif not active:
+                if len(stored_operations) == len(order) and all(
+                    operation.state == "succeeded" for operation in stored_operations
+                ):
+                    parent.state = "succeeded"
+                    return
+                before = len(stored_operations)
+                self._enqueue_next(session, parent)
+                if parent.state != "queued":
+                    raise ValueError(
+                        "next agent upgrade target is not currently eligible"
+                    )
+                session.flush()
+                after = int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(AgentOperation)
+                        .where(AgentOperation.parent_job_id == parent.id)
+                    )
+                    or 0
+                )
+                if after != before + 1:
+                    raise ValueError("agent upgrade has no operation to resume")
+        self._operations.notify_available()
 
     def consume_agent_result(
         self,
