@@ -148,6 +148,11 @@ def _campaign_plan(
             "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
             "selected_recipes": sorted(options.selected_recipes),
+            **(
+                {"allowed_node_ids": sorted(options.allowed_node_ids)}
+                if options.allowed_node_ids
+                else {}
+            ),
             "fixture_manifest_sha256": fixture_sha,
         },
     }
@@ -324,6 +329,103 @@ def test_intent_digest_binds_catalog_authority_and_fixture_manifest() -> None:
     )
 
 
+def test_node_pins_require_explicit_single_spark_recipes_and_known_authority() -> None:
+    node_id = f"spk_{1:032x}"
+    unknown_node_id = "spk_" + "f" * 32
+    with pytest.raises(QualificationError, match="require explicit recipes"):
+        RunnerOptions(allowed_node_ids=frozenset({node_id}))
+
+    selected = frozenset({"vonk/tiny"})
+    options = RunnerOptions(
+        selected_recipes=selected,
+        allowed_node_ids=frozenset({unknown_node_id}),
+    )
+    client = _Client(
+        {
+            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/v1/catalog/public-recipes"): {
+                "repository": "test",
+                "commit": "b" * 40,
+                "recipes": [_recipe("tiny")],
+            },
+        }
+    )
+    with pytest.raises(QualificationError, match="not in controller authority"):
+        build_plan(client, options, {})
+
+    dual = _recipe("dual", nodes=2)
+    dual_client = _Client(
+        {
+            ("GET", "/api/v1/fleet"): _fleet(2),
+            ("GET", "/api/v1/catalog/public-recipes"): {
+                "repository": "test",
+                "commit": "b" * 40,
+                "recipes": [dual],
+            },
+        }
+    )
+    with pytest.raises(QualificationError, match="exactly one Spark"):
+        build_plan(
+            dual_client,
+            RunnerOptions(
+                selected_recipes=frozenset({"vonk/dual"}),
+                allowed_node_ids=frozenset({node_id}),
+            ),
+            {},
+        )
+
+
+def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_intent() -> (
+    None
+):
+    node_ids = (f"spk_{1:032x}", f"spk_{2:032x}")
+    recipe = _recipe("tiny")
+
+    def planned(allowed: frozenset[str]) -> dict[str, object]:
+        client = _Client(
+            {
+                ("GET", "/api/v1/fleet"): _fleet(2),
+                ("GET", "/api/v1/catalog/public-recipes"): {
+                    "repository": "test",
+                    "commit": "b" * 40,
+                    "recipes": [recipe],
+                },
+                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
+            }
+        )
+        return build_plan(
+            client,
+            RunnerOptions(
+                selected_recipes=frozenset({"vonk/tiny"}),
+                allowed_node_ids=allowed,
+            ),
+            {},
+        )
+
+    first = planned(frozenset({node_ids[0]}))
+    second = planned(frozenset({node_ids[1]}))
+    unpinned = build_plan(
+        _Client(
+            {
+                ("GET", "/api/v1/fleet"): _fleet(2),
+                ("GET", "/api/v1/catalog/public-recipes"): {
+                    "repository": "test",
+                    "commit": "b" * 40,
+                    "recipes": [recipe],
+                },
+                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
+            }
+        ),
+        RunnerOptions(selected_recipes=frozenset({"vonk/tiny"})),
+        {},
+    )
+
+    assert first["plan_digest"] != second["plan_digest"]
+    assert first["campaign_intent"]["options"]["allowed_node_ids"] == [node_ids[0]]
+    assert second["campaign_intent"]["options"]["allowed_node_ids"] == [node_ids[1]]
+    assert "allowed_node_ids" not in unpinned["campaign_intent"]["options"]
+
+
 @pytest.mark.parametrize(
     ("lane", "expected_code"),
     [
@@ -387,6 +489,24 @@ def test_apply_rejects_actionable_plan_tampering_and_option_drift(
             EvidenceLedger(tmp_path / "options.jsonl"),
             RunnerOptions(jurisdiction="US"),
         ).apply(plan, str(plan["plan_digest"]))
+
+    selected = frozenset({"vonk/tiny"})
+    pinned = RunnerOptions(
+        jurisdiction="NL",
+        selected_recipes=selected,
+        allowed_node_ids=frozenset({f"spk_{1:032x}"}),
+    )
+    pinned_plan = _campaign_plan([item], pinned)
+    with pytest.raises(QualificationError, match="runner options"):
+        QualificationRunner(
+            _Client({}),
+            EvidenceLedger(tmp_path / "node-options.jsonl"),
+            RunnerOptions(
+                jurisdiction="NL",
+                selected_recipes=selected,
+                allowed_node_ids=frozenset({f"spk_{2:032x}"}),
+            ),
+        ).apply(pinned_plan, str(pinned_plan["plan_digest"]))
 
 
 def test_transient_blocker_is_retried_under_same_campaign_intent(
@@ -672,6 +792,210 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
     assert any(
         row["event"] == "recipe.blocked" and row["recipe"] == "vonk/a"
         for row in blocked_ledger.records
+    )
+
+
+def test_node_pin_filters_capacity_and_resume_rejects_candidate_escape(
+    tmp_path: Path,
+) -> None:
+    pinned_node = f"spk_{1:032x}"
+    other_node = f"spk_{2:032x}"
+    recipe_id = "00000000-0000-4000-8000-000000000091"
+    revision_id = "10000000-0000-4000-8000-000000000091"
+    item = {
+        "key": "vonk/tiny",
+        "content_sha256": "9" * 64,
+        "node_count": 1,
+        "blockers": [],
+        "local_recipe_id": recipe_id,
+        "local_revision_id": revision_id,
+        "maximum_installed_bytes_per_node": 20,
+        "expected_download_bytes": 10,
+        "temporary_build_bytes_per_node": 0,
+        "disk_requirements_by_role": _role_disk(image=20),
+        "artifact_identities": [],
+    }
+
+    def detail(node_ids: tuple[str, ...]) -> dict[str, object]:
+        return {
+            "selected_revision": {
+                "id": revision_id,
+                "content_sha256": "9" * 64,
+            },
+            "visual_recipe": {},
+            "operational_state": {"installations": []},
+            "placement": [
+                {
+                    "recommendations": [
+                        {
+                            "eligible": True,
+                            "node_ids": [node_id],
+                            "nodes": [{"node_id": node_id, "role": "solo", "rank": 0}],
+                            "installation_ids": [],
+                        }
+                        for node_id in node_ids
+                    ]
+                }
+            ],
+        }
+
+    fleet = _fleet(2)
+    options = RunnerOptions(
+        selected_recipes=frozenset({"vonk/tiny"}),
+        allowed_node_ids=frozenset({pinned_node}),
+    )
+    ledger = EvidenceLedger(tmp_path / "pinned-capacity.jsonl")
+    first = QualificationRunner(
+        _Client(
+            {
+                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail(
+                    (pinned_node, other_node)
+                ),
+                ("GET", "/api/v1/fleet"): fleet,
+            }
+        ),
+        ledger,
+        options,
+    )
+
+    first._prepare_capacity_campaign("d" * 64, [item], set())
+
+    assignment = first._capacity_assignments["vonk/tiny"]
+    assert assignment["node_ids"] == [pinned_node]
+    created = next(
+        row for row in ledger.records if row["event"] == "capacity.plan.created"
+    )
+    assert set(created["payload"]["baseline_allocatable_bytes_by_node"]) == {
+        pinned_node
+    }
+
+    resumed = QualificationRunner(
+        _Client(
+            {
+                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail((other_node,)),
+                ("GET", "/api/v1/fleet"): fleet,
+            }
+        ),
+        ledger,
+        options,
+    )
+    resumed._prepare_capacity_campaign("d" * 64, [item], set())
+
+    assert resumed._preflight_blocked == {"vonk/tiny"}
+    assert resumed._capacity_assignments == {}
+    assert any(row["event"] == "capacity.plan.invalidated" for row in ledger.records)
+    blocker = next(
+        row
+        for row in reversed(ledger.records)
+        if row["event"] == "recipe.blocked" and row["recipe"] == "vonk/tiny"
+    )
+    assert blocker["payload"]["blockers"][0]["code"] == "placement.no_eligible_group"
+
+
+@pytest.mark.parametrize(
+    ("uncertain_node_ids", "expected_blocked"),
+    [
+        ([f"spk_{2:032x}"], False),
+        ([f"spk_{1:032x}"], True),
+        (None, True),
+    ],
+)
+def test_pinned_lane_only_blocks_uncertain_installation_on_its_node(
+    tmp_path: Path,
+    uncertain_node_ids: list[str] | None,
+    expected_blocked: bool,
+) -> None:
+    pinned_node = f"spk_{1:032x}"
+    recipe_id = "00000000-0000-4000-8000-000000000093"
+    revision_id = "10000000-0000-4000-8000-000000000093"
+    item = {
+        "key": "vonk/tiny",
+        "content_sha256": "a" * 64,
+        "node_count": 1,
+        "blockers": [],
+        "local_recipe_id": recipe_id,
+        "local_revision_id": revision_id,
+        "maximum_installed_bytes_per_node": 20,
+        "expected_download_bytes": 10,
+        "temporary_build_bytes_per_node": 0,
+        "disk_requirements_by_role": _role_disk(image=20),
+        "artifact_identities": [],
+    }
+    uncertain_installation: dict[str, object] = {
+        "installation_id": "20000000-0000-4000-8000-000000000093",
+        "recipe_revision_id": revision_id,
+        "state": "failed",
+    }
+    if uncertain_node_ids is not None:
+        uncertain_installation["node_ids"] = uncertain_node_ids
+    detail = {
+        "selected_revision": {
+            "id": revision_id,
+            "content_sha256": "a" * 64,
+        },
+        "visual_recipe": {},
+        "operational_state": {"installations": [uncertain_installation]},
+        "placement": [
+            {
+                "recommendations": [
+                    {
+                        "eligible": True,
+                        "node_ids": [pinned_node],
+                        "nodes": [{"node_id": pinned_node, "role": "solo", "rank": 0}],
+                        "installation_ids": [],
+                    }
+                ]
+            }
+        ],
+    }
+    runner = QualificationRunner(
+        _Client(
+            {
+                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail,
+                ("GET", "/api/v1/fleet"): _fleet(2),
+            }
+        ),
+        EvidenceLedger(tmp_path / f"uncertain-{expected_blocked}.jsonl"),
+        RunnerOptions(
+            selected_recipes=frozenset({"vonk/tiny"}),
+            allowed_node_ids=frozenset({pinned_node}),
+        ),
+    )
+
+    runner._prepare_capacity_campaign("d" * 64, [item], set())
+
+    assert ("vonk/tiny" in runner._preflight_blocked) is expected_blocked
+    if expected_blocked:
+        blocker = next(
+            row
+            for row in runner.ledger.records
+            if row["event"] == "recipe.blocked" and row["recipe"] == "vonk/tiny"
+        )
+        assert (
+            blocker["payload"]["blockers"][0]["code"]
+            == "resource.installation_reconciliation_required"
+        )
+    else:
+        assert runner._capacity_assignments["vonk/tiny"]["node_ids"] == [pinned_node]
+
+
+def test_unpinned_campaign_keeps_global_uncertain_installation_block(
+    tmp_path: Path,
+) -> None:
+    revision_id = "10000000-0000-4000-8000-000000000094"
+    runner = QualificationRunner(
+        _Client({}),
+        EvidenceLedger(tmp_path / "unpinned-uncertain.jsonl"),
+        RunnerOptions(),
+    )
+
+    assert runner._uncertain_installation_blocks(
+        {
+            "recipe_revision_id": revision_id,
+            "state": "failed",
+            "node_ids": [f"spk_{2:032x}"],
+        },
+        revision_id,
     )
 
 
@@ -1150,6 +1474,55 @@ def test_runtime_ineligible_planned_placement_is_structured_resource_blocker(
     assert blocker["classification"] == "resource"
     assert blocker["code"] == "resource.planned_placement_ineligible"
     assert blocker["planned_node_ids"] == [planned_node]
+
+
+def test_apply_rejects_placement_escape_before_mapping_or_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned_node = f"spk_{1:032x}"
+    escaped_node = f"spk_{2:032x}"
+    recipe_id = "00000000-0000-4000-8000-000000000092"
+    revision_id = "10000000-0000-4000-8000-000000000092"
+    key = "vonk/tiny"
+    client = _Client(
+        {
+            ("GET", f"/api/v1/library/recipes/{recipe_id}"): {
+                "selected_revision": {
+                    "id": revision_id,
+                    "content_sha256": "9" * 64,
+                },
+                "operational_state": {},
+            }
+        }
+    )
+    runner = QualificationRunner(
+        client,
+        EvidenceLedger(tmp_path / "placement-escape.jsonl"),
+        RunnerOptions(
+            selected_recipes=frozenset({key}),
+            allowed_node_ids=frozenset({pinned_node}),
+        ),
+    )
+    runner._prepared[key] = (recipe_id, revision_id, {})
+    monkeypatch.setattr(
+        runner,
+        "_select_placement",
+        lambda *_args: {"node_ids": [escaped_node]},
+    )
+
+    with pytest.raises(QualificationError, match="escaped"):
+        runner._apply_recipe(
+            "d" * 64,
+            {
+                "key": key,
+                "content_sha256": "9" * 64,
+                "node_count": 1,
+            },
+        )
+
+    assert [call[:2] for call in client.calls] == [
+        ("GET", f"/api/v1/library/recipes/{recipe_id}")
+    ]
 
 
 def test_apply_continues_after_recipe_failure_but_exits_nonzero(
