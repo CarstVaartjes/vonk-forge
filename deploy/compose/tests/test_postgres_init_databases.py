@@ -264,7 +264,12 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                     "-d",
                     "control",
                     "-tAc",
-                    "SELECT count(*) FROM pg_roles WHERE rolname = 'litellm'",
+                    (
+                        "SELECT count(*) FROM pg_database AS databases "
+                        "JOIN pg_roles AS owners ON owners.oid = databases.datdba "
+                        "WHERE databases.datname = 'litellm' "
+                        "AND owners.rolname = 'litellm'"
+                    ),
                 ],
                 check=False,
                 capture_output=True,
