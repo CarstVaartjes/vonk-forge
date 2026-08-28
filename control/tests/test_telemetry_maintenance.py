@@ -588,6 +588,53 @@ def test_minute_recompute_is_half_open_independent_and_idempotent(
         assert len(session.scalars(select(NodeTelemetryRollupDirty)).all()) == 1
 
 
+@pytest.mark.parametrize(
+    ("constant", "sample_count"),
+    ((0.01, 29), (0.1, 3)),
+    ids=("below-minimum", "above-maximum"),
+)
+def test_minute_recompute_clamps_floating_mean_to_constant_value(
+    sessions,
+    constant: float,
+    sample_count: int,
+) -> None:
+    start = datetime(2026, 8, 15, 11, 59, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add_all(
+            _raw(
+                f"constant-{index}",
+                start + timedelta(seconds=index),
+                sequence=index + 1,
+                cpu=constant,
+            )
+            for index in range(sample_count)
+        )
+        session.add(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=start,
+            )
+        )
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1
+    )
+
+    with sessions() as session:
+        metric = session.get(
+            NodeTelemetryRollupMetric,
+            (60, NODE_A, start, "cpu_utilization_percent"),
+        )
+
+    assert metric is not None
+    assert (metric.minimum, metric.mean, metric.maximum) == (
+        constant,
+        constant,
+        constant,
+    )
+
+
 def test_empty_minute_recompute_removes_stale_bucket_and_queues_parent(
     sessions,
 ) -> None:
@@ -802,6 +849,64 @@ def test_quarter_hour_recompute_weights_minute_means_by_metric_count(
         metrics["temperature_c"].mean,
         metrics["temperature_c"].maximum,
     ) == (2, 45, 50, 55)
+
+
+@pytest.mark.parametrize(
+    ("constant", "sample_count"),
+    ((0.01, 29), (0.1, 3)),
+    ids=("below-minimum", "above-maximum"),
+)
+def test_quarter_hour_recompute_clamps_weighted_mean_to_constant_value(
+    sessions,
+    constant: float,
+    sample_count: int,
+) -> None:
+    start = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                NodeTelemetryRollupBucket(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=start,
+                    source_sample_count=sample_count,
+                    gap_samples=0,
+                ),
+                NodeTelemetryRollupMetric(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=start,
+                    metric_name="cpu_utilization_percent",
+                    sample_count=sample_count,
+                    minimum=constant,
+                    mean=constant,
+                    maximum=constant,
+                ),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=900,
+                    node_id=NODE_A,
+                    bucket_start=start,
+                ),
+            )
+        )
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1
+    )
+
+    with sessions() as session:
+        metric = session.get(
+            NodeTelemetryRollupMetric,
+            (900, NODE_A, start, "cpu_utilization_percent"),
+        )
+
+    assert metric is not None
+    assert metric.sample_count == sample_count
+    assert (metric.minimum, metric.mean, metric.maximum) == (
+        constant,
+        constant,
+        constant,
+    )
 
 
 def test_late_sample_reruns_minute_and_quarter_hour_rollups(sessions) -> None:
