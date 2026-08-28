@@ -9,6 +9,7 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import AgentNode, AgentNodeProfile, Base, Observation
+from vonk_control.operation_api import fleet_response
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 
@@ -70,6 +71,8 @@ def test_dashboard_joins_registered_fleet_with_latest_observation(tmp_path) -> N
     assert {key: node[key] for key in ("id", "display_name", "hostname", "lifecycle", "healthy", "labels")} == {
         "id": "spk_00000000000000000000000000000001", "display_name": "Alpha", "hostname": "alpha", "lifecycle": "ready", "healthy": True, "labels": {"zone": "lab"},
     }
+    assert node["profile"] is None
+    assert fleet_response(result).nodes[0].profile is None
     assert "management" not in result["nodes"][0]
     assert node["probe_age_seconds"] == 301.0
     assert node["stale"] is True
