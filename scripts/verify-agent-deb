@@ -267,6 +267,12 @@ def _verify_control(control: Path) -> None:
         "dpkg --compare-versions",
         "refusing downgrade",
         "inside_package_helper",
+        "helper_namespace_has_package_paths",
+        'keyrings=/usr/share/keyrings',
+        'package_doc=/usr/share/doc/vonk-forge-agent',
+        '.vonk-package-write.XXXXXX',
+        'package_action=1',
+        '[ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]',
         "stage_bridge",
         "vonk-forge-package-helper-upgrade-bridge.service",
         "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
@@ -280,6 +286,8 @@ def _verify_control(control: Path) -> None:
     ):
         if required not in preinst:
             raise VerificationError("preinst downgrade protection is incomplete")
+    if "helper_unit_has_package_paths" in preinst or "helper_unit_path=" in preinst:
+        raise VerificationError("preinst trusts stale on-disk helper configuration")
     if "/usr/bin/python" in postinst or "python3" in postinst:
         raise VerificationError("postinst has an undeclared interpreter dependency")
     prerm = (control / "prerm").read_text(encoding="utf-8")

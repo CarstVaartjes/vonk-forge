@@ -22,7 +22,20 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
 _ONLINE_WINDOW = timedelta(seconds=150)
-_HELPER_BRIDGE_RECOVERY_BACKOFF = timedelta(seconds=10)
+# packaging/debian/preinst gives the asynchronous bridge unit 180 seconds to
+# outlive the failed dpkg invocation and restart the helper.  A helper stop can
+# then consume its 15-second TimeoutStopSec.  Keep another 45 seconds for PID 1
+# dispatch, polling, and controller/agent scheduling jitter.  This durable gate
+# is deliberately coupled to those package-side budgets: the single automatic
+# retry must not enter the old helper namespace while its bridge is still live.
+_HELPER_BRIDGE_RUNTIME_MAX = timedelta(seconds=180)
+_HELPER_STOP_TIMEOUT = timedelta(seconds=15)
+_HELPER_BRIDGE_DISPATCH_MARGIN = timedelta(seconds=45)
+_HELPER_BRIDGE_RECOVERY_BACKOFF = (
+    _HELPER_BRIDGE_RUNTIME_MAX
+    + _HELPER_STOP_TIMEOUT
+    + _HELPER_BRIDGE_DISPATCH_MARGIN
+)
 _TARGET_PROTOCOL_VERSION = 3
 _RECOVERABLE_HELPER_BRIDGE_FAILURES = frozenset(
     {
@@ -529,10 +542,11 @@ class AgentUpgradeService:
         operation.retry_disposition_attempt = attempt.attempt if retry else None
         if retry:
             # The package preinst asks PID 1 to restart the old sandboxed helper
-            # only after the failed dpkg process exits. Persist a conservative
-            # recovery window so an immediate agent poll cannot race that
-            # asynchronous restart. AgentOperationAttempt is already the durable
-            # owner of attempt timing, including after controller restarts.
+            # only after the failed dpkg process exits. Persist the full bridge
+            # runtime, helper stop timeout, and dispatch margin so an immediate
+            # agent poll cannot race that asynchronous restart.
+            # AgentOperationAttempt is already the durable owner of attempt
+            # timing, including after controller restarts.
             attempt.lease_deadline = now + _HELPER_BRIDGE_RECOVERY_BACKOFF
 
     @staticmethod
