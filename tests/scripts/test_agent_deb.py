@@ -17,6 +17,7 @@ VERIFY = ROOT / "scripts/verify-agent-deb"
 PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
+RECOVERY_LIFECYCLE = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
 BUILD_DIGEST = "sha256:" + "b" * 64
@@ -455,6 +456,26 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     assert "durable recovery armed outside the inherited helper sandbox" in preinst
     assert "Bootstrap trust boundary" in preinst
     assert "old-protocol TOCTOU" in preinst
+
+
+def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
+    lifecycle = RECOVERY_LIFECYCLE.read_text()
+
+    assert "candidate_custody=${CANDIDATE_CUSTODY:-legacy}" in lifecycle
+    assert "custody_root=/run/vonk-forge-package-candidates" in lifecycle
+    assert "custody_invocation=0123456789abcdef0123456789abcdef" in lifecycle
+    assert "candidate=$custody_root/$custody_invocation/$package_digest.deb" in lifecycle
+    assert "helper_runtime_directory=vonk-forge-package-candidates" in lifecycle
+    assert "helper_runtime_mode=0700" in lifecycle
+    assert "helper_runtime_preserve=restart" in lifecycle
+    assert 'test "$(stat -c %u:%g:%a "$custody_root")" = 0:0:700' in lifecycle
+    assert 'test "$(stat -c %u:%g:%a:%h "$candidate")" = 0:0:600:1' in lifecycle
+    assert 'mapfile -d \'\' -t dpkg_argv < "/proc/$dpkg_pid/cmdline"' in lifecycle
+    assert 'test "${dpkg_argv[0]}" = /usr/bin/dpkg' in lifecycle
+    assert 'test "${dpkg_argv[1]}" = --install' in lifecycle
+    assert 'test "${dpkg_argv[2]}" = --force-confold' in lifecycle
+    assert 'test "${dpkg_argv[3]}" = "$candidate"' in lifecycle
+    assert 'test "$(wc -l < "$upgrade_invocations")" -eq 1' in lifecycle
 
 
 def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:

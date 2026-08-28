@@ -18,6 +18,11 @@ baseline_version=0.0.0~acceptance.1+g0123456789ab
 baseline_semantic=0.0.0
 stale_pending_format=${STALE_PENDING_FORMAT:-prior3}
 crash_mode=${CRASH_MODE:-full-cgroup}
+candidate_custody=${CANDIDATE_CUSTODY:-legacy}
+case "$candidate_custody" in
+  legacy|root) ;;
+  *) printf 'unknown candidate custody fixture: %s\n' "$candidate_custody" >&2; exit 64 ;;
+esac
 case "$(dpkg --print-architecture)" in
   amd64) build_arch=linux-amd64 ;;
   arm64) build_arch=linux-arm64 ;;
@@ -33,6 +38,7 @@ agent_unit=vonk-forge-agent.service
 recovery_unit=vonk-forge-package-upgrade-recover.service
 started=$test_root/start
 crash_observed=$test_root/crash-observed
+upgrade_invocations=$test_root/upgrade-invocations
 
 cleanup() {
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
@@ -47,13 +53,15 @@ cleanup() {
   rm -f -- "$old_helper_unit" "$old_socket_unit"
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   systemctl --system daemon-reload >/dev/null 2>&1 || true
+  rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- "$test_root"
 }
 trap cleanup EXIT HUP INT TERM
 
 if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
   || systemctl --system cat "$helper_unit" >/dev/null 2>&1 \
-  || systemctl --system cat "$socket_unit" >/dev/null 2>&1; then
+  || systemctl --system cat "$socket_unit" >/dev/null 2>&1 \
+  || [[ -e /run/vonk-forge-package-candidates ]]; then
   printf '%s\n' 'agent upgrade recovery fixture would collide with host state' >&2
   exit 1
 fi
@@ -149,13 +157,47 @@ id -u vonk-agent >/dev/null 2>&1 \
     --shell /usr/sbin/nologin vonk-agent
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
-candidate=/var/lib/vonk-forge/incoming/$package_digest.deb
-install -o vonk-agent -g vonk-agent -m 0600 "$package" "$candidate"
+case "$candidate_custody" in
+  legacy)
+    candidate=/var/lib/vonk-forge/incoming/$package_digest.deb
+    helper_runtime_directory=vonk-forge-package-helper
+    helper_runtime_mode=0711
+    helper_runtime_preserve=yes
+    ;;
+  root)
+    custody_root=/run/vonk-forge-package-candidates
+    custody_invocation=0123456789abcdef0123456789abcdef
+    candidate=$custody_root/$custody_invocation/$package_digest.deb
+    helper_runtime_directory=vonk-forge-package-candidates
+    helper_runtime_mode=0700
+    helper_runtime_preserve=restart
+    ;;
+esac
+
+stage_candidate() {
+  case "$candidate_custody" in
+    legacy)
+      install -o vonk-agent -g vonk-agent -m 0600 "$package" "$candidate"
+      test "$(stat -c %U:%G:%a:%h "$candidate")" = vonk-agent:vonk-agent:600:1
+      ;;
+    root)
+      test "$(stat -c %u:%g:%a "$custody_root")" = 0:0:700
+      install -d -o root -g root -m 0700 "$custody_root/$custody_invocation"
+      install -o root -g root -m 0600 "$package" "$candidate"
+      test "$(stat -c %u:%g:%a "$custody_root/$custody_invocation")" = 0:0:700
+      test "$(stat -c %u:%g:%a:%h "$candidate")" = 0:0:600:1
+      test "$candidate" \
+        = "/run/vonk-forge-package-candidates/$custody_invocation/$package_digest.deb"
+      ;;
+  esac
+  test "$(basename "$candidate")" = "$package_digest.deb"
+}
 
 cat > "$test_root/old-helper" <<WRAPPER
 #!/usr/bin/env bash
 set -euo pipefail
 while [[ ! -e "$started" ]]; do sleep 0.05; done
+printf '%s\n' invocation >> "$upgrade_invocations"
 set +e
 /usr/bin/dpkg --install --force-confold "$candidate"
 set -e
@@ -197,9 +239,9 @@ SystemCallFilter=~@mount @raw-io @obsolete @debug
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_NET_ADMIN CAP_SETGID CAP_SETUID
 AmbientCapabilities=
-RuntimeDirectory=vonk-forge-package-helper
-RuntimeDirectoryMode=0711
-RuntimeDirectoryPreserve=yes
+RuntimeDirectory=$helper_runtime_directory
+RuntimeDirectoryMode=$helper_runtime_mode
+RuntimeDirectoryPreserve=$helper_runtime_preserve
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
 TimeoutStopSec=15s
 UNIT
@@ -223,6 +265,7 @@ chmod 0644 "$old_helper_unit" "$old_socket_unit"
 systemctl --system daemon-reload
 systemctl --system enable --now "$socket_unit" >/dev/null
 systemctl --system start "$helper_unit"
+stage_candidate
 
 # Model the live Spark's dev350 state: an older package is left unpacked while
 # the already-running dev335 helper retains its old executable and sandbox.
@@ -260,6 +303,16 @@ cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
       systemctl --system freeze "$helper_unit"
       cmp -s "$test_root/stale-pending" \
         /var/lib/vonk-forge/helper-upgrade.pending
+      dpkg_pid=$(sed -n 's/^dpkg_pid=//p' \
+        /var/lib/vonk-forge/package-upgrade/intent)
+      case "$dpkg_pid" in ''|*[!0-9]*) exit 1 ;; esac
+      test "$(readlink -f "/proc/$dpkg_pid/exe")" = /usr/bin/dpkg
+      mapfile -d '' -t dpkg_argv < "/proc/$dpkg_pid/cmdline"
+      test "${#dpkg_argv[@]}" -eq 4
+      test "${dpkg_argv[0]}" = /usr/bin/dpkg
+      test "${dpkg_argv[1]}" = --install
+      test "${dpkg_argv[2]}" = --force-confold
+      test "${dpkg_argv[3]}" = "$candidate"
       case "$crash_mode" in
         full-cgroup)
           systemctl --system stop "$recovery_unit" >/dev/null 2>&1 || true
@@ -269,10 +322,6 @@ cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
             /var/lib/vonk-forge/helper-upgrade.pending
           ;;
         dpkg-only)
-          dpkg_pid=$(sed -n 's/^dpkg_pid=//p' \
-            /var/lib/vonk-forge/package-upgrade/intent)
-          case "$dpkg_pid" in ''|*[!0-9]*) exit 1 ;; esac
-          test "$(readlink -f "/proc/$dpkg_pid/exe")" = /usr/bin/dpkg
           systemctl --system daemon-reload
           systemctl --system --no-block start "$recovery_unit"
           kill -KILL "$dpkg_pid"
@@ -338,6 +387,7 @@ grep -Fxq 'schema_version=2' /var/lib/vonk-forge/helper-upgrade.receipt
 grep -Fxq "version=$version" /var/lib/vonk-forge/helper-upgrade.receipt
 grep -Fxq "package_sha256=$package_digest" \
   /var/lib/vonk-forge/helper-upgrade.receipt
+test "$(wc -l < "$upgrade_invocations")" -eq 1
 test ! -e /var/lib/vonk-forge/helper-upgrade.pending
 test ! -e /var/lib/vonk-forge/package-upgrade/intent
 test ! -e /var/lib/vonk-forge/package-upgrade/agent-blocked
@@ -354,6 +404,7 @@ test "$(stat -c %U "/proc/$agent_pid")" = vonk-agent
 
 # A subsequent ordinary live reinstall must accept and replace the durable v2
 # receipt. Package removal must then accept the normal v1 receipt.
+stage_candidate
 dpkg --install --force-confold "$candidate"
 for _ in {1..1200}; do
   if grep -Fxq 'schema_version=1' \
@@ -368,4 +419,4 @@ dpkg --remove vonk-forge-agent
 test ! -e /var/lib/vonk-forge/helper-upgrade.receipt
 
 printf '%s\n' \
-  "durable lower-iU $stale_pending_format $crash_mode recovery/normal-upgrade/remove lifecycle: PASS"
+  "durable lower-iU $stale_pending_format $crash_mode $candidate_custody recovery/normal-upgrade/remove lifecycle: PASS"
