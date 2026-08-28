@@ -26,6 +26,7 @@ const REQUEST_LEDGER: &str = "/var/lib/vonk-forge/helper/requests";
 const DATA_ROOT: &str = "/var/lib/vonk-forge";
 const AGENT_DATA_ROOT: &str = "/var/lib/vonk-forge-agent";
 const RUNTIME_REQUEST_ROOT: &str = "/run/vonk-forge-agent/runtime-requests";
+const PACKAGE_CUSTODY_ROOT: &str = "/run/vonk-forge-package-candidates";
 const AGENT_GROUP: &str = "vonk-agent";
 const MAX_CONCURRENT_REQUESTS: usize = 8;
 
@@ -101,19 +102,20 @@ fn run() -> Result<(), String> {
     let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
     let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
     let verifier = Arc::new(GrantVerifier::new(&grant_key, group_gid).map_err(display)?);
-    let executor = Arc::new(
-        OperationExecutor::new(
-            ManagedRoots::under(Path::new(DATA_ROOT))
-                .with_agent_data(Path::new(AGENT_DATA_ROOT))
-                .with_runtime_requests(Path::new(RUNTIME_REQUEST_ROOT)),
-            &release_key,
-            ProcessCommandRunner,
-            Some(0),
-        )
-        .map_err(display)?
-        .with_package_owner(agent_uid)
-        .with_runtime_request_owner(agent_uid),
-    );
+    let executor = OperationExecutor::new(
+        ManagedRoots::under(Path::new(DATA_ROOT))
+            .with_agent_data(Path::new(AGENT_DATA_ROOT))
+            .with_runtime_requests(Path::new(RUNTIME_REQUEST_ROOT))
+            .with_package_custody(Path::new(PACKAGE_CUSTODY_ROOT)),
+        &release_key,
+        ProcessCommandRunner,
+        Some(0),
+    )
+    .map_err(display)?
+    .with_package_owner(agent_uid)
+    .with_runtime_request_owner(agent_uid);
+    executor.prepare_package_custody().map_err(display)?;
+    let executor = Arc::new(executor);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {

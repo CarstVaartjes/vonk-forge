@@ -163,9 +163,9 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
     if (
-        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-helper"
-        or helper["Service"].get("RuntimeDirectoryMode") != "0711"
-        or helper["Service"].get("RuntimeDirectoryPreserve") != "yes"
+        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-candidates"
+        or helper["Service"].get("RuntimeDirectoryMode") != "0700"
+        or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"
     ):
         raise RuntimeError("package helper runtime ownership boundary is invalid")
     return {

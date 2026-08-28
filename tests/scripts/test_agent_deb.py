@@ -393,13 +393,17 @@ def test_upgrade_bridge_only_uses_dev335_writable_mounts() -> None:
     helper = (
         ROOT / "packaging/systemd/vonk-forge-package-helper.service"
     ).read_text()
+    helper_socket = (
+        ROOT / "packaging/systemd/vonk-forge-package-helper.socket"
+    ).read_text()
 
     assert "/lib/systemd/system" in next(
         line
         for line in helper.splitlines()
         if line.startswith("ReadWritePaths=/var/lib/vonk-forge ")
     ).split()
-    assert "RuntimeDirectory=vonk-forge-package-helper" in helper.splitlines()
+    assert "DirectoryMode=0711" in helper_socket.splitlines()
+    assert "RuntimeDirectory=vonk-forge-package-candidates" in helper.splitlines()
     assert (
         "bridge_dropin_dir=/lib/systemd/system/"
         "vonk-forge-package-helper.service.d"
@@ -866,6 +870,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "PrivateNetwork=yes" not in helper_unit
     assert "IPAddressDeny=any" in helper_unit
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in helper_unit
+    assert "RuntimeDirectory=vonk-forge-package-candidates" in helper_unit.splitlines()
+    assert "RuntimeDirectoryMode=0700" in helper_unit.splitlines()
+    assert "RuntimeDirectoryPreserve=restart" in helper_unit.splitlines()
+    assert "RuntimeDirectory=vonk-forge-package-helper" not in helper_unit.splitlines()
     assert (
         "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
         "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"

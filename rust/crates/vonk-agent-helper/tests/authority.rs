@@ -234,6 +234,68 @@ struct RecordingRunner {
     runtime_running: Arc<Mutex<bool>>,
 }
 
+#[derive(Clone, Default)]
+struct AdversarialPackageRunner {
+    calls: SharedCalls,
+    observed_candidates: Arc<Mutex<Vec<(PathBuf, Vec<u8>, u32, u32, u32, u64)>>>,
+    source_swap: Arc<Mutex<Option<(PathBuf, PathBuf)>>>,
+    fail_dpkg: Arc<Mutex<bool>>,
+}
+
+impl CommandRunner for AdversarialPackageRunner {
+    fn run(
+        &self,
+        executable: &std::path::Path,
+        arguments: &[String],
+    ) -> Result<CommandOutput, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((executable.to_path_buf(), arguments.to_vec()));
+        if matches!(
+            executable.to_str(),
+            Some("/usr/bin/dpkg-deb" | "/usr/bin/dpkg")
+        ) {
+            let candidate_index = if executable == std::path::Path::new("/usr/bin/dpkg-deb") {
+                1
+            } else {
+                2
+            };
+            let candidate = PathBuf::from(&arguments[candidate_index]);
+            let metadata = fs::metadata(&candidate).map_err(|error| error.to_string())?;
+            self.observed_candidates.lock().unwrap().push((
+                candidate,
+                fs::read(&arguments[candidate_index]).map_err(|error| error.to_string())?,
+                metadata.uid(),
+                metadata.gid(),
+                metadata.mode() & 0o777,
+                metadata.nlink(),
+            ));
+        }
+        if executable == std::path::Path::new("/usr/bin/dpkg-deb") {
+            if let Some((replacement, incoming)) = self.source_swap.lock().unwrap().take() {
+                fs::rename(replacement, incoming).map_err(|error| error.to_string())?;
+            }
+            let stdout = if arguments.get(2).is_some_and(|field| field == "Package") {
+                b"vonk-forge-agent\n".to_vec()
+            } else {
+                b"arm64\n".to_vec()
+            };
+            return Ok(CommandOutput {
+                success: true,
+                stdout,
+                exit_code: Some(0),
+            });
+        }
+        let success = !*self.fail_dpkg.lock().unwrap();
+        Ok(CommandOutput {
+            success,
+            stdout: Vec::new(),
+            exit_code: Some(if success { 0 } else { 1 }),
+        })
+    }
+}
+
 type SharedCalls = Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>;
 
 impl CommandRunner for RecordingRunner {
@@ -330,6 +392,7 @@ fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     fs::create_dir_all(&roots.models).unwrap();
     fs::create_dir_all(&roots.state).unwrap();
     fs::create_dir_all(&roots.incoming).unwrap();
+    fs::create_dir_all(roots.package_custody.parent().unwrap()).unwrap();
     (temp, roots, RecordingRunner::default(), signer(9))
 }
 
@@ -943,11 +1006,9 @@ fn artifacts_are_verified_before_package_mutation() {
     .unwrap();
 
     let bad_package = "e".repeat(64);
-    fs::write(
-        roots.incoming.join(format!("{bad_package}.deb")),
-        b"not that digest",
-    )
-    .unwrap();
+    let incoming = roots.incoming.join(format!("{bad_package}.deb"));
+    fs::write(&incoming, b"not that digest").unwrap();
+    fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(
         executor
             .execute(&HostOperation::InstallVonkDeb {
@@ -957,6 +1018,12 @@ fn artifacts_are_verified_before_package_mutation() {
             .is_err()
     );
     assert!(runner.calls.lock().unwrap().is_empty());
+    assert!(
+        fs::read_dir(&roots.package_custody)
+            .unwrap()
+            .next()
+            .is_none()
+    );
 }
 
 #[test]
@@ -967,13 +1034,15 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
         roots.clone(),
         release.public_key().as_ref(),
         runner.clone(),
-        None,
+        Some(package_owner),
     )
     .unwrap()
     .with_package_owner(package_owner);
     let package = b"signed deb";
     let digest = vonk_agent_protocol::hex_sha256(package);
-    fs::write(roots.incoming.join(format!("{digest}.deb")), package).unwrap();
+    let incoming = roots.incoming.join(format!("{digest}.deb"));
+    fs::write(&incoming, package).unwrap();
+    fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
     let signature = release.sign(
         vonk_agent_helper::protocol::artifact_signing_bytes("deb", &digest)
             .unwrap()
@@ -1014,4 +1083,248 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
     );
     assert_eq!(calls[4].0, PathBuf::from("/usr/bin/systemd-run"));
     assert!(calls[4].1.contains(&"--on-active=300s".to_owned()));
+}
+
+fn signed_package(
+    roots: &ManagedRoots,
+    release: &Ed25519KeyPair,
+    body: &[u8],
+) -> (String, String, PathBuf) {
+    let digest = hex_sha256(body);
+    let incoming = roots.incoming.join(format!("{digest}.deb"));
+    fs::write(&incoming, body).unwrap();
+    fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
+    let signature = release.sign(
+        vonk_agent_helper::protocol::artifact_signing_bytes("deb", &digest)
+            .unwrap()
+            .as_slice(),
+    );
+    (digest, hex::encode(signature.as_ref()), incoming)
+}
+
+#[test]
+fn startup_sweeps_only_exact_root_custody_shapes() {
+    let (temp, roots, runner, release) = fixture();
+    let owner = fs::metadata(&roots.data).unwrap().uid();
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner,
+        Some(owner),
+    )
+    .unwrap();
+    executor.prepare_package_custody().unwrap();
+
+    let stale = roots.package_custody.join("a".repeat(32));
+    fs::create_dir(&stale).unwrap();
+    fs::set_permissions(&stale, fs::Permissions::from_mode(0o700)).unwrap();
+    let candidate = stale.join(format!("{}.deb", "b".repeat(64)));
+    fs::write(&candidate, b"stale root-owned candidate").unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o600)).unwrap();
+
+    executor.prepare_package_custody().unwrap();
+    assert!(
+        fs::read_dir(&roots.package_custody)
+            .unwrap()
+            .next()
+            .is_none()
+    );
+
+    let hostile = roots.package_custody.join("c".repeat(32));
+    fs::create_dir(&hostile).unwrap();
+    fs::set_permissions(&hostile, fs::Permissions::from_mode(0o700)).unwrap();
+    let outside = temp.path().join("must-not-delete");
+    fs::write(&outside, b"outside custody").unwrap();
+    symlink(&outside, hostile.join(format!("{}.deb", "d".repeat(64)))).unwrap();
+
+    assert!(executor.prepare_package_custody().is_err());
+    assert_eq!(fs::read(outside).unwrap(), b"outside custody");
+}
+
+#[test]
+fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
+    for attack in ["symlink", "hardlink", "mode"] {
+        let (temp, roots, runner, release) = fixture();
+        let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
+        let package = b"signed package";
+        let digest = hex_sha256(package);
+        let incoming = roots.incoming.join(format!("{digest}.deb"));
+        match attack {
+            "symlink" => {
+                let outside = temp.path().join("outside.deb");
+                fs::write(&outside, package).unwrap();
+                symlink(outside, &incoming).unwrap();
+            }
+            "hardlink" => {
+                fs::write(&incoming, package).unwrap();
+                fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
+                fs::hard_link(&incoming, temp.path().join("linked.deb")).unwrap();
+            }
+            "mode" => {
+                fs::write(&incoming, package).unwrap();
+                fs::set_permissions(&incoming, fs::Permissions::from_mode(0o640)).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let signature = release.sign(
+            vonk_agent_helper::protocol::artifact_signing_bytes("deb", &digest)
+                .unwrap()
+                .as_slice(),
+        );
+        let executor = OperationExecutor::new(
+            roots.clone(),
+            release.public_key().as_ref(),
+            runner.clone(),
+            Some(package_owner),
+        )
+        .unwrap()
+        .with_package_owner(package_owner);
+
+        assert!(
+            executor
+                .execute(&HostOperation::InstallVonkDeb {
+                    package_sha256: digest,
+                    package_signature: hex::encode(signature.as_ref()),
+                })
+                .is_err(),
+            "accepted {attack} package"
+        );
+        assert!(runner.calls.lock().unwrap().is_empty());
+        assert!(
+            !roots.package_custody.exists()
+                || fs::read_dir(&roots.package_custody)
+                    .unwrap()
+                    .next()
+                    .is_none()
+        );
+    }
+}
+
+#[test]
+fn root_custody_closes_the_agent_path_swap_race_and_compiles_exact_dpkg_argv() {
+    let (_temp, roots, _runner, release) = fixture();
+    let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
+    let body = b"exact signed package bytes";
+    let (digest, signature, incoming) = signed_package(&roots, &release, body);
+    let replacement = roots.incoming.join("agent-controlled-replacement.tmp");
+    fs::write(&replacement, b"different bytes after verification").unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o600)).unwrap();
+    let runner = AdversarialPackageRunner::default();
+    *runner.source_swap.lock().unwrap() = Some((replacement, incoming.clone()));
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner.clone(),
+        Some(package_owner),
+    )
+    .unwrap()
+    .with_package_owner(package_owner);
+
+    executor
+        .execute(&HostOperation::InstallVonkDeb {
+            package_sha256: digest.clone(),
+            package_signature: signature,
+        })
+        .unwrap();
+
+    let observed = runner.observed_candidates.lock().unwrap();
+    assert_eq!(observed.len(), 3);
+    let candidate = observed[0].0.clone();
+    for (path, bytes, uid, gid, mode, links) in observed.iter() {
+        assert_eq!(path, &candidate);
+        assert_eq!(bytes, body);
+        assert_eq!(
+            (*uid, *gid),
+            (package_owner, fs::metadata(&roots.data).unwrap().gid())
+        );
+        assert_eq!((*mode, *links), (0o600, 1));
+    }
+    let relative = candidate.strip_prefix(&roots.package_custody).unwrap();
+    let components = relative
+        .iter()
+        .map(|part| part.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(components.len(), 2);
+    assert_eq!(components[0].len(), 32);
+    assert!(
+        components[0]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
+    assert_eq!(components[1], format!("{digest}.deb"));
+    let calls = runner.calls.lock().unwrap();
+    assert_eq!(
+        calls.as_slice(),
+        [
+            (
+                PathBuf::from("/usr/bin/dpkg-deb"),
+                vec![
+                    "--field".to_owned(),
+                    candidate.display().to_string(),
+                    "Package".to_owned()
+                ],
+            ),
+            (
+                PathBuf::from("/usr/bin/dpkg-deb"),
+                vec![
+                    "--field".to_owned(),
+                    candidate.display().to_string(),
+                    "Architecture".to_owned()
+                ],
+            ),
+            (
+                PathBuf::from("/usr/bin/dpkg"),
+                vec![
+                    "--install".to_owned(),
+                    "--force-confold".to_owned(),
+                    candidate.display().to_string(),
+                ],
+            ),
+        ]
+    );
+    assert_eq!(
+        fs::read(&incoming).unwrap(),
+        b"different bytes after verification"
+    );
+    assert!(!candidate.exists());
+    assert!(
+        fs::read_dir(&roots.package_custody)
+            .unwrap()
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
+fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
+    let (_temp, roots, _runner, release) = fixture();
+    let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
+    let body = b"signed package that dpkg rejects";
+    let (digest, signature, incoming) = signed_package(&roots, &release, body);
+    let runner = AdversarialPackageRunner::default();
+    *runner.fail_dpkg.lock().unwrap() = true;
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner,
+        Some(package_owner),
+    )
+    .unwrap()
+    .with_package_owner(package_owner);
+
+    assert!(
+        executor
+            .execute(&HostOperation::InstallVonkDeb {
+                package_sha256: digest,
+                package_signature: signature,
+            })
+            .is_err()
+    );
+    assert_eq!(fs::read(incoming).unwrap(), body);
+    assert!(
+        fs::read_dir(&roots.package_custody)
+            .unwrap()
+            .next()
+            .is_none()
+    );
 }
