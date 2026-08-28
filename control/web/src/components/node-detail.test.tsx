@@ -104,6 +104,16 @@ test("offers an individual agent upgrade from Spark detail", async () => {
   expect(onUpgrade).toHaveBeenCalledOnce();
 });
 
+test("opens a Spark-scoped model management workspace", () => {
+  const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  expect(screen.getByRole("link", {name: "Manage models on this Spark"})).toHaveAttribute(
+    "href",
+    `/library?spark=${encodeURIComponent(node().id)}`,
+  );
+});
+
 test("shows structured node evidence and a retryable history error", async () => {
   let fail = true;
   const control = {

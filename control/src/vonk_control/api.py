@@ -64,6 +64,7 @@ from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
 )
+from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
@@ -447,6 +448,7 @@ def create_app(
     recipe_library: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    fleet_profiles: Any | None = None,
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
 ) -> FastAPI:
@@ -677,6 +679,12 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         projection=library_projection,
+    )
+    install_fleet_profile_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        profiles=fleet_profiles,
+        audits=audits,
     )
     install_workload_run_routes(
         app, actor_dependency=authenticated_actor, audits=audits, workflow=workload_run
@@ -1352,6 +1360,13 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
+    from .fleet_profiles import FleetProfileService
+
+    fleet_profiles = FleetProfileService(
+        sessions,
+        clock=clock,
+        recipe_operations=recipe_operations,
+    )
     agent_upgrades = AgentUpgradeService(
         sessions,
         agent_services.operations,
@@ -1453,6 +1468,7 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         recipe_operations=recipe_operations,
+        fleet_profiles=fleet_profiles,
         agent_upgrades=agent_upgrades,
     )
     web_root = Path(__file__).resolve().parent / "web"

@@ -34,7 +34,7 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeVisible();
   await expect(page.locator("h1")).toHaveCount(1);
   const primaryLinks = page.getByRole("navigation", {name: "Primary"}).getByRole("link");
-  await expect(primaryLinks).toHaveText(["Fleet", "Library", "Activity"]);
+  await expect(primaryLinks).toHaveText(["Fleet", "Library"]);
   await expect(page).toHaveURL(/\/library$/);
 
   for (const width of [760, 761, 768, 864, 865]) {

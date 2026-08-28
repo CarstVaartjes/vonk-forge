@@ -4,6 +4,7 @@ import type {ControlApi, EnrollmentGrantResponse, TelemetryHistory, VisualFleetN
 import {CopyButton} from "../components/copy-button";
 import {AgentUpgradeDialog} from "../components/agent-upgrade-dialog";
 import {FleetCompactView, FleetTopologyView} from "../components/fleet-views";
+import {FleetOperatingBoard} from "../components/fleet-operating-board";
 import {NodeCard} from "../components/node-card";
 import {NodeDetail} from "../components/node-detail";
 import {NodeProfileDialog} from "../components/node-profile-dialog";
@@ -438,13 +439,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
                 menu?.querySelector<HTMLElement>("summary")?.focus();
               }}>Close</button>
             </div>
-            <section className="fleet-discovery" aria-label="Fleet discovery">
-              <label className="fleet-search"><span>Find a Spark</span><input ref={discoverySearch} type="search" value={query} placeholder="Search friendly name or hostname" onChange={event => setQuery(event.currentTarget.value)}/></label>
-              <fieldset className="fleet-health-filters"><legend>Health</legend><div>
-                {HEALTH_STATES.map(state => <label key={state}><input type="checkbox" checked={healthFilters.includes(state)} onChange={() => toggleHealthFilter(state)}/><span>{state.charAt(0).toUpperCase() + state.slice(1)} <small>{summary?.[state] ?? 0}</small></span></label>)}
-              </div></fieldset>
+            <section className="fleet-controls-basic" aria-label="Secondary Fleet controls">
               <label className="fleet-sort"><span>Sort</span><select value={sort} onChange={event => setSort(event.currentTarget.value as FleetSort)}><option value="attention">Attention first</option><option value="name">Name A–Z</option></select></label>
-              <div className="fleet-discovery-footer"><span role="status">Showing {visibleNodes.length} of {fleet.snapshot.nodes.length} {fleet.snapshot.nodes.length === 1 ? "Spark" : "Sparks"}</span>{filtersActive && <button type="button" className="fleet-clear-filters" onClick={clearDiscoveryFilters}>Clear filters</button>}</div>
             </section>
             <div className="fleet-view-toolbar">
               <div><strong>Fleet view</strong><span>Change density or inspect topology.</span></div>
@@ -467,28 +463,39 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
+    {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <section className="fleet-discovery fleet-discovery-primary" aria-label="Find and filter Sparks">
+      <label className="fleet-search"><span>Find a Spark</span><input ref={discoverySearch} type="search" value={query} placeholder="Search friendly name or hostname" onChange={event => setQuery(event.currentTarget.value)}/></label>
+      <fieldset className="fleet-health-filters"><legend>Health</legend><div>
+        {HEALTH_STATES.map(state => <label key={state}><input type="checkbox" checked={healthFilters.includes(state)} onChange={() => toggleHealthFilter(state)}/><span>{state.charAt(0).toUpperCase() + state.slice(1)} <small>{summary?.[state] ?? 0}</small></span></label>)}
+      </div></fieldset>
+      <div className="fleet-discovery-footer"><span role="status">Showing {visibleNodes.length} of {fleet.snapshot.nodes.length} {fleet.snapshot.nodes.length === 1 ? "Spark" : "Sparks"}</span>{filtersActive && <button type="button" className="fleet-clear-filters" onClick={clearDiscoveryFilters}>Clear filters</button>}</div>
+    </section>}
+
     {fleet.loading && !fleet.snapshot && <section className="fleet-loading" aria-label="Loading Fleet" role="status">
       <span className="loading-orb" aria-hidden="true"/>
       <div><h3>Joining the Fleet stream</h3><p>Loading the latest registered Fleet projection and node telemetry…</p></div>
     </section>}
 
     {fleet.error && !fleet.snapshot && <section className="fleet-error" role="alert">
-      <p className="fleet-kicker">Connection problem</p>
       <h3>Fleet unavailable</h3>
-      <p>{fleet.error}</p>
+      <p>{fleet.error} Check the controller connection, then try again.</p>
       <button type="button" onClick={fleet.retry}>Retry Fleet</button>
     </section>}
 
     {fleet.snapshot && fleet.snapshot.nodes.length === 0 && <section className="fleet-empty">
-      <p className="fleet-kicker">PostgreSQL registration projection is ready</p>
       <h3>No registered Fleet nodes</h3>
-      <p>Add the first managed node through the onboarding workflow. A silent or offline node would still appear here.</p>
+      <p>The controller is ready. Add the first managed Spark through onboarding; once registered, even a silent or offline Spark remains visible here.</p>
       <button type="button" className="button" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboarding(true); }}>Add your first Spark</button>
     </section>}
 
     {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <>
+      <FleetOperatingBoard api={api} nodes={fleet.snapshot.nodes} now={fleet.now} onManageNode={selectNode}/>
+      <div className="fleet-roster-heading">
+        <div><h2>Spark roster</h2><p>Inspect capacity, telemetry, and workload evidence for each managed Spark.</p></div>
+        <span>{visibleNodes.length} of {fleet.snapshot.nodes.length}</span>
+      </div>
       <div className={`fleet-workspace fleet-view-${viewMode}${selectedNode ? " has-detail" : ""}`}>
-        {visibleNodes.length === 0 && <section className="fleet-filter-empty" aria-label="No matching Sparks"><p className="fleet-kicker">No matches</p><h3>No Sparks match these filters</h3><p>Try another friendly name or include more health states.</p><button type="button" className="button secondary" onClick={clearDiscoveryFilters}>Clear filters</button></section>}
+        {visibleNodes.length === 0 && <section className="fleet-filter-empty" aria-label="No matching Sparks"><h3>No Sparks match these filters</h3><p>Try another friendly name or include more health states.</p><button type="button" className="button secondary" aria-label="Clear Fleet filters from empty state" onClick={clearDiscoveryFilters}>Clear filters</button></section>}
         {visibleNodes.length > 0 && viewMode === "detailed" && <section className="node-grid" aria-label="Fleet nodes detailed">
           {visibleNodes.map(node => <NodeCard
             key={node.id}

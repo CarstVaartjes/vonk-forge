@@ -17,6 +17,10 @@ class _RecoveryCoordinator(Protocol):
     def tick(self) -> bool: ...
 
 
+class _FleetProfileCoordinator(Protocol):
+    def tick(self) -> bool: ...
+
+
 class RecipeOperationWorker:
     def __init__(
         self,
@@ -25,13 +29,17 @@ class RecipeOperationWorker:
         *,
         clock: Callable[[], datetime],
         recoveries: _RecoveryCoordinator | None = None,
+        fleet_profiles: _FleetProfileCoordinator | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
         self._clock = clock
         self._recoveries = recoveries
+        self._fleet_profiles = fleet_profiles
 
     def tick(self) -> bool:
+        if self._fleet_profiles is not None and self._fleet_profiles.tick():
+            return True
         if self._recoveries is not None and self._recoveries.tick():
             return True
         with self._sessions() as session:

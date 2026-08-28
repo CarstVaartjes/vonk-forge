@@ -137,7 +137,19 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
-  const route = libraryRoute(path);
+  const parsedPath = new URL(path, location.origin);
+  const route = libraryRoute(parsedPath.pathname);
+  const preferredNodeId = parsedPath.searchParams.get("spark") ?? undefined;
+  const preferredNodeName = preferredNodeId ? nodeDisplayNames[preferredNodeId] ?? preferredNodeId : undefined;
+  const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => {
+    if (!preferredNodeId || !nextPath.startsWith("/library") || nextPath.startsWith("/library/import") || nextPath.startsWith("/library/create")) {
+      onNavigate(event, nextPath);
+      return;
+    }
+    const next = new URL(nextPath, location.origin);
+    next.searchParams.set("spark", preferredNodeId);
+    onNavigate(event, `${next.pathname}${next.search}`);
+  }, [onNavigate, preferredNodeId]);
 
   useEffect(() => {
     const fleetApi = api as LibraryApi & Partial<Pick<ControlApi, "visualFleet">>;
@@ -292,6 +304,10 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom</a>
       </nav>
     </header>
+    {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing models on ${preferredNodeName}`}>
+      <div><span>Individual Spark workspace</span><strong>{preferredNodeName}</strong><p>Choose a model and recipe. Compatible placement groups containing this Spark are selected first, while every lifecycle change still opens a server-authoritative review.</p></div>
+      <a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a>
+    </aside>}
     {snapshot && <>
       <section className="library-command-bar" aria-label="Library command bar">
         <div className="library-overview" role="region" aria-label="Library summary">
@@ -329,12 +345,13 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         catalogError={catalogError}
         catalogLoading={catalogLoading}
         onClearSearch={() => setQuery("")}
-        onNavigate={onNavigate}
+        onNavigate={contextualNavigate}
         onBusyChange={onBusyChange}
         onRefresh={refreshDetail}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
         onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
         publicRecipes={publicRecipes}
+        preferredNodeId={preferredNodeId}
         query={query}
         route={route}
         snapshot={browserSnapshot}

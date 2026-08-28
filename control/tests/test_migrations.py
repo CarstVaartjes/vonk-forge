@@ -30,6 +30,8 @@ EXPECTED_BASELINE_TABLES = {
     "cluster_mappings",
     "control_process_heartbeats",
     "fleet_event_cursor",
+    "fleet_profile_applications",
+    "fleet_profiles",
     "fleet_stream_events",
     "installation_nodes",
     "job_attempts",

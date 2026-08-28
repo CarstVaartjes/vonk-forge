@@ -209,9 +209,17 @@ def assemble_production_worker(
     """Compose the worker-owned reconciliation runtime."""
 
     from .agent_reconciliation import AgentReconciliationService
+    from .artifact_sizes import DeclaredArtifactSizeResolver
+    from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
+    from .fleet_profiles import FleetProfileService
+    from .install_admission import InstallAdmissionService
+    from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
+    from .recipe_operations import RecipeOperationService
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+    from .run_admission import RunAdmissionService
+    from .source_bundles import DatabaseSourceBundleStore
     from .telemetry_maintenance import (
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
@@ -233,10 +241,38 @@ def assemble_production_worker(
         clock=clock,
         maximum_age_seconds=120,
     )
+    lifecycle = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(
+            sessions,
+            sizes=DeclaredArtifactSizeResolver(),
+            inventory_max_age=300,
+            disk_floor_bytes=10_000_000_000,
+        ),
+        run_admission=RunAdmissionService(
+            sessions,
+            inventory_max_age=300,
+            memory_floor_bytes=4_000_000_000,
+        ),
+        agent_jobs=agent_jobs,
+        clock=clock,
+        route_publications=recipe_routes,
+        builds=RecipeBuildService(
+            sessions,
+            bundles=DatabaseSourceBundleStore(sessions),
+            inventory_max_age=300,
+        ),
+        mappings=ClusterMappingService(sessions),
+    )
     recipe_operations = RecipeOperationWorker(
         sessions,
         recipe_routes,
         clock=clock,
+        fleet_profiles=FleetProfileService(
+            sessions,
+            clock=clock,
+            recipe_operations=lifecycle,
+        ),
         recoveries=DistributedRecoveryCoordinator(
             sessions,
             routes=recipe_routes,

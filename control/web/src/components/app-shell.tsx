@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import type {KeyboardEvent, MouseEvent, ReactNode} from "react";
 import {AdminMenu} from "./admin-menu";
-import {ActivityIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
+import {CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
 
 export type AppRoute = "fleet" | "library" | "activity";
 
@@ -124,7 +124,6 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
           <p className="nav-label">Workspace</p>
           <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
           <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
-          <a href="/activity" className="nav-link nav-link-primary" aria-current={activeRoute === "activity" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "activity")}><ActivityIcon/><span>Activity</span></a>
         </nav>
         <div className="sidebar-footer">
           {operator && <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigateToActivity={event => navigate(event, "activity")}/>}

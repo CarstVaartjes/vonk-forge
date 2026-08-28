@@ -152,27 +152,29 @@ function RejectedEvidence({group, policy}: {group: Group; policy: FreshnessPolic
   </article>;
 }
 
-export function LibraryPlacement({actionsDisabled = false, detail, onReview, policy}: {
+export function LibraryPlacement({actionsDisabled = false, detail, onReview, policy, preferredNodeId}: {
   actionsDisabled?: boolean;
   detail: LibraryRecipeDetail;
   onReview?(target: LibraryActionTarget, trigger: HTMLButtonElement, evidence?: LibraryPlacementGroup): void;
   policy: FreshnessPolicy;
+  preferredNodeId?: string;
 }) {
-  const selectableGroups = installablePlacementGroups(detail);
+  const selectableGroups = installablePlacementGroups(detail).sort((left, right) => Number(right.group.node_ids.includes(preferredNodeId ?? "")) - Number(left.group.node_ids.includes(preferredNodeId ?? "")));
   const selectableSignature = selectableGroups.map(group => group.key).join("|");
-  const soleGroup = selectableGroups.length === 1 ? selectableGroups[0]!.key : "";
-  const [selectedGroup, setSelectedGroup] = useState(soleGroup);
+  const initialGroup = preferredNodeId ? selectableGroups.find(group => group.group.node_ids.includes(preferredNodeId))?.key ?? "" : selectableGroups.length === 1 ? selectableGroups[0]!.key : "";
+  const [selectedGroup, setSelectedGroup] = useState(initialGroup);
   const nodeName = useLibraryNodeName();
   useEffect(() => {
-    setSelectedGroup(current => selectableGroups.some(group => group.key === current) ? current : soleGroup);
-  }, [selectableSignature, soleGroup]);
+    setSelectedGroup(current => selectableGroups.some(group => group.key === current) ? current : initialGroup);
+  }, [initialGroup, selectableSignature]);
   if (detail.placement.length === 0) return <section className="library-section"><h4>Placement</h4><p className="library-placeholder">No valid complete topology placement is available.</p></section>;
   return <section className="library-section placement-section" id="recipe-placement" aria-label="Complete placement groups">
     <div className="section-heading"><div><p className="fleet-kicker">One atomic group</p><h4>Complete placement groups</h4></div><small>Select all ranks together</small></div>
     {detail.placement.map(topology => {
       const installableGroups = [...topology.recommendations, ...topology.rejected_groups]
         .filter(groupInstallable)
-        .filter((group, index, groups) => groups.findIndex(candidate => groupKey(topology.topology_name, candidate) === groupKey(topology.topology_name, group)) === index);
+        .filter((group, index, groups) => groups.findIndex(candidate => groupKey(topology.topology_name, candidate) === groupKey(topology.topology_name, group)) === index)
+        .sort((left, right) => Number(right.node_ids.includes(preferredNodeId ?? "")) - Number(left.node_ids.includes(preferredNodeId ?? "")));
       return <section key={topology.topology_name} className="placement-profile" aria-label={`${topology.topology_name} placement`}>
       <div className="placement-profile-heading"><h5>{humanizeIdentifier(topology.topology_name)}</h5><span>{topology.node_count} Sparks · {installableGroups.length} installable</span></div>
       {!topology.search_complete && <div className="bounded-search-notice" role="note">
@@ -185,9 +187,10 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
         const selected = selectedGroup === key;
         const loadBlocked = group.reasons.some(isLoadBlocker);
         const actions = group.preview_targets.filter(target => !loadBlocked || target.kind !== "run");
-        return <article key={key} className={`placement-group${selected ? " is-selected" : ""}`}>
+        const preferred = group.node_ids.includes(preferredNodeId ?? "");
+        return <article key={key} className={`placement-group${selected ? " is-selected" : ""}${preferred ? " is-preferred-spark" : ""}`}>
           <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${groupName(group, nodeName)}`}>
-            <span>{group.node_ids.map(nodeName).join(" + ")}</span><small>{group.nodes.length} ranks · {loadBlocked ? "installable · load blocked" : "installable and loadable"}</small>
+            <span>{group.node_ids.map(nodeName).join(" + ")}{preferred ? " · selected Spark" : ""}</span><small>{group.nodes.length} ranks · {loadBlocked ? "installable · load blocked" : "installable and loadable"}</small>
           </button>
           <LoadBlockedSummary group={group} nodeCount={topology.node_count}/>
           {selected && actions.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">

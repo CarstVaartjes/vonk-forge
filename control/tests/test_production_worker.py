@@ -9,6 +9,7 @@ from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.settings import SettingsError, WorkerSettings
 from vonk_control.worker import Worker, assemble_production_worker
@@ -39,6 +40,30 @@ def test_production_worker_fails_unknown_generic_work(
     assert persisted.state == "failed"
     assert persisted.status_reason == "unsupported job kind: probe"
     assert persisted.current_attempt == 1
+
+
+def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> None:
+    calls: list[str] = []
+
+    class Profiles:
+        def tick(self) -> bool:
+            calls.append("profiles")
+            return True
+
+    class Routes:
+        def maintain(self, **_kwargs) -> bool:
+            calls.append("routes")
+            return False
+
+    worker = RecipeOperationWorker(
+        None,
+        Routes(),
+        clock=lambda: datetime(2026, 8, 6, tzinfo=UTC),
+        fleet_profiles=Profiles(),
+    )
+
+    assert worker.tick() is True
+    assert calls == ["profiles"]
 
 
 def test_production_builder_wires_reconciliation_and_housekeeping(
@@ -101,6 +126,8 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         worker._housekeeping._maintenance,
         telemetry_maintenance.TelemetryMaintenance,
     )
+    assert worker._recipes._fleet_profiles is not None
+    assert worker._recipes._fleet_profiles._recipe_operations is not None
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(

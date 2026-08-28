@@ -137,6 +137,21 @@ function localSnapshot() {
 
 async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
+  const profile = {
+    schema_version: 1, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
+    installation_policy: "keep-cached", labels: {purpose: "interactive"}, favorite: true, profile_digest: "d".repeat(64), created_by: "admin",
+    created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
+    assignments: [{id: "00000000-0000-4000-8000-000000000102", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", model_title: "Qwen 3", topology_name: "pair", desired_state: "running", alias: "chat", nodes: [
+      {node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: borealisId, rank: 1, role: "worker", endpoint_owner: false},
+    ]}],
+  };
+  const profilePreview = {
+    schema_version: 1, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
+    summary: {already_correct: 0, blockers: 1, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
+    assignments: [{assignment_id: profile.assignments[0].id, recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", desired_state: "running", current_state: "degraded", node_ids: [nodeId, borealisId], actions: [], reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}]}],
+    reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}], steps: [],
+  };
   const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
   libraryFixtures.set(page, libraryState);
   await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
@@ -147,6 +162,8 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 1, generated_at: snapshot.generated_at, profiles: [profile]}}));
+  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
     const nodeId = route.request().url().split("/").at(-2) ?? "";
     const input = await route.request().postDataJSON() as {display_name: string};
@@ -251,6 +268,9 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expect(fleetSummary).toContainText("1 loaded recipe");
   await expect(fleetSummary.getByText("Live", {exact: true})).toBeVisible();
   await expect(fleetSummary.getByText("Offline", {exact: true})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Workload map"})).toBeVisible();
+  await expect(page.getByRole("table").getByText("Qwen 3")).toBeVisible();
+  await expect(page.getByText("1 blocked", {exact: true})).toBeVisible();
   const aurora = page.getByRole("article", {name: /Aurora — (Live|Delayed)/});
   await expect(aurora).toContainText("NVIDIA GB10 · P0");
   await expect(aurora.getByRole("img", {name: "GPU 24h trend"})).toBeVisible();
@@ -271,6 +291,9 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("link", {name: "Manage models on this Spark"}).click();
+  await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
+  await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
 
 test("Fleet cards default to 24h trends and expose editable friendly identity", async ({page}) => {
@@ -295,10 +318,13 @@ test("Fleet cards default to 24h trends and expose editable friendly identity", 
 
 test("Fleet discovery searches friendly names and combines actionable health filters", async ({page}) => {
   await page.goto("/fleet");
+  const search = page.getByRole("searchbox", {name: "Find a Spark"});
+  await expect(search).toBeVisible();
+  await expect(page.getByRole("group", {name: "Filter Fleet by health"})).toBeVisible();
   await openFleetControls(page);
   await expect(page.getByRole("button", {name: "Detailed"})).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", {name: "Close Fleet controls"}).click();
 
-  const search = page.getByRole("searchbox", {name: "Find a Spark"});
   await search.fill("Borealis");
   await expect(page.getByRole("article", {name: "Borealis — Offline"})).toBeVisible();
   await expect(page.getByRole("article", {name: /Aurora —/})).toHaveCount(0);
@@ -380,6 +406,7 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   expect(commandRows.summary.top).toBeGreaterThanOrEqual(commandRows.actions.bottom);
 
   await page.getByRole("button", {name: "Topology"}).click();
+  await page.getByRole("button", {name: "Close Fleet controls"}).click();
 
   await expect(page.getByRole("region", {name: "Fleet topology"})).toBeVisible();
   await expect(page.getByRole("button", {name: /View Aurora details/})).toBeVisible();
@@ -408,8 +435,48 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await expect(page.locator(".fleet-controls-popover")).toBeHidden();
   await expect(page.locator(".fleet-controls-menu > summary")).toBeFocused();
   await expect(page.getByRole("heading", {name: "Fleet"})).toBeVisible();
+  await expect(page.locator(".workload-matrix-scroll")).toBeHidden();
+  const mobileWorkloads = page.getByRole("list", {name: "Workloads by Spark"});
+  await expect(mobileWorkloads).toBeVisible();
+  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Aurora");
+  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Borealis");
   await expectNoSeriousAccessibilityViolations(page);
   await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
+});
+
+test("Fleet resilient-state headings remain plain and scannable", async ({page}, testInfo) => {
+  await page.goto("/fleet");
+  await page.getByRole("button", {name: "View Aurora details"}).click();
+  const detail = await page.locator(".node-detail-heading").evaluate(element => element.outerHTML);
+
+  await page.getByRole("searchbox", {name: "Find a Spark"}).fill("no-such-spark");
+  const filtered = await page.locator(".fleet-filter-empty").evaluate(element => element.outerHTML);
+
+  const empty = {...localSnapshot(), nodes: []};
+  await page.route("**/api/v1/fleet/stream", route => route.fulfill({
+    status: 200,
+    contentType: "text/event-stream",
+    body: `id: ${empty.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot: empty})}\n\n`,
+  }));
+  await page.route("**/api/v1/fleet", route => route.fulfill({json: empty}));
+  await page.reload();
+  const emptyState = await page.locator(".fleet-empty").evaluate(element => element.outerHTML);
+
+  await page.route("**/api/v1/fleet/stream", route => route.fulfill({status: 503, body: "stream unavailable"}));
+  await page.route("**/api/v1/fleet", route => route.fulfill({status: 503, json: {detail: "projection unavailable"}}));
+  await page.reload();
+  const errorState = await page.locator(".fleet-error").evaluate(element => element.outerHTML);
+  browserProblems.set(page, []);
+
+  for (const state of [detail, filtered, emptyState, errorState]) {
+    expect(state).not.toContain("fleet-kicker");
+    expect(state).not.toContain("node-eyebrow");
+  }
+
+  await page.setContent(`<main class="state-evidence"><header><h1>Fleet resilient states</h1><p>Plain headings keep recovery and inspection states direct.</p></header><section><h2>Connection failure</h2>${errorState}</section><section><h2>Registered Fleet is empty</h2>${emptyState}</section><section><h2>Filters return no Sparks</h2>${filtered}</section><section><h2>Selected Spark detail</h2>${detail}</section></main>`);
+  await page.addStyleTag({path: "src/styles.css"});
+  await page.addStyleTag({content: `body{padding:32px;background:#07100d}.state-evidence{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:1180px;margin:auto}.state-evidence>header{grid-column:1/-1}.state-evidence>header h1{margin:0;font-size:32px}.state-evidence>header p{color:var(--text-muted)}.state-evidence>section{min-width:0;padding:18px;border:1px solid var(--border);border-radius:14px;background:#0c1815}.state-evidence>section>h2{margin:0 0 12px;color:var(--text-subtle);font-size:13px}.state-evidence .fleet-error,.state-evidence .fleet-empty,.state-evidence .fleet-filter-empty{margin:0}.state-evidence .node-detail-heading{padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--surface-panel)}@media(max-width:760px){.state-evidence{grid-template-columns:1fr}}`});
+  await page.screenshot({path: testInfo.outputPath("fleet-resilient-states.png"), fullPage: true});
 });
 
 test("Add Spark preserves an in-flight and revealed one-time grant until an explicit decision", async ({page}) => {

@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-28T00:06:04Z",
+  "title": "Design System: Vonk Forge Control",
+  "extensions": {
+    "colorMeta": {
+      "surface-base": {
+        "role": "neutral",
+        "displayName": "Graphite Base",
+        "canonical": "#090c09",
+        "tonalRamp": ["oklch(15% 0.010 140)", "oklch(25% 0.010 140)", "oklch(36% 0.010 140)", "oklch(48% 0.010 140)", "oklch(60% 0.010 140)", "oklch(72% 0.010 140)", "oklch(84% 0.008 140)", "oklch(95% 0.004 140)"]
+      },
+      "surface-sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar Graphite",
+        "canonical": "#0d120d",
+        "tonalRamp": ["oklch(15% 0.012 140)", "oklch(25% 0.012 140)", "oklch(36% 0.011 140)", "oklch(48% 0.010 140)", "oklch(60% 0.009 140)", "oklch(72% 0.008 140)", "oklch(84% 0.006 140)", "oklch(95% 0.003 140)"]
+      },
+      "surface-panel": {
+        "role": "neutral",
+        "displayName": "Panel Graphite",
+        "canonical": "#111912",
+        "tonalRamp": ["oklch(15% 0.016 140)", "oklch(25% 0.015 140)", "oklch(36% 0.014 140)", "oklch(48% 0.013 140)", "oklch(60% 0.011 140)", "oklch(72% 0.009 140)", "oklch(84% 0.006 140)", "oklch(95% 0.003 140)"]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "canonical": "#19231a",
+        "tonalRamp": ["oklch(15% 0.020 140)", "oklch(25% 0.019 140)", "oklch(36% 0.017 140)", "oklch(48% 0.015 140)", "oklch(60% 0.012 140)", "oklch(72% 0.009 140)", "oklch(84% 0.006 140)", "oklch(95% 0.003 140)"]
+      },
+      "surface-recessed": {
+        "role": "neutral",
+        "displayName": "Recessed Graphite",
+        "canonical": "#07110e",
+        "tonalRamp": ["oklch(15% 0.018 165)", "oklch(25% 0.017 165)", "oklch(36% 0.015 165)", "oklch(48% 0.013 165)", "oklch(60% 0.011 165)", "oklch(72% 0.009 165)", "oklch(84% 0.006 165)", "oklch(95% 0.003 165)"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Structural Line",
+        "canonical": "#3b4336",
+        "tonalRamp": ["oklch(15% 0.020 125)", "oklch(25% 0.023 125)", "oklch(36% 0.025 125)", "oklch(48% 0.023 125)", "oklch(60% 0.020 125)", "oklch(72% 0.016 125)", "oklch(84% 0.010 125)", "oklch(95% 0.004 125)"]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Strong Structural Line",
+        "canonical": "#5f6854",
+        "tonalRamp": ["oklch(15% 0.025 125)", "oklch(25% 0.030 125)", "oklch(36% 0.034 125)", "oklch(48% 0.032 125)", "oklch(60% 0.027 125)", "oklch(72% 0.021 125)", "oklch(84% 0.013 125)", "oklch(95% 0.005 125)"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Primary Text",
+        "canonical": "#f0f3eb",
+        "tonalRamp": ["oklch(15% 0.008 120)", "oklch(25% 0.008 120)", "oklch(36% 0.008 120)", "oklch(48% 0.008 120)", "oklch(60% 0.007 120)", "oklch(72% 0.006 120)", "oklch(84% 0.005 120)", "oklch(95% 0.004 120)"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Text",
+        "canonical": "#abb5a7",
+        "tonalRamp": ["oklch(15% 0.015 135)", "oklch(25% 0.017 135)", "oklch(36% 0.018 135)", "oklch(48% 0.017 135)", "oklch(60% 0.015 135)", "oklch(72% 0.012 135)", "oklch(84% 0.008 135)", "oklch(95% 0.004 135)"]
+      },
+      "text-subtle": {
+        "role": "neutral",
+        "displayName": "Subtle Text",
+        "canonical": "#8d9988",
+        "tonalRamp": ["oklch(15% 0.018 135)", "oklch(25% 0.020 135)", "oklch(36% 0.021 135)", "oklch(48% 0.020 135)", "oklch(60% 0.017 135)", "oklch(72% 0.013 135)", "oklch(84% 0.008 135)", "oklch(95% 0.004 135)"]
+      },
+      "mint": {
+        "role": "primary",
+        "displayName": "NVIDIA Action Green",
+        "canonical": "#7cc64b",
+        "tonalRamp": ["oklch(15% 0.060 135)", "oklch(25% 0.090 135)", "oklch(36% 0.130 135)", "oklch(48% 0.170 135)", "oklch(60% 0.190 135)", "oklch(72% 0.170 135)", "oklch(84% 0.110 135)", "oklch(95% 0.040 135)"]
+      },
+      "mint-strong": {
+        "role": "primary",
+        "displayName": "Charged Green",
+        "canonical": "#a9ec7a",
+        "tonalRamp": ["oklch(15% 0.055 135)", "oklch(25% 0.085 135)", "oklch(36% 0.125 135)", "oklch(48% 0.165 135)", "oklch(60% 0.195 135)", "oklch(72% 0.180 135)", "oklch(84% 0.125 135)", "oklch(95% 0.045 135)"]
+      },
+      "mint-ink": {
+        "role": "primary",
+        "displayName": "Green Ink",
+        "canonical": "#0b1907",
+        "tonalRamp": ["oklch(15% 0.035 135)", "oklch(25% 0.055 135)", "oklch(36% 0.075 135)", "oklch(48% 0.090 135)", "oklch(60% 0.095 135)", "oklch(72% 0.080 135)", "oklch(84% 0.050 135)", "oklch(95% 0.020 135)"]
+      },
+      "titanium": {
+        "role": "secondary",
+        "displayName": "Champagne Titanium",
+        "canonical": "#c8b996",
+        "tonalRamp": ["oklch(15% 0.025 82)", "oklch(25% 0.035 82)", "oklch(36% 0.045 82)", "oklch(48% 0.055 82)", "oklch(60% 0.060 82)", "oklch(72% 0.052 82)", "oklch(84% 0.035 82)", "oklch(95% 0.012 82)"]
+      },
+      "titanium-muted": {
+        "role": "secondary",
+        "displayName": "Aged Titanium",
+        "canonical": "#92866d",
+        "tonalRamp": ["oklch(15% 0.024 82)", "oklch(25% 0.033 82)", "oklch(36% 0.041 82)", "oklch(48% 0.047 82)", "oklch(60% 0.045 82)", "oklch(72% 0.038 82)", "oklch(84% 0.025 82)", "oklch(95% 0.010 82)"]
+      },
+      "focus": {
+        "role": "primary",
+        "displayName": "Focus Lime",
+        "canonical": "#c3f89d",
+        "tonalRamp": ["oklch(15% 0.045 135)", "oklch(25% 0.070 135)", "oklch(36% 0.105 135)", "oklch(48% 0.140 135)", "oklch(60% 0.165 135)", "oklch(72% 0.150 135)", "oklch(84% 0.105 135)", "oklch(95% 0.040 135)"]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "Attention Amber",
+        "canonical": "#f4c66b",
+        "tonalRamp": ["oklch(15% 0.040 80)", "oklch(25% 0.070 80)", "oklch(36% 0.110 80)", "oklch(48% 0.145 80)", "oklch(60% 0.165 80)", "oklch(72% 0.145 80)", "oklch(84% 0.095 80)", "oklch(95% 0.035 80)"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Proven Failure Red",
+        "canonical": "#ff919d",
+        "tonalRamp": ["oklch(15% 0.045 20)", "oklch(25% 0.080 20)", "oklch(36% 0.125 20)", "oklch(48% 0.170 20)", "oklch(60% 0.190 20)", "oklch(72% 0.165 20)", "oklch(84% 0.105 20)", "oklch(95% 0.035 20)"]
+      },
+      "info": {
+        "role": "tertiary",
+        "displayName": "Installed Blue",
+        "canonical": "#94cfff",
+        "tonalRamp": ["oklch(15% 0.035 245)", "oklch(25% 0.060 245)", "oklch(36% 0.090 245)", "oklch(48% 0.120 245)", "oklch(60% 0.140 245)", "oklch(72% 0.125 245)", "oklch(84% 0.085 245)", "oklch(95% 0.030 245)"]
+      },
+      "workcell-canvas": {
+        "role": "neutral",
+        "displayName": "Inspection Canvas",
+        "canonical": "#f4f1e8",
+        "tonalRamp": ["oklch(15% 0.012 85)", "oklch(25% 0.018 85)", "oklch(36% 0.024 85)", "oklch(48% 0.030 85)", "oklch(60% 0.032 85)", "oklch(72% 0.028 85)", "oklch(84% 0.020 85)", "oklch(95% 0.010 85)"]
+      },
+      "workcell-ink": {
+        "role": "neutral",
+        "displayName": "Inspection Ink",
+        "canonical": "#181a16",
+        "tonalRamp": ["oklch(15% 0.008 115)", "oklch(25% 0.010 115)", "oklch(36% 0.011 115)", "oklch(48% 0.011 115)", "oklch(60% 0.010 115)", "oklch(72% 0.008 115)", "oklch(84% 0.006 115)", "oklch(95% 0.003 115)"]
+      },
+      "workcell-muted": {
+        "role": "neutral",
+        "displayName": "Inspection Muted",
+        "canonical": "#5d6258",
+        "tonalRamp": ["oklch(15% 0.010 115)", "oklch(25% 0.014 115)", "oklch(36% 0.017 115)", "oklch(48% 0.018 115)", "oklch(60% 0.016 115)", "oklch(72% 0.013 115)", "oklch(84% 0.008 115)", "oklch(95% 0.004 115)"]
+      },
+      "workcell-line": {
+        "role": "neutral",
+        "displayName": "Inspection Line",
+        "canonical": "#c9c4b6",
+        "tonalRamp": ["oklch(15% 0.012 82)", "oklch(25% 0.017 82)", "oklch(36% 0.022 82)", "oklch(48% 0.025 82)", "oklch(60% 0.024 82)", "oklch(72% 0.020 82)", "oklch(84% 0.013 82)", "oklch(95% 0.006 82)"]
+      }
+    },
+    "typographyMeta": {
+      "display": {"displayName": "Workspace Display", "purpose": "Rare workspace-level titles, especially Library orientation."},
+      "headline": {"displayName": "Command Headline", "purpose": "Command titles, board headings, and primary section names."},
+      "title": {"displayName": "Fixture Title", "purpose": "Spark, profile, recipe, and workload names."},
+      "body": {"displayName": "Operating Body", "purpose": "Compact explanations, helper copy, and evidence context."},
+      "label": {"displayName": "Measurement Label", "purpose": "Uppercase axes, field labels, and metric categories."}
+    },
+    "shadows": [
+      {"name": "fixture-ambient", "value": "0 1.4rem 4rem #0002, inset 0 1px #ffffff0b", "purpose": "Quiet separation for complete dark Spark and recipe fixtures."},
+      {"name": "inspection-board-ambient", "value": "0 1.3rem 3.4rem #0005", "purpose": "Lifts the complete warm workload board as one instrument."},
+      {"name": "overlay-ambient", "value": "0 2rem 6rem #000b", "purpose": "Consequential dialogs and control overlays only."}
+    ],
+    "motion": [
+      {"name": "disclosure", "value": "160ms ease", "purpose": "Navigation chevrons and disclosure indicators."},
+      {"name": "profile-progress", "value": "450ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Durable profile-application progress changes."},
+      {"name": "telemetry-spin", "value": "850ms linear infinite", "purpose": "Loading telemetry indicators only."},
+      {"name": "reduced-motion", "value": "0.01ms", "purpose": "Effectively removes non-essential animation when reduced motion is requested."}
+    ],
+    "breakpoints": [
+      {"name": "board-two-rail", "value": "82rem"},
+      {"name": "state-strip-wrap", "value": "68rem"},
+      {"name": "shell-stack", "value": "54rem"},
+      {"name": "workload-stack", "value": "42rem"},
+      {"name": "narrow-actions", "value": "34rem"}
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The local affirmative action for a safe, understood change.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Apply profile</button>",
+      "css": ".ds-btn-primary { display:inline-flex; min-height:2.75rem; align-items:center; justify-content:center; border:0; border-radius:.45rem; padding:.7rem 1rem; background:var(--mint,#7cc64b); color:var(--mint-ink,#0b1907); font:750 .8rem/1.2 ui-sans-serif,system-ui,sans-serif; cursor:pointer; } .ds-btn-primary:hover { background:var(--mint,#7cc64b); } .ds-btn-primary:active { background:var(--mint,#7cc64b); } .ds-btn-primary:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A bordered inspection, cancellation, or alternate-path action.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">View details</button>",
+      "css": ".ds-btn-secondary { display:inline-flex; min-height:2.75rem; align-items:center; justify-content:center; border:1px solid var(--border-strong,#5f6854); border-radius:.45rem; padding:.7rem 1rem; background:transparent; color:var(--text,#f0f3eb); font:750 .8rem/1.2 ui-sans-serif,system-ui,sans-serif; cursor:pointer; } .ds-btn-secondary:hover { background:var(--surface-raised,#19231a); color:var(--mint-strong,#a9ec7a); } .ds-btn-secondary:active { background:var(--surface-panel,#111912); } .ds-btn-secondary:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Search Input",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "A recessed full-width field for fleet and library command rails.",
+      "html": "<label class=\"ds-search\"><span>Find a Spark</span><input type=\"search\" placeholder=\"Search friendly name or hostname\"></label>",
+      "css": ".ds-search { display:grid; gap:.35rem; color:var(--text-subtle,#8d9988); font:800 .7rem/1.2 ui-sans-serif,system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; } .ds-search input { min-height:2.75rem; width:100%; border:1px solid var(--border-strong,#5f6854); border-radius:.45rem; padding:.7rem; background:var(--surface-recessed,#07110e); color:var(--text,#f0f3eb); font:400 .8rem/1.45 ui-sans-serif,system-ui,sans-serif; text-transform:none; letter-spacing:normal; caret-color:var(--mint,#7cc64b); } .ds-search input:hover { border-color:var(--border-strong,#5f6854); } .ds-search input:active { border-color:var(--mint,#7cc64b); } .ds-search input:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Active Navigation Link",
+      "kind": "nav",
+      "refersTo": "nav-link-active",
+      "description": "The current Fleet or Library location in the graphite shell.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Primary\"><a class=\"ds-nav-link\" href=\"#\" aria-current=\"page\">Fleet</a><a class=\"ds-nav-link\" href=\"#\">Library</a></nav>",
+      "css": ".ds-nav { display:grid; gap:.3rem; width:15rem; padding:.75rem; background:var(--surface-sidebar,#0d120d); } .ds-nav-link { display:flex; min-height:2.75rem; align-items:center; border-radius:.65rem; padding:.65rem .75rem; color:var(--text-muted,#abb5a7); font:400 .9rem/1.2 ui-sans-serif,system-ui,sans-serif; text-decoration:none; } .ds-nav-link:hover { background:var(--surface-panel,#111912); color:var(--text,#f0f3eb); } .ds-nav-link[aria-current=\"page\"] { background:#15342a; color:var(--mint-strong,#a9ec7a); box-shadow:inset 3px 0 var(--mint,#7cc64b); } .ds-nav-link:active { background:var(--surface-raised,#19231a); } .ds-nav-link:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Healthy Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill-healthy",
+      "description": "A compact textual health label that supplements, never replaces, evidence.",
+      "html": "<span class=\"ds-status-healthy\">Live</span>",
+      "css": ".ds-status-healthy { display:inline-flex; width:max-content; max-width:100%; align-items:center; border:1px solid #2c624f; border-radius:999px; padding:.25rem .55rem; background:#153b30; color:var(--mint-strong,#a9ec7a); font:750 .78rem/1.2 ui-sans-serif,system-ui,sans-serif; } .ds-status-healthy:hover { border-color:var(--mint,#7cc64b); } .ds-status-healthy:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Spark Workcell",
+      "kind": "card",
+      "refersTo": "spark-workcell",
+      "description": "A complete inspectable Spark fixture with one strong health edge.",
+      "html": "<article class=\"ds-spark-workcell ds-state-live\"><header><span>Spark</span><strong>Aurora</strong><small>aurora.fixture.invalid</small></header><dl><div><dt>Health</dt><dd>Live</dd></div><div><dt>Unified memory</dt><dd>84.0 GiB available</dd></div><div><dt>Workloads</dt><dd>1 loaded</dd></div></dl></article>",
+      "css": ".ds-spark-workcell { position:relative; overflow:hidden; border:1px solid var(--border,#3b4336); border-radius:1rem; padding:1rem; background:linear-gradient(155deg,#13221f 0,#0d1916 70%); color:var(--text,#f0f3eb); box-shadow:0 1.4rem 4rem #0002,inset 0 1px #ffffff0b; font-family:ui-sans-serif,system-ui,sans-serif; } .ds-spark-workcell::before { content:\"\"; position:absolute; top:0; right:1.25rem; left:1.25rem; height:2px; background:var(--node-tone,var(--border,#3b4336)); box-shadow:0 0 1rem var(--node-tone,var(--border,#3b4336)); } .ds-spark-workcell.ds-state-live { --node-tone:var(--mint,#7cc64b); } .ds-spark-workcell:hover { border-color:var(--border-strong,#5f6854); } .ds-spark-workcell:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; } .ds-spark-workcell header { display:grid; gap:.18rem; padding-bottom:.75rem; } .ds-spark-workcell header span,.ds-spark-workcell dt { color:var(--text-subtle,#8d9988); font-size:.69rem; font-weight:700; letter-spacing:.035em; text-transform:uppercase; } .ds-spark-workcell header strong { font-size:1.15rem; } .ds-spark-workcell header small { color:var(--text-subtle,#8d9988); font-size:.72rem; } .ds-spark-workcell dl { display:grid; gap:1px; margin:0; overflow:hidden; border:1px solid var(--border,#3b4336); border-radius:.85rem; background:var(--border,#3b4336); } .ds-spark-workcell dl div { padding:.72rem .8rem; background:#0c1815; } .ds-spark-workcell dd { margin:.28rem 0 0; font-size:.84rem; font-weight:650; }"
+    },
+    {
+      "name": "Fleet Profile Rail Item",
+      "kind": "custom",
+      "refersTo": "profile-rail-item",
+      "description": "A compact saved desired-state selection inside the hardware rail.",
+      "html": "<button class=\"ds-profile-rail-item\" type=\"button\" aria-pressed=\"true\"><span>Studio service</span><small>1 workload · Keep cached</small></button>",
+      "css": ".ds-profile-rail-item { display:grid; width:13rem; gap:.2rem; justify-items:start; border:1px solid transparent; border-radius:.35rem; padding:.7rem .65rem; background:transparent; color:#e6e3da; text-align:left; font-family:ui-sans-serif,system-ui,sans-serif; cursor:pointer; } .ds-profile-rail-item span { max-width:100%; overflow:hidden; font-size:.78rem; font-weight:780; text-overflow:ellipsis; white-space:nowrap; } .ds-profile-rail-item small { color:#aaa99f; font-size:.64rem; } .ds-profile-rail-item:hover { background:#242720; } .ds-profile-rail-item[aria-pressed=\"true\"] { border-color:#76c442; background:#2a2d26; } .ds-profile-rail-item:active { background:#171915; } .ds-profile-rail-item:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    },
+    {
+      "name": "Workload Map Row",
+      "kind": "custom",
+      "refersTo": "workload-map-row",
+      "description": "A warm inspection row comparing one exact model recipe across Sparks.",
+      "html": "<table class=\"ds-workload-map\"><tbody><tr><th scope=\"row\"><strong>Qwen 3</strong><small>Qwen pair</small></th><td class=\"ds-running\"><strong>Running</strong><small>fast-chat</small></td><td class=\"ds-degraded\"><strong>Degraded</strong><small>member-rank-unhealthy</small></td></tr></tbody></table>",
+      "css": ".ds-workload-map { width:100%; border-collapse:collapse; background:#f4f1e8; color:#181a16; font-family:ui-sans-serif,system-ui,sans-serif; font-variant-numeric:tabular-nums; } .ds-workload-map th,.ds-workload-map td { min-width:7.6rem; border-right:1px solid #c9c4b6; border-bottom:1px solid #c9c4b6; padding:.68rem .75rem; text-align:left; vertical-align:middle; } .ds-workload-map th { width:13rem; background:#fbf9f3; } .ds-workload-map th strong,.ds-workload-map th small,.ds-workload-map td strong,.ds-workload-map td small { display:block; } .ds-workload-map th strong { font-size:.75rem; } .ds-workload-map th small,.ds-workload-map td small { margin-top:.16rem; color:#5d6258; font-size:.61rem; font-weight:500; } .ds-workload-map td strong { font-size:.66rem; } .ds-workload-map .ds-running strong { color:#2f6b1c; } .ds-workload-map .ds-degraded { background:#fff0ee; } .ds-workload-map .ds-degraded strong { color:#a43731; } .ds-workload-map tr:hover td { background:#ece8dd; } .ds-workload-map tr:active td { background:#e8e4d9; } .ds-workload-map:focus-visible { outline:3px solid var(--focus,#c3f89d); outline-offset:3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Spark Workcell",
+    "overview": "Vonk Forge feels like a local AI CNC-machine inspection board: a powder-coated graphite control shell with restrained champagne hardware cues surrounding a warm, light inspection canvas. The shell is calm and compact; the canvas makes live workload placement, desired profile state, and discrepancies read like a physical job sheet under task lighting.\n\nPrecision comes from rows, rails, thin dividers, tabular measurements, and exact state language rather than ornamental dashboard chrome. NVIDIA green is deliberately scarce and belongs to positive health, readiness, and safe primary action. Amber requests attention, red proves failure, and blue identifies installed or informational state; text and structure always repeat the meaning.",
+    "keyCharacteristics": [
+      "Graphite hardware shell with champagne separators and labels.",
+      "Warm inspection canvas for live-versus-desired workload truth.",
+      "Dense, aligned operating rows with generous local whitespace.",
+      "Green reserved for positive health, readiness, and safe action.",
+      "Flat fixtures first; ambient depth only where hierarchy requires it."
+    ],
+    "rules": [
+      {"name": "The Green Means Go Rule", "body": "Reserve green for positive health, readiness, and safe primary action; never use it as general decoration or as the only state signal.", "section": "colors"},
+      {"name": "The Two Material Zones Rule", "body": "Dense control chrome stays graphite; desired-versus-live workload truth moves onto the warm inspection canvas.", "section": "colors"},
+      {"name": "The Measure Before Decorate Rule", "body": "Use tabular numerals for counts, capacity, percentages, versions, and timestamps; use monospace only for identifiers, digests, and commands.", "section": "typography"},
+      {"name": "The Rows Before Cards Rule", "body": "Use rows, rails, and dividers for repeated operational facts; introduce a card only when it represents a complete inspectable fixture.", "section": "layout"},
+      {"name": "The Workload-First Mobile Rule", "body": "On phones, preserve each workload and reveal its Spark states beneath it; do not miniaturize the desktop matrix.", "section": "layout"},
+      {"name": "The Ambient Only Rule", "body": "Keep shadows soft and material; structure comes from tonal planes, lines, and strong edges rather than hard offsets.", "section": "elevation"},
+      {"name": "The Fixture Corners Rule", "body": "Apply curvature to the outside silhouette; keep internal rows and matrix cells square and separated by lines.", "section": "shapes"},
+      {"name": "The State Before Control Rule", "body": "Show health, current workload, capacity, and live-versus-desired evidence before presenting the action that changes them.", "section": "components"}
+    ],
+    "dos": [
+      "Do keep operational text on solid graphite or warm inspection surfaces with WCAG 2.2 AA contrast.",
+      "Do pair every color-coded state with explicit words and, where useful, a dot, border, or edge.",
+      "Do use warm inspection surfaces for desired-versus-live comparisons and graphite for control chrome.",
+      "Do preserve exact alignment and tabular numerals across counts, measurements, and workload cells.",
+      "Do confine horizontal scrolling to an explicit data region and provide a stacked mobile representation.",
+      "Do honor reduced motion and keep visible focus unobscured."
+    ],
+    "donts": [
+      "Don't use green as ambient decoration, a generic brand wash, or an unsupported success claim.",
+      "Don't put texture, metallic noise, or champagne fields behind operational text.",
+      "Don't use shadow as the primary grouping device or scatter floating rounded cards across dense data.",
+      "Don't compress a desktop matrix until labels or touch targets become illegible.",
+      "Don't encode healthy, warning, blocked, installed, or running state through color alone.",
+      "Don't introduce eyebrow or kicker labels above headings, or glyph-style icons in place of the established icon system; use direct headings and recognizable visual controls."
+    ]
+  }
+}

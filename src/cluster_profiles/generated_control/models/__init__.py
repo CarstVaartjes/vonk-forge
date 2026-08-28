@@ -36,6 +36,34 @@ from .enrollment_summary import EnrollmentSummary
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
+from .fleet_profile_application_view import FleetProfileApplicationView
+from .fleet_profile_application_view_progress import FleetProfileApplicationViewProgress
+from .fleet_profile_application_view_result_type_0 import FleetProfileApplicationViewResultType0
+from .fleet_profile_application_view_state import FleetProfileApplicationViewState
+from .fleet_profile_apply_request import FleetProfileApplyRequest
+from .fleet_profile_assignment import FleetProfileAssignment
+from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
+from .fleet_profile_assignment_input import FleetProfileAssignmentInput
+from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
+from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
+from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
+from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
+from .fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from .fleet_profile_input import FleetProfileInput
+from .fleet_profile_input_installation_policy import FleetProfileInputInstallationPolicy
+from .fleet_profile_input_labels import FleetProfileInputLabels
+from .fleet_profile_list import FleetProfileList
+from .fleet_profile_node import FleetProfileNode
+from .fleet_profile_plan_step import FleetProfilePlanStep
+from .fleet_profile_plan_step_kind import FleetProfilePlanStepKind
+from .fleet_profile_plan_summary import FleetProfilePlanSummary
+from .fleet_profile_preview import FleetProfilePreview
+from .fleet_profile_preview_request import FleetProfilePreviewRequest
+from .fleet_profile_reason import FleetProfileReason
+from .fleet_profile_reason_severity import FleetProfileReasonSeverity
+from .fleet_profile_view import FleetProfileView
+from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
+from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
@@ -294,6 +322,34 @@ __all__ = (
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
+    "FleetProfileApplicationView",
+    "FleetProfileApplicationViewProgress",
+    "FleetProfileApplicationViewResultType0",
+    "FleetProfileApplicationViewState",
+    "FleetProfileApplyRequest",
+    "FleetProfileAssignment",
+    "FleetProfileAssignmentDesiredState",
+    "FleetProfileAssignmentInput",
+    "FleetProfileAssignmentInputDesiredState",
+    "FleetProfileAssignmentPreview",
+    "FleetProfileAssignmentPreviewActionsItem",
+    "FleetProfileAssignmentPreviewCurrentState",
+    "FleetProfileAssignmentPreviewDesiredState",
+    "FleetProfileInput",
+    "FleetProfileInputInstallationPolicy",
+    "FleetProfileInputLabels",
+    "FleetProfileList",
+    "FleetProfileNode",
+    "FleetProfilePlanStep",
+    "FleetProfilePlanStepKind",
+    "FleetProfilePlanSummary",
+    "FleetProfilePreview",
+    "FleetProfilePreviewRequest",
+    "FleetProfileReason",
+    "FleetProfileReasonSeverity",
+    "FleetProfileView",
+    "FleetProfileViewInstallationPolicy",
+    "FleetProfileViewLabels",
     "FleetSnapshot",
     "FleetStatusResponse",
     "ForkRecipeRequest",

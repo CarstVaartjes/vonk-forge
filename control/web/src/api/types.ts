@@ -70,6 +70,11 @@ export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
 export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
 export type LibraryOperation = components["schemas"]["OperationResponse"];
 export type LibraryRunStatus = components["schemas"]["RunStatusResponse"];
+export type FleetProfile = components["schemas"]["FleetProfileView"];
+export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
+export type FleetProfileList = components["schemas"]["FleetProfileList"];
+export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
+export type FleetProfileApplication = components["schemas"]["FleetProfileApplicationView"];
 export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
@@ -150,6 +155,14 @@ export interface LibraryApi {
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
 }
 export interface ControlApi extends LibraryApi {
+  fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;
+  fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile>;
+  createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
+  updateFleetProfile(profileId: string, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
+  deleteFleetProfile(profileId: string, signal?: AbortSignal): Promise<void>;
+  previewFleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfilePreview>;
+  applyFleetProfile(profileId: string, planDigest: string, signal?: AbortSignal): Promise<FleetProfileApplication>;
+  fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;

@@ -91,6 +91,21 @@ test("summarizes the loaded Library window and filters recipes without changing 
   expect(location.pathname).toBe(qwenModelPath);
 });
 
+test("retains individual Spark context while choosing models and recipes", async () => {
+  const sparkId = "spk_0123456789abcdef0123456789abcdef";
+  history.replaceState(null, "", `/library?spark=${sparkId}`);
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByRole("complementary", {name: `Managing models on ${sparkId}`})).toBeVisible();
+  await user.click(screen.getByRole("link", {name: /Qwen 3/}));
+
+  expect(location.pathname).toBe(qwenModelPath);
+  expect(new URLSearchParams(location.search).get("spark")).toBe(sparkId);
+  expect(screen.getByRole("link", {name: "Exit Spark workspace"})).toHaveAttribute("href", "/library");
+});
+
 test("shows a useful zero-search state in Browse and clears it without changing the route", async () => {
   history.replaceState(null, "", "/library");
   const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
