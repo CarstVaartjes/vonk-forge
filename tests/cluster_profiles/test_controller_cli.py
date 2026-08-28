@@ -239,6 +239,65 @@ def test_human_list_output_is_a_readable_table() -> None:
     assert "total: 1" in stdout.getvalue()
 
 
+def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> None:
+    expected_binary = "b" * 64
+    expected_build = "sha256:" + "c" * 64
+    old_binary = "d" * 64
+    old_build = "sha256:" + "e" * 64
+    client = _Client(
+        {
+            ("GET", "/api/v1/jobs/upgrade-1"): {
+                "id": "upgrade-1",
+                "kind": "agent-upgrade",
+                "state": "waiting-for-operator",
+                "status_reason": "The exact target identity was not proven.",
+                "agent_upgrade_diagnostics": {
+                    "expected_identity": {
+                        "version": "0.1.0~dev.350+g15f9faf7c5bf",
+                        "binary_digest": expected_binary,
+                        "build_digest": expected_build,
+                    },
+                    "targets": [
+                        {
+                            "node_id": "spk_" + "1" * 32,
+                            "attempts": 2,
+                            "target_proven": False,
+                            "observed_identity": {
+                                "version": "0.1.0",
+                                "binary_digest": old_binary,
+                                "build_digest": old_build,
+                            },
+                            "raw_reason": "agent upgrade request is invalid",
+                            "retry_not_before": "2026-08-28T21:27:40+00:00",
+                            "retry_queued": False,
+                        }
+                    ],
+                    "legacy_generic_ambiguous": True,
+                    "next_action": "Inspect package-helper and dpkg recovery state before resuming.",
+                    "operator_summary": "The exact target identity was not proven.",
+                },
+            }
+        }
+    )
+    stdout = StringIO()
+
+    with redirect_stdout(stdout):
+        result = cli.main(("activity", "job", "upgrade-1"), control_client=client)
+
+    output = stdout.getvalue()
+    assert result == 0
+    assert "expected_release: 0.1.0~dev.350+g15f9faf7c5bf" in output
+    assert f"expected_binary_digest: {expected_binary}" in output
+    assert "install_attempts: 2" in output
+    assert "target_proven: false" in output
+    assert f"observed_build_digest: {old_build}" in output
+    assert "raw_helper_reason: agent upgrade request is invalid" in output
+    assert "retry_not_before: 2026-08-28T21:27:40+00:00" in output
+    assert "retry_queued: false" in output
+    assert "legacy helper response is ambiguous" in output
+    assert "next_action: Inspect package-helper" in output
+
+
 def test_library_apply_is_plan_only_until_apply_flag_is_explicit() -> None:
     client = _Client()
 

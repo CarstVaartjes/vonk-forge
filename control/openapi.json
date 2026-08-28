@@ -168,6 +168,100 @@
         "title": "AgentUpgradeApplyRequest",
         "type": "object"
       },
+      "AgentUpgradeDiagnosticsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_identity": {
+            "$ref": "#/components/schemas/AgentUpgradeIdentityResponse"
+          },
+          "legacy_generic_ambiguous": {
+            "title": "Legacy Generic Ambiguous",
+            "type": "boolean"
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
+          },
+          "operator_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator Summary"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUpgradeTargetDiagnosticsResponse"
+            },
+            "maxItems": 64,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_identity",
+          "targets",
+          "legacy_generic_ambiguous"
+        ],
+        "title": "AgentUpgradeDiagnosticsResponse",
+        "type": "object"
+      },
+      "AgentUpgradeIdentityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "binary_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binary Digest"
+          },
+          "build_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Digest"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "title": "AgentUpgradeIdentityResponse",
+        "type": "object"
+      },
       "AgentUpgradePackageRequest": {
         "additionalProperties": false,
         "properties": {
@@ -273,6 +367,71 @@
           }
         },
         "title": "AgentUpgradePreviewRequest",
+        "type": "object"
+      },
+      "AgentUpgradeTargetDiagnosticsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "minimum": 0.0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_identity": {
+            "$ref": "#/components/schemas/AgentUpgradeIdentityResponse"
+          },
+          "raw_reason": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Reason"
+          },
+          "retry_not_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Not Before"
+          },
+          "retry_queued": {
+            "title": "Retry Queued",
+            "type": "boolean"
+          },
+          "state": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          },
+          "target_proven": {
+            "title": "Target Proven",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node_id",
+          "state",
+          "attempts",
+          "target_proven",
+          "observed_identity",
+          "retry_queued"
+        ],
+        "title": "AgentUpgradeTargetDiagnosticsResponse",
         "type": "object"
       },
       "AgentsResponse": {
@@ -2969,6 +3128,16 @@
       "JobDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "agent_upgrade_diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentUpgradeDiagnosticsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "authority_revision": {
             "maxLength": 128,
             "minLength": 1,

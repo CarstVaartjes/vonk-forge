@@ -316,6 +316,59 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
     return False
 
 
+def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
+    diagnostics = payload.get("agent_upgrade_diagnostics")
+    if payload.get("kind") != "agent-upgrade" or not isinstance(diagnostics, Mapping):
+        return False
+    print(f"state: {_table_cell(payload.get('state'), maximum=80)}")
+    if payload.get("status_reason"):
+        print(f"summary: {payload['status_reason']}")
+    expected = diagnostics.get("expected_identity")
+    if isinstance(expected, Mapping):
+        print(f"expected_release: {_table_cell(expected.get('version'), maximum=128)}")
+        print(
+            f"expected_binary_digest: {_table_cell(expected.get('binary_digest'), maximum=80)}"
+        )
+        print(
+            f"expected_build_digest: {_table_cell(expected.get('build_digest'), maximum=80)}"
+        )
+    targets = diagnostics.get("targets")
+    if isinstance(targets, list):
+        for target in targets:
+            if not isinstance(target, Mapping):
+                continue
+            node_id = _table_cell(target.get("node_id"), maximum=128)
+            print(f"spark: {node_id}")
+            print(f"  install_attempts: {_table_cell(target.get('attempts'))}")
+            print(f"  target_proven: {str(bool(target.get('target_proven'))).lower()}")
+            observed = target.get("observed_identity")
+            if isinstance(observed, Mapping):
+                print(
+                    f"  observed_version: {_table_cell(observed.get('version'), maximum=128)}"
+                )
+                print(
+                    f"  observed_binary_digest: {_table_cell(observed.get('binary_digest'), maximum=80)}"
+                )
+                print(
+                    f"  observed_build_digest: {_table_cell(observed.get('build_digest'), maximum=80)}"
+                )
+            if target.get("raw_reason"):
+                print(f"  raw_helper_reason: {target['raw_reason']}")
+            if target.get("retry_not_before"):
+                print(f"  retry_not_before: {target['retry_not_before']}")
+                print(
+                    f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
+                )
+    if diagnostics.get("legacy_generic_ambiguous") is True:
+        print(
+            "diagnosis: legacy helper response is ambiguous; the exact target "
+            "identity remains the success gate"
+        )
+    if diagnostics.get("next_action"):
+        print(f"next_action: {diagnostics['next_action']}")
+    return True
+
+
 def _emit(
     payload: Mapping[str, object],
     args: argparse.Namespace,
@@ -332,6 +385,8 @@ def _emit(
         and getattr(args, "library_command", None) == "template"
     ):
         print(json.dumps(safe, sort_keys=True, indent=2))
+        return
+    if _emit_agent_upgrade_detail(safe):
         return
     if _emit_list_table(safe):
         return

@@ -14,6 +14,7 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.job_progress import JobProgress
   from ..models.job_operation_response import JobOperationResponse
+  from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 
 
 
@@ -37,6 +38,7 @@ class JobDetailResponse:
             state (str):
             target_total (int):
             targets (list[str]):
+            agent_upgrade_diagnostics (Union['AgentUpgradeDiagnosticsResponse', None, Unset]):
             operation_next_cursor (Union[None, Unset, str]):
             reconciliation_id (Union[None, Unset, str]):
             status_reason (Union[None, Unset, str]):
@@ -53,6 +55,7 @@ class JobDetailResponse:
     state: str
     target_total: int
     targets: list[str]
+    agent_upgrade_diagnostics: Union['AgentUpgradeDiagnosticsResponse', None, Unset] = UNSET
     operation_next_cursor: Union[None, Unset, str] = UNSET
     reconciliation_id: Union[None, Unset, str] = UNSET
     status_reason: Union[None, Unset, str] = UNSET
@@ -65,6 +68,7 @@ class JobDetailResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
+        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
         authority_revision = self.authority_revision
 
         current_attempt = self.current_attempt
@@ -91,6 +95,14 @@ class JobDetailResponse:
         targets = self.targets
 
 
+
+        agent_upgrade_diagnostics: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.agent_upgrade_diagnostics, Unset):
+            agent_upgrade_diagnostics = UNSET
+        elif isinstance(self.agent_upgrade_diagnostics, AgentUpgradeDiagnosticsResponse):
+            agent_upgrade_diagnostics = self.agent_upgrade_diagnostics.to_dict()
+        else:
+            agent_upgrade_diagnostics = self.agent_upgrade_diagnostics
 
         operation_next_cursor: Union[None, Unset, str]
         if isinstance(self.operation_next_cursor, Unset):
@@ -131,6 +143,8 @@ class JobDetailResponse:
             "target_total": target_total,
             "targets": targets,
         })
+        if agent_upgrade_diagnostics is not UNSET:
+            field_dict["agent_upgrade_diagnostics"] = agent_upgrade_diagnostics
         if operation_next_cursor is not UNSET:
             field_dict["operation_next_cursor"] = operation_next_cursor
         if reconciliation_id is not UNSET:
@@ -148,6 +162,7 @@ class JobDetailResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
+        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
         d = dict(src_dict)
         authority_revision = d.pop("authority_revision")
 
@@ -179,6 +194,26 @@ class JobDetailResponse:
         target_total = d.pop("target_total")
 
         targets = cast(list[str], d.pop("targets"))
+
+
+        def _parse_agent_upgrade_diagnostics(data: object) -> Union['AgentUpgradeDiagnosticsResponse', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                agent_upgrade_diagnostics_type_0 = AgentUpgradeDiagnosticsResponse.from_dict(data)
+
+
+
+                return agent_upgrade_diagnostics_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['AgentUpgradeDiagnosticsResponse', None, Unset], data)
+
+        agent_upgrade_diagnostics = _parse_agent_upgrade_diagnostics(d.pop("agent_upgrade_diagnostics", UNSET))
 
 
         def _parse_operation_next_cursor(data: object) -> Union[None, Unset, str]:
@@ -232,6 +267,7 @@ class JobDetailResponse:
             state=state,
             target_total=target_total,
             targets=targets,
+            agent_upgrade_diagnostics=agent_upgrade_diagnostics,
             operation_next_cursor=operation_next_cursor,
             reconciliation_id=reconciliation_id,
             status_reason=status_reason,

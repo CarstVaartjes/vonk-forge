@@ -1414,6 +1414,27 @@ export interface components {
              */
             strategy: "one-at-a-time" | "all-at-once";
         };
+        /** AgentUpgradeDiagnosticsResponse */
+        AgentUpgradeDiagnosticsResponse: {
+            expected_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
+            /** Legacy Generic Ambiguous */
+            legacy_generic_ambiguous: boolean;
+            /** Next Action */
+            next_action?: string | null;
+            /** Operator Summary */
+            operator_summary?: string | null;
+            /** Targets */
+            targets: components["schemas"]["AgentUpgradeTargetDiagnosticsResponse"][];
+        };
+        /** AgentUpgradeIdentityResponse */
+        AgentUpgradeIdentityResponse: {
+            /** Binary Digest */
+            binary_digest?: string | null;
+            /** Build Digest */
+            build_digest?: string | null;
+            /** Version */
+            version?: string | null;
+        };
         /** AgentUpgradePackageRequest */
         AgentUpgradePackageRequest: {
             /**
@@ -1452,6 +1473,24 @@ export interface components {
              * @enum {string}
              */
             strategy: "one-at-a-time" | "all-at-once";
+        };
+        /** AgentUpgradeTargetDiagnosticsResponse */
+        AgentUpgradeTargetDiagnosticsResponse: {
+            /** Attempts */
+            attempts: number;
+            /** Node Id */
+            node_id: string;
+            observed_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
+            /** Raw Reason */
+            raw_reason?: string | null;
+            /** Retry Not Before */
+            retry_not_before?: string | null;
+            /** Retry Queued */
+            retry_queued: boolean;
+            /** State */
+            state: string;
+            /** Target Proven */
+            target_proven: boolean;
         };
         /** AgentsResponse */
         AgentsResponse: {
@@ -2376,6 +2415,7 @@ export interface components {
         };
         /** JobDetailResponse */
         JobDetailResponse: {
+            agent_upgrade_diagnostics?: components["schemas"]["AgentUpgradeDiagnosticsResponse"] | null;
             /** Authority Revision */
             authority_revision: string;
             /** Current Attempt */

@@ -207,7 +207,7 @@ function CopyableValue({label, value}: {label: string; value?: string | null}) {
     <dt>{label}</dt>
     <dd className="activity-copy-value"><code>{value}</code><button type="button" className="activity-copy" aria-describedby={statusId} onClick={() => void copy()} aria-label={`Copy ${label.toLowerCase()}`}>{copyState === "copied" ? "Copied" : "Copy"}</button></dd>
     {copyState === "failed" && <dd className="activity-copy-error">Clipboard access is unavailable. Select the value to copy it.</dd>}
-    <dd className="sr-only" id={statusId} role="status" aria-live="polite">{copyState === "copied" ? `${label} copied` : copyState === "failed" ? `Could not copy ${label.toLocaleLowerCase()}` : ""}</dd>
+    <dd className="sr-only" id={statusId} aria-live="polite">{copyState === "copied" ? `${label} copied` : copyState === "failed" ? `Could not copy ${label.toLocaleLowerCase()}` : ""}</dd>
   </div>;
 }
 
@@ -252,8 +252,31 @@ function TargetSummary({compact = false, event}: {compact?: boolean; event: Acti
 
 const LIVE_JOB_STATES = new Set(["compensating", "pending", "planned", "queued", "running", "starting", "stopping"]);
 
+function jobUpdatesAutomatically(detail: JobDetail): boolean {
+  return LIVE_JOB_STATES.has(detail.state) || (
+    detail.state === "waiting-for-operator"
+    && (detail.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false)
+  );
+}
+
 function friendlyTarget(target: string, names: Map<string, string>): string {
   return names.get(target) || unavailableTargetLabel(target);
+}
+
+function AgentUpgradeDiagnostics({detail, targetNames}: {detail: JobDetail; targetNames: Map<string, string>}) {
+  const diagnostics = detail.agent_upgrade_diagnostics;
+  if (!diagnostics) return null;
+  const expected = diagnostics.expected_identity;
+  return <section className="activity-upgrade-diagnostics" aria-label="Agent upgrade diagnosis">
+    <header><div><span>Expected release</span><strong>{expected.version || "Not recorded"}</strong></div><StatusPill tone={diagnostics.targets.every(target => target.target_proven) ? "healthy" : "warning"}>{diagnostics.targets.every(target => target.target_proven) ? "Identity proven" : "Identity not proven"}</StatusPill></header>
+    <dl className="activity-upgrade-expected"><CopyableValue label="Target binary digest" value={expected.binary_digest}/><CopyableValue label="Target build digest" value={expected.build_digest}/></dl>
+    <ul>{diagnostics.targets.map(target => <li key={target.node_id}>
+      <div className="activity-upgrade-target"><strong>{friendlyTarget(target.node_id, targetNames)}</strong><span>{target.attempts} install {target.attempts === 1 ? "attempt" : "attempts"} · {target.target_proven ? "exact target reported" : "exact target not reported"}</span></div>
+      <dl><div><dt>Observed version</dt><dd>{target.observed_identity.version || "Not reported"}</dd></div><CopyableValue label="Observed binary digest" value={target.observed_identity.binary_digest}/><CopyableValue label="Observed build digest" value={target.observed_identity.build_digest}/>{target.retry_not_before && <div><dt>{target.retry_queued ? "Controller retry not before" : "Retry not before"}</dt><dd><time dateTime={target.retry_not_before}>{exactTime(target.retry_not_before) || target.retry_not_before}</time></dd></div>}</dl>
+      {target.raw_reason && <details><summary>Raw helper evidence</summary><code>{target.raw_reason}</code></details>}
+    </li>)}</ul>
+    {diagnostics.legacy_generic_ambiguous && <p className="activity-upgrade-ambiguity"><strong>Legacy helper response is ambiguous.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
+  </section>;
 }
 
 function JobProgressDetails({
@@ -304,7 +327,7 @@ function JobProgressDetails({
   }, [api, event.request_id, onUpdate]);
 
   useEffect(() => {
-    if (!open || !detail || !LIVE_JOB_STATES.has(detail.state)) return undefined;
+    if (!open || !detail || !jobUpdatesAutomatically(detail)) return undefined;
     const interval = window.setInterval(() => void loadDetail(true), 5_000);
     return () => window.clearInterval(interval);
   }, [detail, loadDetail, open]);
@@ -326,9 +349,9 @@ function JobProgressDetails({
       const resumed = {...detail, state: response.state};
       setDetail(resumed);
       onUpdate(resumed);
-      setResumeNotice("Resume accepted. Reloading the current operation state.");
+      setResumeNotice(detail.kind === "agent-upgrade" ? "Retry queued behind a new safety delay. Reloading the current operation state." : "Resume accepted. Reloading the current operation state.");
       const refreshed = await loadDetail();
-      if (mountedRef.current && refreshed) setResumeNotice("Operation resumed and current details reloaded.");
+      if (mountedRef.current && refreshed) setResumeNotice(detail.kind === "agent-upgrade" ? "Retry queued. It will not dispatch before the reported retry time." : "Operation resumed and current details reloaded.");
     } catch (value) {
       if (mountedRef.current) setResumeError(value instanceof Error ? value.message : "Unable to resume this operation.");
     } finally {
@@ -341,6 +364,7 @@ function JobProgressDetails({
   const completed = detail?.progress.completed ?? 0;
   const total = detail?.progress.total ?? 0;
   const completion = total > 0 ? Math.min(100, Math.max(0, completed / total * 100)) : 0;
+  const agentRetryQueued = detail?.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false;
 
   return <details className="activity-job" onToggle={toggle}>
     <summary>{detail ? "Operation progress" : "View operation progress"}</summary>
@@ -352,7 +376,7 @@ function JobProgressDetails({
           <div><span>Current state</span><strong>{titleCase(detail.state)}</strong></div>
           <button type="button" className="button secondary" disabled={loading || resuming} onClick={() => void loadDetail()}>{loading ? "Refreshing…" : "Refresh details"}</button>
         </header>
-        {LIVE_JOB_STATES.has(detail.state) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>Updates automatically while this operation is active.</p>}
+        {jobUpdatesAutomatically(detail) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>Updates automatically while this operation is active.</p>}
         {detail.status_reason && <div className="activity-job-reason"><span>State reason</span><strong>{detail.status_reason}</strong></div>}
         <section className="activity-job-progress" aria-label="Operation progress">
           <div><span>Completed</span><strong>{detail.progress.completed}</strong></div>
@@ -361,10 +385,11 @@ function JobProgressDetails({
           <div><span>Total</span><strong>{detail.progress.total}</strong></div>
           <div className="activity-job-progress-track" role="img" aria-label={`${completed} of ${total} operation steps completed`}><span style={{width: `${completion}%`}}/></div>
         </section>
-        <p className="activity-job-attempt">Current attempt <strong>{detail.current_attempt}</strong></p>
+        {detail.kind !== "agent-upgrade" && <p className="activity-job-attempt">Current attempt <strong>{detail.current_attempt}</strong></p>}
+        <AgentUpgradeDiagnostics detail={detail} targetNames={targetNames}/>
         {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
         {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{titleCase(operation.state)}</StatusPill>{operation.progress?.phase && <small>Phase: {operation.progress.phase}</small>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
-        {detail.state === "waiting-for-operator" && <section className="activity-job-resume"><div><strong>Operator action required</strong><p>This operation can be returned to the queue. Review the state reason and affected targets first.</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? "Resuming…" : "Resume operation"}</button></section>}
+        {detail.state === "waiting-for-operator" && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
         <details className="activity-job-technical"><summary>Operation identifiers</summary><dl><CopyableValue label="Operation ID" value={detail.id}/><CopyableValue label="Authority revision" value={detail.authority_revision}/>{detail.reconciliation_id && <CopyableValue label="Reconciliation ID" value={detail.reconciliation_id}/>} {detail.targets.map((target, index) => <CopyableValue key={`${target}:${index}`} label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`} value={target}/>)}</dl></details>

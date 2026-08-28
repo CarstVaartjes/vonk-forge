@@ -17,7 +17,14 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
+from .agent_upgrade_status import (
+    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    RECOVERABLE_AGENT_UPGRADE_REASONS,
+    agent_upgrade_next_action,
+    operator_agent_upgrade_reason,
+)
 from .auth import CursorCodec
+from .logging import redact_text
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -198,6 +205,31 @@ class JobProgress(StrictModel):
     total: int = Field(ge=0)
 
 
+class AgentUpgradeIdentityResponse(StrictModel):
+    version: str | None = Field(default=None, max_length=128)
+    binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class AgentUpgradeTargetDiagnosticsResponse(StrictModel):
+    node_id: str = Field(pattern=NODE_PATTERN)
+    state: str = Field(min_length=1, max_length=80)
+    attempts: int = Field(ge=0)
+    target_proven: bool
+    observed_identity: AgentUpgradeIdentityResponse
+    raw_reason: str | None = Field(default=None, max_length=1024)
+    retry_not_before: str | None = None
+    retry_queued: bool
+
+
+class AgentUpgradeDiagnosticsResponse(StrictModel):
+    expected_identity: AgentUpgradeIdentityResponse
+    targets: list[AgentUpgradeTargetDiagnosticsResponse] = Field(max_length=64)
+    legacy_generic_ambiguous: bool
+    next_action: str | None = Field(default=None, max_length=512)
+    operator_summary: str | None = Field(default=None, max_length=1024)
+
+
 class JobDetailResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=80)
@@ -213,6 +245,7 @@ class JobDetailResponse(StrictModel):
     operation_next_cursor: str | None = Field(default=None, max_length=512)
     operation_total: int = Field(ge=0)
     progress: JobProgress
+    agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
 
 
 class JobResumeResponse(StrictModel):
@@ -253,6 +286,7 @@ class OperationPage:
     items: Sequence[Mapping[str, object]]
     next_cursor: str | None
     progress: JobProgress
+    agent_upgrade_diagnostics: Mapping[str, object] | None = None
 
 
 def job_response(
@@ -302,12 +336,23 @@ def job_response(
         target_next_cursor=target_next_cursor,
         target_total=len(targets),
         current_attempt=int(job.current_attempt),
-        status_reason=job.status_reason,
+        status_reason=(
+            operation_page.agent_upgrade_diagnostics.get("operator_summary")
+            if (
+                operation_page.agent_upgrade_diagnostics is not None
+                and isinstance(
+                    operation_page.agent_upgrade_diagnostics.get("operator_summary"),
+                    str,
+                )
+            )
+            else job.status_reason
+        ),
         reconciliation_id=job.reconciliation_id,
         operations=projected,
         operation_next_cursor=operation_page.next_cursor,
         operation_total=operation_page.progress.total,
         progress=operation_page.progress,
+        agent_upgrade_diagnostics=operation_page.agent_upgrade_diagnostics,
     )
 
 
@@ -353,6 +398,141 @@ def _progress_projection(value: object) -> JobOperationProgress | None:
 
 def _aware(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _agent_upgrade_diagnostics(
+    session: Session, job_id: str
+) -> Mapping[str, object] | None:
+    job = session.get(Job, job_id)
+    if job is None or job.kind != "agent-upgrade":
+        return None
+    package = job.payload.get("package")
+    if not isinstance(package, Mapping):
+        return None
+    operations = list(
+        session.scalars(
+            select(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                AgentOperation.node_id.in_(job.targets),
+            )
+            .order_by(AgentOperation.created_at, AgentOperation.id)
+            .limit(64)
+        )
+    )
+    operations_by_node = {operation.node_id: operation for operation in operations}
+    attempts = {
+        attempt.operation_id: attempt
+        for attempt in session.scalars(
+            select(AgentOperationAttempt)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                AgentOperation.node_id.in_(job.targets),
+                AgentOperationAttempt.attempt == AgentOperation.current_attempt,
+            )
+            .limit(64)
+        )
+    }
+    nodes = {
+        node.node_id: node
+        for node in session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(job.targets))
+        )
+    }
+    expected_binary = package.get("target_binary_digest")
+    expected_build = package.get("target_build_digest")
+    targets: list[dict[str, object]] = []
+    legacy_generic_ambiguous = False
+    retry_queued_any = False
+    operator_summary = None
+    for node_id in job.targets:
+        operation = operations_by_node.get(node_id)
+        attempt = None if operation is None else attempts.get(operation.id)
+        result = None if attempt is None else attempt.result
+        raw_reason = None
+        if isinstance(result, Mapping):
+            candidate = result.get("reason")
+            if not isinstance(candidate, str):
+                candidate = result.get("error_code")
+            if isinstance(candidate, str):
+                raw_reason = redact_text(candidate)[:1024]
+        node = nodes.get(node_id)
+        # The controller only transitions an upgrade operation to succeeded
+        # after _contact_proves_target accepts authenticated contact plus the
+        # complete runtime and result evidence. Matching digests alone is not
+        # the success gate and must never be projected as proof here.
+        target_proven = bool(operation is not None and operation.state == "succeeded")
+        unresolved_generic = bool(
+            not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
+        )
+        legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
+        retry_queued = bool(
+            operation is not None
+            and operation.retry_disposition == "retry"
+            and operation.retry_disposition_attempt == operation.current_attempt
+        )
+        retry_queued_any = retry_queued_any or retry_queued
+        retry_not_before = (
+            _aware(attempt.lease_deadline).isoformat()
+            if attempt is not None and retry_queued
+            else None
+        )
+        if unresolved_generic and operator_summary is None and raw_reason is not None:
+            operator_summary = operator_agent_upgrade_reason(
+                node_id=node_id,
+                attempt_count=(0 if operation is None else operation.current_attempt),
+                package=package,
+                observed_semantic_version=(
+                    None if node is None else node.semantic_version
+                ),
+                observed_binary_digest=(None if node is None else node.binary_digest),
+                observed_build_digest=None if node is None else node.build_digest,
+                raw_reason=raw_reason,
+                retry_queued=retry_queued,
+            )
+        targets.append(
+            {
+                "node_id": node_id,
+                "state": "not-started" if operation is None else operation.state,
+                "attempts": 0 if operation is None else operation.current_attempt,
+                "target_proven": target_proven,
+                "observed_identity": {
+                    "version": None if node is None else node.semantic_version,
+                    "binary_digest": None if node is None else node.binary_digest,
+                    "build_digest": None if node is None else node.build_digest,
+                },
+                "raw_reason": raw_reason,
+                "retry_not_before": retry_not_before,
+                "retry_queued": retry_queued,
+            }
+        )
+    return {
+        "expected_identity": {
+            "version": package.get("package_version"),
+            "binary_digest": expected_binary,
+            "build_digest": expected_build,
+        },
+        "targets": targets,
+        "legacy_generic_ambiguous": legacy_generic_ambiguous,
+        "next_action": (
+            agent_upgrade_next_action(retry_queued=retry_queued_any)
+            if any(
+                not target["target_proven"]
+                and target["attempts"]
+                and (
+                    target["state"] == "waiting-for-operator"
+                    or target["raw_reason"] in RECOVERABLE_AGENT_UPGRADE_REASONS
+                )
+                for target in targets
+            )
+            else None
+        ),
+        "operator_summary": operator_summary,
+    }
 
 
 class _DurableOperationProjection:
@@ -565,6 +745,7 @@ class _DurableOperationProjection:
             except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
                 raise ValueError("operation cursor is invalid") from None
         with self._sessions() as session:
+            agent_upgrade_diagnostics = _agent_upgrade_diagnostics(session, job_id)
             statement = select(AgentOperation).where(
                 AgentOperation.parent_job_id == job_id
             )
@@ -664,6 +845,7 @@ class _DurableOperationProjection:
                 running=sum(state_counts.get(state, 0) for state in running),
                 total=sum(state_counts.values()),
             ),
+            agent_upgrade_diagnostics=agent_upgrade_diagnostics,
         )
 
     def resume_job(self, job_id: str) -> None:
