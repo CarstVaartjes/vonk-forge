@@ -717,12 +717,15 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
 def test_apt_publisher_verifies_and_indexes_both_architectures_as_one_release() -> None:
     verify = apt_step("Verify exact downloaded package")
     generation = apt_step("Generate missing aptly state or public tree")
+    state = APT_STATE.read_text()
 
     for architecture in ("arm64", "amd64"):
         assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in verify
     assert '.architecture == $architecture' in verify
-    assert 'for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"' in generation
-    assert 'repo add "$REPOSITORY" "dist/$package"' in generation
+    assert 'for architecture in ("amd64", "arm64")' in state
+    assert 'publication["packages"][architecture]["sha256"]' in state
+    assert 'str(package_paths[architecture])' in state
+    assert "--phase prepare" in generation
     assert 'binary-$architecture/Packages' in generation
     assert 'architectures:["amd64","arm64"]' in generation
     assert "-architectures=amd64,arm64" in generation
@@ -870,6 +873,20 @@ def test_reusable_apt_publisher_enables_and_verifies_by_hash_indexes() -> None:
     assert "Acquire-By-Hash: yes" in local
     assert "by-hash/SHA256" in local
     assert local.index("publish snapshot") < local.index("Acquire-By-Hash: yes")
+
+
+def test_development_apt_state_is_compacted_before_snapshot_and_after_switch() -> None:
+    local = apt_step("Generate missing aptly state or public tree")
+    prepare = local.index("--phase prepare")
+    snapshot = local.index("snapshot create")
+    switch = local.index("publish switch")
+    indexes = local.index('test "$checked_indexes" -gt 0')
+    finalize = local.index("--phase finalize")
+
+    assert "CHANNEL: ${{ inputs.channel }}" in APT_WORKFLOW.read_text()
+    assert prepare < snapshot < switch < indexes < finalize
+    assert local.count("scripts/agent-apt-state compact") == 2
+    assert 'if [[ "$CHANNEL" == dev ]]' not in local
 
 
 def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> None:

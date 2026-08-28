@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import sys
 import tarfile
+from collections.abc import Callable
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
@@ -164,21 +166,26 @@ def test_publication_receipt_binds_both_architecture_packages() -> None:
 
 def bundles(tmp_path: Path, publication: dict[str, object]) -> tuple[bytes, bytes]:
     state = load_state_module()
+    channel = publication["channel"]
+    assert isinstance(channel, str)
+    distribution, keyring = state.CHANNELS[channel]
     aptly = tmp_path / "aptly"
     aptly.mkdir()
     (aptly / "db").write_bytes(b"trusted aptly database")
     public = tmp_path / "public"
     for architecture in PACKAGE_BYTES:
-        index = public / f"dists/dev/main/binary-{architecture}"
+        index = public / f"dists/{distribution}/main/binary-{architecture}"
         index.mkdir(parents=True)
         (index / "Packages").write_bytes(f"{architecture} package index".encode())
         (index / "Packages.gz").write_bytes(
             f"compressed {architecture} package index".encode()
         )
-    (public / "dists/dev/Release").write_bytes(b"release metadata")
-    (public / "dists/dev/Release.gpg").write_bytes(b"detached signature")
-    (public / "dists/dev/InRelease").write_bytes(b"signed-at-t1")
-    (public / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
+    (public / f"dists/{distribution}/Release").write_bytes(b"release metadata")
+    (public / f"dists/{distribution}/Release.gpg").write_bytes(
+        b"detached signature"
+    )
+    (public / f"dists/{distribution}/InRelease").write_bytes(b"signed-at-t1")
+    (public / keyring).write_bytes(b"public key")
     package_root = public / "pool/main/v/vonk-forge-agent"
     package_root.mkdir(parents=True)
     packages = publication["packages"]
@@ -191,6 +198,444 @@ def bundles(tmp_path: Path, publication: dict[str, object]) -> tuple[bytes, byte
         state.build_bundle(aptly, "state", publication),
         state.build_bundle(public, "public", publication),
     )
+
+
+def package_files(tmp_path: Path, publication: dict[str, object]) -> Path:
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    for architecture, content in PACKAGE_BYTES.items():
+        package = packages[architecture]
+        assert isinstance(package, dict)
+        (package_dir / package["filename"]).write_bytes(content)
+    return package_dir
+
+
+def package_records(publication: dict[str, object]) -> set[tuple[str, str, str, str]]:
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    version = publication["version"]
+    assert isinstance(version, str)
+    return {
+        (
+            "vonk-forge-agent",
+            version,
+            architecture,
+            package["sha256"],
+        )
+        for architecture, package in packages.items()
+        if isinstance(package, dict)
+    }
+
+
+def compare_test_versions(left: str, right: str) -> int:
+    def key(value: str) -> tuple[int, ...]:
+        stable, marker, development = value.partition("~dev.")
+        base = tuple(int(part) for part in stable.split("."))
+        if not marker:
+            return (*base, sys.maxsize)
+        return (*base, int(development.split("+", 1)[0]))
+
+    return (key(left) > key(right)) - (key(left) < key(right))
+
+
+class FakeAptly:
+    def __init__(
+        self,
+        repo: set[tuple[str, str, str, str]],
+        snapshots: dict[str, set[tuple[str, str, str, str]]],
+        packages: dict[str, tuple[str, str, str, str]],
+    ) -> None:
+        self.repo = set(repo)
+        self.snapshots = {name: set(records) for name, records in snapshots.items()}
+        self.packages = packages
+        self.operations: list[tuple[str, ...]] = []
+        self.cleanup_count = 0
+        self.fail: Callable[[tuple[str, ...]], bool] = lambda _arguments: False
+
+    def run(
+        self, _config: Path, *arguments: str, allow_no_results: bool = False
+    ) -> str:
+        assert isinstance(allow_no_results, bool)
+        self.operations.append(arguments)
+        if self.fail(arguments):
+            raise RuntimeError("injected aptly interruption")
+        if arguments[:3] == ("repo", "remove", "vonk-forge-dev"):
+            query = arguments[3]
+            match = re.fullmatch(
+                r"Name \(= vonk-forge-agent\), \$Version \(= '([^']+)'\)",
+                query,
+            )
+            assert match is not None
+            self.repo = {record for record in self.repo if record[1] != match[1]}
+            return ""
+        if arguments[:3] == ("repo", "remove", "vonk-forge"):
+            query = arguments[3]
+            match = re.fullmatch(
+                r"Name \(= vonk-forge-agent\), \$Version \(= '([^']+)'\)",
+                query,
+            )
+            assert match is not None
+            self.repo = {record for record in self.repo if record[1] != match[1]}
+            return ""
+        if arguments[:3] in {
+            ("repo", "add", "vonk-forge-dev"),
+            ("repo", "add", "vonk-forge"),
+        }:
+            self.repo.add(self.packages[arguments[3]])
+            return ""
+        if arguments[:2] == ("repo", "search"):
+            return self._format(self.repo)
+        if arguments == ("snapshot", "list", "-raw"):
+            return "".join(f"{name}\n" for name in sorted(self.snapshots))
+        if arguments[:2] == ("snapshot", "search"):
+            return self._format(self.snapshots[arguments[3]])
+        if arguments[:2] == ("snapshot", "drop"):
+            del self.snapshots[arguments[2]]
+            return ""
+        if arguments == ("db", "cleanup"):
+            self.cleanup_count += 1
+            return ""
+        raise AssertionError(f"unexpected aptly command: {arguments!r}")
+
+    @staticmethod
+    def _format(records: set[tuple[str, str, str, str]]) -> str:
+        return "".join("\t".join(record) + "\n" for record in sorted(records))
+
+
+def fake_aptly(
+    tmp_path: Path,
+    publication: dict[str, object],
+    *,
+    repo: set[tuple[str, str, str, str]] | None = None,
+    snapshots: dict[str, set[tuple[str, str, str, str]]] | None = None,
+) -> tuple[Path, Path, FakeAptly]:
+    config = tmp_path / "aptly.json"
+    config.write_text("{}\n")
+    package_dir = package_files(tmp_path, publication)
+    packages = publication["packages"]
+    assert isinstance(packages, dict)
+    version = publication["version"]
+    assert isinstance(version, str)
+    paths = {
+        str((package_dir / package["filename"]).resolve()): (
+            "vonk-forge-agent",
+            version,
+            architecture,
+            package["sha256"],
+        )
+        for architecture, package in packages.items()
+        if isinstance(package, dict)
+    }
+    return (
+        config,
+        package_dir,
+        FakeAptly(repo or set(), snapshots or {}, paths),
+    )
+
+
+def write_public_tree(
+    tmp_path: Path,
+    records: set[tuple[str, str, str, str]],
+    distribution: str = "dev",
+) -> Path:
+    public = tmp_path / "public"
+    for architecture in ("amd64", "arm64"):
+        paragraphs: list[str] = []
+        for package, version, record_architecture, digest in sorted(records):
+            if record_architecture != architecture:
+                continue
+            filename = (
+                "pool/main/v/vonk-forge-agent/"
+                f"vonk-forge-agent_{version}_{architecture}.deb"
+            )
+            package_path = public / filename
+            package_path.parent.mkdir(parents=True, exist_ok=True)
+            package_path.write_bytes(PACKAGE_BYTES[architecture])
+            assert hashlib.sha256(package_path.read_bytes()).hexdigest() == digest
+            paragraphs.append(
+                "\n".join(
+                    (
+                        f"Package: {package}",
+                        f"Version: {version}",
+                        f"Architecture: {architecture}",
+                        f"Filename: {filename}",
+                        f"SHA256: {digest}",
+                        "Description: test package",
+                    )
+                )
+            )
+        index = public / f"dists/{distribution}/main/binary-{architecture}/Packages"
+        index.parent.mkdir(parents=True, exist_ok=True)
+        index.write_text("\n\n".join(paragraphs) + "\n")
+    return public
+
+
+def test_development_compaction_makes_each_new_snapshot_exact_and_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    previous = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    current = receipt("0.1.0~dev.1786300001+g0123456789ab")
+    old_records = package_records(previous)
+    current_records = package_records(current)
+    config, package_dir, aptly = fake_aptly(
+        tmp_path,
+        current,
+        repo=old_records,
+        snapshots={previous["snapshot"]: old_records},
+    )
+    monkeypatch.setattr(state, "_run_aptly", aptly.run)
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+
+    state.compact_aptly_state(
+        current, config, "vonk-forge-dev", package_dir, tmp_path / "public", "prepare"
+    )
+    assert aptly.repo == current_records
+    assert aptly.snapshots == {previous["snapshot"]: old_records}
+    assert (
+        "repo",
+        "remove",
+        "vonk-forge-dev",
+        f"Name (= vonk-forge-agent), $Version (= '{previous['version']}')",
+    ) in aptly.operations
+
+    aptly.snapshots[current["snapshot"]] = set(aptly.repo)
+    public = write_public_tree(tmp_path, current_records)
+    state.compact_aptly_state(
+        current, config, "vonk-forge-dev", package_dir, public, "finalize"
+    )
+
+    assert aptly.repo == current_records
+    assert aptly.snapshots == {current["snapshot"]: current_records}
+    assert aptly.cleanup_count == 1
+    assert ("snapshot", "drop", previous["snapshot"]) in aptly.operations
+    drop = aptly.operations.index(("snapshot", "drop", previous["snapshot"]))
+    cleanup = aptly.operations.index(("db", "cleanup"))
+    assert drop < cleanup
+
+    state.compact_aptly_state(
+        current, config, "vonk-forge-dev", package_dir, public, "finalize"
+    )
+    assert aptly.snapshots == {current["snapshot"]: current_records}
+    assert aptly.cleanup_count == 2
+
+
+def test_development_compaction_workflow_retry_restores_prior_committed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    previous = receipt("0.1.0~dev.1786299999+g0123456789ab")
+    old_records = package_records(previous)
+    config, package_dir, aptly = fake_aptly(
+        tmp_path,
+        publication,
+        repo=old_records,
+        snapshots={previous["snapshot"]: old_records},
+    )
+    monkeypatch.setattr(state, "_run_aptly", aptly.run)
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+    failures = 0
+
+    def fail_second_add(arguments: tuple[str, ...]) -> bool:
+        nonlocal failures
+        if arguments[:3] == ("repo", "add", "vonk-forge-dev"):
+            failures += 1
+            return failures == 2
+        return False
+
+    aptly.fail = fail_second_add
+    with pytest.raises(RuntimeError, match="injected aptly interruption"):
+        state.compact_aptly_state(
+            publication,
+            config,
+            "vonk-forge-dev",
+            package_dir,
+            tmp_path / "public",
+            "prepare",
+        )
+    retry = FakeAptly(old_records, {previous["snapshot"]: old_records}, aptly.packages)
+    monkeypatch.setattr(state, "_run_aptly", retry.run)
+    state.compact_aptly_state(
+        publication,
+        config,
+        "vonk-forge-dev",
+        package_dir,
+        tmp_path / "public",
+        "prepare",
+    )
+    assert retry.repo == package_records(publication)
+
+
+def test_development_compaction_fails_closed_on_cumulative_current_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    previous = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    current = receipt("0.1.0~dev.1786300001+g0123456789ab")
+    old_records = package_records(previous)
+    current_records = package_records(current)
+    config, package_dir, aptly = fake_aptly(
+        tmp_path,
+        current,
+        repo=current_records,
+        snapshots={
+            previous["snapshot"]: old_records,
+            current["snapshot"]: old_records | current_records,
+        },
+    )
+    monkeypatch.setattr(state, "_run_aptly", aptly.run)
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+
+    with pytest.raises(state.StateError, match="current aptly snapshot"):
+        state.compact_aptly_state(
+            current,
+            config,
+            "vonk-forge-dev",
+            package_dir,
+            tmp_path / "public",
+            "finalize",
+        )
+
+    assert aptly.cleanup_count == 0
+    assert previous["snapshot"] in aptly.snapshots
+
+
+def stable_receipt(version: str) -> dict[str, object]:
+    return {
+        "channel": "stable",
+        "distribution": "stable",
+        "packages": {
+            architecture: {
+                "filename": f"vonk-forge-agent_{version}_{architecture}.deb",
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for architecture, content in PACKAGE_BYTES.items()
+        },
+        "snapshot": f"stable-{version}",
+        "source_sha": SHA,
+        "version": version,
+    }
+
+
+def test_stable_compaction_retains_current_and_two_complete_predecessors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    historical = [stable_receipt(version) for version in ("1.8.0", "1.9.0", "1.10.0")]
+    publication = stable_receipt("1.11.0")
+    old_records = set().union(*(package_records(item) for item in historical))
+    old_snapshots = {
+        item["snapshot"]: package_records(item) for item in historical
+    }
+    config, package_dir, aptly = fake_aptly(
+        tmp_path,
+        publication,
+        repo=old_records,
+        snapshots=old_snapshots,
+    )
+    monkeypatch.setattr(state, "_run_aptly", aptly.run)
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+
+    state.compact_aptly_state(
+        publication,
+        config,
+        "vonk-forge",
+        package_dir,
+        tmp_path / "public",
+        "prepare",
+    )
+    assert {record[1] for record in aptly.repo} == {"1.9.0", "1.10.0", "1.11.0"}
+    assert {record[2] for record in aptly.repo} == {"amd64", "arm64"}
+    aptly.snapshots[publication["snapshot"]] = set(aptly.repo)
+    public = write_public_tree(tmp_path, aptly.repo, "stable")
+    state.compact_aptly_state(
+        publication, config, "vonk-forge", package_dir, public, "finalize"
+    )
+    assert aptly.snapshots == {publication["snapshot"]: aptly.repo}
+    assert aptly.cleanup_count == 1
+
+
+def test_stable_compaction_rejects_rollback_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    high = stable_receipt("2.0.0")
+    publication = stable_receipt("1.9.0")
+    high_records = package_records(high)
+    config, package_dir, aptly = fake_aptly(
+        tmp_path,
+        publication,
+        repo=high_records,
+        snapshots={high["snapshot"]: high_records},
+    )
+    monkeypatch.setattr(state, "_run_aptly", aptly.run)
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+
+    with pytest.raises(state.StateError, match="roll back"):
+        state.compact_aptly_state(
+            publication,
+            config,
+            "vonk-forge",
+            package_dir,
+            tmp_path / "public",
+            "prepare",
+        )
+    assert not any(operation[:2] == ("repo", "remove") for operation in aptly.operations)
+
+
+def test_repository_version_requires_exactly_one_package_per_architecture() -> None:
+    state = load_state_module()
+    publication = stable_receipt("1.2.3")
+    records = package_records(publication)
+    records.add(("vonk-forge-agent", "1.2.3", "amd64", "f" * 64))
+
+    with pytest.raises(state.StateError, match="incomplete package version"):
+        state._group_complete_versions(records, "stable")
+
+
+def test_repository_version_rejects_incomplete_and_unexpected_packages() -> None:
+    state = load_state_module()
+    publication = stable_receipt("1.2.3")
+    records = package_records(publication)
+    records = {record for record in records if record[2] == "amd64"}
+    with pytest.raises(state.StateError, match="incomplete package version"):
+        state._group_complete_versions(records, "stable")
+
+    with pytest.raises(state.StateError, match="package identity"):
+        state._group_complete_versions(
+            {("another-package", "1.2.3", "amd64", "a" * 64)}, "stable"
+        )
+
+
+def test_public_package_matrix_requires_every_retained_version_and_architecture(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = stable_receipt("1.2.0")
+    predecessor = stable_receipt("1.1.0")
+    records = package_records(publication) | package_records(predecessor)
+    public = write_public_tree(tmp_path, records, "stable")
+    index = public / "dists/stable/main/binary-arm64/Packages"
+    paragraphs = index.read_text().strip().split("\n\n")
+    index.write_text(paragraphs[-1] + "\n")
+
+    assert state._public_package_records(publication, public) != records
+
+
+def test_bundle_size_limit_reports_kind_limit_and_observed_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = load_state_module()
+    monkeypatch.setattr(state, "MAX_BUNDLE_BYTES", 3)
+
+    with pytest.raises(
+        state.StateError,
+        match=r"state bundle exceeds 3 byte limit: 4 bytes",
+    ):
+        state.validate_bundle(b"1234", "state")
 
 
 def without_bundle_member(raw: bytes, missing_name: str) -> bytes:
@@ -458,6 +903,102 @@ def test_public_failure_does_not_advance_latest_and_exact_retry_completes(
 
     assert public.objects["dists/dev/InRelease"] == b"signed-at-t1"
     assert "latest.json" in private.objects
+
+
+def test_successor_publication_preserves_older_public_pool_objects(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+    first = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    second = receipt("0.1.0~dev.1786300001+g0123456789ab")
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_state, first_public = bundles(first_root, first)
+    second_state, second_public = bundles(second_root, second)
+
+    state.commit_candidate(private, first, first_state, first_public)
+    state.publish_committed(private, public, first)
+    first_package = first["packages"]["arm64"]
+    assert isinstance(first_package, dict)
+    first_key = f"pool/main/v/vonk-forge-agent/{first_package['filename']}"
+    immutable_bytes = public.objects[first_key]
+
+    state.commit_candidate(private, second, second_state, second_public)
+    state.publish_committed(private, public, second)
+
+    assert public.objects[first_key] == immutable_bytes
+
+
+def test_stable_successor_replays_predecessor_pool_object_immutably(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+    first = stable_receipt("1.0.0")
+    second = stable_receipt("1.1.0")
+    first_root = tmp_path / "first-stable"
+    second_root = tmp_path / "second-stable"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_state, first_public = bundles(first_root, first)
+    second_state, _ = bundles(second_root, second)
+    first_package = first["packages"]["arm64"]
+    assert isinstance(first_package, dict)
+    predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
+    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["arm64"])
+    second_public = state.build_bundle(second_root / "public", "public", second)
+
+    state.commit_candidate(private, first, first_state, first_public)
+    state.publish_committed(private, public, first)
+    first_key = f"pool/main/v/vonk-forge-agent/{first_package['filename']}"
+    immutable_bytes = public.objects[first_key]
+    state.commit_candidate(private, second, second_state, second_public)
+    state.publish_committed(private, public, second)
+
+    assert public.objects[first_key] == immutable_bytes
+    assert operations.count(f"public:read:{first_key}") >= 2
+
+
+def test_immutable_public_conflict_preserves_all_public_bytes_and_latest(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+    first = stable_receipt("1.0.0")
+    second = stable_receipt("1.1.0")
+    first_root = tmp_path / "conflict-first"
+    second_root = tmp_path / "conflict-second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_state, first_public = bundles(first_root, first)
+    second_state, _ = bundles(second_root, second)
+    first_package = first["packages"]["amd64"]
+    assert isinstance(first_package, dict)
+    predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
+    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["amd64"])
+    second_public = state.build_bundle(second_root / "public", "public", second)
+    state.commit_candidate(private, first, first_state, first_public)
+    state.publish_committed(private, public, first)
+    state.commit_candidate(private, second, second_state, second_public)
+    first_key = f"pool/main/v/vonk-forge-agent/{first_package['filename']}"
+    public.objects[first_key] = b"pre-existing conflicting bytes"
+    before_public = dict(public.objects)
+    before_latest = private.objects["latest.json"]
+
+    with pytest.raises(state.StateError, match="immutable public object conflict"):
+        state.publish_committed(private, public, second)
+
+    assert public.objects == before_public
+    assert private.objects["latest.json"] == before_latest
 
 
 def test_public_bundle_binds_the_exact_verified_package_hash(tmp_path: Path) -> None:
