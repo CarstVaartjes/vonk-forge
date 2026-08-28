@@ -55,6 +55,9 @@ _MAX_SOURCE_CONTEXTS = 128
 _MAX_SOURCE_FILES = 4096
 _MAX_RELEASES = 32
 _MAX_RELEASE_CHANGES = 16
+_TRANSIENT_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_DEFAULT_MAX_STALE_SECONDS = 24 * 60 * 60
+_MAX_STALE_LIMIT_SECONDS = 7 * 24 * 60 * 60
 _CONTENTS_ACCEPT = "application/vnd.github.object+json"
 _SEMVER = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
@@ -185,6 +188,8 @@ class RecipeLibraryClient:
         transport: httpx.BaseTransport | None = None,
         timeout_seconds: float = 8.0,
         cache_ttl_seconds: float = 60.0,
+        stale_retry_interval_seconds: float = 15.0,
+        max_stale_seconds: float = _DEFAULT_MAX_STALE_SECONDS,
     ) -> None:
         normalized_base_url = base_url.rstrip("/")
         parsed = urlsplit(normalized_base_url)
@@ -207,10 +212,20 @@ class RecipeLibraryClient:
             )
         self._repository = repository
         self._ref = ref
-        self._cache_ttl_seconds = max(0.0, cache_ttl_seconds)
+        self._cache_ttl_seconds = min(
+            _MAX_STALE_LIMIT_SECONDS, max(0.0, cache_ttl_seconds)
+        )
+        self._stale_retry_interval_seconds = min(
+            300.0, max(1.0, stale_retry_interval_seconds)
+        )
+        self._max_stale_seconds = max(
+            self._cache_ttl_seconds,
+            min(_MAX_STALE_LIMIT_SECONDS, max(0.0, max_stale_seconds)),
+        )
         self._cached_at = 0.0
+        self._retry_after = 0.0
         self._cached_snapshot: RecipeLibrarySnapshot | None = None
-        self._hydrated_items: dict[str, RecipeLibraryItem] = {}
+        self._hydrated_items: dict[tuple[str, str], RecipeLibraryItem] = {}
         self._hydrated_bundles: dict[str, bytes] = {}
         self._cache_lock = threading.Lock()
         self._client = httpx.Client(
@@ -229,14 +244,26 @@ class RecipeLibraryClient:
         self._client.close()
 
     def list(self) -> RecipeLibrarySnapshot:
-        cached = self._fresh_snapshot()
+        cached = self._usable_snapshot()
         if cached is not None:
             return cached
         with self._cache_lock:
-            cached = self._fresh_snapshot()
+            cached = self._usable_snapshot()
             if cached is not None:
                 return cached
-            snapshot = self._load_snapshot()
+            try:
+                snapshot = self._load_snapshot()
+            except RecipeLibraryError as error:
+                if (
+                    error.code != "recipe_library.unavailable"
+                    or self._cached_snapshot is None
+                    or time.monotonic() - self._cached_at >= self._max_stale_seconds
+                ):
+                    raise
+                self._retry_after = (
+                    time.monotonic() + self._stale_retry_interval_seconds
+                )
+                return self._cached_snapshot
             if (
                 self._cached_snapshot is not None
                 and self._cached_snapshot.commit != snapshot.commit
@@ -245,12 +272,16 @@ class RecipeLibraryClient:
                 self._hydrated_bundles.clear()
             self._cached_snapshot = snapshot
             self._cached_at = time.monotonic()
+            self._retry_after = 0.0
             return snapshot
 
-    def _fresh_snapshot(self) -> RecipeLibrarySnapshot | None:
-        if (
-            self._cached_snapshot is not None
-            and time.monotonic() - self._cached_at < self._cache_ttl_seconds
+    def _usable_snapshot(self) -> RecipeLibrarySnapshot | None:
+        if self._cached_snapshot is None:
+            return None
+        now = time.monotonic()
+        age = now - self._cached_at
+        if age < self._cache_ttl_seconds or (
+            age < self._max_stale_seconds and now < self._retry_after
         ):
             return self._cached_snapshot
         return None
@@ -830,7 +861,8 @@ class RecipeLibraryClient:
         if item.source_context is None:
             return item
         with self._cache_lock:
-            cached = self._hydrated_items.get(item.uri)
+            cache_key = (item.library_commit, item.uri)
+            cached = self._hydrated_items.get(cache_key)
             if cached is not None:
                 return cached
             cached_bundle = self._hydrated_bundles.get(
@@ -838,7 +870,7 @@ class RecipeLibraryClient:
             )
             if cached_bundle is not None:
                 hydrated = replace(item, source_bundle=cached_bundle)
-                self._hydrated_items[item.uri] = hydrated
+                self._hydrated_items[cache_key] = hydrated
                 return hydrated
             files: dict[str, bytes] = {}
             for source_file in item.source_context.files:
@@ -877,7 +909,7 @@ class RecipeLibraryClient:
                 )
             hydrated = replace(item, source_bundle=bundle.archive)
             self._hydrated_bundles[item.source_context.content_sha256] = bundle.archive
-            self._hydrated_items[item.uri] = hydrated
+            self._hydrated_items[cache_key] = hydrated
             return hydrated
 
     def _current_revision(self) -> str:
@@ -1133,10 +1165,20 @@ class RecipeLibraryClient:
                         "recipe_library.not_found",
                         "recipe library entry was not found",
                     )
-                if response.status_code != 200:
+                retry_after = response.headers.get("Retry-After", "").strip()
+                rate_limited = response.status_code == 403 and (
+                    response.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+                    or retry_after.isdigit()
+                )
+                if response.status_code in _TRANSIENT_STATUS_CODES or rate_limited:
                     raise RecipeLibraryError(
                         "recipe_library.unavailable",
                         "recipe library request failed",
+                    )
+                if response.status_code != 200:
+                    raise RecipeLibraryError(
+                        "recipe_library.request_rejected",
+                        "recipe library request was rejected",
                     )
                 body = bytearray()
                 for chunk in response.iter_bytes():
