@@ -403,6 +403,7 @@ class AgentJobService:
             self._reconcile_agent_upgrade(
                 session,
                 node_id,
+                certificate.serial,
                 now,
                 capabilities,
                 runtime_identity,
@@ -413,6 +414,18 @@ class AgentJobService:
                     AgentOperationAttempt.operation_id == StoredOperation.id,
                     AgentOperationAttempt.attempt == StoredOperation.current_attempt,
                     AgentOperationAttempt.state == "running",
+                    AgentOperationAttempt.lease_deadline <= now,
+                )
+                .exists()
+            )
+            retry_ready_attempt = (
+                select(AgentOperationAttempt.id)
+                .where(
+                    AgentOperationAttempt.operation_id == StoredOperation.id,
+                    AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                    AgentOperationAttempt.state.in_(
+                        {"expired", "failed", "waiting-for-operator"}
+                    ),
                     AgentOperationAttempt.lease_deadline <= now,
                 )
                 .exists()
@@ -436,6 +449,7 @@ class AgentJobService:
                                 StoredOperation.retry_disposition == _RETRY_DISPOSITION,
                                 StoredOperation.retry_disposition_attempt
                                 == StoredOperation.current_attempt,
+                                retry_ready_attempt,
                             ),
                         ),
                     )
@@ -488,7 +502,10 @@ class AgentJobService:
                     )
                     .with_for_update(of=AgentOperationAttempt)
                 )
-                if previous is not None:
+                if previous is not None and previous.state in {
+                    "running",
+                    "waiting-for-operator",
+                }:
                     previous.state = "expired"
             if (
                 operation.state == "running"
@@ -534,6 +551,7 @@ class AgentJobService:
         self,
         session: Session,
         node_id: str,
+        certificate_serial: str,
         now: datetime,
         capabilities: tuple[str, ...] | None,
         runtime_identity: Mapping[str, object],
@@ -548,7 +566,9 @@ class AgentJobService:
             .where(
                 StoredOperation.node_id == node_id,
                 StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
-                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                StoredOperation.state.in_(
+                    {"queued", "running", "waiting-for-operator"}
+                ),
             )
             .order_by(StoredOperation.created_at, StoredOperation.id)
             .with_for_update(of=StoredOperation)
@@ -564,20 +584,6 @@ class AgentJobService:
             or runtime_identity.get("self_test_passed") is not True
         ):
             return
-        attempt = session.scalar(
-            select(AgentOperationAttempt)
-            .where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == operation.current_attempt,
-            )
-            .with_for_update(of=AgentOperationAttempt)
-        )
-        if attempt is None or attempt.state not in {
-            "running",
-            "waiting-for-operator",
-            "expired",
-        }:
-            return
         evidence = {
             "architecture": runtime_identity["architecture"],
             "binary_digest": runtime_identity["binary_digest"],
@@ -587,6 +593,33 @@ class AgentJobService:
             "self_test_passed": True,
             "status": "upgraded",
         }
+        attempt = session.scalar(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+            .with_for_update(of=AgentOperationAttempt)
+        )
+        if operation.state == "queued" and operation.current_attempt == 0:
+            operation.current_attempt = 1
+            attempt = AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now,
+                agent_certificate_serial=certificate_serial,
+                state="succeeded",
+                result=_document(evidence),
+            )
+            session.add(attempt)
+        elif attempt is None or attempt.state not in {
+            "running",
+            "waiting-for-operator",
+            "expired",
+            "failed",
+        }:
+            return
         message = AgentResult(
             schema_version=1,
             job_id=operation.parent_job_id,
@@ -598,8 +631,12 @@ class AgentJobService:
             state="succeeded",
             result=evidence,
         )
-        attempt.state = "succeeded"
-        attempt.result = _document(evidence)
+        # Preserve explicit helper failures as truthful attempt audit. Exact
+        # contact reconciles the operation projection, not the historical fact
+        # that the signed helper attempt returned failure.
+        if attempt.state != "failed":
+            attempt.state = "succeeded"
+            attempt.result = _document(evidence)
         operation.state = "succeeded"
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
@@ -1562,6 +1599,16 @@ class AgentJobService:
                 .order_by(StoredOperation.created_at, StoredOperation.id)
             )
         )
+        if (
+            job.kind == "agent-upgrade"
+            and job.state == "waiting-for-operator"
+            and set(job.targets) - {operation.node_id for operation in operations}
+        ):
+            # Sequential agent upgrades intentionally materialize one target at
+            # a time. If the next target drifted ineligible, preserve the
+            # service's specific operator-facing reason instead of declaring the
+            # job successful merely because every materialized operation passed.
+            return
         terminal = {
             "cancelled",
             "compensated",

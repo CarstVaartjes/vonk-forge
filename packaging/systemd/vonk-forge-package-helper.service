@@ -38,6 +38,7 @@ RuntimeDirectory=vonk-forge-package-helper
 RuntimeDirectoryMode=0711
 RuntimeDirectoryPreserve=yes
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
+ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent
 BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports
 ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata
 TimeoutStartSec=30s

@@ -225,8 +225,26 @@ def _verify_control(control: Path) -> None:
         "openssl rand -hex 32",
         "install -o root -g vonk-agent -m 0640",
         "deb-systemd-helper enable vonk-forge-agent.service",
-        "deb-systemd-invoke restart vonk-forge-agent.service",
         "daemon-reload",
+        "schedule_permanent_helper_restart",
+        "activate_permanent_helper_unit",
+        "helper-upgrade.pending",
+        "helper-upgrade.receipt",
+        "agent_sha256=$expected_agent_digest",
+        "boot_id=$boot_id",
+        "schema_version=1",
+        "activated_at=$activated_at",
+        '"/proc/$new_helper_pid/exe"',
+        "helper_sha256=$expected_helper_digest",
+        "installed_helper_digest",
+        "confirmed_helper_digest",
+        "/usr/bin/sync -f /var/lib/vonk-forge",
+        "vonk-forge-agent.service >/dev/null",
+        "vonk-forge-package-helper-upgrade-finish.service",
+        "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
+        "RuntimeMaxSec=240s",
+        "/proc/$wait_pid/stat",
+        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
     ):
         if required not in postinst:
             raise VerificationError("postinst lifecycle is incomplete")
@@ -245,11 +263,35 @@ def _verify_control(control: Path) -> None:
     ):
         raise VerificationError("postinst contains obsolete agent lifecycle state")
     preinst = (control / "preinst").read_text(encoding="utf-8")
-    for required in ("dpkg --compare-versions", "refusing downgrade"):
+    for required in (
+        "dpkg --compare-versions",
+        "refusing downgrade",
+        "inside_package_helper",
+        "stage_bridge",
+        "vonk-forge-package-helper-upgrade-bridge.service",
+        "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
+        "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge",
+        "write_preunpack_pending",
+        "state=pre-unpack",
+        "RuntimeMaxSec=180s",
+        "/proc/$wait_pid/stat",
+        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
+        "package-helper upgrade bridge staged; retry the signed controller upgrade",
+    ):
         if required not in preinst:
             raise VerificationError("preinst downgrade protection is incomplete")
     if "/usr/bin/python" in postinst or "python3" in postinst:
         raise VerificationError("postinst has an undeclared interpreter dependency")
+    prerm = (control / "prerm").read_text(encoding="utf-8")
+    for required in (
+        "helper-upgrade.pending",
+        "helper-upgrade.receipt",
+        "safe_pending",
+        "safe_receipt",
+        "/usr/bin/sync -f /var/lib/vonk-forge",
+    ):
+        if required not in prerm:
+            raise VerificationError("prerm helper evidence cleanup is incomplete")
 
 
 def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
@@ -340,9 +382,15 @@ def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
         "vonk-forge-docker-firewall.service",
         "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
         "ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
+        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
     ):
         if boundary not in helper:
             raise VerificationError("helper Spark runtime boundary is invalid")
+    if any(
+        boundary in helper.splitlines()
+        for boundary in ("ReadWritePaths=/usr/share", "ReadWritePaths=/usr")
+    ):
+        raise VerificationError("helper package write boundary is too broad")
     firewall = units["vonk-forge-docker-firewall.service"]
     for boundary in (
         "Requires=docker.service",

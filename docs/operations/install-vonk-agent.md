@@ -40,11 +40,17 @@ resolve from the Spark:
 curl -fsSL https://install.vonkforge.ai/spark | sh
 ```
 
-For an installed Spark package-only upgrade, rerun the channel command without
-`--enroll`. It preserves configuration and identity, replaces the Debian package
-directly, restarts the service, and requires sustained readiness. There is no
-separate upgrade command, A/B slot, supervisor, rollback state, migration
-command, or follow-up setup step.
+For routine upgrades of enrolled online Sparks, use Fleet's **Upgrade agents**
+action or `vonkctl fleet upgrade`. It previews the exact signed package and
+eligible nodes, rolls out one Spark at a time by default, and requires the new
+agent and privileged helper activation evidence before continuing. This path
+preserves configuration and identity and does not require SSH.
+
+Rerun the channel command without `--enroll` for a local package repair or when
+the controller-managed path is unavailable. It preserves configuration and
+identity, replaces the Debian package directly, restarts the services, and
+requires sustained readiness. There is no A/B slot, supervisor, rollback state,
+migration command, or follow-up setup step.
 
 Healthy connected agents rotate their 24-hour client certificate before it
 expires; operators should not normally need to re-enroll them. A package upgrade

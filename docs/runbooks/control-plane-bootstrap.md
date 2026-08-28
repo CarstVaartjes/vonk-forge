@@ -38,5 +38,9 @@ address comes from the generated command. Tailscale remains on the NAS gateway;
 it is not required on the Sparks.
 
 Rerun the NAS command from the existing bundle's parent directory to prepare a
-NAS upgrade. Rerun the Spark command on an installed Spark to upgrade it. No
-separate bootstrap, migration, supervisor, or updater command is supported.
+NAS upgrade. After the NAS is running the accepted release, use Fleet's signed
+one-at-a-time upgrade action for routine Spark package rollouts; it uses the
+existing agent connection, requires the exact target identity before advancing,
+and does not require SSH. Rerun the Spark command for package repair, a fresh
+installation, or an explicit `--enroll` certificate replacement. No separate
+bootstrap, migration, supervisor, or rollback-slot command is required.

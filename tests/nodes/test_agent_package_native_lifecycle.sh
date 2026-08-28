@@ -95,6 +95,15 @@ DPKG_QUERY
 cat > "$bin/dpkg" <<'DPKG'
 #!/usr/bin/env bash
 set -euo pipefail
+write_helper_unit() {
+  unit="${VONK_AGENT_LIFECYCLE_ROOT:?}/lib/systemd/system/vonk-forge-package-helper.service"
+  mkdir -p "${unit%/*}"
+  printf '%s\n' \
+    '[Service]' \
+    'ProtectSystem=strict' \
+    'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+    > "$unit"
+}
 printf 'dpkg %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
 case "${1:-}" in
   --compare-versions)
@@ -109,6 +118,7 @@ case "${1:-}" in
       printf '%s\n' 'vonk-forge-agent: refusing downgrade' >&2
       exit 1
     fi
+    write_helper_unit
     printf '%s\n' "$candidate" > "${LIFECYCLE_VERSION_STATE:?}"
     printf 'ii \n' > "${LIFECYCLE_STATE:?}"
     ;;
@@ -116,6 +126,7 @@ case "${1:-}" in
     package=${2##*/}
     candidate=${package#vonk-forge-agent_}
     candidate=${candidate%_amd64.deb}
+    write_helper_unit
     printf '%s\n' "$candidate" > "${LIFECYCLE_VERSION_STATE:?}"
     printf 'iU \n' > "${LIFECYCLE_STATE:?}"
     ;;

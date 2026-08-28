@@ -77,8 +77,11 @@ commands above.
 
 Prepare a NAS upgrade by rerunning the development NAS command from the parent
 of the existing local `vonk-forge/` directory. Upload it and redeploy while
-keeping named volumes. Upgrade a Spark by rerunning the development Spark
-command on that node. Verify one canary before continuing through the fleet.
+keeping named volumes. For enrolled online Sparks, preview and apply the signed
+candidate from Fleet (or `vonkctl fleet upgrade`) with the one-at-a-time
+strategy; the controller verifies the canary before it queues the next Spark,
+and no SSH is required. Rerun the development Spark command only for a local
+package repair, fresh installation, or controller-authorized re-enrollment.
 
 If this pre-release deployment is intentionally disposable, a full Compose
 volume reset is permitted only as an explicit fresh-install acceptance step.

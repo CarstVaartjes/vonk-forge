@@ -22,6 +22,20 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
 _ONLINE_WINDOW = timedelta(seconds=150)
+_HELPER_BRIDGE_RECOVERY_BACKOFF = timedelta(seconds=10)
+_TARGET_PROTOCOL_VERSION = 3
+_RECOVERABLE_HELPER_BRIDGE_FAILURES = frozenset(
+    {
+        "agent upgrade request is invalid",
+        "agent upgrade helper is unavailable",
+        "agent upgrade helper rejected the request",
+        "agent upgrade helper rejected the request: operation_failed",
+        "agent upgrade did not restart the service",
+    }
+)
+_RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
+    "agent upgrade did not restart the service"
+}
 
 
 class AgentUpgradeConflict(RuntimeError):
@@ -241,18 +255,166 @@ class AgentUpgradeService:
         self,
         session: Session,
         operation: AgentOperation,
-        _attempt: AgentOperationAttempt,
+        attempt: AgentOperationAttempt,
         message: AgentResult,
     ) -> None:
-        if operation.kind != "agent.upgrade.v1" or message.state != "succeeded":
+        if operation.kind != "agent.upgrade.v1":
             return
         parent = session.scalar(
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
         if parent is None or parent.kind != "agent-upgrade":
             return
+        package = parent.payload.get("package")
+        if not isinstance(package, dict):
+            return
+        node = session.scalar(
+            select(AgentNode)
+            .where(AgentNode.node_id == operation.node_id)
+            .with_for_update(of=AgentNode)
+        )
+        if message.state == "succeeded":
+            if node is None or not self._contact_proves_target(
+                node, operation, package, message
+            ):
+                # A helper acknowledgement or generic health report is not proof
+                # that the newly installed binary restarted successfully.  Keep
+                # the operation reconcilable until a subsequent authenticated
+                # protocol-v3 contact reports the exact published identity.
+                self._wait_for_identity(operation, attempt, now=self._clock())
+                return
+            if parent.state == "waiting-for-operator":
+                parent.state = "queued"
+                parent.status_reason = None
+                parent.updated_at = self._clock()
+        elif (bridge_failure := self._helper_bridge_failure(message)) is not None:
+            # The original signed-helper bridge could reject the first request
+            # before dpkg changed the host.  Permit one subsequent agent poll to
+            # retry that exact request, then leave it waiting for identity-only
+            # reconciliation instead of forming an unbounded retry loop.
+            retry = bool(
+                attempt.attempt == 1
+                and operation.current_attempt == 1
+                and bridge_failure in _RETRYABLE_HELPER_BRIDGE_FAILURES
+                and node is not None
+                and self._safe_to_retry(node, package)
+            )
+            self._wait_for_identity(
+                operation,
+                attempt,
+                now=self._clock(),
+                retry=retry,
+                preserve_failed_attempt=True,
+            )
+            return
+        else:
+            return
         if parent.payload.get("strategy") == "one-at-a-time":
             self._enqueue_next(session, parent)
+
+    @staticmethod
+    def _wait_for_identity(
+        operation: AgentOperation,
+        attempt: AgentOperationAttempt,
+        *,
+        now: datetime,
+        retry: bool = False,
+        preserve_failed_attempt: bool = False,
+    ) -> None:
+        operation.state = "waiting-for-operator"
+        operation.updated_at = now
+        if not preserve_failed_attempt:
+            attempt.state = "waiting-for-operator"
+        operation.retry_disposition = "retry" if retry else None
+        operation.retry_disposition_attempt = attempt.attempt if retry else None
+        if retry:
+            # The package preinst asks PID 1 to restart the old sandboxed helper
+            # only after the failed dpkg process exits. Persist a conservative
+            # recovery window so an immediate agent poll cannot race that
+            # asynchronous restart. AgentOperationAttempt is already the durable
+            # owner of attempt timing, including after controller restarts.
+            attempt.lease_deadline = now + _HELPER_BRIDGE_RECOVERY_BACKOFF
+
+    @staticmethod
+    def _helper_bridge_failure(message: AgentResult) -> str | None:
+        reason = message.result.get("reason")
+        return (
+            reason
+            if (
+                message.state == "failed"
+                and isinstance(reason, str)
+                and reason in _RECOVERABLE_HELPER_BRIDGE_FAILURES
+            )
+            else None
+        )
+
+    @classmethod
+    def _contact_proves_target(
+        cls,
+        node: AgentNode,
+        operation: AgentOperation,
+        package: Mapping[str, object],
+        message: AgentResult,
+    ) -> bool:
+        semantic_version = cls._target_semantic_version(package)
+        last_seen = node.last_seen_at
+        if semantic_version is None or last_seen is None:
+            return False
+        observed = (
+            last_seen if last_seen.tzinfo is not None else last_seen.replace(tzinfo=UTC)
+        )
+        dispatched = (
+            operation.created_at
+            if operation.created_at.tzinfo is not None
+            else operation.created_at.replace(tzinfo=UTC)
+        )
+        evidence = message.result
+        return bool(
+            observed >= dispatched
+            and node.state == "active"
+            and node.revoked_at is None
+            and node.protocol_version == _TARGET_PROTOCOL_VERSION
+            and "agent.runtime.rust.v1" in set(node.capabilities or ())
+            and "agent.upgrade.v1" in set(node.capabilities or ())
+            and node.architecture == package.get("architecture")
+            and node.semantic_version == semantic_version
+            and node.build_digest == package.get("target_build_digest")
+            and node.binary_digest == package.get("target_binary_digest")
+            and node.self_test_passed is True
+            and evidence.get("architecture") == package.get("architecture")
+            and evidence.get("build_digest") == package.get("target_build_digest")
+            and evidence.get("binary_digest") == package.get("target_binary_digest")
+            and evidence.get("package_sha256") == package.get("package_sha256")
+            and evidence.get("package_version") == package.get("package_version")
+            and evidence.get("self_test_passed") is True
+            and evidence.get("status") == "upgraded"
+        )
+
+    @staticmethod
+    def _target_semantic_version(package: Mapping[str, object]) -> str | None:
+        version = package.get("package_version")
+        if not isinstance(version, str):
+            return None
+        match = re.match(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
+        return None if match is None else match.group(0)
+
+    @staticmethod
+    def _safe_to_retry(
+        node: AgentNode,
+        package: Mapping[str, object],
+    ) -> bool:
+        return bool(
+            node.state == "active"
+            and node.revoked_at is None
+            and node.protocol_version == _TARGET_PROTOCOL_VERSION
+            and "agent.upgrade.v1" in set(node.capabilities or ())
+            and node.architecture == package.get("architecture")
+            and node.self_test_passed is True
+            and (
+                node.build_digest != package.get("target_build_digest")
+                or node.binary_digest != package.get("target_binary_digest")
+            )
+        )
 
     def _enqueue_next(self, session: Session, parent: Job) -> None:
         package = parent.payload.get("package")
@@ -275,6 +437,21 @@ class AgentUpgradeService:
             None,
         )
         if next_node is None:
+            return
+        node = session.scalar(
+            select(AgentNode)
+            .where(AgentNode.node_id == next_node)
+            .with_for_update(of=AgentNode)
+        )
+        reason = (
+            "does not exist"
+            if node is None
+            else self._ineligible_reason(node, package, self._clock())
+        )
+        if reason is not None:
+            parent.state = "waiting-for-operator"
+            parent.status_reason = f"Spark {next_node} {reason}"
+            parent.updated_at = self._clock()
             return
         self._enqueue_node(session, parent, next_node)
 
