@@ -3,11 +3,11 @@ set -euo pipefail
 
 if (( EUID != 0 )); then
   printf '%s\n' 'agent upgrade bridge sandbox test must run as root' >&2
-  exit 1
+  exit 77
 fi
 if [[ ! -d /run/systemd/system ]]; then
   printf '%s\n' 'agent upgrade bridge sandbox test requires systemd' >&2
-  exit 1
+  exit 77
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
