@@ -2,6 +2,197 @@
 set -eu
 
 new_version='@VERSION@'
+helper_unit=vonk-forge-package-helper.service
+helper_unit_path=/lib/systemd/system/vonk-forge-package-helper.service
+bridge_root=/run/vonk-forge-package-helper/upgrade-bridge
+bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
+bridge_dropin=$bridge_dropin_dir/20-package-upgrade-bridge.conf
+bridge_main_pid=$bridge_root/previous-main-pid
+helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
+
+write_preunpack_pending() {
+    [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
+        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+        || return 1
+    if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
+        [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
+            && /usr/bin/sed -n '1p' "$helper_pending" \
+                | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
+        pending_lines=$(/usr/bin/wc -l < "$helper_pending")
+        if [ "$pending_lines" -eq 2 ]; then
+            /usr/bin/sed -n '2p' "$helper_pending" \
+                | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
+                || return 1
+        elif [ "$pending_lines" -eq 3 ]; then
+            /usr/bin/sed -n '2p' "$helper_pending" \
+                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
+            /usr/bin/sed -n '3p' "$helper_pending" \
+                | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
+        else
+            return 1
+        fi
+    fi
+    pending_new=$(/usr/bin/mktemp /var/lib/vonk-forge/.helper-upgrade.XXXXXX)
+    trap '/usr/bin/rm -f -- "$pending_new"' EXIT HUP INT TERM
+    printf '%s\n' "version=$new_version" 'state=pre-unpack' > "$pending_new"
+    /usr/bin/chown root:root "$pending_new"
+    /usr/bin/chmod 0600 "$pending_new"
+    /usr/bin/sync -f "$pending_new"
+    /usr/bin/mv -f -- "$pending_new" "$helper_pending"
+    /usr/bin/sync -f /var/lib/vonk-forge
+    trap - EXIT HUP INT TERM
+}
+
+helper_unit_has_package_paths() {
+    unit_path=$1
+    [ -f "$unit_path" ] && [ ! -L "$unit_path" ] \
+        && grep -Fq 'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            "$unit_path"
+}
+
+inside_package_helper() {
+    [ -r /proc/self/cgroup ] \
+        && grep -Eq '(^|/)vonk-forge-package-helper[.]service(/|$)' \
+            /proc/self/cgroup
+}
+
+current_helper_main_pid() {
+    main_pid=$(/usr/bin/systemctl --system show --property=MainPID --value \
+        "$helper_unit")
+    case "$main_pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$main_pid" -gt 1 ] && [ -d "/proc/$main_pid" ] || return 1
+    printf '%s\n' "$main_pid"
+}
+
+ensure_bridge_directory() {
+    directory=$1
+    mode=$2
+    if [ -L "$directory" ] || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
+        return 1
+    fi
+    if [ ! -d "$directory" ]; then
+        /usr/bin/install -d -o root -g root -m "0$mode" "$directory"
+    fi
+    [ "$(/usr/bin/stat -c %u:%a "$directory")" = "0:$mode" ]
+}
+
+bridge_dropin_is_safe() {
+    [ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ] \
+        && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin")" = 0:644 ] \
+        && [ "$(/usr/bin/wc -l < "$bridge_dropin")" -eq 2 ] \
+        && grep -Fxq '[Service]' "$bridge_dropin" \
+        && grep -Fxq \
+            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            "$bridge_dropin"
+}
+
+bridge_marker_is_safe() {
+    [ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ] \
+        && [ "$(/usr/bin/stat -c %u:%a "$bridge_main_pid")" = 0:600 ] \
+        && [ "$(/usr/bin/wc -l < "$bridge_main_pid")" -eq 1 ] \
+        && grep -Eq '^[0-9]+$' "$bridge_main_pid"
+}
+
+helper_has_effective_bridge_paths() {
+    effective_paths=$(/usr/bin/systemctl --system show \
+        --property=ReadWritePaths --value "$helper_unit")
+    printf '%s\n' "$effective_paths" | grep -Fq '/usr/share/keyrings' \
+        && printf '%s\n' "$effective_paths" \
+            | grep -Fq '/usr/share/doc/vonk-forge-agent'
+}
+
+stage_bridge() {
+    helper_main_pid=$1
+    ensure_bridge_directory "$bridge_dropin_dir" 755 || return 1
+    ensure_bridge_directory "$bridge_root" 700 || return 1
+    if [ -e "$bridge_dropin" ] || [ -L "$bridge_dropin" ]; then
+        bridge_dropin_is_safe || return 1
+    else
+        bridge_new=$(/usr/bin/mktemp \
+            "$bridge_dropin_dir/.20-package-upgrade-bridge.XXXXXX")
+        trap '/usr/bin/rm -f -- "$bridge_new"' EXIT HUP INT TERM
+        printf '%s\n' \
+            '[Service]' \
+            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            > "$bridge_new"
+        /usr/bin/chown root:root "$bridge_new"
+        /usr/bin/chmod 0644 "$bridge_new"
+        /usr/bin/mv -f -- "$bridge_new" "$bridge_dropin"
+        trap - EXIT HUP INT TERM
+    fi
+    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
+        bridge_marker_is_safe || return 1
+    fi
+    /usr/bin/systemctl --system daemon-reload >/dev/null
+    marker_new=$(/usr/bin/mktemp "$bridge_root/.previous-main-pid.XXXXXX")
+    trap '/usr/bin/rm -f -- "$marker_new"' EXIT HUP INT TERM
+    printf '%s\n' "$helper_main_pid" > "$marker_new"
+    /usr/bin/chown root:root "$marker_new"
+    /usr/bin/chmod 0600 "$marker_new"
+    /usr/bin/mv -f -- "$marker_new" "$bridge_main_pid"
+    trap - EXIT HUP INT TERM
+}
+
+schedule_bridge_restart() {
+    wait_pid=$1
+    wait_start=$2
+    bridge_job=vonk-forge-package-helper-upgrade-bridge.service
+    bridge_job_load=$(/usr/bin/systemctl --system show \
+        --property=LoadState --value "$bridge_job" 2>/dev/null || true)
+    bridge_job_state=$(/usr/bin/systemctl --system show \
+        --property=ActiveState --value "$bridge_job" 2>/dev/null || true)
+    case "$bridge_job_state" in
+        active|activating|deactivating) return 0 ;;
+    esac
+    if [ "$bridge_job_load" != not-found ] && [ -n "$bridge_job_load" ]; then
+        /usr/bin/systemctl --system reset-failed "$bridge_job" >/dev/null 2>&1 \
+            || true
+        collect_attempts=0
+        while [ "$collect_attempts" -lt 50 ]; do
+            bridge_job_load=$(/usr/bin/systemctl --system show \
+                --property=LoadState --value "$bridge_job" 2>/dev/null || true)
+            [ "$bridge_job_load" = not-found ] && break
+            /bin/sleep 0.1
+            collect_attempts=$((collect_attempts + 1))
+        done
+        [ "$bridge_job_load" = not-found ] || return 1
+    fi
+    # The single-quoted script must expand only inside the transient service.
+    # shellcheck disable=SC2016
+    /usr/bin/systemd-run --quiet --collect \
+        --unit="$bridge_job" \
+        --property=Type=exec \
+        --property=RuntimeMaxSec=180s \
+        --property=NoNewPrivileges=yes \
+        --property=PrivateTmp=yes \
+        --property=ProtectHome=yes \
+        --property=ProtectSystem=strict \
+        --property=IPAddressDeny=any \
+        --property=RestrictAddressFamilies=AF_UNIX \
+        /bin/sh -c '
+            set -eu
+            wait_pid=$1
+            wait_start=$2
+            attempts=0
+            while [ "$attempts" -lt 1200 ] \
+                && [ -r "/proc/$wait_pid/stat" ] \
+                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
+                    = "$wait_start" ]; do
+                /bin/sleep 0.1
+                attempts=$((attempts + 1))
+            done
+            if [ -r "/proc/$wait_pid/stat" ] \
+                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
+                    = "$wait_start" ]; then
+                exit 1
+            fi
+            /usr/bin/systemctl --system restart \
+                vonk-forge-package-helper.service >/dev/null
+        ' vonk-package-upgrade "$wait_pid" "$wait_start" >/dev/null
+}
 
 case "${1:-}" in
 install|upgrade)
@@ -21,6 +212,76 @@ if [ -n "$old_version" ]; then
         echo "vonk-forge-agent: refusing downgrade from $old_version to $new_version" >&2
         exit 1
     fi
+    if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
+        write_preunpack_pending || {
+            echo 'vonk-forge-agent: cannot record the pre-unpack helper upgrade gate' >&2
+            exit 1
+        }
+    fi
+fi
+
+# Development packages predating this bridge sandboxed dpkg away from two
+# package-owned /usr/share paths. A signed upgrade invoked by that old helper
+# cannot unpack its release key or evidence documents. Stage only those exact
+# paths in a transient drop-in, stop before dpkg can partially unpack, and have
+# PID 1 restart the helper after this dpkg process has exited. The controller's
+# bounded retry then runs under the bridge and can install the permanent unit.
+if [ -n "$old_version" ] \
+    && [ -d /run/systemd/system ] \
+    && inside_package_helper \
+    && ! helper_unit_has_package_paths "$helper_unit_path"; then
+    helper_main_pid=$(current_helper_main_pid) || {
+        echo 'vonk-forge-agent: cannot identify the package helper for safe upgrade bridging' >&2
+        exit 1
+    }
+    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
+        bridge_marker_is_safe || {
+            echo 'vonk-forge-agent: package-helper upgrade bridge state is unsafe' >&2
+            exit 1
+        }
+        previous_main_pid=$(/usr/bin/sed -n '1p' "$bridge_main_pid")
+        case "$previous_main_pid" in
+            ''|*[!0-9]*)
+                echo 'vonk-forge-agent: package-helper upgrade bridge state is invalid' >&2
+                exit 1
+                ;;
+        esac
+        if [ "$helper_main_pid" != "$previous_main_pid" ] \
+            && bridge_dropin_is_safe \
+            && helper_has_effective_bridge_paths; then
+            # The old helper has restarted with the exact bridge loaded. Leave
+            # it in place until the new package's postinst activates the
+            # permanent unit and schedules cleanup outside this dpkg process.
+            exit 0
+        fi
+    fi
+    case "$PPID" in
+        ''|*[!0-9]*)
+            echo 'vonk-forge-agent: cannot identify dpkg for safe helper restart' >&2
+            exit 1
+            ;;
+    esac
+    if [ ! -r "/proc/$PPID/stat" ]; then
+        echo 'vonk-forge-agent: cannot inspect dpkg for safe helper restart' >&2
+        exit 1
+    fi
+    dpkg_start=$(/usr/bin/awk '{ print $22 }' "/proc/$PPID/stat")
+    case "$dpkg_start" in
+        ''|*[!0-9]*)
+            echo 'vonk-forge-agent: dpkg process identity is invalid' >&2
+            exit 1
+            ;;
+    esac
+    stage_bridge "$helper_main_pid" || {
+        echo 'vonk-forge-agent: cannot stage the package-helper upgrade bridge' >&2
+        exit 1
+    }
+    schedule_bridge_restart "$PPID" "$dpkg_start" || {
+        echo 'vonk-forge-agent: cannot schedule the package-helper upgrade bridge' >&2
+        exit 1
+    }
+    echo 'vonk-forge-agent: package-helper upgrade bridge staged; retry the signed controller upgrade' >&2
+    exit 1
 fi
 
 exit 0

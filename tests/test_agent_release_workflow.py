@@ -401,6 +401,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert materializer.count('"archive_sha256":') == 2
     assert materializer.count('"binary_sha256":') == 2
     assert "scripts/test-agent-package-native-lifecycle" in text
+    assert "sudo tests/nodes/test_agent_upgrade_bridge_sandbox.sh" in text
     for architecture in ("linux-arm64", "linux-amd64"):
         assert f"--architecture {architecture}" in text
     for architecture in ("arm64", "amd64"):

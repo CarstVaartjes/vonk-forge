@@ -55,6 +55,36 @@ struct HelperResponse<'a> {
     evidence_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'a str>,
+}
+
+struct HelperRejection {
+    request_id: Option<String>,
+    error_code: &'static str,
+    detail: String,
+}
+
+impl HelperRejection {
+    fn new(error_code: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            request_id: None,
+            error_code,
+            detail: detail.into(),
+        }
+    }
+
+    fn for_request(
+        request_id: impl Into<String>,
+        error_code: &'static str,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: Some(request_id.into()),
+            error_code,
+            detail: detail.into(),
+        }
+    }
 }
 
 fn main() {
@@ -100,7 +130,13 @@ fn run() -> Result<(), String> {
         match connection {
             Ok(mut stream) => {
                 let Some(permit) = acquire_worker(&workers) else {
-                    reject(&mut stream, "concurrent request limit reached");
+                    reject(
+                        &mut stream,
+                        &HelperRejection::new(
+                            "concurrency_limit",
+                            "concurrent request limit reached",
+                        ),
+                    );
                     continue;
                 };
                 let verifier = Arc::clone(&verifier);
@@ -124,18 +160,19 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn reject(stream: &mut UnixStream, error: &str) {
+fn reject(stream: &mut UnixStream, error: &HelperRejection) {
     let response = HelperResponse {
         schema_version: 1,
-        request_id: None,
+        request_id: error.request_id.clone(),
         status: "rejected",
         evidence_sha256: None,
         exit_code: None,
+        error_code: Some(error.error_code),
     };
     if let Ok(body) = vonk_agent_protocol::canonical_json(&response) {
         let _ = write_frame(stream, &body);
     }
-    eprintln!("vonk-agent-helper: request rejected: {error}");
+    eprintln!("vonk-agent-helper: request rejected: {}", error.detail);
 }
 
 fn handle(
@@ -143,37 +180,60 @@ fn handle(
     verifier: &GrantVerifier,
     executor: &OperationExecutor<ProcessCommandRunner>,
     node_id: &str,
-) -> Result<(), String> {
+) -> Result<(), HelperRejection> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
-        .map_err(display)?;
+        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
-        .map_err(display)?;
-    let peer = peer_identity(stream)?;
-    let raw = read_frame(stream).map_err(display)?;
-    let request = parse_request(&raw).map_err(display)?;
+        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
+    let peer = peer_identity(stream)
+        .map_err(|error| HelperRejection::new("peer_identity_invalid", error))?;
+    let raw = read_frame(stream)
+        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
+    let request = parse_request(&raw)
+        .map_err(|error| HelperRejection::new("grant_invalid", display(error)))?;
+    let request_id = request.claims.request_id.to_string();
     if request.claims.node_id != node_id {
-        return Err("grant is for a different node".to_owned());
+        return Err(HelperRejection::new(
+            "grant_node_mismatch",
+            "grant is for a different node",
+        ));
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(display)?
+        .map_err(|error| HelperRejection::new("grant_invalid", display(error)))?
         .as_secs() as i64;
-    verifier.authorize(&request, &peer, now).map_err(display)?;
-    claim_once(request.claims.request_id.to_string().as_str())?;
+    verifier
+        .authorize(&request, &peer, now)
+        .map_err(|error| HelperRejection::new("grant_unauthorized", display(error)))?;
+    claim_once(&request_id).map_err(|error| {
+        let error_code = if error == "request grant was already consumed" {
+            "request_replayed"
+        } else {
+            "request_ledger_failed"
+        };
+        HelperRejection::for_request(&request_id, error_code, error)
+    })?;
     let outcome = executor
         .execute(&request.claims.operation)
-        .map_err(display)?;
+        .map_err(|error| {
+            HelperRejection::for_request(&request_id, "operation_failed", display(error))
+        })?;
     let response = HelperResponse {
         schema_version: 1,
         request_id: Some(request.claims.request_id.to_string()),
         status: &outcome.status,
         evidence_sha256: Some(outcome.evidence_sha256),
         exit_code: outcome.exit_code,
+        error_code: None,
     };
-    let body = vonk_agent_protocol::canonical_json(&response).map_err(display)?;
-    write_frame(stream, &body).map_err(display)
+    let body = vonk_agent_protocol::canonical_json(&response).map_err(|error| {
+        HelperRejection::for_request(&request_id, "operation_failed", display(error))
+    })?;
+    write_frame(stream, &body).map_err(|error| {
+        HelperRejection::for_request(&request_id, "operation_failed", display(error))
+    })
 }
 
 fn claim_once(request_id: &str) -> Result<(), String> {
@@ -321,7 +381,7 @@ fn _classify_protocol_error(error: HelperError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_CONCURRENT_REQUESTS, acquire_worker};
+    use super::{HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -338,5 +398,49 @@ mod tests {
         drop(permits);
         assert_eq!(counter.load(Ordering::Acquire), 0);
         assert!(acquire_worker(&counter).is_some());
+    }
+
+    #[test]
+    fn rejection_response_contains_only_stable_diagnostics() {
+        let response = HelperResponse {
+            schema_version: 1,
+            request_id: Some("request-1".to_owned()),
+            status: "rejected",
+            evidence_sha256: None,
+            exit_code: None,
+            error_code: Some("operation_failed"),
+        };
+        let body = vonk_agent_protocol::canonical_json(&response).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["request_id"], "request-1");
+        assert_eq!(value["error_code"], "operation_failed");
+        assert!(value.get("detail").is_none());
+        assert!(value.get("stderr").is_none());
+    }
+
+    #[test]
+    fn success_response_omits_error_code_for_old_clients() {
+        let response = HelperResponse {
+            schema_version: 1,
+            request_id: Some("request-1".to_owned()),
+            status: "package-installed",
+            evidence_sha256: Some("a".repeat(64)),
+            exit_code: None,
+            error_code: None,
+        };
+        let body = vonk_agent_protocol::canonical_json(&response).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value.get("error_code").is_none());
+    }
+
+    #[test]
+    fn request_id_is_only_attached_after_authorization() {
+        let before_authorization =
+            HelperRejection::new("grant_unauthorized", "signature was invalid");
+        assert!(before_authorization.request_id.is_none());
+
+        let after_authorization =
+            HelperRejection::for_request("request-1", "operation_failed", "dpkg failed");
+        assert_eq!(after_authorization.request_id.as_deref(), Some("request-1"));
     }
 }

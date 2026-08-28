@@ -333,9 +333,11 @@ runs:
           packaging/bin/vonk-forge-docker-firewall \
           scripts/test-agent-package-native-lifecycle \
           tests/scripts/test_docker_firewall.sh \
-          tests/nodes/test_agent_package_native_lifecycle.sh
+          tests/nodes/test_agent_package_native_lifecycle.sh \
+          tests/nodes/test_agent_upgrade_bridge_sandbox.sh
         sudo tests/scripts/test_docker_firewall.sh
         tests/nodes/test_agent_package_native_lifecycle.sh
+        sudo tests/nodes/test_agent_upgrade_bridge_sandbox.sh
 
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)

@@ -17,8 +17,13 @@ They then upload the refreshed three-entry directory and redeploy it with the
 NAS Docker UI. This is the only supported NAS upgrade entry point.
 
 Spark nodes use the architecture-specific `vonk-forge-agent` Debian package.
-There is no controller-managed host updater, platform update API, generation
-selector, rollback slot, or offline wheel bundle.
+For an enrolled, online fleet, the authenticated Fleet upgrade action (or
+`vonkctl fleet upgrade`) previews the current signed package and rolls it out
+through the existing agent relay without SSH. The default one-at-a-time
+strategy requires the exact new agent and helper activation evidence before it
+queues the next Spark. Rerunning the Spark installer remains the package repair,
+fresh-install, and explicit re-enrollment path; there is no A/B rollback slot or
+offline wheel bundle.
 
 ## CI authority boundary
 

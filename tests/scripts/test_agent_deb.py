@@ -105,6 +105,7 @@ def _run_preinst(
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": "/usr/bin:/bin",
+            "SYSTEMD_OFFLINE": "1",
         },
         capture_output=True,
         text=True,
@@ -229,16 +230,24 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
 ):
     postinst = POSTINST.read_text()
 
-    assert 'if [ -n "${2:-}" ]' in postinst
-    upgrade_guard = postinst.index('if [ -n "${2:-}" ]')
-    restart = postinst.index("deb-systemd-invoke restart", upgrade_guard)
-    assert restart > upgrade_guard
+    assert (
+        '&& { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; };'
+        in postinst
+    )
+    assert "deb-systemd-invoke restart vonk-forge-agent.service" not in postinst
+    helper_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
+    )
+    agent_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
+        helper_restart,
+    )
+    assert helper_restart < agent_restart
     assert "post_restart_self_test" not in postinst
     assert "/run/vonk-forge-agent" not in postinst
     assert "self-test" not in postinst
     for forbidden in (
         "verify-readiness",
-        "MainPID",
         "is-active",
         "readiness.json",
         "/usr/bin/sleep",
@@ -246,6 +255,261 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
         "wget",
     ):
         assert forbidden not in postinst
+
+
+def test_package_helper_upgrade_bridge_is_narrow_bounded_and_retryable() -> None:
+    preinst = PREINST.read_text()
+    postinst = POSTINST.read_text()
+    helper = (
+        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+    exact_paths = (
+        "ReadWritePaths=/usr/share/keyrings "
+        "/usr/share/doc/vonk-forge-agent"
+    )
+
+    assert exact_paths in helper.splitlines()
+    assert "ReadWritePaths=/usr/share" not in helper.splitlines()
+    assert "ReadWritePaths=/usr" not in helper.splitlines()
+    assert "ProtectSystem=strict" in helper.splitlines()
+
+    assert "inside_package_helper" in preinst
+    assert "/proc/self/cgroup" in preinst
+    assert "previous-main-pid" in preinst
+    assert "vonk-forge-package-helper-upgrade-bridge.service" in preinst
+    assert "--property=ActiveState" in preinst
+    assert "--property=LoadState" in preinst
+    assert "reset-failed" in preinst
+    assert "RuntimeMaxSec=180s" in preinst
+    assert 'attempts" -lt 1200' in preinst
+    assert "bridge_dropin_dir=/lib/systemd/system/" in preinst
+    assert "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge" in preinst
+    assert "bridge_dropin_dir=/run/systemd/system/" not in preinst
+    assert exact_paths in preinst
+    assert "stop before dpkg can partially unpack" in preinst
+    assert "retry the signed controller upgrade" in preinst
+    assert preinst.index("schedule_bridge_restart") < preinst.rindex("exit 1")
+    preunpack_gate = preinst.index("write_preunpack_pending ||")
+    bridge_decision = preinst.index(
+        "# Development packages predating this bridge"
+    )
+    assert preunpack_gate < bridge_decision
+    assert preinst.index('/usr/bin/sync -f "$pending_new"') < preunpack_gate
+    assert preinst.index(
+        "/usr/bin/sync -f /var/lib/vonk-forge"
+    ) < preunpack_gate
+    live_gate_guard = preinst.rfind(
+        'if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]',
+        0,
+        preunpack_gate,
+    )
+    assert live_gate_guard >= 0
+
+    assert "vonk-forge-package-helper-upgrade-finish.service" in postinst
+    assert "--property=ActiveState" in postinst
+    assert "--property=LoadState" in postinst
+    assert "reset-failed" in postinst
+    assert "schedule_permanent_helper_restart" in postinst
+    assert exact_paths in postinst
+    schedule_call = postinst.index(
+        'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
+    )
+    assert postinst.rfind(exact_paths, 0, schedule_call) >= 0
+    helper_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
+    )
+    agent_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
+        helper_restart,
+    )
+    assert helper_restart < agent_restart < schedule_call
+    retire = postinst.index('/usr/bin/mv -- "$bridge_dropin" "$bridge_retired"')
+    permanent_reload = postinst.index(
+        "/usr/bin/systemctl --system daemon-reload", retire
+    )
+    cleanup = postinst.index('/usr/bin/rm -f -- "$bridge_retired"')
+    assert retire < permanent_reload < cleanup < agent_restart < schedule_call
+    assert "RuntimeMaxSec=240s" in postinst
+    assert 'attempts" -lt 1200' in postinst
+    assert "bridge_dropin_dir=/lib/systemd/system/" in postinst
+    assert "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge" in postinst
+    assert "ReadWritePaths=/run/systemd/system" not in postinst
+    assert "helper_has_effective_bridge_paths" in preinst
+    assert "--property=ReadWritePaths --value" in preinst
+
+
+def test_package_helper_upgrade_bridge_fails_closed_on_unsafe_runtime_state() -> None:
+    preinst = PREINST.read_text()
+    postinst = POSTINST.read_text()
+
+    for unsafe_guard in (
+        '[ -L "$directory" ]',
+        '[ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ]',
+        'stat -c %u:%a "$bridge_dropin"',
+        '[ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ]',
+        'stat -c %u:%a "$bridge_main_pid"',
+    ):
+        assert unsafe_guard in preinst
+    assert "cannot stage the package-helper upgrade bridge" in preinst
+    assert "cannot schedule the package-helper upgrade bridge" in preinst
+    assert "cannot schedule the permanent package finisher" in postinst
+    assert '[ ! -L "$helper_unit_path" ]' in postinst
+    assert '[ ! -L "$bridge_dropin" ]' in postinst
+    assert '[ ! -L "$bridge_main_pid" ]' in postinst
+
+
+def test_upgrade_bridge_only_uses_dev335_writable_mounts() -> None:
+    preinst = PREINST.read_text()
+    helper = (
+        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+
+    assert "/lib/systemd/system" in next(
+        line
+        for line in helper.splitlines()
+        if line.startswith("ReadWritePaths=/var/lib/vonk-forge ")
+    ).split()
+    assert "RuntimeDirectory=vonk-forge-package-helper" in helper.splitlines()
+    assert (
+        "bridge_dropin_dir=/lib/systemd/system/"
+        "vonk-forge-package-helper.service.d"
+    ) in preinst.splitlines()
+    assert (
+        "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge"
+        in preinst.splitlines()
+    )
+    assert "bridge_dropin_dir=/run/systemd/system/" not in preinst
+    assert "bridge_root=/run/vonk-forge-package-helper-upgrade-bridge" not in preinst
+
+
+def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
+    postinst = POSTINST.read_text()
+    agent_unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
+    helper_unit = (
+        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+    agent_timeout = int(
+        next(
+            line.removeprefix("TimeoutStopSec=").removesuffix("s")
+            for line in agent_unit.splitlines()
+            if line.startswith("TimeoutStopSec=")
+        )
+    )
+    helper_timeout = int(
+        next(
+            line.removeprefix("TimeoutStopSec=").removesuffix("s")
+            for line in helper_unit.splitlines()
+            if line.startswith("TimeoutStopSec=")
+        )
+    )
+
+    assert agent_timeout == 30
+    assert helper_timeout == 15
+    assert "RuntimeMaxSec=240s" in postinst
+    assert 'attempts" -lt 1200' in postinst
+    helper_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
+    )
+    agent_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
+        helper_restart,
+    )
+    assert helper_restart < agent_restart
+    assert 240 >= 120 + helper_timeout + agent_timeout + 60
+
+
+def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None:
+    postinst = POSTINST.read_text()
+
+    pending_write = postinst.index('"helper_sha256=$helper_digest"')
+    helper_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
+    )
+    running_digest = postinst.index('"/proc/$new_helper_pid/exe"', helper_restart)
+    installed_digest = postinst.index(
+        "/usr/lib/vonk-forge/vonk-agent-helper", running_digest
+    )
+    receipt_write = postinst.index('"helper_main_pid=$new_helper_pid"')
+    receipt_file_sync = postinst.index(
+        '/usr/bin/sync -f "$receipt_new"', receipt_write
+    )
+    receipt_rename = postinst.index(
+        '/usr/bin/mv -f -- "$receipt_new" "$helper_receipt"', receipt_file_sync
+    )
+    receipt_dir_sync = postinst.index(
+        "/usr/bin/sync -f /var/lib/vonk-forge", receipt_rename
+    )
+    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_dir_sync)
+    pending_retire = postinst.index(
+        '/usr/bin/rm -f -- "$helper_pending"', confirmed_digest
+    )
+    pending_retire_sync = postinst.index(
+        "/usr/bin/sync -f /var/lib/vonk-forge", pending_retire
+    )
+    agent_restart = postinst.index(
+        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
+        helper_restart,
+    )
+    schedule_call = postinst.index(
+        'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
+    )
+
+    assert pending_write < schedule_call
+    assert helper_restart < running_digest < installed_digest < receipt_write
+    assert receipt_write < receipt_file_sync < receipt_rename < receipt_dir_sync
+    assert receipt_dir_sync < confirmed_digest < pending_retire
+    assert pending_retire < pending_retire_sync < agent_restart < schedule_call
+    assert "helper-upgrade.pending" in postinst
+    assert "helper-upgrade.receipt" in postinst
+    assert '"schema_version=1"' in postinst
+    assert '"activated_at=$activated_at"' in postinst
+    assert "/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ" in postinst
+    assert "ReadWritePaths=/var/lib/vonk-forge" in postinst
+    pending_file_sync = postinst.index('/usr/bin/sync -f "$pending_new"')
+    pending_rename = postinst.index(
+        '/usr/bin/mv -f -- "$pending_new" "$helper_pending"'
+    )
+    pending_dir_sync = postinst.index(
+        "/usr/bin/sync -f /var/lib/vonk-forge", pending_rename
+    )
+    assert pending_file_sync < pending_rename < pending_dir_sync < schedule_call
+    assert "^version=[0-9A-Za-z.+~:-]+$" in postinst
+    assert "active package helper identity is invalid" in postinst
+
+
+def test_interrupted_upgrade_state_has_safe_fresh_recovery_and_remove_paths() -> None:
+    postinst = POSTINST.read_text()
+    prerm = PRERM.read_text()
+
+    assert "clear_stale_pending_for_fresh_install" not in postinst
+    pending_probe = postinst.index(
+        'if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]'
+    )
+    finisher_decision = postinst.index(
+        '&& { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; };'
+    )
+    pending_write = postinst.index("pending_digests=$(write_helper_pending)")
+    schedule = postinst.index(
+        'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
+    )
+    assert pending_probe < finisher_decision < pending_write < schedule
+    assert "interrupted helper activation requires a live systemd configure retry" in postinst
+    assert "pending helper upgrade state is unsafe" in postinst
+
+    stop_finisher = prerm.index(
+        "vonk-forge-package-helper-upgrade-finish.service"
+    )
+    stop_agent = prerm.index(
+        "deb-systemd-invoke stop vonk-forge-agent.service"
+    )
+    stop_helper = prerm.index(
+        "deb-systemd-invoke stop vonk-forge-package-helper.service"
+    )
+    remove_evidence = prerm.index('/usr/bin/rm -f -- "$pending" "$receipt"')
+    assert stop_finisher < stop_agent < stop_helper < remove_evidence
+    assert "safe_pending" in prerm
+    assert "safe_receipt" in prerm
+    assert "/usr/bin/sync -f /var/lib/vonk-forge" in prerm
 
 
 def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
@@ -487,6 +751,12 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
     ) in helper_unit.splitlines()
     assert "AF_INET" not in helper_unit
+    assert (
+        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"
+        in helper_unit.splitlines()
+    )
+    assert "ReadWritePaths=/usr/share" not in helper_unit.splitlines()
+    assert "ReadWritePaths=/usr" not in helper_unit.splitlines()
     assert "usermod --add-subuids" in postinst
     assert "usermod --add-subgids" in postinst
     assert "SUB_UID_MIN" in postinst

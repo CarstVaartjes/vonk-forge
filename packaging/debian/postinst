@@ -6,6 +6,327 @@ package_version='@VERSION@'
 agent_semver=${package_version%%~*}
 agent_semver=${agent_semver%%+*}
 
+helper_unit_path=/lib/systemd/system/vonk-forge-package-helper.service
+bridge_root=/run/vonk-forge-package-helper/upgrade-bridge
+bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
+bridge_dropin=$bridge_dropin_dir/20-package-upgrade-bridge.conf
+bridge_main_pid=$bridge_root/previous-main-pid
+bridge_retired=$bridge_dropin_dir/20-package-upgrade-bridge.conf.retired
+helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
+helper_receipt=/var/lib/vonk-forge/helper-upgrade.receipt
+
+write_helper_pending() {
+    [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
+        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+        && [ -f /usr/lib/vonk-forge/vonk-agent-helper ] \
+        && [ ! -L /usr/lib/vonk-forge/vonk-agent-helper ] \
+        && [ "$(/usr/bin/stat -c %u:%a \
+            /usr/lib/vonk-forge/vonk-agent-helper)" = 0:555 ] \
+        && [ -f /usr/lib/vonk-forge/vonk-agent ] \
+        && [ ! -L /usr/lib/vonk-forge/vonk-agent ] \
+        && [ "$(/usr/bin/stat -c %u:%a \
+            /usr/lib/vonk-forge/vonk-agent)" = 0:555 ] \
+        || return 1
+    helper_digest=$(/usr/bin/sha256sum \
+        /usr/lib/vonk-forge/vonk-agent-helper | /usr/bin/cut -d' ' -f1)
+    case "$helper_digest" in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#helper_digest}" -eq 64 ] || return 1
+    agent_digest=$(/usr/bin/sha256sum \
+        /usr/lib/vonk-forge/vonk-agent | /usr/bin/cut -d' ' -f1)
+    case "$agent_digest" in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#agent_digest}" -eq 64 ] || return 1
+    if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
+        [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
+            && /usr/bin/sed -n '1p' "$helper_pending" \
+                | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
+        pending_lines=$(/usr/bin/wc -l < "$helper_pending")
+        if [ "$pending_lines" -eq 2 ]; then
+            /usr/bin/sed -n '2p' "$helper_pending" \
+                | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
+                || return 1
+        elif [ "$pending_lines" -eq 3 ]; then
+            /usr/bin/sed -n '2p' "$helper_pending" \
+                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
+            /usr/bin/sed -n '3p' "$helper_pending" \
+                | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
+        else
+            return 1
+        fi
+    fi
+    pending_new=$(/usr/bin/mktemp /var/lib/vonk-forge/.helper-upgrade.XXXXXX)
+    trap '/usr/bin/rm -f -- "$pending_new"' EXIT HUP INT TERM
+    printf '%s\n' \
+        "version=$package_version" \
+        "helper_sha256=$helper_digest" \
+        "agent_sha256=$agent_digest" \
+        > "$pending_new"
+    /usr/bin/chown root:root "$pending_new"
+    /usr/bin/chmod 0600 "$pending_new"
+    /usr/bin/sync -f "$pending_new"
+    /usr/bin/mv -f -- "$pending_new" "$helper_pending"
+    /usr/bin/sync -f /var/lib/vonk-forge
+    trap - EXIT HUP INT TERM
+    printf '%s %s\n' "$helper_digest" "$agent_digest"
+}
+
+pending_is_safe() {
+    [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
+        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+        && [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
+        && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
+        && /usr/bin/sed -n '1p' "$helper_pending" \
+            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
+    pending_lines=$(/usr/bin/wc -l < "$helper_pending")
+    if [ "$pending_lines" -eq 2 ]; then
+        /usr/bin/sed -n '2p' "$helper_pending" \
+            | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
+            || return 1
+    elif [ "$pending_lines" -eq 3 ]; then
+        /usr/bin/sed -n '2p' "$helper_pending" \
+            | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
+        /usr/bin/sed -n '3p' "$helper_pending" \
+            | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
+    else
+        return 1
+    fi
+}
+
+activate_permanent_helper_unit() {
+    [ -f "$helper_unit_path" ] && [ ! -L "$helper_unit_path" ] \
+        && grep -Fq \
+            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+            "$helper_unit_path" || return 1
+    retired=0
+    if [ -e "$bridge_dropin" ] || [ -L "$bridge_dropin" ]; then
+        [ -d "$bridge_dropin_dir" ] && [ ! -L "$bridge_dropin_dir" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin_dir")" = 0:755 ] \
+            && [ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin")" = 0:644 ] \
+            && [ "$(/usr/bin/wc -l < "$bridge_dropin")" -eq 2 ] \
+            && grep -Fxq '[Service]' "$bridge_dropin" \
+            && grep -Fxq \
+                'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+                "$bridge_dropin" \
+            && [ ! -e "$bridge_retired" ] && [ ! -L "$bridge_retired" ] \
+            || return 1
+        /usr/bin/mv -- "$bridge_dropin" "$bridge_retired"
+        retired=1
+    elif [ -e "$bridge_retired" ] || [ -L "$bridge_retired" ]; then
+        [ -d "$bridge_dropin_dir" ] && [ ! -L "$bridge_dropin_dir" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin_dir")" = 0:755 ] \
+            && [ -f "$bridge_retired" ] && [ ! -L "$bridge_retired" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_retired")" = 0:644 ] \
+            && [ "$(/usr/bin/wc -l < "$bridge_retired")" -eq 2 ] \
+            && grep -Fxq '[Service]' "$bridge_retired" \
+            && grep -Fxq \
+                'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
+                "$bridge_retired" || return 1
+        retired=1
+    fi
+    if ! /usr/bin/systemctl --system daemon-reload >/dev/null; then
+        if [ "$retired" -eq 1 ]; then
+            /usr/bin/mv -- "$bridge_retired" "$bridge_dropin"
+            /usr/bin/systemctl --system daemon-reload >/dev/null || true
+        fi
+        return 1
+    fi
+    if [ "$retired" -eq 1 ]; then
+        /usr/bin/rm -f -- "$bridge_retired"
+    fi
+    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
+        [ -d "$bridge_root" ] && [ ! -L "$bridge_root" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_root")" = 0:700 ] \
+            && [ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ] \
+            && [ "$(/usr/bin/stat -c %u:%a "$bridge_main_pid")" = 0:600 ] \
+            || return 1
+        /usr/bin/rm -f -- "$bridge_main_pid"
+        /usr/bin/rmdir --ignore-fail-on-non-empty "$bridge_root" 2>/dev/null \
+            || true
+    fi
+    /usr/bin/rmdir --ignore-fail-on-non-empty "$bridge_dropin_dir" 2>/dev/null \
+        || true
+}
+
+schedule_permanent_helper_restart() {
+    wait_pid=$1
+    wait_start=$2
+    old_helper_pid=$3
+    old_helper_start=$4
+    expected_helper_digest=$5
+    expected_agent_digest=$6
+    finish_job=vonk-forge-package-helper-upgrade-finish.service
+    finish_job_load=$(/usr/bin/systemctl --system show \
+        --property=LoadState --value "$finish_job" 2>/dev/null || true)
+    finish_job_state=$(/usr/bin/systemctl --system show \
+        --property=ActiveState --value "$finish_job" 2>/dev/null || true)
+    case "$finish_job_state" in
+        active|activating|deactivating) return 0 ;;
+    esac
+    if [ "$finish_job_load" != not-found ] && [ -n "$finish_job_load" ]; then
+        /usr/bin/systemctl --system reset-failed "$finish_job" >/dev/null 2>&1 \
+            || true
+        collect_attempts=0
+        while [ "$collect_attempts" -lt 50 ]; do
+            finish_job_load=$(/usr/bin/systemctl --system show \
+                --property=LoadState --value "$finish_job" 2>/dev/null || true)
+            [ "$finish_job_load" = not-found ] && break
+            /bin/sleep 0.1
+            collect_attempts=$((collect_attempts + 1))
+        done
+        [ "$finish_job_load" = not-found ] || return 1
+    fi
+    # The single-quoted script must expand only inside the transient service.
+    # shellcheck disable=SC2016
+    /usr/bin/systemd-run --quiet --collect \
+        --unit="$finish_job" \
+        --property=Type=exec \
+        --property=RuntimeMaxSec=240s \
+        --property=NoNewPrivileges=yes \
+        --property=PrivateTmp=yes \
+        --property=ProtectHome=yes \
+        --property=ProtectSystem=strict \
+        --property=IPAddressDeny=any \
+        --property=RestrictAddressFamilies=AF_UNIX \
+        --property=ReadWritePaths=/var/lib/vonk-forge \
+        /bin/sh -c '
+            set -eu
+            wait_pid=$1
+            wait_start=$2
+            old_helper_pid=$3
+            old_helper_start=$4
+            expected_helper_digest=$5
+            expected_agent_digest=$6
+            package_version=$7
+            helper_pending=$8
+            helper_receipt=$9
+            attempts=0
+            while [ "$attempts" -lt 1200 ] \
+                && [ -r "/proc/$wait_pid/stat" ] \
+                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
+                    = "$wait_start" ]; do
+                /bin/sleep 0.1
+                attempts=$((attempts + 1))
+            done
+            if [ -r "/proc/$wait_pid/stat" ] \
+                && [ "$(/usr/bin/awk '\''{ print $22 }'\'' "/proc/$wait_pid/stat")" \
+                    = "$wait_start" ]; then
+                exit 1
+            fi
+            /usr/bin/systemctl --system restart \
+                vonk-forge-package-helper.service >/dev/null
+            [ "$(/usr/bin/systemctl --system show --property=ActiveState \
+                --value vonk-forge-package-helper.service)" = active ]
+            new_helper_pid=$(/usr/bin/systemctl --system show --property=MainPID \
+                --value vonk-forge-package-helper.service)
+            case "$new_helper_pid" in
+                ""|*[!0-9]*) exit 1 ;;
+            esac
+            [ "$new_helper_pid" -gt 1 ] \
+                && [ -r "/proc/$new_helper_pid/stat" ] || exit 1
+            new_helper_start=$(/usr/bin/awk '\''{ print $22 }'\'' \
+                "/proc/$new_helper_pid/stat")
+            if [ "$old_helper_pid" -gt 1 ] \
+                && [ "$new_helper_pid" = "$old_helper_pid" ] \
+                && [ "$new_helper_start" = "$old_helper_start" ]; then
+                exit 1
+            fi
+            running_helper_digest=$(/usr/bin/sha256sum \
+                "/proc/$new_helper_pid/exe" | /usr/bin/cut -d" " -f1)
+            [ "$running_helper_digest" = "$expected_helper_digest" ] || exit 1
+            installed_helper_digest=$(/usr/bin/sha256sum \
+                /usr/lib/vonk-forge/vonk-agent-helper \
+                | /usr/bin/cut -d" " -f1)
+            [ "$installed_helper_digest" = "$expected_helper_digest" ] || exit 1
+            installed_agent_digest=$(/usr/bin/sha256sum \
+                /usr/lib/vonk-forge/vonk-agent | /usr/bin/cut -d" " -f1)
+            [ "$installed_agent_digest" = "$expected_agent_digest" ] || exit 1
+            boot_id=$(/usr/bin/sed -n "1p" /proc/sys/kernel/random/boot_id)
+            printf "%s\n" "$boot_id" \
+                | grep -Eq "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" \
+                || exit 1
+            activated_at=$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
+            printf "%s\n" "$activated_at" \
+                | grep -Eq "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
+                || exit 1
+            [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
+                && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+                || exit 1
+            [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
+                && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
+                && [ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ] \
+                && grep -Fxq "version=$package_version" "$helper_pending" \
+                && grep -Fxq "helper_sha256=$expected_helper_digest" \
+                    "$helper_pending" \
+                && grep -Fxq "agent_sha256=$expected_agent_digest" \
+                    "$helper_pending" || exit 1
+            if [ -e "$helper_receipt" ] || [ -L "$helper_receipt" ]; then
+                [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
+                    && [ "$(/usr/bin/stat -c %u:%a "$helper_receipt")" = 0:600 ] \
+                    && [ "$(/usr/bin/wc -l < "$helper_receipt")" -eq 8 ] \
+                    && /usr/bin/sed -n "1p" "$helper_receipt" \
+                        | grep -Fxq "schema_version=1" \
+                    && /usr/bin/sed -n "2p" "$helper_receipt" \
+                        | grep -Eq "^version=[0-9A-Za-z.+~:-]+$" \
+                    && /usr/bin/sed -n "3p" "$helper_receipt" \
+                        | grep -Eq "^helper_sha256=[0-9a-f]{64}$" \
+                    && /usr/bin/sed -n "4p" "$helper_receipt" \
+                        | grep -Eq "^agent_sha256=[0-9a-f]{64}$" \
+                    && /usr/bin/sed -n "5p" "$helper_receipt" \
+                        | grep -Eq "^boot_id=[0-9a-f-]+$" \
+                    && /usr/bin/sed -n "6p" "$helper_receipt" \
+                        | grep -Eq "^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
+                    && /usr/bin/sed -n "7p" "$helper_receipt" \
+                        | grep -Eq "^helper_main_pid=[0-9]+$" \
+                    && /usr/bin/sed -n "8p" "$helper_receipt" \
+                        | grep -Eq "^helper_start_time=[0-9]+$" \
+                    || exit 1
+            fi
+            receipt_new=$(/usr/bin/mktemp \
+                /var/lib/vonk-forge/.helper-upgrade-receipt.XXXXXX)
+            trap '\''/usr/bin/rm -f -- "$receipt_new"'\'' EXIT HUP INT TERM
+            printf "%s\n" \
+                "schema_version=1" \
+                "version=$package_version" \
+                "helper_sha256=$expected_helper_digest" \
+                "agent_sha256=$expected_agent_digest" \
+                "boot_id=$boot_id" \
+                "activated_at=$activated_at" \
+                "helper_main_pid=$new_helper_pid" \
+                "helper_start_time=$new_helper_start" \
+                > "$receipt_new"
+            /usr/bin/chown root:root "$receipt_new"
+            /usr/bin/chmod 0600 "$receipt_new"
+            /usr/bin/sync -f "$receipt_new"
+            /usr/bin/mv -f -- "$receipt_new" "$helper_receipt"
+            /usr/bin/sync -f /var/lib/vonk-forge
+            trap - EXIT HUP INT TERM
+            [ "$(/usr/bin/systemctl --system show --property=ActiveState \
+                --value vonk-forge-package-helper.service)" = active ]
+            confirmed_helper_pid=$(/usr/bin/systemctl --system show \
+                --property=MainPID --value vonk-forge-package-helper.service)
+            [ "$confirmed_helper_pid" = "$new_helper_pid" ] \
+                && [ -r "/proc/$confirmed_helper_pid/stat" ] || exit 1
+            confirmed_helper_start=$(/usr/bin/awk '\''{ print $22 }'\'' \
+                "/proc/$confirmed_helper_pid/stat")
+            [ "$confirmed_helper_start" = "$new_helper_start" ] || exit 1
+            confirmed_helper_digest=$(/usr/bin/sha256sum \
+                "/proc/$confirmed_helper_pid/exe" | /usr/bin/cut -d" " -f1)
+            [ "$confirmed_helper_digest" = "$expected_helper_digest" ] || exit 1
+            /usr/bin/rm -f -- "$helper_pending"
+            /usr/bin/sync -f /var/lib/vonk-forge
+            /usr/bin/systemctl --system restart \
+                vonk-forge-agent.service >/dev/null
+        ' vonk-package-upgrade "$wait_pid" "$wait_start" \
+            "$old_helper_pid" "$old_helper_start" "$expected_helper_digest" \
+            "$expected_agent_digest" \
+            "$package_version" "$helper_pending" "$helper_receipt" >/dev/null
+}
+
 if [ "${1:-}" != configure ]; then
     exit 0
 fi
@@ -140,14 +461,88 @@ if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
 fi
 [ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ]
-if [ -d /run/systemd/system ]; then
+pending_present=0
+if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
+    pending_is_safe || {
+        echo 'vonk-forge-agent: pending helper upgrade state is unsafe' >&2
+        exit 1
+    }
+    pending_present=1
+fi
+needs_finisher=0
+if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ] \
+    && { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; }; then
+    needs_finisher=1
+fi
+if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ]; then
+    echo 'vonk-forge-agent: interrupted helper activation requires a live systemd configure retry' >&2
+    exit 1
+fi
+if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
-    if [ -n "${2:-}" ]; then
-        # Restart an upgraded agent, but do not make dpkg configuration depend
-        # on controller reachability or the continued existence of systemd's
-        # transient RuntimeDirectory. The signed Spark installer owns the
-        # sustained-readiness gate and explicit re-enrollment recovery.
-        deb-systemd-invoke restart vonk-forge-agent.service >/dev/null
+    if [ "$needs_finisher" -eq 1 ]; then
+        if ! activate_permanent_helper_unit; then
+            echo 'vonk-forge-agent: cannot activate the permanent package-helper sandbox' >&2
+            exit 1
+        fi
+        case "$PPID" in
+            ''|*[!0-9]*)
+                echo 'vonk-forge-agent: cannot identify dpkg for safe helper restart' >&2
+                exit 1
+                ;;
+        esac
+        if [ ! -r "/proc/$PPID/stat" ]; then
+            echo 'vonk-forge-agent: cannot inspect dpkg for safe helper restart' >&2
+            exit 1
+        fi
+        dpkg_start=$(/usr/bin/awk '{ print $22 }' "/proc/$PPID/stat")
+        case "$dpkg_start" in
+            ''|*[!0-9]*)
+                echo 'vonk-forge-agent: dpkg process identity is invalid' >&2
+                exit 1
+                ;;
+        esac
+        old_helper_pid=$(/usr/bin/systemctl --system show \
+            --property=MainPID --value vonk-forge-package-helper.service)
+        case "$old_helper_pid" in
+            ''|*[!0-9]*)
+                echo 'vonk-forge-agent: package helper identity is invalid' >&2
+                exit 1
+                ;;
+        esac
+        old_helper_start=0
+        if [ "$old_helper_pid" -gt 1 ]; then
+            if [ ! -r "/proc/$old_helper_pid/stat" ]; then
+                echo 'vonk-forge-agent: cannot inspect the active package helper' >&2
+                exit 1
+            fi
+            old_helper_start=$(/usr/bin/awk '{ print $22 }' \
+                "/proc/$old_helper_pid/stat")
+            case "$old_helper_start" in
+                ''|*[!0-9]*)
+                    echo 'vonk-forge-agent: active package helper identity is invalid' >&2
+                    exit 1
+                    ;;
+            esac
+        fi
+        pending_digests=$(write_helper_pending) || {
+            echo 'vonk-forge-agent: cannot record the pending helper upgrade' >&2
+            exit 1
+        }
+        expected_helper_digest=${pending_digests%% *}
+        expected_agent_digest=${pending_digests#* }
+        [ "$expected_helper_digest" != "$pending_digests" ] \
+            && [ "$expected_agent_digest" != "$pending_digests" ] \
+            || exit 1
+        # PID 1 waits for dpkg to exit, proves the helper restarted under
+        # the permanent sandbox, and only then restarts the agent. Seeing
+        # the new agent identity therefore proves helper activation too.
+        schedule_permanent_helper_restart "$PPID" "$dpkg_start" \
+            "$old_helper_pid" "$old_helper_start" \
+            "$expected_helper_digest" "$expected_agent_digest" || {
+            echo 'vonk-forge-agent: cannot schedule the permanent package finisher' >&2
+            exit 1
+        }
     fi
 fi
 
