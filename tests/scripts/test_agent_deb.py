@@ -539,16 +539,12 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
 
     assert 'crash_pending_kind=stale' in lifecycle
     assert 'crash_pending_kind=normalized' in lifecycle
-    sync_gate = lifecycle.index("intent_sync_quiescent=0")
-    freeze = lifecycle.index('systemctl --system freeze "$helper_unit"', sync_gate)
-    assert sync_gate < freeze
-    sync_window = lifecycle[sync_gate:freeze]
-    assert "-f /var/lib/vonk-forge/package-upgrade/agent-blocked" in sync_window
-    assert "/sys/fs/cgroup$helper_control_group/cgroup.procs" in sync_window
-    assert "${intent_sync_argv[0]}" in sync_window
-    assert "/usr/bin/sync" in sync_window
-    assert "/var/lib/vonk-forge/package-upgrade" in sync_window
-    assert "intent_sync_quiescent < 5" in sync_window
+    freeze = lifecycle.index('systemctl --system freeze "$helper_unit"')
+    trigger = lifecycle.index(
+        "if [[ -f /var/lib/vonk-forge/package-upgrade/intent ]]"
+    )
+    assert trigger < freeze
+    assert "intent_sync_quiescent" not in lifecycle[trigger:freeze]
     assert '"$test_root/crash-point-pending"' in lifecycle
     assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
     assert lifecycle.count("assert_interrupted_baseline_state") == 4
@@ -571,7 +567,34 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert lifecycle.index("FreezerState", thaw_before_kill) < final_kill
     crash_window = lifecycle[crash_snapshot:final_kill]
     assert "helper_control_group" in crash_window
-    assert "all_helper_pids_stopped" in crash_window
+    assert "all_helper_pids_quiescent" in crash_window
+    assert "T|t|Z" in crash_window
+    assert "D)" in crash_window
+    assert 'helper_pid_exe" != /usr/bin/sync' in crash_window
+    assert '"${#helper_pid_argv[@]}" -ne 3' in crash_window
+    assert '"${helper_pid_argv[0]}" != /usr/bin/sync' in crash_window
+    assert '"${helper_pid_argv[1]}" != -f' in crash_window
+    for safe_sync_target in (
+        "/var/lib/vonk-forge/package-upgrade",
+        "/var/lib/vonk-forge",
+        "[0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]{6}",
+    ):
+        assert safe_sync_target in crash_window
+    assert ".vonk-upgrade.??????" not in crash_window
+    assert "%F" not in crash_window
+    assert "'0:0:700'" in crash_window
+    assert "'0:0:755'" in crash_window
+    assert "'0:0:600:1'" in crash_window
+    assert '"$safe_sync_target" -ne 1' in crash_window
+    assert 'case "$dpkg_pid_state" in T|t)' in crash_window
+    assert "captured helper pid=%s state=%s exe=%q argv=" in crash_window
+    assert (
+        crash_window.count(
+            'done < "/proc/$helper_pid/status" 2>/dev/null || continue'
+        )
+        == 2
+    )
+    assert 'done < "/proc/$dpkg_pid/status" 2>/dev/null || exit 1' in crash_window
     assert "crash_intent_digest" in crash_window
     post_kill = lifecycle[final_kill:]
     assert "helper_main_pid_after" in post_kill
@@ -585,14 +608,36 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'cmp -s "$test_root/crash-point-pending"'
     )
     assert '"$test_root/normalized-pending"' not in dpkg_only
-    loop_start = dpkg_only.index("for _ in {1..100}; do")
-    recovery_pid_check = dpkg_only.index('"$recovery_unit")" -gt 0')
+    recovery_loop_start = dpkg_only.index("for _ in {1..100}; do")
+    recovery_active_read = dpkg_only.index(
+        "--property=ActiveState", recovery_loop_start
+    )
+    recovery_pid_read = dpkg_only.index("--property=MainPID", recovery_active_read)
+    recovery_running_break = dpkg_only.index(
+        '[[ "$recovery_active_state" == activating', recovery_pid_read
+    )
+    recovery_pid_predicate = dpkg_only.index(
+        '&& "$recovery_main_pid" -gt 0', recovery_running_break
+    )
+    recovery_break = dpkg_only.index("then\n              break", recovery_pid_predicate)
+    recovery_retry_sleep = dpkg_only.index("sleep 0.01", recovery_break)
+    recovery_loop_end = dpkg_only.index("          done", recovery_retry_sleep)
+    recovery_active_check = dpkg_only.index(
+        'test "$recovery_active_state" = activating'
+    )
+    recovery_pid_check = dpkg_only.index('test "$recovery_main_pid" -gt 0')
     frozen_state_check = dpkg_only.index('"$helper_unit")" = frozen')
+    recovery_start = dpkg_only.index(
+        'systemctl --system --no-block start "$recovery_unit"'
+    )
+    kill_dpkg = dpkg_only.index('kill -KILL "$dpkg_pid"')
     intent_digest_check = dpkg_only.index('= "$crash_intent_digest"')
+    baseline_state_check = dpkg_only.index("assert_interrupted_baseline_state")
+    thaw_loop_start = dpkg_only.index("for _ in {1..100}; do", recovery_pid_check)
     thaw = dpkg_only.index(
         'systemctl --system thaw "$helper_unit" \\\n'
         "              >/dev/null 2>&1 || true",
-        loop_start,
+        thaw_loop_start,
     )
     freezer_read = dpkg_only.index("--property=FreezerState", thaw)
     running_break = dpkg_only.index(
@@ -604,11 +649,23 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'test "$helper_freezer_state" = running', loop_end
     )
     assert (
-        recovery_pid_check
-        < frozen_state_check
-        < intent_digest_check
+        frozen_state_check
         < crash_pending_check
-        < loop_start
+        < intent_digest_check
+        < baseline_state_check
+        < recovery_start
+        < kill_dpkg
+        < recovery_loop_start
+        < recovery_active_read
+        < recovery_pid_read
+        < recovery_running_break
+        < recovery_pid_predicate
+        < recovery_break
+        < recovery_retry_sleep
+        < recovery_loop_end
+        < recovery_active_check
+        < recovery_pid_check
+        < thaw_loop_start
         < thaw
         < freezer_read
         < running_break
@@ -616,6 +673,8 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         < loop_end
         < terminal_state
     )
+    assert dpkg_only.count('"$helper_unit")" = frozen') == 1
+    assert "sleep 1" not in dpkg_only
     boot_comment = lifecycle.index(
         "A real boot does not preserve the test-only cgroup"
     )
