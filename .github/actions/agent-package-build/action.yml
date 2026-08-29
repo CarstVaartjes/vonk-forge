@@ -12,7 +12,7 @@ inputs:
     description: Exact Debian package version
     required: true
   next_version:
-    description: Next version used by lifecycle upgrade checks
+    description: Next version included in the exact release metadata contract
     required: true
   baseline_version:
     description: Lower immutable acceptance-only package version
@@ -89,7 +89,7 @@ outputs:
     description: Acceptance-only baseline artifact name
     value: ${{ steps.accepted.outputs.baseline_artifact_name }}
   amd64_lifecycle_package:
-    description: Short-lived next-version AMD64 package filename for native lifecycle acceptance
+    description: Short-lived next-version AMD64 package filename for stable lifecycle acceptance
     value: ${{ steps.accepted.outputs.amd64_lifecycle_package }}
   amd64_lifecycle_artifact_name:
     description: Short-lived AMD64 lifecycle Actions artifact name
@@ -333,6 +333,7 @@ runs:
     - name: Build package twice reproducibly
       shell: bash
       env:
+        BINARY_SOURCE_MODE: ${{ inputs.binary_source_mode }}
         VERSION: ${{ inputs.version }}
         VONK_SOURCE_REVISION: ${{ github.sha }}
         VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
@@ -358,38 +359,52 @@ runs:
           arm64_reproducible_args=(--binaries-dir prebuilt/arm64/candidate)
           amd64_reproducible_args=(--binaries-dir prebuilt/amd64/candidate)
         fi
-        scripts/build-agent-deb \
-          --version "$VERSION" \
-          --architecture linux-arm64 \
-          --build-digest "$arm64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${arm64_initial_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir dist
-        scripts/build-agent-deb \
-          --version "$VERSION" \
-          --architecture linux-arm64 \
-          --build-digest "$arm64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${arm64_reproducible_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir reproducible
-        scripts/build-agent-deb \
-          --version "$VERSION" \
-          --architecture linux-amd64 \
-          --build-digest "$amd64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${amd64_initial_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir dist
-        scripts/build-agent-deb \
-          --version "$VERSION" \
-          --architecture linux-amd64 \
-          --build-digest "$amd64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${amd64_reproducible_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir reproducible
+        build_package() {
+          local architecture=$1 build_digest=$2 output_dir=$3
+          shift 3
+          scripts/build-agent-deb \
+            --version "$VERSION" \
+            --architecture "$architecture" \
+            --build-digest "$build_digest" \
+            --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+            "$@" \
+            --source-date-epoch "$epoch" \
+            --output-dir "$output_dir"
+        }
+        wait_for_packages() {
+          local failed=0 pid
+          for pid in "$@"; do
+            if ! wait "$pid"; then
+              failed=1
+            fi
+          done
+          return "$failed"
+        }
+        if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then
+          package_pids=()
+          build_package linux-arm64 "$arm64_build_digest" dist \
+            "${arm64_initial_args[@]}" &
+          package_pids+=("$!")
+          build_package linux-arm64 "$arm64_build_digest" reproducible \
+            "${arm64_reproducible_args[@]}" &
+          package_pids+=("$!")
+          build_package linux-amd64 "$amd64_build_digest" dist \
+            "${amd64_initial_args[@]}" &
+          package_pids+=("$!")
+          build_package linux-amd64 "$amd64_build_digest" reproducible \
+            "${amd64_reproducible_args[@]}" &
+          package_pids+=("$!")
+          wait_for_packages "${package_pids[@]}"
+        else
+          build_package linux-arm64 "$arm64_build_digest" dist \
+            "${arm64_initial_args[@]}"
+          build_package linux-arm64 "$arm64_build_digest" reproducible \
+            "${arm64_reproducible_args[@]}"
+          build_package linux-amd64 "$amd64_build_digest" dist \
+            "${amd64_initial_args[@]}"
+          build_package linux-amd64 "$amd64_build_digest" reproducible \
+            "${amd64_reproducible_args[@]}"
+        fi
         cmp --silent \
           "dist/vonk-forge-agent_${VERSION}_arm64.deb" \
           "reproducible/vonk-forge-agent_${VERSION}_arm64.deb"
@@ -415,75 +430,104 @@ runs:
         scripts/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
 
-    - name: Build lifecycle and acceptance package sets
+    - name: Build lifecycle acceptance baseline packages
       shell: bash
       env:
         BASELINE_VERSION: ${{ inputs.baseline_version }}
+        BINARY_SOURCE_MODE: ${{ inputs.binary_source_mode }}
         NEXT_VERSION: ${{ inputs.next_version }}
-        VERSION: ${{ inputs.version }}
         VONK_SOURCE_REVISION: ${{ github.sha }}
         VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
       run: |
         set -euo pipefail
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
-        arm64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
-        )"
-        amd64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
-        )"
-        arm64_candidate_args=(--binaries-dir target/aarch64-unknown-linux-gnu/release)
-        amd64_candidate_args=(--binaries-dir target/x86_64-unknown-linux-gnu/release)
-        if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
-          arm64_candidate_args=(--binaries-dir prebuilt/arm64/candidate)
-          amd64_candidate_args=(--binaries-dir prebuilt/amd64/candidate)
+        arm64_baseline_args=()
+        amd64_baseline_args=()
+        if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then
+          arm64_baseline_args=(--binaries-dir prebuilt/arm64/baseline)
+          amd64_baseline_args=(--binaries-dir prebuilt/amd64/baseline)
         fi
-        scripts/build-agent-deb \
-          --version "$NEXT_VERSION" \
-          --architecture linux-arm64 \
-          --build-digest "$arm64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${arm64_candidate_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir lifecycle
-        scripts/build-agent-deb \
-          --version "$NEXT_VERSION" \
-          --architecture linux-amd64 \
-          --build-digest "$amd64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          "${amd64_candidate_args[@]}" \
-          --source-date-epoch "$epoch" \
-          --output-dir lifecycle
-        scripts/verify-agent-deb --json \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
-        scripts/verify-agent-deb --json \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
-        for architecture in arm64 amd64; do
-          platform="linux-$architecture"
-          baseline_binary_args=()
-          if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
-            baseline_binary_args=(--binaries-dir "prebuilt/$architecture/baseline")
-          fi
-          baseline_build_digest="sha256:$(
-            printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
-              "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
-              | sha256sum | cut -d' ' -f1
-          )"
+        arm64_baseline_digest="sha256:$(
+          printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-arm64 "$lock_digest" "$BASELINE_VERSION" \
+            | sha256sum | cut -d' ' -f1
+        )"
+        amd64_baseline_digest="sha256:$(
+          printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-amd64 "$lock_digest" "$BASELINE_VERSION" \
+            | sha256sum | cut -d' ' -f1
+        )"
+        build_baseline() {
+          local architecture=$1 build_digest=$2
+          shift 2
           scripts/build-agent-deb \
             --acceptance-baseline \
             --version "$BASELINE_VERSION" \
-            --architecture "$platform" \
-            --build-digest "$baseline_build_digest" \
+            --architecture "$architecture" \
+            --build-digest "$build_digest" \
             --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-            "${baseline_binary_args[@]}" \
+            "$@" \
             --source-date-epoch "$epoch" \
             --output-dir baseline
+        }
+        build_lifecycle() {
+          local architecture=$1 build_digest=$2 binaries_dir=$3
+          scripts/build-agent-deb \
+            --version "$NEXT_VERSION" \
+            --architecture "$architecture" \
+            --build-digest "$build_digest" \
+            --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+            --binaries-dir "$binaries_dir" \
+            --source-date-epoch "$epoch" \
+            --output-dir lifecycle
+        }
+        wait_for_packages() {
+          local failed=0 pid
+          for pid in "$@"; do
+            if ! wait "$pid"; then
+              failed=1
+            fi
+          done
+          return "$failed"
+        }
+        if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then
+          package_pids=()
+          build_baseline linux-arm64 "$arm64_baseline_digest" \
+            "${arm64_baseline_args[@]}" &
+          package_pids+=("$!")
+          build_baseline linux-amd64 "$amd64_baseline_digest" \
+            "${amd64_baseline_args[@]}" &
+          package_pids+=("$!")
+          wait_for_packages "${package_pids[@]}"
+        else
+          arm64_build_digest="sha256:$(
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+              "$GITHUB_SHA" linux-arm64 "$lock_digest" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          amd64_build_digest="sha256:$(
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+              "$GITHUB_SHA" linux-amd64 "$lock_digest" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          build_lifecycle linux-arm64 "$arm64_build_digest" \
+            target/aarch64-unknown-linux-gnu/release
+          build_lifecycle linux-amd64 "$amd64_build_digest" \
+            target/x86_64-unknown-linux-gnu/release
           scripts/verify-agent-deb --json \
-            "baseline/vonk-forge-agent_${BASELINE_VERSION}_${architecture}.deb"
-        done
+            "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+          scripts/verify-agent-deb --json \
+            "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
+          build_baseline linux-arm64 "$arm64_baseline_digest" \
+            "${arm64_baseline_args[@]}"
+          build_baseline linux-amd64 "$amd64_baseline_digest" \
+            "${amd64_baseline_args[@]}"
+        fi
+        scripts/verify-agent-deb --json \
+          "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb"
+        scripts/verify-agent-deb --json \
+          "baseline/vonk-forge-agent_${BASELINE_VERSION}_amd64.deb"
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
 
@@ -532,6 +576,7 @@ runs:
           "$BASELINE_VERSION" "$VERSION"
 
     - name: Upload short-lived AMD64 lifecycle package
+      if: inputs.lifecycle_gate_mode == 'inline'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}

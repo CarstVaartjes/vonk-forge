@@ -210,26 +210,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Download exact ARM64 candidate binaries
+      - name: Download exact ARM64 compiled binary sets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-arm64-candidate
+          pattern: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-arm64-*
           path: prebuilt/arm64
-      - name: Download exact ARM64 baseline binaries
+          merge-multiple: true
+      - name: Download exact AMD64 compiled binary sets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-arm64-baseline
-          path: prebuilt/arm64
-      - name: Download exact AMD64 candidate binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-amd64-candidate
+          pattern: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-amd64-*
           path: prebuilt/amd64
-      - name: Download exact AMD64 baseline binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-amd64-baseline
-          path: prebuilt/amd64
+          merge-multiple: true
       - name: Build, lifecycle-test, and attest AMD64 and ARM64 packages
         id: package
         uses: ./.github/actions/agent-package-build
