@@ -14,6 +14,7 @@ def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
     for path in (
         ".github/workflows/ci.yml",
+        ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
         ".github/actions/agent-package-compile/action.yml",
@@ -262,6 +263,7 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
 @pytest.mark.parametrize(
     "path",
     (
+        ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
         ".github/actions/agent-package-compile/action.yml",

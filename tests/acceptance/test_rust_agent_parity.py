@@ -9,7 +9,9 @@ def _source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged() -> None:
+def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged() -> (
+    None
+):
     main = _source("rust/crates/vonk-agent/src/main.rs")
     for capability in (
         "agent.runtime.rust.v1",
@@ -45,12 +47,22 @@ def test_debian_package_is_the_only_agent_installer_authority() -> None:
 
 def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
     orchestrator = _source(".github/workflows/agent-release.yml")
+    apt_publisher = _source(".github/workflows/agent-apt-development.yml")
     package_builder = _source(".github/actions/agent-package-build/action.yml")
     package_security = _source(".github/actions/agent-package-security/action.yml")
 
     assert "uses: ./.github/actions/agent-package-build" in orchestrator
     assert "needs: [package-metadata, build-test-sign]" in orchestrator
-    assert "uses: ./.github/actions/agent-apt-publish" in orchestrator
+    assert "uses: ./.github/actions/agent-apt-publish" not in orchestrator
+    assert "workflows: [Rust Vonk Forge agent development]" in apt_publisher
+    assert "uses: ./.github/actions/agent-apt-publish" in apt_publisher
+    for gate in (
+        "Build and sign AMD64 and ARM64; lifecycle-test ARM64",
+        "Run Rust and package security gates",
+        "Lifecycle-test accepted ARM64 package on ARM64",
+        "Lifecycle-test accepted AMD64 package on AMD64",
+    ):
+        assert f"'{gate}'" in apt_publisher
     assert "uses: ./.github/actions/agent-package-security" in package_builder
     assert "uses: ./.github/actions/agent-package-security" in orchestrator
     assert "cargo test --workspace --locked" in package_security
