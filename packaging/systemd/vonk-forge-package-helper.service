@@ -6,7 +6,7 @@ Wants=docker.service
 After=local-fs.target docker.service vonk-forge-docker-firewall.service
 
 [Service]
-Type=simple
+Type=exec
 ExecStart=/usr/lib/vonk-forge/vonk-agent-helper
 User=root
 Group=root

@@ -686,6 +686,28 @@ def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
     assert 240 >= 120 + helper_timeout + agent_timeout + 60
 
 
+def test_package_helper_restart_waits_for_verified_exec_identity() -> None:
+    helper_unit = (
+        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
+    ).read_text()
+    postinst = POSTINST.read_text()
+    preinst = PREINST.read_text()
+
+    assert "Type=exec" in helper_unit.splitlines()
+    assert "Type=simple" not in helper_unit.splitlines()
+    assert (
+        "ExecStart=/usr/lib/vonk-forge/vonk-agent-helper"
+        in helper_unit.splitlines()
+    )
+    assert (
+        "/usr/bin/systemctl --system restart \\\n"
+        "                vonk-forge-package-helper.service"
+    ) in postinst
+    assert 'restart "$helper_unit"' in preinst
+    assert '"/proc/$new_helper_pid/exe"' in postinst
+    assert '"/proc/$service_pid/exe"' in preinst
+
+
 def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None:
     postinst = POSTINST.read_text()
 
@@ -1017,6 +1039,12 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     helper_unit = (
         payload / "lib/systemd/system/vonk-forge-package-helper.service"
     ).read_text()
+    assert "Type=exec" in helper_unit.splitlines()
+    assert "Type=simple" not in helper_unit.splitlines()
+    assert (
+        "ExecStart=/usr/lib/vonk-forge/vonk-agent-helper"
+        in helper_unit.splitlines()
+    )
     assert "Requires=vonk-forge-docker-firewall.service" in helper_unit
     assert (
         "After=" in helper_unit and "vonk-forge-docker-firewall.service" in helper_unit
