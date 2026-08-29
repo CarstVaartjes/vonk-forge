@@ -542,11 +542,50 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "unexpected interrupted package state" in lifecycle
     assert "durable lower-interrupted" in lifecycle
     assert "trap thaw_helper EXIT" in lifecycle
+    boot_comment = lifecycle.index(
+        "A real boot does not preserve the test-only cgroup"
+    )
+    boot_simulation = lifecycle.index(
+        'systemctl --system thaw "$helper_unit"', boot_comment
+    )
+    assert lifecycle.index("FreezerState", boot_simulation) > boot_simulation
+    reset_failed = lifecycle.index("systemctl --system reset-failed", boot_simulation)
+    assert lifecycle.index('"$helper_unit"', reset_failed) > reset_failed
+    assert lifecycle.index('"$socket_unit"', reset_failed) > reset_failed
+    assert lifecycle.index("ActiveState", reset_failed) > reset_failed
+    assert lifecycle.index("Result", reset_failed) > reset_failed
     assert 'trap \'exit 129\' HUP' in lifecycle
     assert 'trap \'exit 130\' INT' in lifecycle
     assert 'trap \'exit 143\' TERM' in lifecycle
     assert "dump_failure_diagnostics" in lifecycle
     assert "journalctl --system --no-pager -n 200" in lifecycle
+    assert 'firewall_fixture=/run/systemd/system/$firewall_unit' in lifecycle
+    assert "Vonk Forge package recovery firewall fixture" in lifecycle
+    assert lifecycle.count('"$firewall_unit"') >= 7
+    assert (
+        "install -d -o vonk-agent -g vonk-agent -m 0700 "
+        "/var/lib/vonk-forge-agent" in lifecycle
+    )
+    collision_check = lifecycle.index(
+        "agent upgrade recovery fixture would collide with host state"
+    )
+    assert "/var/lib/vonk-forge-agent" in lifecycle[:collision_check]
+    cleanup = lifecycle[
+        lifecycle.index("cleanup() {") : lifecycle.index("cleanup_test_root() {")
+    ]
+    recovery_state_cleanup = cleanup.index(
+        "rm -rf -- /var/lib/vonk-forge/package-upgrade"
+    )
+    package_purge = cleanup.index(
+        "dpkg --purge --force-remove-reinstreq", recovery_state_cleanup
+    )
+    home_cleanup = cleanup.index(
+        "rm -rf -- /var/lib/vonk-forge-agent", package_purge
+    )
+    assert recovery_state_cleanup < package_purge < home_cleanup
+    assert cleanup.count("dpkg-query --show vonk-forge-agent") == 2
+    assert 'trap - EXIT\n  exit "$cleanup_status"' in cleanup
+    assert 'return "$cleanup_status"' not in cleanup
     assert "recovery_nonce)=.*/\\1=<redacted>" in lifecycle
 
 
