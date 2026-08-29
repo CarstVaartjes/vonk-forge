@@ -90,6 +90,13 @@ def workflow_step_run(text: str, step_name: str) -> str:
     return "\n".join(run_lines)
 
 
+def workflow_job(text: str, job_name: str) -> str:
+    marker = f"\n  {job_name}:\n"
+    body = text.split(marker, 1)[1]
+    next_job = re.search(r"\n  [a-z0-9][a-z0-9-]*:\n", body)
+    return body if next_job is None else body[: next_job.start()]
+
+
 def package_step(step_name: str) -> str:
     return workflow_step(PACKAGE_WORKFLOW.read_text(), step_name)
 
@@ -590,7 +597,7 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
 
 def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
-    metadata = text.split("\n  compile-arm64:\n", 1)[0]
+    metadata = text.split("\n  compile-arm64-candidate:\n", 1)[0]
 
     assert "  push:\n    branches: [main]\n  workflow_dispatch:" in text
     assert "paths:" not in text.split("  workflow_dispatch:", 1)[0]
@@ -621,16 +628,16 @@ def test_development_cancels_only_stale_keyless_and_package_build_work() -> None
         "\n  publish-apt:\n", 1
     )[0]
     publisher = text.split("\n  publish-apt:\n", 1)[1]
-    arm64 = text.split("\n  compile-arm64:\n", 1)[1].split("\n  compile-amd64:\n", 1)[0]
-    amd64 = text.split("\n  compile-amd64:\n", 1)[1].split("\n  build-test-sign:\n", 1)[
-        0
-    ]
 
     assert "concurrency:" not in workflow_header
-    assert "group: vonk-forge-agent-development-compile-arm64" in arm64
-    assert "cancel-in-progress: true" in arm64
-    assert "group: vonk-forge-agent-development-compile-amd64" in amd64
-    assert "cancel-in-progress: true" in amd64
+    for architecture in ("arm64", "amd64"):
+        for binary_set in ("candidate", "baseline"):
+            compiler = workflow_job(text, f"compile-{architecture}-{binary_set}")
+            assert (
+                "group: vonk-forge-agent-development-compile-"
+                f"{architecture}-{binary_set}"
+            ) in compiler
+            assert "cancel-in-progress: true" in compiler
     assert "group: vonk-forge-agent-development-package" in package
     assert "cancel-in-progress: true" in package
     assert "group: vonk-forge-agent-development-security" in security
@@ -651,7 +658,13 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
     authority = workflow_step(security, "Revalidate exact current main security source")
 
     assert "needs: [package-metadata]" in security
-    assert "needs: [package-metadata, compile-arm64, compile-amd64]" in package
+    for compiler in (
+        "compile-arm64-candidate",
+        "compile-arm64-baseline",
+        "compile-amd64-candidate",
+        "compile-amd64-baseline",
+    ):
+        assert f"- {compiler}" in package
     assert "runs-on: ubuntu-24.04-arm" in security
     assert "uses: ./.github/actions/agent-package-security" in security
     assert "shared-key: linux-arm64" in security
@@ -674,22 +687,23 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
     None
 ):
     text = WORKFLOW.read_text()
-    arm64 = text.split("\n  compile-arm64:\n", 1)[1].split("\n  compile-amd64:\n", 1)[0]
-    amd64 = text.split("\n  compile-amd64:\n", 1)[1].split("\n  build-test-sign:\n", 1)[
-        0
-    ]
     package = text.split("\n  build-test-sign:\n", 1)[1].split(
         "\n  security-gates:\n", 1
     )[0]
 
-    for job, architecture, runner in (
-        (arm64, "linux-arm64", "ubuntu-24.04-arm"),
-        (amd64, "linux-amd64", "ubuntu-24.04"),
-    ):
+    compilers = (
+        ("compile-arm64-candidate", "linux-arm64", "candidate", "ubuntu-24.04-arm"),
+        ("compile-arm64-baseline", "linux-arm64", "baseline", "ubuntu-24.04-arm"),
+        ("compile-amd64-candidate", "linux-amd64", "candidate", "ubuntu-24.04"),
+        ("compile-amd64-baseline", "linux-amd64", "baseline", "ubuntu-24.04"),
+    )
+    for job_name, architecture, binary_set, runner in compilers:
+        job = workflow_job(text, job_name)
         assert "needs: [package-metadata]" in job
         assert f"runs-on: {runner}" in job
         assert "uses: ./.github/actions/agent-package-compile" in job
         assert f"architecture: {architecture}" in job
+        assert f"binary_set: {binary_set}" in job
         assert "source_sha: ${{ github.sha }}" in job
         for forbidden in (
             "environment:",
@@ -700,25 +714,45 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
             "APT_REPOSITORY_GPG_PRIVATE_KEY",
         ):
             assert forbidden not in job
-    assert "needs: [package-metadata, compile-arm64, compile-amd64]" in package
+    for job_name, _, _, _ in compilers:
+        assert f"- {job_name}" in package
+        assert f"needs.{job_name}.result == 'success'" in package
     assert "environment: agent-development" in package
     assert (
         text.count("release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}")
         == 1
     )
     for architecture in ("arm64", "amd64"):
-        assert (
-            "name: ${{ needs.package-metadata.outputs.artifact_name }}"
-            f"-compiled-{architecture}"
-        ) in package
-        assert f"path: prebuilt/{architecture}" in package
+        for binary_set in ("candidate", "baseline"):
+            assert (
+                "name: ${{ needs.package-metadata.outputs.artifact_name }}"
+                f"-compiled-{architecture}-{binary_set}"
+            ) in package
+        assert package.count(f"path: prebuilt/{architecture}") == 2
+
+
+def test_development_compiler_fanout_is_role_complete_and_collision_free() -> None:
+    text = WORKFLOW.read_text()
+    compiler_names = {
+        f"compile-{architecture}-{binary_set}"
+        for architecture in ("arm64", "amd64")
+        for binary_set in ("candidate", "baseline")
+    }
+
+    assert text.count("uses: ./.github/actions/agent-package-compile") == 4
+    assert text.count("needs: [package-metadata]") == 5
+    for compiler_name in compiler_names:
+        compiler = workflow_job(text, compiler_name)
+        assert f"group: vonk-forge-agent-development-{compiler_name}" in compiler
+        for other_name in compiler_names - {compiler_name}:
+            assert f"group: vonk-forge-agent-development-{other_name}" not in compiler
 
 
 def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() -> None:
     text = COMPILE_WORKFLOW.read_text()
     validation = workflow_step(text, "Validate architecture compilation authority")
     authority = workflow_step(text, "Revalidate exact current main compilation source")
-    compile_step = workflow_step(text, "Compile candidate and baseline binaries")
+    compile_step = workflow_step(text, "Compile exact package binary set")
     upload_authority = workflow_step(
         text, "Revalidate source before compiled artifact upload"
     )
@@ -729,18 +763,34 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert 'test "$SOURCE_SHA" = "$GITHUB_SHA"' in validation
     assert 'test "$GITHUB_REF" = refs/heads/main' in validation
     assert "scripts/agent-package-metadata" in validation
+    assert "candidate|baseline" in validation
+    assert '${debian_architecture}_baseline_package' in validation
+    assert "-compiled-${debian_architecture}-${BINARY_SET}" in validation
+    assert "shared-key: ${{ inputs.architecture }}-${{ inputs.binary_set }}" in text
+    assert 'cache-workspace-crates: "false"' in text
     assert "+refs/heads/main:refs/remotes/origin/main" in authority
     assert "+refs/heads/main:refs/remotes/origin/main" in upload_authority
-    assert compile_step.count("cargo build --release --locked") == 2
+    assert compile_step.count("cargo build --release --locked") == 1
+    assert "--package vonk-agent --package vonk-agent-helper" in compile_step
+    assert "--workspace" not in compile_step
+    assert "vonk-nas-setup" not in compile_step
+    assert "vonk-spark-setup" not in compile_step
+    assert "vonk-agent-build-v2" in compile_step
+    assert "vonk-agent-acceptance-baseline-v1" in compile_step
     assert "VONK_AGENT_BUILD_DIGEST" in compile_step
     assert "VONK_AGENT_SEMANTIC_VERSION" in compile_step
-    assert compile_step.count("scripts/verify-agent-binaries") == 2
+    assert compile_step.count("scripts/verify-agent-binaries") == 1
+    assert '"compiled/$BINARY_SET.json"' in compile_step
     assert "name: ${{ steps.target.outputs.compiled_artifact_name }}" in upload
     assert "retention-days: 1" in upload
     assert "overwrite: false" in upload
+    assert "compiled/${{ inputs.binary_set }}.json" in upload
+    assert "compiled/${{ inputs.binary_set }}/vonk-agent" in upload
+    assert "compiled/${{ inputs.binary_set }}/vonk-agent-helper" in upload
+    assert "path: compiled\n" not in upload
     assert (
         text.index("Revalidate exact current main compilation source")
-        < text.index("Compile candidate and baseline binaries")
+        < text.index("Compile exact package binary set")
         < text.index("Revalidate source before compiled artifact upload")
         < text.index("Upload exact compiled binary set")
     )

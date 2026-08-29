@@ -1,9 +1,12 @@
-name: Compile one agent package architecture
-description: Compile candidate and baseline agent binaries without release credentials
+name: Compile one agent package binary set
+description: Compile one candidate or baseline architecture without release credentials
 
 inputs:
   architecture:
     description: Literal linux-arm64 or linux-amd64 target
+    required: true
+  binary_set:
+    description: Literal candidate or baseline binary identity
     required: true
   channel:
     description: Literal development package channel
@@ -34,6 +37,7 @@ runs:
         ARCHITECTURE: ${{ inputs.architecture }}
         ARTIFACT_NAME: ${{ inputs.artifact_name }}
         BASELINE_VERSION: ${{ inputs.baseline_version }}
+        BINARY_SET: ${{ inputs.binary_set }}
         CHANNEL: ${{ inputs.channel }}
         PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
         SOURCE_SHA: ${{ inputs.source_sha }}
@@ -57,6 +61,10 @@ runs:
         test "$VERSION" = "$(value version)"
         test "$BASELINE_VERSION" = "$(value baseline_version)"
         test "$ARTIFACT_NAME" = "$(value artifact_name)"
+        case "$BINARY_SET" in
+          candidate|baseline) ;;
+          *) exit 64 ;;
+        esac
         case "$ARCHITECTURE" in
           linux-arm64)
             test "$(uname -m)" = aarch64
@@ -74,10 +82,12 @@ runs:
         esac
         test "$(value "${debian_architecture}_package")" = \
           "vonk-forge-agent_${VERSION}_${debian_architecture}.deb"
+        test "$(value "${debian_architecture}_baseline_package")" = \
+          "vonk-forge-agent_${BASELINE_VERSION}_${debian_architecture}.deb"
         printf '%s\n' \
           "target=$target" \
           "debian_architecture=$debian_architecture" \
-          "compiled_artifact_name=${ARTIFACT_NAME}-compiled-${debian_architecture}" \
+          "compiled_artifact_name=${ARTIFACT_NAME}-compiled-${debian_architecture}-${BINARY_SET}" \
           >> "$GITHUB_OUTPUT"
 
     - name: Revalidate exact current main compilation source
@@ -105,62 +115,57 @@ runs:
     - name: Restore architecture Rust dependency cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
-        shared-key: ${{ inputs.architecture }}
+        shared-key: ${{ inputs.architecture }}-${{ inputs.binary_set }}
         add-job-id-key: "false"
+        cache-workspace-crates: "false"
 
-    - name: Compile candidate and baseline binaries
+    - name: Compile exact package binary set
       shell: bash
       env:
         ARCHITECTURE: ${{ inputs.architecture }}
         BASELINE_VERSION: ${{ inputs.baseline_version }}
+        BINARY_SET: ${{ inputs.binary_set }}
         TARGET: ${{ steps.target.outputs.target }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
-        candidate_semantic_version=${VERSION%%~*}
-        candidate_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" \
-            | sha256sum | cut -d' ' -f1
-        )"
-        baseline_semantic_version=${BASELINE_VERSION%%~*}
-        baseline_build_digest="sha256:$(
-          printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
-            "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" "$BASELINE_VERSION" \
-            | sha256sum | cut -d' ' -f1
-        )"
+        case "$BINARY_SET" in
+          candidate)
+            semantic_version=${VERSION%%~*}
+            build_digest="sha256:$(
+              printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+                "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" \
+                | sha256sum | cut -d' ' -f1
+            )"
+            ;;
+          baseline)
+            semantic_version=${BASELINE_VERSION%%~*}
+            build_digest="sha256:$(
+              printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+                "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" \
+                "$BASELINE_VERSION" | sha256sum | cut -d' ' -f1
+            )"
+            ;;
+          *) exit 64 ;;
+        esac
         export CARGO_INCREMENTAL=0 SOURCE_DATE_EPOCH="$epoch"
-        export VONK_AGENT_BUILD_DIGEST="$candidate_build_digest"
-        export VONK_AGENT_SEMANTIC_VERSION="$candidate_semantic_version"
-        cargo build --release --locked --target "$TARGET" --workspace
-        install -d -m 0755 compiled/candidate
+        export VONK_AGENT_BUILD_DIGEST="$build_digest"
+        export VONK_AGENT_SEMANTIC_VERSION="$semantic_version"
+        cargo build --release --locked --target "$TARGET" \
+          --package vonk-agent --package vonk-agent-helper
+        install -d -m 0755 "compiled/$BINARY_SET"
         install -m 0555 \
           "target/$TARGET/release/vonk-agent" \
           "target/$TARGET/release/vonk-agent-helper" \
-          compiled/candidate/
+          "compiled/$BINARY_SET/"
         scripts/verify-agent-binaries \
           --architecture "$ARCHITECTURE" \
-          --semantic-version "$candidate_semantic_version" \
-          --build-digest "$candidate_build_digest" \
-          --binaries-dir compiled/candidate \
-          > compiled/candidate.json
-
-        export VONK_AGENT_BUILD_DIGEST="$baseline_build_digest"
-        export VONK_AGENT_SEMANTIC_VERSION="$baseline_semantic_version"
-        cargo build --release --locked --target "$TARGET" --workspace
-        install -d -m 0755 compiled/baseline
-        install -m 0555 \
-          "target/$TARGET/release/vonk-agent" \
-          "target/$TARGET/release/vonk-agent-helper" \
-          compiled/baseline/
-        scripts/verify-agent-binaries \
-          --architecture "$ARCHITECTURE" \
-          --semantic-version "$baseline_semantic_version" \
-          --build-digest "$baseline_build_digest" \
-          --binaries-dir compiled/baseline \
-          > compiled/baseline.json
+          --semantic-version "$semantic_version" \
+          --build-digest "$build_digest" \
+          --binaries-dir "compiled/$BINARY_SET" \
+          > "compiled/$BINARY_SET.json"
 
     - name: Revalidate source before compiled artifact upload
       shell: bash
@@ -180,4 +185,7 @@ runs:
         if-no-files-found: error
         overwrite: false
         retention-days: 1
-        path: compiled
+        path: |
+          compiled/${{ inputs.binary_set }}.json
+          compiled/${{ inputs.binary_set }}/vonk-agent
+          compiled/${{ inputs.binary_set }}/vonk-agent-helper
