@@ -1,0 +1,900 @@
+#!/usr/bin/env python3
+"""Create, verify, and publish a thin accepted OCI image capsule.
+
+The capsule carries every manifest, config, and attestation blob. Large runnable
+filesystem layers may be omitted, but remain bound by their OCI descriptors.
+Publication is allowed only when the destination repository already contains
+every omitted blob by digest; otherwise the caller must use the accepted full
+OCI archive fallback.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import io
+import json
+import os
+import re
+import stat
+import sys
+import tarfile
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "vonk-forge.dev-image-publication-capsule.v1"
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+REPOSITORY_SEGMENT = re.compile(r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*\Z")
+TAG = re.compile(r"dev-sha-[0-9a-f]{40}\Z")
+RUNNABLE_ARCHITECTURES = {"amd64", "arm64"}
+EXTERNAL_LAYER_MINIMUM = 1024 * 1024
+CAPSULE_MAXIMUM_SIZE = 128 * 1024 * 1024
+CAPSULE_MAXIMUM_MEMBERS = 512
+FALLBACK_EXIT = 75
+
+
+class CapsuleError(ValueError):
+    """The capsule or requested publication is invalid."""
+
+
+class MissingExternalBlob(CapsuleError):
+    """An accepted external blob is absent from the destination repository."""
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Surface redirects so credentials are never forwarded implicitly."""
+
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        file_pointer: Any,
+        code: int,
+        message: str,
+        headers: Any,
+        new_url: str,
+    ) -> None:
+        return None
+
+
+def url_origin(value: str) -> tuple[str, str, int]:
+    parsed = urllib.parse.urlparse(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise CapsuleError("registry URL origin is invalid")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise CapsuleError("registry URL origin is invalid") from error
+    return (
+        parsed.scheme,
+        parsed.hostname,
+        port or (443 if parsed.scheme == "https" else 80),
+    )
+
+
+def redirect_target(source: str, location: object) -> str:
+    if (
+        not isinstance(location, str)
+        or not location
+        or any(character in location for character in "\r\n")
+    ):
+        raise CapsuleError("external blob redirect location is invalid")
+    target = urllib.parse.urljoin(source, location)
+    parsed = urllib.parse.urlparse(target)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise CapsuleError("external blob redirect must use HTTPS")
+    url_origin(target)
+    return target
+
+
+def canonical(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def digest(content: bytes) -> str:
+    return f"sha256:{hashlib.sha256(content).hexdigest()}"
+
+
+def require_digest(value: object, context: str) -> str:
+    if not isinstance(value, str) or DIGEST.fullmatch(value) is None:
+        raise CapsuleError(f"{context} digest is invalid")
+    return value
+
+
+def require_sha256(value: object, context: str) -> str:
+    if not isinstance(value, str) or SHA256.fullmatch(value) is None:
+        raise CapsuleError(f"{context} checksum is invalid")
+    return value
+
+
+def require_repository(image: str) -> str:
+    prefix = "ghcr.io/"
+    if not image.startswith(prefix):
+        raise CapsuleError("capsule publication identity is invalid")
+    repository = image.removeprefix(prefix)
+    segments = repository.split("/")
+    if not segments or any(
+        not segment or REPOSITORY_SEGMENT.fullmatch(segment) is None
+        for segment in segments
+    ):
+        raise CapsuleError("capsule publication identity is invalid")
+    return repository
+
+
+def require_size(value: object, context: str, *, allow_zero: bool = False) -> int:
+    minimum = 0 if allow_zero else 1
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise CapsuleError(f"{context} size is invalid")
+    return value
+
+
+def regular_file(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as error:
+        raise CapsuleError(f"required file is missing: {path.name}") from error
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise CapsuleError(f"required file is not regular: {path.name}")
+
+
+def load_json_bytes(content: bytes, context: str) -> dict[str, Any]:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise CapsuleError(f"{context} has duplicate keys")
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(content, object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CapsuleError(f"{context} is not valid JSON") from error
+    if not isinstance(document, dict):
+        raise CapsuleError(f"{context} is not a JSON object")
+    return document
+
+
+def descriptor(value: object, context: str) -> tuple[str, int, str]:
+    if not isinstance(value, dict):
+        raise CapsuleError(f"{context} descriptor is invalid")
+    blob_digest = require_digest(value.get("digest"), context)
+    size = require_size(value.get("size"), context, allow_zero=True)
+    media_type = value.get("mediaType")
+    if not isinstance(media_type, str) or not media_type:
+        raise CapsuleError(f"{context} media type is invalid")
+    return blob_digest, size, media_type
+
+
+def layout_blob(layout: Path, blob_digest: str, expected_size: int) -> bytes:
+    path = layout / "blobs" / "sha256" / blob_digest.removeprefix("sha256:")
+    regular_file(path)
+    content = path.read_bytes()
+    if len(content) != expected_size or digest(content) != blob_digest:
+        raise CapsuleError(f"OCI layout blob does not match {blob_digest}")
+    return content
+
+
+def root_descriptor(layout: Path) -> tuple[str, int, str]:
+    index_path = layout / "index.json"
+    layout_path = layout / "oci-layout"
+    regular_file(index_path)
+    regular_file(layout_path)
+    layout_document = load_json_bytes(layout_path.read_bytes(), "OCI layout")
+    if layout_document != {"imageLayoutVersion": "1.0.0"}:
+        raise CapsuleError("OCI layout version is invalid")
+    index = load_json_bytes(index_path.read_bytes(), "OCI layout index")
+    manifests = index.get("manifests")
+    if not isinstance(manifests, list) or len(manifests) != 1:
+        raise CapsuleError("OCI layout must select exactly one root manifest")
+    return descriptor(manifests[0], "root")
+
+
+def create(layout: Path, output: Path) -> None:
+    if not layout.is_dir() or layout.is_symlink():
+        raise CapsuleError("OCI layout root is invalid")
+    if not output.parent.is_dir() or output.is_symlink():
+        raise CapsuleError("capsule output path is invalid")
+
+    root_digest, root_size, root_media_type = root_descriptor(layout)
+    if root_media_type != "application/vnd.oci.image.index.v1+json":
+        raise CapsuleError("capsule root must be an OCI image index")
+    root_content = layout_blob(layout, root_digest, root_size)
+    root = load_json_bytes(root_content, "root manifest")
+    manifests = root.get("manifests")
+    if not isinstance(manifests, list) or len(manifests) != 4:
+        raise CapsuleError("capsule root must contain two images and two attestations")
+
+    included: dict[str, bytes] = {root_digest: root_content}
+    external: dict[str, dict[str, object]] = {}
+    runnable_architectures: set[str] = set()
+    attestation_subjects: set[str] = set()
+    runnable_digests: set[str] = set()
+
+    for manifest_number, manifest_descriptor in enumerate(manifests):
+        child_digest, child_size, child_media_type = descriptor(
+            manifest_descriptor, f"root manifest {manifest_number}"
+        )
+        if child_media_type != "application/vnd.oci.image.manifest.v1+json":
+            raise CapsuleError("capsule child must be an OCI image manifest")
+        child_content = layout_blob(layout, child_digest, child_size)
+        included[child_digest] = child_content
+        child = load_json_bytes(child_content, "child manifest")
+        platform = manifest_descriptor.get("platform")
+        if not isinstance(platform, dict):
+            raise CapsuleError("capsule child platform is missing")
+        architecture = platform.get("architecture")
+        operating_system = platform.get("os")
+        annotations = manifest_descriptor.get("annotations", {})
+        if not isinstance(annotations, dict):
+            raise CapsuleError("capsule child annotations are invalid")
+        is_runnable = (
+            operating_system == "linux" and architecture in RUNNABLE_ARCHITECTURES
+        )
+        is_attestation = (
+            operating_system == "unknown"
+            and architecture == "unknown"
+            and annotations.get("vnd.docker.reference.type") == "attestation-manifest"
+        )
+        if is_runnable:
+            if architecture in runnable_architectures:
+                raise CapsuleError("capsule contains a duplicate runnable platform")
+            runnable_architectures.add(str(architecture))
+            runnable_digests.add(child_digest)
+        elif is_attestation:
+            attestation_subjects.add(
+                require_digest(
+                    annotations.get("vnd.docker.reference.digest"),
+                    "attestation subject",
+                )
+            )
+        else:
+            raise CapsuleError("capsule child platform is unsupported")
+
+        config_digest, config_size, _ = descriptor(child.get("config"), "child config")
+        included[config_digest] = layout_blob(layout, config_digest, config_size)
+        layers = child.get("layers")
+        if not isinstance(layers, list) or not layers:
+            raise CapsuleError("capsule child layers are missing")
+        for layer_number, layer_descriptor in enumerate(layers):
+            layer_digest, layer_size, layer_media_type = descriptor(
+                layer_descriptor, f"child layer {layer_number}"
+            )
+            if (
+                is_runnable
+                and layer_media_type.startswith("application/vnd.oci.image.layer.")
+                and layer_size >= EXTERNAL_LAYER_MINIMUM
+            ):
+                external[layer_digest] = {
+                    "digest": layer_digest,
+                    "media_type": layer_media_type,
+                    "size": layer_size,
+                }
+            else:
+                included[layer_digest] = layout_blob(layout, layer_digest, layer_size)
+
+    if runnable_architectures != RUNNABLE_ARCHITECTURES:
+        raise CapsuleError("capsule runnable platforms are incomplete")
+    if attestation_subjects != runnable_digests:
+        raise CapsuleError("capsule attestations are not bound to runnable images")
+
+    metadata = {
+        "schema": SCHEMA,
+        "manifest_digest": root_digest,
+        "external_blobs": [external[key] for key in sorted(external)],
+    }
+    descriptor_fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.", dir=output.parent
+    )
+    os.close(descriptor_fd)
+    temporary = Path(temporary_name)
+    try:
+        with tarfile.open(temporary, "w") as stream:
+            entries = {"capsule.json": canonical(metadata)}
+            entries.update(
+                {
+                    f"blobs/sha256/{blob_digest.removeprefix('sha256:')}": content
+                    for blob_digest, content in included.items()
+                }
+            )
+            for name in sorted(entries):
+                content = entries[name]
+                member = tarfile.TarInfo(name)
+                member.mode = 0o600
+                member.mtime = 0
+                member.size = len(content)
+                stream.addfile(member, io.BytesIO(content))
+        os.chmod(temporary, 0o600)
+        if temporary.stat().st_size > CAPSULE_MAXIMUM_SIZE:
+            raise CapsuleError("capsule exceeds the publication size limit")
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def capsule_files(path: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
+    regular_file(path)
+    if path.stat().st_size > CAPSULE_MAXIMUM_SIZE:
+        raise CapsuleError("capsule exceeds the publication size limit")
+    files: dict[str, bytes] = {}
+    total_size = 0
+    try:
+        with tarfile.open(path, "r:") as stream:
+            for member_number, member in enumerate(stream, start=1):
+                if member_number > CAPSULE_MAXIMUM_MEMBERS:
+                    raise CapsuleError("capsule contains too many members")
+                name = member.name.removeprefix("./")
+                if (
+                    not name
+                    or name in files
+                    or not member.isfile()
+                    or (
+                        name != "capsule.json"
+                        and not re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", name)
+                    )
+                ):
+                    raise CapsuleError("capsule contains an unsafe or duplicate member")
+                total_size += member.size
+                if total_size > CAPSULE_MAXIMUM_SIZE:
+                    raise CapsuleError(
+                        "capsule expands beyond the publication size limit"
+                    )
+                extracted = stream.extractfile(member)
+                if extracted is None:
+                    raise CapsuleError("capsule member cannot be read")
+                files[name] = extracted.read()
+    except tarfile.TarError as error:
+        raise CapsuleError("capsule cannot be read") from error
+    if "capsule.json" not in files:
+        raise CapsuleError("capsule metadata is missing")
+    metadata = load_json_bytes(files.pop("capsule.json"), "capsule metadata")
+    return metadata, files
+
+
+def validate(path: Path, expected_digest: str | None = None) -> dict[str, Any]:
+    metadata, named_blobs = capsule_files(path)
+    if set(metadata) != {"schema", "manifest_digest", "external_blobs"}:
+        raise CapsuleError("capsule metadata has an invalid shape")
+    if metadata["schema"] != SCHEMA:
+        raise CapsuleError("capsule schema is invalid")
+    root_digest = require_digest(metadata["manifest_digest"], "capsule manifest")
+    if expected_digest is not None and root_digest != require_digest(
+        expected_digest, "expected manifest"
+    ):
+        raise CapsuleError("capsule manifest does not match its receipt")
+
+    included: dict[str, bytes] = {}
+    for name, content in named_blobs.items():
+        blob_digest = f"sha256:{name.rsplit('/', 1)[1]}"
+        if digest(content) != blob_digest:
+            raise CapsuleError("capsule blob digest does not match its name")
+        included[blob_digest] = content
+    external_entries = metadata["external_blobs"]
+    if (
+        not isinstance(external_entries, list)
+        or not external_entries
+        or len(external_entries) > CAPSULE_MAXIMUM_MEMBERS
+    ):
+        raise CapsuleError("capsule external blob list is invalid")
+    external: dict[str, dict[str, object]] = {}
+    for entry in external_entries:
+        if not isinstance(entry, dict) or set(entry) != {
+            "digest",
+            "media_type",
+            "size",
+        }:
+            raise CapsuleError("capsule external blob entry is invalid")
+        blob_digest = require_digest(entry["digest"], "external blob")
+        size = require_size(entry["size"], "external blob")
+        media_type = entry["media_type"]
+        if (
+            blob_digest in external
+            or blob_digest in included
+            or not isinstance(media_type, str)
+            or not media_type.startswith("application/vnd.oci.image.layer.")
+            or size < EXTERNAL_LAYER_MINIMUM
+        ):
+            raise CapsuleError("capsule external blob entry is invalid")
+        external[blob_digest] = entry
+
+    root_content = included.get(root_digest)
+    if root_content is None:
+        raise CapsuleError("capsule root manifest is missing")
+    root = load_json_bytes(root_content, "capsule root manifest")
+    if root.get("mediaType") != "application/vnd.oci.image.index.v1+json":
+        raise CapsuleError("capsule root manifest has an invalid media type")
+    manifests = root.get("manifests")
+    if not isinstance(manifests, list) or len(manifests) != 4:
+        raise CapsuleError("capsule root manifest has an invalid shape")
+
+    reachable = {root_digest}
+    runnable_digests: set[str] = set()
+    runnable_architectures: set[str] = set()
+    attestation_subjects: set[str] = set()
+    child_manifests: list[tuple[str, str, bytes]] = []
+    for manifest_number, manifest_descriptor in enumerate(manifests):
+        child_digest, child_size, child_media_type = descriptor(
+            manifest_descriptor, f"capsule child {manifest_number}"
+        )
+        if child_media_type != "application/vnd.oci.image.manifest.v1+json":
+            raise CapsuleError("capsule child media type is invalid")
+        child_content = included.get(child_digest)
+        if child_content is None or len(child_content) != child_size:
+            raise CapsuleError("capsule child manifest is missing")
+        reachable.add(child_digest)
+        child = load_json_bytes(child_content, "capsule child manifest")
+        platform = manifest_descriptor.get("platform")
+        annotations = manifest_descriptor.get("annotations", {})
+        if not isinstance(platform, dict) or not isinstance(annotations, dict):
+            raise CapsuleError("capsule child identity is invalid")
+        architecture = platform.get("architecture")
+        operating_system = platform.get("os")
+        is_runnable = (
+            operating_system == "linux" and architecture in RUNNABLE_ARCHITECTURES
+        )
+        is_attestation = (
+            operating_system == "unknown"
+            and architecture == "unknown"
+            and annotations.get("vnd.docker.reference.type") == "attestation-manifest"
+        )
+        if is_runnable:
+            runnable_architectures.add(str(architecture))
+            runnable_digests.add(child_digest)
+        elif is_attestation:
+            attestation_subjects.add(
+                require_digest(
+                    annotations.get("vnd.docker.reference.digest"),
+                    "attestation subject",
+                )
+            )
+        else:
+            raise CapsuleError("capsule child platform is unsupported")
+        config_digest, config_size, _ = descriptor(
+            child.get("config"), "capsule config"
+        )
+        config_content = included.get(config_digest)
+        if config_content is None or len(config_content) != config_size:
+            raise CapsuleError("capsule config is missing")
+        reachable.add(config_digest)
+        layers = child.get("layers")
+        if not isinstance(layers, list) or not layers:
+            raise CapsuleError("capsule child layers are missing")
+        for layer_number, layer_descriptor in enumerate(layers):
+            layer_digest, layer_size, layer_media_type = descriptor(
+                layer_descriptor, f"capsule layer {layer_number}"
+            )
+            if layer_digest in included:
+                if len(included[layer_digest]) != layer_size:
+                    raise CapsuleError("capsule layer size is invalid")
+                reachable.add(layer_digest)
+            elif (
+                is_runnable
+                and layer_digest in external
+                and external[layer_digest]["size"] == layer_size
+                and external[layer_digest]["media_type"] == layer_media_type
+            ):
+                reachable.add(layer_digest)
+            else:
+                raise CapsuleError(
+                    "capsule layer is missing or improperly externalized"
+                )
+        child_manifests.append((child_digest, child_media_type, child_content))
+
+    if runnable_architectures != RUNNABLE_ARCHITECTURES:
+        raise CapsuleError("capsule runnable platforms are incomplete")
+    if attestation_subjects != runnable_digests:
+        raise CapsuleError("capsule attestations do not bind runnable images")
+    if reachable != set(included) | set(external):
+        raise CapsuleError("capsule contains unreferenced or missing blobs")
+    return {
+        "manifest_digest": root_digest,
+        "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+        "root_content": root_content,
+        "child_manifests": child_manifests,
+        "included": included,
+        "external": external,
+    }
+
+
+class Registry:
+    def __init__(self, repository: str) -> None:
+        self.repository = repository
+        self.base = "https://ghcr.io"
+        self.testing = os.environ.get("VONK_CAPSULE_TESTING") == "1"
+        override = os.environ.get("VONK_CAPSULE_TEST_REGISTRY")
+        if override is not None:
+            parsed = urllib.parse.urlparse(override)
+            if (
+                not self.testing
+                or parsed.scheme != "http"
+                or parsed.hostname
+                not in {
+                    "127.0.0.1",
+                    "localhost",
+                }
+            ):
+                raise CapsuleError("test registry override is not permitted")
+            self.base = override.rstrip("/")
+        self.basic = self._basic_authorization()
+        self.bearer: str | None = None
+        self.opener = urllib.request.build_opener(NoRedirectHandler())
+
+    def _basic_authorization(self) -> str:
+        if self.testing:
+            return "Basic " + base64.b64encode(b"test:test").decode()
+        docker_root = Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker"))
+        config_path = docker_root / "config.json"
+        regular_file(config_path)
+        document = load_json_bytes(config_path.read_bytes(), "Docker config")
+        auths = document.get("auths")
+        if not isinstance(auths, dict):
+            raise CapsuleError("Docker config registry credentials are missing")
+        entry = auths.get("ghcr.io") or auths.get("https://ghcr.io")
+        if not isinstance(entry, dict):
+            raise CapsuleError("GHCR credentials are missing")
+        authorization = entry.get("auth")
+        if not isinstance(authorization, str) or not authorization:
+            raise CapsuleError("GHCR basic credentials are missing")
+        try:
+            decoded = base64.b64decode(authorization, validate=True)
+        except ValueError as error:
+            raise CapsuleError("GHCR credentials are invalid") from error
+        if b":" not in decoded:
+            raise CapsuleError("GHCR credentials are invalid")
+        return f"Basic {authorization}"
+
+    def _token(self, challenge: str) -> str:
+        if not challenge.startswith("Bearer "):
+            raise CapsuleError("registry authentication challenge is invalid")
+        values: dict[str, str] = {}
+        for match in re.finditer(r'(realm|service|scope)="([^"\r\n]+)"', challenge):
+            values[match.group(1)] = match.group(2)
+        realm = values.get("realm")
+        service = values.get("service")
+        if realm is None or service is None:
+            raise CapsuleError("registry authentication challenge is incomplete")
+        parsed = urllib.parse.urlparse(realm)
+        if url_origin(realm) != url_origin(self.base):
+            raise CapsuleError("registry token realm changed origin")
+        if self.testing:
+            if parsed.scheme != "http" or parsed.hostname not in {
+                "127.0.0.1",
+                "localhost",
+            }:
+                raise CapsuleError("test registry token realm is invalid")
+        elif parsed.scheme != "https" or parsed.hostname != "ghcr.io":
+            raise CapsuleError("GHCR token realm is invalid")
+        query = urllib.parse.urlencode(
+            {
+                "service": service,
+                "scope": f"repository:{self.repository}:pull,push",
+            }
+        )
+        request = urllib.request.Request(
+            f"{realm}?{query}", headers={"Authorization": self.basic}
+        )
+        try:
+            with self.opener.open(request, timeout=30) as response:
+                document = load_json_bytes(response.read(), "registry token")
+        except urllib.error.URLError as error:
+            raise CapsuleError(f"registry token request failed: {error}") from error
+        token = document.get("token") or document.get("access_token")
+        if not isinstance(token, str) or not token:
+            raise CapsuleError("registry token response is invalid")
+        return token
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        content: bytes | None = None,
+        content_type: str | None = None,
+        expected: set[int],
+        allow_external_head_redirect: bool = False,
+    ) -> tuple[int, Any, bytes]:
+        url = urllib.parse.urljoin(f"{self.base}/", path.lstrip("/"))
+        for attempt in range(2):
+            headers = {
+                "Authorization": f"Bearer {self.bearer}" if self.bearer else self.basic
+            }
+            if content_type is not None:
+                headers["Content-Type"] = content_type
+            if method in {"GET", "HEAD"}:
+                headers["Accept"] = (
+                    "application/vnd.oci.image.index.v1+json, "
+                    "application/vnd.oci.image.manifest.v1+json, "
+                    "application/vnd.docker.distribution.manifest.list.v2+json"
+                )
+            request = urllib.request.Request(
+                url, data=content, headers=headers, method=method
+            )
+            try:
+                with self.opener.open(request, timeout=120) as response:
+                    status = response.status
+                    body = b"" if method == "HEAD" else response.read()
+                    if status not in expected:
+                        raise CapsuleError(
+                            f"registry returned unexpected HTTP {status}"
+                        )
+                    return status, response.headers, body
+            except urllib.error.HTTPError as error:
+                if 300 <= error.code < 400:
+                    location = error.headers.get("Location")
+                    if not allow_external_head_redirect or method != "HEAD":
+                        raise CapsuleError(
+                            "authenticated registry redirect is forbidden"
+                        ) from error
+                    redirected = redirect_target(url, location)
+                    redirected_request = urllib.request.Request(
+                        redirected,
+                        headers={"Accept": headers["Accept"]},
+                        method="HEAD",
+                    )
+                    try:
+                        with self.opener.open(
+                            redirected_request, timeout=120
+                        ) as response:
+                            if response.status not in expected:
+                                raise CapsuleError(
+                                    f"registry returned unexpected HTTP {response.status}"
+                                )
+                            return response.status, response.headers, b""
+                    except urllib.error.HTTPError as redirect_error:
+                        if 300 <= redirect_error.code < 400:
+                            raise CapsuleError(
+                                "external blob redirect chain is forbidden"
+                            ) from redirect_error
+                        if redirect_error.code in expected:
+                            return redirect_error.code, redirect_error.headers, b""
+                        raise CapsuleError(
+                            f"registry HEAD failed with HTTP {redirect_error.code}"
+                        ) from redirect_error
+                    except urllib.error.URLError as redirect_error:
+                        raise CapsuleError(
+                            f"registry HEAD failed: {redirect_error}"
+                        ) from redirect_error
+                if error.code == 401 and attempt == 0:
+                    self.bearer = self._token(error.headers.get("WWW-Authenticate", ""))
+                    continue
+                if error.code in expected:
+                    return error.code, error.headers, error.read()
+                raise CapsuleError(
+                    f"registry {method} failed with HTTP {error.code}"
+                ) from error
+            except urllib.error.URLError as error:
+                raise CapsuleError(f"registry {method} failed: {error}") from error
+        raise CapsuleError("registry authentication failed")
+
+    def blob_exists(self, blob_digest: str) -> bool:
+        status, _, _ = self.request(
+            "HEAD",
+            f"/v2/{self.repository}/blobs/{blob_digest}",
+            expected={200, 404},
+            allow_external_head_redirect=True,
+        )
+        return status == 200
+
+    def manifest(self, reference: str) -> bytes | None:
+        status, headers, body = self.request(
+            "GET",
+            f"/v2/{self.repository}/manifests/{reference}",
+            expected={200, 404},
+        )
+        if status == 404:
+            return None
+        observed = headers.get("Docker-Content-Digest")
+        if observed is not None and observed != digest(body):
+            raise CapsuleError("registry manifest digest header is invalid")
+        return body
+
+    def put_blob(self, blob_digest: str, content: bytes) -> None:
+        if self.blob_exists(blob_digest):
+            return
+        _, headers, _ = self.request(
+            "POST",
+            f"/v2/{self.repository}/blobs/uploads/",
+            content=b"",
+            expected={202},
+        )
+        location = headers.get("Location")
+        if not isinstance(location, str) or not location:
+            raise CapsuleError("registry upload location is missing")
+        separator = "&" if "?" in location else "?"
+        target = (
+            f"{location}{separator}{urllib.parse.urlencode({'digest': blob_digest})}"
+        )
+        parsed = urllib.parse.urlparse(target)
+        if parsed.scheme:
+            base = urllib.parse.urlparse(self.base)
+            if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+                raise CapsuleError("registry upload location changed origin")
+            target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        self.request(
+            "PUT",
+            target,
+            content=content,
+            content_type="application/octet-stream",
+            expected={201},
+        )
+        if not self.blob_exists(blob_digest):
+            raise CapsuleError("registry did not retain uploaded blob")
+
+    def put_manifest(
+        self, reference: str, content: bytes, media_type: str, expected_digest: str
+    ) -> None:
+        _, headers, _ = self.request(
+            "PUT",
+            f"/v2/{self.repository}/manifests/{reference}",
+            content=content,
+            content_type=media_type,
+            expected={201},
+        )
+        observed = headers.get("Docker-Content-Digest")
+        if observed is not None and observed != expected_digest:
+            raise CapsuleError("registry changed the published manifest digest")
+
+
+def reserve_digest_output(path: Path) -> tuple[int, Path]:
+    try:
+        parent = path.parent.lstat()
+    except FileNotFoundError as error:
+        raise CapsuleError("accepted digest output path is invalid") from error
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
+        raise CapsuleError("accepted digest output path is invalid")
+    if path.exists() or path.is_symlink():
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise CapsuleError("accepted digest output path is invalid")
+    descriptor_fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
+    return descriptor_fd, Path(temporary_name)
+
+
+def write_reserved_digest(
+    descriptor_fd: int, temporary: Path, path: Path, value: str
+) -> None:
+    try:
+        with os.fdopen(descriptor_fd, "w") as stream:
+            stream.write(f"{value}\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def file_sha256(path: Path) -> str:
+    checksum = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            checksum.update(chunk)
+    return checksum.hexdigest()
+
+
+def publish(
+    capsule: Path,
+    image: str,
+    tag: str,
+    expected_digest: str,
+    expected_capsule_sha256: str,
+    output: Path,
+) -> None:
+    repository = require_repository(image)
+    if TAG.fullmatch(tag) is None:
+        raise CapsuleError("capsule publication identity is invalid")
+    expected_digest = require_digest(expected_digest, "expected manifest")
+    expected_capsule_sha256 = require_sha256(
+        expected_capsule_sha256, "expected capsule"
+    )
+    regular_file(capsule)
+    if file_sha256(capsule) != expected_capsule_sha256:
+        raise CapsuleError("capsule does not match its acceptance receipt")
+    document = validate(capsule, expected_digest)
+    descriptor_fd, temporary = reserve_digest_output(output)
+    try:
+        registry = Registry(repository)
+
+        existing = registry.manifest(tag)
+        if existing is not None:
+            if digest(existing) != expected_digest:
+                raise CapsuleError("refusing to overwrite immutable Hermes image tag")
+            write_reserved_digest(descriptor_fd, temporary, output, expected_digest)
+            return
+
+        missing = [
+            blob_digest
+            for blob_digest in document["external"]
+            if not registry.blob_exists(blob_digest)
+        ]
+        if missing:
+            raise MissingExternalBlob(
+                "destination repository lacks accepted external blobs: "
+                + ", ".join(missing)
+            )
+
+        child_manifest_digests = {
+            child_digest for child_digest, _, _ in document["child_manifests"]
+        }
+        for blob_digest, content in document["included"].items():
+            if blob_digest == expected_digest or blob_digest in child_manifest_digests:
+                continue
+            registry.put_blob(blob_digest, content)
+        for child_digest, media_type, content in document["child_manifests"]:
+            registry.put_manifest(child_digest, content, media_type, child_digest)
+
+        existing = registry.manifest(tag)
+        if existing is not None:
+            if digest(existing) != expected_digest:
+                raise CapsuleError("refusing to overwrite immutable Hermes image tag")
+        else:
+            registry.put_manifest(
+                tag,
+                document["root_content"],
+                document["manifest_media_type"],
+                expected_digest,
+            )
+        observed = registry.manifest(tag)
+        if observed is None or digest(observed) != expected_digest:
+            raise CapsuleError(
+                "immutable Hermes image digest changed during publication"
+            )
+        write_reserved_digest(descriptor_fd, temporary, output, expected_digest)
+    finally:
+        try:
+            os.close(descriptor_fd)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    try:
+        if len(arguments) == 3 and arguments[0] == "create":
+            create(Path(arguments[1]), Path(arguments[2]))
+        elif len(arguments) == 3 and arguments[0] == "verify":
+            validate(Path(arguments[1]), arguments[2])
+        elif len(arguments) == 7 and arguments[0] == "publish":
+            publish(
+                Path(arguments[1]),
+                arguments[2],
+                arguments[3],
+                arguments[4],
+                arguments[5],
+                Path(arguments[6]),
+            )
+        else:
+            raise CapsuleError(
+                "usage: dev-image-publication-capsule "
+                "create OCI_LAYOUT CAPSULE | verify CAPSULE MANIFEST_DIGEST | "
+                "publish CAPSULE IMAGE IMMUTABLE_TAG MANIFEST_DIGEST "
+                "CAPSULE_SHA256 DIGEST_FILE"
+            )
+    except MissingExternalBlob as error:
+        print(f"dev-image-publication-capsule: {error}", file=sys.stderr)
+        return FALLBACK_EXIT
+    except (OSError, CapsuleError) as error:
+        print(f"dev-image-publication-capsule: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

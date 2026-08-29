@@ -133,6 +133,15 @@ jobs:
               retention-days: 1
               path: ${{ runner.temp }}/${{ matrix.role }}.role-receipt.json
 
+          - name: Upload thin Hermes publication capsule
+            if: matrix.role == 'hermes'
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-image-hermes-capsule-${{ github.sha }}-${{ github.run_id }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/vonk-forge-hermes.publication-capsule.tar
+
   verify-runtime-images:
     name: Verify pinned runtime images are pullable
     runs-on: ubuntu-24.04
@@ -385,11 +394,22 @@ jobs:
               echo "unable to install skopeo after bounded retries" >&2
               exit 1
 
-          - name: Prefetch original immutable OCI archives
+          - name: Prefetch exact API OCI archive
             uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
             with:
-              pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}
-              merge-multiple: true
+              name: development-image-api-${{ github.sha }}-${{ github.run_id }}
+              path: ${{ runner.temp }}/accepted
+
+          - name: Prefetch exact worker OCI archive
+            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+            with:
+              name: development-image-worker-${{ github.sha }}-${{ github.run_id }}
+              path: ${{ runner.temp }}/accepted
+
+          - name: Prefetch thin Hermes publication capsule
+            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+            with:
+              name: development-image-hermes-capsule-${{ github.sha }}-${{ github.run_id }}
               path: ${{ runner.temp }}/accepted
 
           - name: Wait for checksum-bound acceptance receipt
@@ -433,9 +453,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for role in api worker hermes; do
+          for role in api worker; do
             test -f "$RUNNER_TEMP/accepted/vonk-forge-$role.oci.tar"
           done
+          test -f \
+            "$RUNNER_TEMP/accepted/vonk-forge-hermes.publication-capsule.tar"
           test -f "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
           test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml"
           test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml"
@@ -488,9 +510,45 @@ jobs:
           - name: Publish immutable tested Hermes image
             shell: bash
             env:
+              GH_TOKEN: ${{ github.token }}
               IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
+              set -euo pipefail
+              capsule="$RUNNER_TEMP/accepted/vonk-forge-hermes.publication-capsule.tar"
+              receipt="$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
+              expected_digest=$(jq -er \
+                '.roles.hermes.manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+                "$receipt")
+              expected_capsule_sha256=$(jq -er \
+                '.roles.hermes.publication_capsule.sha256 | select(test("^[0-9a-f]{64}$"))' \
+                "$receipt")
+              set +e
+              scripts/dev-image-publication-capsule publish \
+                "$capsule" "$IMAGE" "$IMMUTABLE_TAG" \
+                "$expected_digest" "$expected_capsule_sha256" \
+                "$RUNNER_TEMP/hermes.accepted-digest"
+              capsule_status=$?
+              set -e
+              if ((capsule_status == 0)); then
+                exit 0
+              fi
+              if ((capsule_status != 75)); then
+                exit "$capsule_status"
+              fi
+
+              echo "Accepted Hermes layers are not reusable; downloading full archive" >&2
+              gh run download "$GITHUB_RUN_ID" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name "development-image-hermes-$GITHUB_SHA-$GITHUB_RUN_ID" \
+                --dir "$RUNNER_TEMP/accepted"
+              scripts/dev-image-acceptance-receipt verify \
+                "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              [[ "$GITHUB_SHA" == \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
               scripts/publish-immutable-image hermes \
                 "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
                 "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/hermes.accepted-digest"
