@@ -80,8 +80,53 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint Rust workspace
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test Rust workspace
-        run: cargo test --workspace --locked
+
+  rust-tests:
+    name: Rust workspace tests (${{ matrix.shard.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard:
+          - id: non-nas
+            label: Agent, protocol, helper, and Spark setup
+          - id: nas-setup
+            label: NAS setup
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.97.1
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Test complete Rust shard
+        shell: bash
+        env:
+          RUST_TEST_SHARD: ${{ matrix.shard.id }}
+        run: |
+          set -euo pipefail
+          case "$RUST_TEST_SHARD" in
+            non-nas)
+              cargo test --workspace --exclude vonk-nas-setup --locked
+              ;;
+            nas-setup)
+              cargo test -p vonk-nas-setup --locked
+              ;;
+            *)
+              echo "Unknown Rust test shard: $RUST_TEST_SHARD" >&2
+              exit 1
+              ;;
+          esac
 
   rust-platform:
     name: Rust platform integration
@@ -150,17 +195,19 @@ jobs:
 
   rust:
     name: Rust agent contracts
-    needs: [rust-quality, rust-platform]
+    needs: [rust-quality, rust-tests, rust-platform]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require Rust quality and platform integration
+      - name: Require Rust quality, tests, and platform integration
         env:
           QUALITY_RESULT: ${{ needs.rust-quality.result }}
+          TEST_RESULT: ${{ needs.rust-tests.result }}
           PLATFORM_RESULT: ${{ needs.rust-platform.result }}
         run: |
           test "$QUALITY_RESULT" = success
+          test "$TEST_RESULT" = success
           test "$PLATFORM_RESULT" = success
 
   generated-clients:
