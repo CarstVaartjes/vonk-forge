@@ -59,7 +59,7 @@ jobs:
           fi
 
   rust-quality:
-    name: Rust workspace quality
+    name: Rust workspace lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -128,6 +128,21 @@ jobs:
               ;;
           esac
 
+  rust-quality-gate:
+    name: Rust workspace quality
+    needs: [rust-quality, rust-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require Rust lint and every workspace test shard
+        env:
+          LINT_RESULT: ${{ needs.rust-quality.result }}
+          TEST_RESULT: ${{ needs.rust-tests.result }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$TEST_RESULT" = success
+
   rust-platform:
     name: Rust platform integration
     runs-on: ubuntu-24.04
@@ -195,19 +210,17 @@ jobs:
 
   rust:
     name: Rust agent contracts
-    needs: [rust-quality, rust-tests, rust-platform]
+    needs: [rust-quality-gate, rust-platform]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require Rust quality, tests, and platform integration
         env:
-          QUALITY_RESULT: ${{ needs.rust-quality.result }}
-          TEST_RESULT: ${{ needs.rust-tests.result }}
+          QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
           PLATFORM_RESULT: ${{ needs.rust-platform.result }}
         run: |
           test "$QUALITY_RESULT" = success
-          test "$TEST_RESULT" = success
           test "$PLATFORM_RESULT" = success
 
   generated-clients:
