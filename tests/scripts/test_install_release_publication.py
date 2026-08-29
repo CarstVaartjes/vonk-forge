@@ -355,6 +355,28 @@ def update_activity(delta: int) -> None:
         activity.flush()
         fcntl.flock(activity.fileno(), fcntl.LOCK_UN)
 
+def wait_for_peer(kind: str, key: str) -> None:
+    barrier = os.environ.get("FAKE_RCLONE_PARALLEL_BARRIER")
+    if barrier is None:
+        return
+    selected = (
+        kind == "read" and "/releases/" in key and "/acceptance/" not in key
+    ) or (
+        kind == "acceptance" and "/acceptance/" in key
+    ) or (
+        kind == "endpoint" and key in {"nas", "spark"}
+    )
+    if not selected:
+        return
+    markers = Path(barrier) / kind
+    markers.mkdir(parents=True, exist_ok=True)
+    (markers / str(os.getpid())).touch()
+    deadline = time.monotonic() + 2
+    while len(list(markers.iterdir())) < 2:
+        if time.monotonic() >= deadline:
+            raise SystemExit(70)
+        time.sleep(0.01)
+
 if command == "lsjson":
     path = object_path(arguments[0])
     if not path.is_file():
@@ -365,6 +387,7 @@ if command == "lsjson":
     print(json.dumps({"IsDir": False, "Path": path.name, "Size": path.stat().st_size}))
 elif command == "cat":
     path = object_path(arguments[0])
+    wait_for_peer("read", str(path.relative_to(object_root)))
     # rclone cat succeeds with no output when its exact source object is absent.
     if path.is_file():
         sys.stdout.buffer.write(path.read_bytes())
@@ -374,6 +397,9 @@ elif command == "copyto":
         time.sleep(float(os.environ.get("FAKE_RCLONE_COPY_DELAY", "0")))
         source = Path(arguments[-2])
         destination = object_path(arguments[-1])
+        key = str(destination.relative_to(object_root))
+        wait_for_peer("acceptance", key)
+        wait_for_peer("endpoint", key)
         if "--immutable" in arguments and destination.exists():
             raise SystemExit(9)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1293,6 +1319,89 @@ def test_parallel_rclone_candidate_conflict_is_fail_closed_without_receipt(
     assert "refusing to overwrite immutable object" in result.stderr
     assert result.stdout == ""
     assert conflict_path.read_bytes() == b"conflicting immutable object\n"
+
+
+def test_rclone_promotion_parallelizes_reads_and_phase_groups_before_pointer(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    candidate = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert candidate.returncode == 0, candidate.stderr
+    receipt, signature, public_key = _acceptance_receipt(tmp_path, publication)
+    encoded_public_key = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    barrier = tmp_path / "parallel-barrier"
+    environment["FAKE_RCLONE_PARALLEL_BARRIER"] = str(barrier)
+
+    promoted = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "promote",
+            "--bundle",
+            str(publication),
+            "--accepted-evidence",
+            str(receipt),
+            "--accepted-evidence-signature",
+            str(signature),
+            "--acceptance-public-key",
+            str(public_key),
+            "--acceptance-public-key-sha256",
+            hashlib.sha256(encoded_public_key).hexdigest(),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert promoted.returncode == 0, promoted.stderr
+    assert all(
+        len(list((barrier / phase).iterdir())) >= 2
+        for phase in (
+            "read",
+            "acceptance",
+            "endpoint",
+        )
+    )
+    operations = [json.loads(line) for line in promoted.stdout.splitlines()]
+    assert [operation["phase"] for operation in operations[-3:]] == [
+        "endpoint",
+        "endpoint",
+        "pointer",
+    ]
+    pointer = object_root / "artifacts/stable/current.manifest"
+    assert pointer.is_file()
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    acceptance = (
+        object_root
+        / f"artifacts/stable/releases/{plan['generation']}/acceptance/receipt.json"
+    )
+    assert acceptance.read_bytes() == receipt.read_bytes()
+    assert (object_root / "nas").is_file()
+    assert (object_root / "spark").is_file()
 
 
 def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(

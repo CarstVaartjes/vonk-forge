@@ -46,6 +46,7 @@ KEY = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 MAX_RCLONE_CANDIDATE_WORKERS = 8
+MAX_PROMOTION_IO_WORKERS = 8
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
@@ -1335,9 +1336,9 @@ def _verify_candidate_objects(
     filesystem: Path | None,
     remote: str | None,
 ) -> None:
-    for entry, _ in entries:
-        if entry["phase"] != "immutable":
-            continue
+    immutable_entries = [entry for entry, _ in entries if entry["phase"] == "immutable"]
+
+    def verify(entry: dict[str, Any]) -> None:
         content = _published_bytes(
             filesystem,
             remote,
@@ -1350,6 +1351,39 @@ def _verify_candidate_objects(
             or hashlib.sha256(content).hexdigest() != entry["sha256"]
         ):
             raise PublicationError("published candidate generation is inconsistent")
+
+    if remote is None or len(immutable_entries) < 2:
+        for entry in immutable_entries:
+            verify(entry)
+        return
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(MAX_PROMOTION_IO_WORKERS, len(immutable_entries))
+    ) as executor:
+        list(executor.map(verify, immutable_entries))
+
+
+def _copy_promotion_group(
+    filesystem: Path | None,
+    remote: str | None,
+    entries: tuple[tuple[dict[str, Any], Path], ...],
+) -> None:
+    if remote is None or len(entries) < 2:
+        for entry, source in entries:
+            _copy_publication_entry(filesystem, remote, entry, source)
+        return
+
+    def copy(item: tuple[dict[str, Any], Path]) -> None:
+        entry, source = item
+        _rclone_copy(source, remote, entry)
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(MAX_PROMOTION_IO_WORKERS, len(entries))
+    ) as executor:
+        list(executor.map(copy, entries))
+    for entry, _ in entries:
+        print(
+            json.dumps({"key": entry["key"], "phase": entry["phase"]}, sort_keys=True)
+        )
 
 
 def promote(arguments: argparse.Namespace) -> None:
@@ -1378,11 +1412,17 @@ def promote(arguments: argparse.Namespace) -> None:
             arguments.acceptance_public_key,
         ),
     )
-    for entry, source in acceptance_objects:
-        _copy_publication_entry(filesystem, remote, entry, source)
-    for entry, source in entries:
-        if entry["phase"] in {"endpoint", "pointer"}:
-            _copy_publication_entry(filesystem, remote, entry, source)
+    _copy_promotion_group(filesystem, remote, acceptance_objects)
+    endpoints = tuple(
+        (entry, source) for entry, source in entries if entry["phase"] == "endpoint"
+    )
+    _copy_promotion_group(filesystem, remote, endpoints)
+    pointers = tuple(
+        (entry, source) for entry, source in entries if entry["phase"] == "pointer"
+    )
+    if len(pointers) != 1:
+        raise PublicationError("publication plan pointer is invalid")
+    _copy_publication_entry(filesystem, remote, *pointers[0])
 
 
 def _published_bytes(
