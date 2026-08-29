@@ -491,8 +491,8 @@ def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
     lifecycle = RECOVERY_LIFECYCLE.read_text()
 
     preflight = lifecycle.index("if dpkg-query -W vonk-forge-agent")
-    destructive_cleanup = lifecycle.index("trap cleanup EXIT HUP INT TERM")
-    assert lifecycle.index("trap cleanup_test_root EXIT HUP INT TERM") < preflight
+    destructive_cleanup = lifecycle.index("trap cleanup EXIT")
+    assert lifecycle.index("trap cleanup_test_root EXIT") < preflight
     assert preflight < destructive_cleanup
     collision_check = lifecycle[preflight:destructive_cleanup]
     assert 'systemctl --system cat "$agent_unit"' in collision_check
@@ -505,6 +505,45 @@ def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
         "vonk-forge-package-helper.socket.d",
     ):
         assert protected_path in collision_check
+
+
+def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
+    lifecycle = RECOVERY_LIFECYCLE.read_text()
+
+    baseline = lifecycle.index(
+        'SYSTEMD_OFFLINE=1 dpkg --unpack --force-confold "$baseline_package"'
+    )
+    start_old_helper = lifecycle.index('systemctl --system start "$helper_unit"')
+    restore_new_unit = lifecycle.index(
+        'install -o root -g root -m 0644 "$test_root/installed-helper.service"'
+    )
+    stage_candidate = lifecycle.index("stage_candidate", restore_new_unit)
+    assert baseline < start_old_helper < restore_new_unit < stage_candidate
+
+    for historical_line in (
+        "BindReadOnlyPaths=-/run/docker.sock "
+        "-/run/vonk-forge-agent/runtime-requests "
+        "-/var/lib/vonk-forge-agent/image-imports",
+        "ReadWritePaths=-/var/lib/vonk-forge-agent/models "
+        "-/var/lib/vonk-forge-agent/runs "
+        "-/var/lib/vonk-forge-agent/run-metadata",
+        "TimeoutStartSec=30s",
+        "TimeoutStopSec=15s",
+        "KillMode=mixed",
+    ):
+        assert historical_line in lifecycle.splitlines()
+
+    assert 'crash_pending_kind=stale' in lifecycle
+    assert 'crash_pending_kind=normalized' in lifecycle
+    assert '"$test_root/crash-point-pending"' in lifecycle
+    assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
+    assert "trap thaw_helper EXIT" in lifecycle
+    assert 'trap \'exit 129\' HUP' in lifecycle
+    assert 'trap \'exit 130\' INT' in lifecycle
+    assert 'trap \'exit 143\' TERM' in lifecycle
+    assert "dump_failure_diagnostics" in lifecycle
+    assert "journalctl --system --no-pager -n 200" in lifecycle
+    assert "recovery_nonce)=.*/\\1=<redacted>" in lifecycle
 
 
 def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
