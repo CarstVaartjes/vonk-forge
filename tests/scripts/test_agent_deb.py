@@ -537,6 +537,10 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert 'crash_pending_kind=normalized' in lifecycle
     assert '"$test_root/crash-point-pending"' in lifecycle
     assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
+    assert lifecycle.count("assert_interrupted_baseline_state") == 3
+    assert '"iU |$baseline_version"|"iHR|$baseline_version"' in lifecycle
+    assert "unexpected interrupted package state" in lifecycle
+    assert "durable lower-interrupted" in lifecycle
     assert "trap thaw_helper EXIT" in lifecycle
     assert 'trap \'exit 129\' HUP' in lifecycle
     assert 'trap \'exit 130\' INT' in lifecycle
