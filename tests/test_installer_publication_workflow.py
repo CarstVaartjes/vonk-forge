@@ -442,6 +442,14 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         "shared-key": "${{ matrix.platform }}",
         "add-job-id-key": "false",
     }
+    run = steps["Test and build exact native setup programs"]["run"]
+    release_test = 'cargo test --locked --release --package "$binary"'
+    release_build = (
+        'cargo build --locked --release --package "$binary" --bin "$binary"'
+    )
+    assert release_test in run
+    assert release_build in run
+    assert run.index(release_test) < run.index(release_build)
 
 
 def test_setup_checksums_are_portable_and_exclude_the_manifest_itself() -> None:
