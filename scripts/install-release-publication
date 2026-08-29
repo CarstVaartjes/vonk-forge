@@ -69,6 +69,10 @@ NAS_GATES = {
     "nas_workstation",
 }
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
+NAS_ACCEPTANCE_LANE_TAILSCALE_MODES = {
+    "docker-29.4.3": "disabled",
+    "native": "full",
+}
 
 
 class PublicationError(RuntimeError):
@@ -1022,6 +1026,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version",
         "source_sha",
         "status",
+        "tailscale_mode",
         "version",
     }
     for path in arguments.lane_report:
@@ -1029,7 +1034,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         if (
             set(report) != required_fields
             or type(report.get("schema_version")) is not int
-            or report.get("schema_version") != 1
+            or report.get("schema_version") != 2
         ):
             raise PublicationError("NAS acceptance lane report is invalid")
         lane = report.get("lane")
@@ -1045,6 +1050,8 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or not isinstance(lane, str)
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
+            or report.get("tailscale_mode")
+            != NAS_ACCEPTANCE_LANE_TAILSCALE_MODES.get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"

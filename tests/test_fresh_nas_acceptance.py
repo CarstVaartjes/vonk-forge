@@ -197,6 +197,142 @@ def test_tailnet_client_requirement_is_explicit_and_fail_closed(monkeypatch) -> 
         acceptance.require_tailnet_client()
 
 
+def test_tailscale_disabled_mode_refuses_credentials_and_gateway_ownership(
+    monkeypatch,
+) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_MODE", "disabled")
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv(
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", raising=False
+    )
+    monkeypatch.delenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", raising=False)
+
+    assert acceptance.tailscale_acceptance_mode() == "disabled"
+    assert acceptance.tailscale_acceptance_credentials("disabled") == (
+        "tailscale-disabled-client",
+        "tailscale-disabled-secret",
+    )
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", "forbidden")
+    with pytest.raises(AcceptanceError, match="must not receive client or OAuth"):
+        acceptance.tailscale_acceptance_credentials("disabled")
+
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID")
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "false")
+    with pytest.raises(AcceptanceError, match="must not receive client or OAuth"):
+        acceptance.tailscale_acceptance_credentials("disabled")
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_MODE", "other")
+    with pytest.raises(AcceptanceError, match="must be disabled or full"):
+        acceptance.tailscale_acceptance_mode()
+
+
+def test_tailscale_disabled_service_set_excludes_both_owners() -> None:
+    acceptance = _acceptance_module()
+
+    assert acceptance.TAILSCALE_SERVICES == {
+        "tailscale-configurator",
+        "tailscale-gateway",
+    }
+    assert acceptance.LOCAL_SERVICES == (
+        acceptance.DEFAULT_SERVICES - acceptance.TAILSCALE_SERVICES
+    )
+    assert acceptance.LOCAL_HERMES_SERVICES == (
+        acceptance.HERMES_SERVICES - acceptance.TAILSCALE_SERVICES
+    )
+
+
+def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
+    acceptance = _acceptance_module()
+    healthy = [
+        {
+            "ExitCode": 0,
+            "Health": "healthy",
+            "Service": service,
+            "State": "running",
+        }
+        for service in sorted(acceptance.LOCAL_HERMES_SERVICES)
+    ]
+
+    acceptance.assert_tailscale_services_absent(json.dumps(healthy))
+    for service in sorted(acceptance.TAILSCALE_SERVICES):
+        with pytest.raises(AcceptanceError, match="created a Tailscale service"):
+            acceptance.assert_tailscale_services_absent(
+                json.dumps(healthy + [{"Service": service}])
+            )
+
+
+def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    acceptance = _acceptance_module()
+    compose = ["docker", "compose"]
+    calls: list[list[str]] = []
+    healthy = json.dumps(
+        [
+            {
+                "ExitCode": 0,
+                "Health": "healthy",
+                "Service": service,
+                "State": "running",
+            }
+            for service in sorted(acceptance.LOCAL_HERMES_SERVICES)
+        ]
+    )
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if command[-3:] == ["config", "--images"]:
+            output = "example.invalid/image@sha256:" + "a" * 64 + "\n"
+        elif command[-4:] == ["ps", "--all", "--format", "json"]:
+            output = healthy
+        else:
+            output = ""
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: compose)
+    monkeypatch.setattr(
+        acceptance,
+        "compose_services",
+        lambda _bundle: acceptance.HERMES_SERVICES,
+    )
+    monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(
+        acceptance,
+        "assert_compose_services_healthy",
+        lambda _raw, expected: observed.update(expected=expected),
+    )
+    monkeypatch.setattr(acceptance, "verify_controller_tls", lambda *_args: None)
+    monkeypatch.setattr(acceptance, "verify_postgres_databases", lambda *_args: None)
+    monkeypatch.setattr(
+        acceptance,
+        "verify_tailscale_services",
+        lambda *_args, **_kwargs: pytest.fail("Tailscale verification was reached"),
+    )
+
+    acceptance.exercise_compose(
+        tmp_path,
+        nas_ip="127.0.0.1",
+        control_hostname="control.acceptance.example.test",
+        enrollment_hostname="enroll.acceptance.example.test",
+        registry_hostname="registry.acceptance.example.test",
+        tailnet_suffix="acceptance.example.test",
+        hermes=True,
+        tailscale_mode="disabled",
+    )
+
+    up = next(command for command in calls if "up" in command)
+    assert up[-len(acceptance.LOCAL_HERMES_SERVICES) :] == sorted(
+        acceptance.LOCAL_HERMES_SERVICES
+    )
+    assert not set(up) & acceptance.TAILSCALE_SERVICES
+    assert observed["expected"] == acceptance.LOCAL_HERMES_SERVICES
+    assert any("down" in command for command in calls)
+
+
 def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     tmp_path: Path, monkeypatch
 ) -> None:
