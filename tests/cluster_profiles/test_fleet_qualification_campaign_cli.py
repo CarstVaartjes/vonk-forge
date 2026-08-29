@@ -316,6 +316,21 @@ def test_checked_in_02ae_physical_campaign_is_the_exact_reviewed_partition(
         assert lane.plan_output.is_relative_to(state_root)
 
 
+def test_02ae_physical_runbook_matches_capacity_and_residency_contract() -> None:
+    runbook = (
+        REPOSITORY_ROOT / "docs/runbooks/physical-qualification-02ae8bb5.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(runbook.split())
+
+    assert "Preview does not create `capacity.plan.created`" in runbook
+    assert "before its first install" in normalized
+    assert "`automatic_eviction` remains false" in runbook
+    assert ".payload.complete" not in runbook
+    assert runbook.count(".payload.installation_inventory_complete") >= 2
+    assert '($records | last | .payload.blocked) == 0' in runbook
+    assert "unique | length) == 59" in runbook
+
+
 def test_every_packaged_authority_is_explicitly_mapped() -> None:
     authority_directory = (
         Path(campaign_cli.__file__).resolve().parent / "qualification_authorities"

@@ -118,7 +118,11 @@ test -r "$VONK_CONTROL_TOKEN_FILE"
 
 First capture fresh Controller identity, node authority, telemetry, and current
 Library residency. Stop if either exact node ID is absent, offline/stale, not
-ready, or lacks sufficient disk/memory for the previewed retained-capacity plan.
+ready, or lacks fresh disk and memory telemetry. The preview rejects recipes
+whose declared runtime memory cannot fit the pinned Spark. The cumulative
+retained-disk fit is computed during apply, after any required idempotent catalog
+imports have supplied the exact local placement inputs and before the first
+installation is submitted.
 
 ```bash
 uv run --frozen vonkctl fleet agents --json \
@@ -157,15 +161,53 @@ export CAMPAIGN_DIGEST
 CAMPAIGN_DIGEST="$(jq -er '.campaign_digest' "$QUALIFICATION_ROOT/campaign-preview.json")"
 ```
 
-Review both plan files and their `capacity.plan.created` projections before
-apply. Require exact catalog commit/content identities, current controller and
-fleet authority, the two node pins, `automatic_eviction: false`, complete smoke
-fixtures, and a fitting retained placement. If the catalog, fixtures, fleet
-membership, or immutable plans drift, re-preview and review a new digest.
+Review both plan files before apply. Require exact catalog commit/content
+identities, current controller and fleet authority, the two node pins, no
+preview blockers, complete smoke fixtures, and `cleanup=stop`. This concise
+summary makes the declared retained-capacity inputs easy to compare without
+mistaking their simple totals for an artifact-deduplicated placement proof:
 
 ```bash
-jq . "$QUALIFICATION_ROOT/plans/spark-3542.json"
-jq . "$QUALIFICATION_ROOT/plans/spark-2297.json"
+for PLAN in \
+  "$QUALIFICATION_ROOT/plans/spark-3542.json" \
+  "$QUALIFICATION_ROOT/plans/spark-2297.json"
+do
+  jq -e '
+    .mode == "preview" and
+    .options.cleanup == "stop" and
+    (.options.allowed_node_ids | length) == 1 and
+    ([.recipes[].blockers[]?] | length) == 0 and
+    all(.recipes[];
+      (.maximum_installed_bytes_per_node | type) == "number" and
+      (.temporary_build_bytes_per_node | type) == "number" and
+      (.disk_requirements_by_role | type) == "object" and
+      (.planned_actions | index("retain-installation")) != null)
+  ' "$PLAN" >/dev/null
+  jq '{
+    lane,
+    node_id: .options.allowed_node_ids[0],
+    recipe_count: (.recipes | length),
+    sum_of_per_recipe_maximum_installed_bytes:
+      ([.recipes[].maximum_installed_bytes_per_node] | add),
+    largest_temporary_build_bytes:
+      ([.recipes[].temporary_build_bytes_per_node] | max)
+  }' "$PLAN"
+done
+```
+
+Preview does not create `capacity.plan.created`: a complete retained placement
+depends on exact imported revisions, node-local artifact deduplication, existing
+installations, and refreshed allocatable disk. Apply performs those idempotent
+preparations, then writes one `capacity.plan.created` record per lane before its
+first install. If either lane cannot prove a complete fit, it records
+`capacity.blocked` with the shortfall and stops before installation;
+`automatic_eviction` remains false. There is no operator-review pause between a
+successful capacity calculation and execution, so keep the apply process
+attached and monitor both ledgers from the second terminal below. If the
+catalog, fixtures, fleet membership, or immutable plans drift, re-preview and
+review a new campaign digest.
+
+```bash
 uv run --frozen vonk-fleet-qualify-campaign \
   --manifest config/qualification/nl-single-spark-02ae8bb5.json \
   --campaign-digest "$CAMPAIGN_DIGEST" --apply \
@@ -198,13 +240,39 @@ remains active. A `run.completed-with-failures` or incomplete residency
 inventory is not acceptance.
 
 ```bash
-jq -s -e '
-  ([.[] | select(.event == "run.completed")] | length) == 2 and
-  ([.[] | select(.event == "recipe.succeeded") | .recipe] | unique | length) == 59 and
-  ([.[] | select(.event == "run.residency-inventoried") |
-    select(.payload.complete == true)] | length) == 2
+SPARK_3542_PLAN_DIGEST="$(jq -er '.plan_digest' \
+  "$QUALIFICATION_ROOT/plans/spark-3542.json")"
+SPARK_2297_PLAN_DIGEST="$(jq -er '.plan_digest' \
+  "$QUALIFICATION_ROOT/plans/spark-2297.json")"
+jq -s -e \
+  --arg spark3542 "$SPARK_3542_PLAN_DIGEST" \
+  --arg spark2297 "$SPARK_2297_PLAN_DIGEST" '
+  def accepted_lane($digest; $expected):
+    [ .[] | select(.plan_digest == $digest) ] as $records |
+    ($records | length) > 0 and
+    ($records | last | .event) == "run.completed" and
+    ($records | last | .payload.failed) == 0 and
+    ($records | last | .payload.blocked) == 0 and
+    (($records | last | .payload.succeeded) +
+      ($records | last | .payload.resumed)) == $expected and
+    ([ $records[] | select(.event == "recipe.succeeded") | .recipe ] |
+      unique | length) == $expected and
+    ([ $records[] | select(.event == "run.residency-inventoried") ] |
+      last | .payload.installation_inventory_complete) == true and
+    ([ $records[] | select(.event == "run.residency-inventoried") ] |
+      last | .payload.all_feasible_installations_fit) == true;
+
+  accepted_lane($spark3542; 29) and
+  accepted_lane($spark2297; 30) and
+  ([ .[] |
+    select(.plan_digest == $spark3542 or .plan_digest == $spark2297) |
+    select(.event == "recipe.succeeded") | .recipe ] |
+    unique | length) == 59
 ' "$QUALIFICATION_ROOT/evidence/spark-3542.jsonl" \
   "$QUALIFICATION_ROOT/evidence/spark-2297.jsonl"
+jq -e '.loaded | length == 0' \
+  "$QUALIFICATION_ROOT/status/spark-3542.json" \
+  "$QUALIFICATION_ROOT/status/spark-2297.json"
 ```
 
 ## Ordered dual-Spark follow-on lane
@@ -299,7 +367,7 @@ jq -s -e '
   ([.[] | select(.event == "run.completed")] | length) == 5 and
   ([.[] | select(.event == "recipe.succeeded") | .recipe] | unique | length) == 5 and
   ([.[] | select(.event == "run.residency-inventoried") |
-    select(.payload.complete == true)] | length) == 5
+    select(.payload.installation_inventory_complete == true)] | length) == 5
 ' "$QUALIFICATION_ROOT/dual/evidence.jsonl"
 uv run --frozen vonkctl library list --all --json \
   > "$QUALIFICATION_ROOT/controller/library-final.json"
