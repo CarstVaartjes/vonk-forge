@@ -20,18 +20,30 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # Binary hashes are for the extracted `sccache` executable in Mozilla's
+          # v0.16.0 release archives. Each archive was independently matched to
+          # the SHA-256 digest in GitHub's release asset metadata before extraction:
+          # https://github.com/mozilla/sccache/releases/tag/v0.16.0
           - platform: linux-amd64
             runner: ubuntu-24.04
             binaries: vonk-nas-setup vonk-spark-setup
+            # Archive: aec995a83ad3dff3d14b6314e08858b7b73d35ca85a5bcf3d3a9ec07dee35588
+            sccache_sha256: 91544c5e9e3440aa0b75e0299cd3e880ac0be91ac537333adee69b507b3495c6
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
             binaries: vonk-nas-setup vonk-spark-setup
+            # Archive: f73a5c39f96bb6ebb89cc7915cf182260d4cbf30765322c5e793d0fe8bd80784
+            sccache_sha256: 42998f3f9740df2a53d824cc1008f93337a85002a8801d4f4dc1d739b18aa787
           - platform: darwin-amd64
             runner: macos-15-intel
             binaries: vonk-nas-setup
+            # Archive: f7dbd055db75a938ab1539f5316c5d08e73a1b94c40ab170ddcc617f5bf18343
+            sccache_sha256: b3a564635eddda9119eeaffe3ada7400188e205907e6b68838c7400ec6f9103b
           - platform: darwin-arm64
             runner: macos-15
             binaries: vonk-nas-setup
+            # Archive: ded590cae2c72042c61178632906bef62d635fa20d45f8b22110a2241f430960
+            sccache_sha256: 1e1da56216f82f4968a705ee19991ad1bcf474ab994cc440fd5cdfd045f7c4e8
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -54,11 +66,37 @@ jobs:
           shared-key: ${{ matrix.platform }}
           add-job-id-key: "false"
 
+      - name: Run Rust compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+
+      - name: Verify pinned Rust compiler cache binary
+        shell: bash
+        env:
+          EXPECTED_SCCACHE_SHA256: ${{ matrix.sccache_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "${SCCACHE_PATH:-}"
+          test -x "$SCCACHE_PATH"
+          case "$(uname -s)" in
+            Linux) actual="$(sha256sum "$SCCACHE_PATH")" ;;
+            Darwin) actual="$(shasum -a 256 "$SCCACHE_PATH")" ;;
+            *) echo "unsupported sccache verification platform" >&2; exit 1 ;;
+          esac
+          actual="${actual%% *}"
+          if [[ "$actual" != "$EXPECTED_SCCACHE_SHA256" ]]; then
+            echo "sccache binary checksum mismatch" >&2
+            exit 1
+          fi
+
       - name: Test and build exact native setup programs
         shell: bash
         env:
           BINARIES: ${{ matrix.binaries }}
           PLATFORM: ${{ matrix.platform }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: |
           set -euo pipefail
           case "$PLATFORM:$(uname -s):$(uname -m)" in
