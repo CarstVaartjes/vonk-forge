@@ -5,6 +5,7 @@ import io
 import re
 import sys
 import tarfile
+import threading
 from collections.abc import Callable
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -121,6 +122,34 @@ class FakeR2:
             self.objects[key] = b"corrupted in transit"
         else:
             self.objects[key] = data
+
+
+class ConcurrentBundleR2(FakeR2):
+    def __init__(self, name: str, operations: list[str]) -> None:
+        super().__init__(name, operations)
+        self.bundle_barrier = threading.Barrier(2)
+
+    def write(self, key: str, data: bytes) -> None:
+        if key.endswith(("/aptly-state.tar.gz", "/public-tree.tar.gz")):
+            self.bundle_barrier.wait(timeout=2)
+        super().write(key, data)
+
+
+class ConcurrentPublicR2(FakeR2):
+    def __init__(self, name: str, operations: list[str]) -> None:
+        super().__init__(name, operations)
+        self.ordinary_barrier = threading.Barrier(2)
+        self.release_barrier = threading.Barrier(2)
+
+    def write(self, key: str, data: bytes) -> None:
+        if key in {
+            "dists/dev/main/binary-amd64/Packages",
+            "vonk-forge-dev-archive-keyring.gpg",
+        }:
+            self.ordinary_barrier.wait(timeout=2)
+        if key in {"dists/dev/Release", "dists/dev/Release.gpg"}:
+            self.release_barrier.wait(timeout=2)
+        super().write(key, data)
 
 
 def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, object]:
@@ -677,12 +706,9 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     )
 
     assert private.objects[f"{prefix}/commit.json"] == manifest
-    assert operations.index(f"state:write:{prefix}/aptly-state.tar.gz") < operations.index(
-        f"state:write:{prefix}/public-tree.tar.gz"
-    )
-    assert operations.index(f"state:write:{prefix}/public-tree.tar.gz") < operations.index(
-        f"state:write-failed:{prefix}/commit.json"
-    )
+    commit_failure = operations.index(f"state:write-failed:{prefix}/commit.json")
+    for key in ("aptly-state.tar.gz", "public-tree.tar.gz"):
+        assert operations.index(f"state:write:{prefix}/{key}") < commit_failure
     writes = [operation for operation in operations if ":write:" in operation]
     assert writes[-1] == f"state:write:{prefix}/commit.json"
 
@@ -690,6 +716,24 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     changed = state.build_bundle(tmp_path / "aptly", "state", publication)
     with pytest.raises(state.StateError, match="immutable object conflict"):
         state.commit_candidate(private, publication, changed, public_bundle)
+
+
+def test_candidate_data_objects_upload_concurrently_before_commit(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = ConcurrentBundleR2("state", operations)
+
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    prefix = f"versions/{publication['version']}"
+    commit = operations.index(f"state:write:{prefix}/commit.json")
+    state_object = operations.index(f"state:write:{prefix}/aptly-state.tar.gz")
+    public_object = operations.index(f"state:write:{prefix}/public-tree.tar.gz")
+    assert max(state_object, public_object) < commit
 
 
 def test_single_partial_data_object_is_completed_on_exact_retry(tmp_path: Path) -> None:
@@ -751,6 +795,29 @@ def test_committed_manifest_is_the_monotonic_high_water_without_latest(
         state.prepare_candidate(private, older)
 
 
+def test_pending_prepare_only_downloads_predecessor_aptly_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    previous = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    current = receipt("0.1.0~dev.1786300001+g0123456789ab")
+    previous_root = tmp_path / "previous"
+    previous_root.mkdir()
+    state_bundle, public_bundle = bundles(previous_root, previous)
+    state.commit_candidate(private, previous, state_bundle, public_bundle)
+    operations.clear()
+
+    prepared = state.prepare_candidate(private, current)
+
+    prefix = f"versions/{previous['version']}"
+    assert prepared.state_bundle == state_bundle
+    assert f"state:read:{prefix}/aptly-state.tar.gz" in operations
+    assert f"state:read:{prefix}/public-tree.tar.gz" not in operations
+
+
 def test_commit_precedes_public_bytes_and_single_latest_pointer(
     tmp_path: Path,
 ) -> None:
@@ -781,6 +848,23 @@ def test_commit_precedes_public_bytes_and_single_latest_pointer(
         "commit_sha256": state.sha256(private.objects[f"{prefix}/commit.json"]),
         "version": publication["version"],
     }
+
+
+def test_publication_only_downloads_committed_public_tree(tmp_path: Path) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    operations.clear()
+
+    state.publish_committed(private, public, publication)
+
+    prefix = f"versions/{publication['version']}"
+    assert f"state:read:{prefix}/public-tree.tar.gz" in operations
+    assert f"state:read:{prefix}/aptly-state.tar.gz" not in operations
 
 
 def test_inrelease_is_the_final_public_commit_after_all_other_public_objects(
@@ -814,6 +898,26 @@ def test_inrelease_is_the_final_public_commit_after_all_other_public_objects(
     assert inrelease < latest
 
 
+def test_public_objects_upload_concurrently_within_commit_phases(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = ConcurrentPublicR2("public", operations)
+
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    state.publish_committed(private, public, publication)
+
+    inrelease = operations.index("public:write:dists/dev/InRelease")
+    latest = operations.index("state:write:latest.json")
+    assert operations.index("public:write:dists/dev/Release") < inrelease
+    assert operations.index("public:write:dists/dev/Release.gpg") < inrelease
+    assert inrelease < latest
+
+
 @pytest.mark.parametrize(
     "failed_key",
     (
@@ -843,6 +947,27 @@ def test_public_failure_before_or_at_inrelease_never_advances_latest(
 
     assert "latest.json" not in private.objects
     assert "state:write:latest.json" not in operations
+
+
+def test_ordinary_object_failure_stops_before_release_commit_metadata(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    failed_key = "vonk-forge-dev-archive-keyring.gpg"
+    public = FakeR2("public", operations, fail_once={failed_key})
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    with pytest.raises(OSError, match="injected R2 failure"):
+        state.publish_committed(private, public, publication)
+
+    assert "dists/dev/Release" not in public.objects
+    assert "dists/dev/Release.gpg" not in public.objects
+    assert "dists/dev/InRelease" not in public.objects
+    assert "latest.json" not in private.objects
 
 
 def test_equal_replay_publishes_persisted_public_bytes_without_regeneration(
