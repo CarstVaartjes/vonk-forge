@@ -430,6 +430,16 @@ def _bounded_object_operations(
         return {key: futures[key].result() for key in ordered}
 
 
+def _read_objects(store: ObjectStore, keys: list[str]) -> dict[str, bytes]:
+    """Read an authenticated object set concurrently within one phase."""
+    if len(keys) != len(set(keys)):
+        raise StateError("object read set is invalid")
+    return _bounded_object_operations(
+        {key: b"" for key in keys},
+        lambda key, _raw: store.read(key),
+    )
+
+
 def _write_objects(store: ObjectStore, objects: dict[str, bytes]) -> None:
     _bounded_object_operations(
         objects, lambda key, raw: store.write(key, raw)
@@ -506,10 +516,14 @@ def _read_committed_objects(
         raise StateError("committed object selection is invalid")
     manifest_raw = store.read(key) if raw is None else raw
     manifest = _validate_manifest(manifest_raw, key)
+    records = {name: manifest["objects"][name] for name in sorted(names)}
+    raw_bundles = _read_objects(
+        store,
+        [record["key"] for record in records.values()],
+    )
     bundles: dict[str, bytes] = {}
-    for name in sorted(names):
-        record = manifest["objects"][name]
-        bundle = store.read(record["key"])
+    for name, record in records.items():
+        bundle = raw_bundles[record["key"]]
         if len(bundle) != record["size"] or sha256(bundle) != record["sha256"]:
             raise StateError("committed object hash mismatch")
         bundles[name] = bundle
@@ -546,13 +560,17 @@ def prepare_candidate(
 ) -> Preparation:
     requested = _validate_receipt(publication)
     committed: list[tuple[dict[str, Any], str, bytes]] = []
+    commit_keys: list[str] = []
     for key in store.list("versions/"):
         if not key.endswith("/commit.json"):
             continue
         match = COMMIT_RE.fullmatch(key)
         if match is None:
             raise StateError("commit manifest path is invalid")
-        raw = store.read(key)
+        commit_keys.append(key)
+    commit_manifests = _read_objects(store, commit_keys)
+    for key in sorted(commit_keys):
+        raw = commit_manifests[key]
         manifest = _validate_manifest(raw, key)
         if manifest["publication"]["channel"] != requested["channel"]:
             raise StateError("commit manifest channel is invalid")
@@ -594,15 +612,17 @@ def prepare_candidate(
     }
     if not set(keys).issubset(allowed):
         raise StateError("uncommitted immutable prefix is invalid")
-    requested_state = None
-    requested_public = None
     state_key = f"{prefix}/aptly-state.tar.gz"
     public_key = f"{prefix}/public-tree.tar.gz"
-    if state_key in keys:
-        requested_state = store.read(state_key)
+    requested_objects = _read_objects(
+        store,
+        [key for key in (state_key, public_key) if key in keys],
+    )
+    requested_state = requested_objects.get(state_key)
+    requested_public = requested_objects.get(public_key)
+    if requested_state is not None:
         validate_bundle(requested_state, "state", requested)
-    if public_key in keys:
-        requested_public = store.read(public_key)
+    if requested_public is not None:
         validate_bundle(requested_public, "public", requested)
     base_state = requested_state
     if base_state is None and high is not None:

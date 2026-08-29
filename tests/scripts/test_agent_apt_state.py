@@ -135,6 +135,20 @@ class ConcurrentBundleR2(FakeR2):
         super().write(key, data)
 
 
+class ConcurrentReadR2(FakeR2):
+    def __init__(
+        self, name: str, operations: list[str], *, concurrent_read_count: int = 2
+    ) -> None:
+        super().__init__(name, operations)
+        self.concurrent_reads: set[str] = set()
+        self.read_barrier = threading.Barrier(concurrent_read_count)
+
+    def read(self, key: str) -> bytes:
+        if key in self.concurrent_reads:
+            self.read_barrier.wait(timeout=2)
+        return super().read(key)
+
+
 class ConcurrentPublicR2(FakeR2):
     def __init__(self, name: str, operations: list[str]) -> None:
         super().__init__(name, operations)
@@ -816,6 +830,93 @@ def test_pending_prepare_only_downloads_predecessor_aptly_state(
     assert prepared.state_bundle == state_bundle
     assert f"state:read:{prefix}/aptly-state.tar.gz" in operations
     assert f"state:read:{prefix}/public-tree.tar.gz" not in operations
+
+
+def test_prepare_scans_committed_manifests_concurrently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+    operations: list[str] = []
+    private = ConcurrentReadR2(
+        "state", operations, concurrent_read_count=state.MAX_OBJECT_STORE_WORKERS
+    )
+    committed = tuple(
+        receipt(f"0.1.0~dev.{1786300000 + index}+g0123456789ab")
+        for index in range(state.MAX_OBJECT_STORE_WORKERS)
+    )
+    for index, publication in enumerate(committed):
+        root = tmp_path / f"committed-{index}"
+        root.mkdir()
+        state_bundle, public_bundle = bundles(root, publication)
+        state.commit_candidate(private, publication, state_bundle, public_bundle)
+    private.concurrent_reads = {
+        f"versions/{publication['version']}/commit.json"
+        for publication in committed
+    }
+
+    prepared = state.prepare_candidate(
+        private,
+        receipt("0.1.0~dev.1786300008+g0123456789ab"),
+    )
+
+    assert prepared.high_water_version == committed[-1]["version"]
+
+
+def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = ConcurrentReadR2("state", operations)
+    committed = (
+        receipt("0.1.0~dev.1786300000+g0123456789ab"),
+        receipt("0.1.0~dev.1786300001+g0123456789ab"),
+    )
+    commit_keys: set[str] = set()
+    for index, publication in enumerate(committed):
+        root = tmp_path / f"corrupt-{index}"
+        root.mkdir()
+        state_bundle, public_bundle = bundles(root, publication)
+        state.commit_candidate(private, publication, state_bundle, public_bundle)
+        commit_keys.add(f"versions/{publication['version']}/commit.json")
+    private.objects[max(commit_keys)] = b"{}\n"
+    private.concurrent_reads = commit_keys
+    operations.clear()
+
+    with pytest.raises(state.StateError, match="commit manifest is invalid"):
+        state.prepare_candidate(
+            private,
+            receipt("0.1.0~dev.1786300002+g0123456789ab"),
+        )
+
+    assert operations[0] == "state:list:versions/"
+    assert set(operations[1:]) == {
+        f"state:read:{key}" for key in commit_keys
+    }
+
+
+def test_equal_replay_downloads_committed_bundles_concurrently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = load_state_module()
+    monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = ConcurrentReadR2("state", operations)
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    prefix = f"versions/{publication['version']}"
+    private.concurrent_reads = {
+        f"{prefix}/aptly-state.tar.gz",
+        f"{prefix}/public-tree.tar.gz",
+    }
+
+    prepared = state.prepare_candidate(private, publication)
+
+    assert prepared.mode == "committed"
+    assert prepared.state_bundle == state_bundle
+    assert prepared.public_bundle == public_bundle
 
 
 def test_commit_precedes_public_bytes_and_single_latest_pointer(
