@@ -575,6 +575,7 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
         )
         assert package in baseline
         assert f"{package}.sha256" in baseline
+        assert f"{package}.host.sig" in baseline
     assert (
         "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
     )
