@@ -411,12 +411,51 @@ printf '%s\n' \
   "agent_sha256=$agent_digest" \
   > "$test_root/normalized-pending"
 
-# Kill the complete old-helper cgroup after durable intent commit. The target
-# preinst is allowed to normalize the safe stale gate before the watcher runs,
-# so capture and prove whichever exact safe state exists at the crash point.
+# Kill the complete old-helper cgroup after durable intent commit. Merely
+# observing the intent pathname can race the directory fsync inside atomic_text.
+# The later agent blocker proves the intent commit returned; a short quiescent
+# window with no exact state-directory sync descendant then avoids freezing the
+# blocker's own fsync. The target preinst is allowed to normalize the safe stale
+# gate before the watcher runs, so capture and prove whichever exact safe state
+# exists at the crash point.
 (
+  intent_sync_quiescent=0
   for _ in {1..2400}; do
-    if [[ -f /var/lib/vonk-forge/package-upgrade/intent ]]; then
+    if [[ -f /var/lib/vonk-forge/package-upgrade/intent \
+      && -f /var/lib/vonk-forge/package-upgrade/agent-blocked ]]; then
+      helper_control_group=$(systemctl --system show \
+        --property=ControlGroup --value "$helper_unit")
+      case "$helper_control_group" in
+        /system.slice/*) ;;
+        *) exit 1 ;;
+      esac
+      intent_sync_active=0
+      mapfile -t intent_sync_pids \
+        < "/sys/fs/cgroup$helper_control_group/cgroup.procs"
+      for intent_sync_pid in "${intent_sync_pids[@]}"; do
+        intent_sync_argv=()
+        if [[ -r "/proc/$intent_sync_pid/cmdline" ]] \
+          && mapfile -d '' -t intent_sync_argv \
+            < "/proc/$intent_sync_pid/cmdline" \
+          && [[ "${#intent_sync_argv[@]}" -eq 3 \
+            && "${intent_sync_argv[0]}" = /usr/bin/sync \
+            && "${intent_sync_argv[1]}" = -f \
+            && "${intent_sync_argv[2]}" \
+              = /var/lib/vonk-forge/package-upgrade ]]; then
+          intent_sync_active=1
+          break
+        fi
+      done
+      if (( intent_sync_active == 1 )); then
+        intent_sync_quiescent=0
+        sleep 0.005
+        continue
+      fi
+      intent_sync_quiescent=$((intent_sync_quiescent + 1))
+      if (( intent_sync_quiescent < 5 )); then
+        sleep 0.005
+        continue
+      fi
       systemctl --system freeze "$helper_unit"
       # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
       thaw_helper() {
