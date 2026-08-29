@@ -465,18 +465,17 @@ jobs:
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
     strategy:
-      # Both lanes use the same three fixed, pre-approved Tailscale Services.
-      # The control plane activates only one primary host for those Service
-      # routes at a time, so keep ownership exclusive even though the runners
-      # and Docker daemons are otherwise independent.
+      # Native is the only Tailscale owner. The Docker lane receives no OAuth
+      # credentials and starts an explicit non-Tailscale service allow-list.
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
           - lane: native
             gateway: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native
+            tailscale_mode: full
           - lane: docker-29.4.3
-            gateway: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind
+            tailscale_mode: disabled
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: installer-canary-${{ needs.authority.outputs.channel }}
@@ -543,6 +542,7 @@ jobs:
           VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
           VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_MODE: full
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
           VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
@@ -600,16 +600,13 @@ jobs:
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
-          VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
           VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
         run: |
           set -euo pipefail
@@ -625,6 +622,7 @@ jobs:
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
           VONK_ACCEPTANCE_LANE: ${{ matrix.lane }}
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_TAILSCALE_MODE: ${{ matrix.tailscale_mode }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
         run: |
           set -euo pipefail
@@ -638,8 +636,9 @@ jobs:
             --arg lane "$VONK_ACCEPTANCE_LANE" \
             --argjson run_id "$GITHUB_RUN_ID" \
             --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --arg tailscale_mode "$VONK_ACCEPTANCE_TAILSCALE_MODE" \
             --arg version "$VONK_ACCEPTANCE_VERSION" \
-          '{channel:$channel,gates:$gates,generation:$generation,lane:$lane,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
+          '{channel:$channel,gates:$gates,generation:$generation,lane:$lane,run_id:$run_id,schema_version:2,source_sha:$source_sha,status:"passed",tailscale_mode:$tailscale_mode,version:$version}' \
             > "$RUNNER_TEMP/nas-acceptance/report-$VONK_ACCEPTANCE_LANE.json"
 
       - name: Remove Docker 29.4.3 compatibility daemon

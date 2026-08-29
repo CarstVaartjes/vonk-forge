@@ -83,7 +83,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     }
     assert jobs["nas-lane-acceptance"]["strategy"] == {
         "fail-fast": "false",
-        "max-parallel": "1",
+        "max-parallel": "2",
         "matrix": {
             "include": [
                 {
@@ -92,13 +92,11 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
                         "vonk-forge-ci-${{ github.run_id }}-"
                         "${{ github.run_attempt }}-native"
                     ),
+                    "tailscale_mode": "full",
                 },
                 {
                     "lane": "docker-29.4.3",
-                    "gateway": (
-                        "vonk-forge-ci-${{ github.run_id }}-"
-                        "${{ github.run_attempt }}-dind"
-                    ),
+                    "tailscale_mode": "disabled",
                 },
             ]
         },
@@ -139,6 +137,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "${{ matrix.gateway }}"
     )
+    assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "full"
     assert spark_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "vonk-spark-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
     )
@@ -229,12 +228,17 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
             "${{ github.workspace }}"
         )
     assert compatibility_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
-    assert compatibility_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == (
-        "false"
-    )
-    assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
-        "${{ matrix.gateway }}"
-    )
+    assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
+    assert "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT" not in compatibility_step["env"]
+    assert "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME" not in compatibility_step[
+        "env"
+    ]
+    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID" not in compatibility_step[
+        "env"
+    ]
+    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET" not in compatibility_step[
+        "env"
+    ]
     assert "DOCKER_HOST" not in native_step["env"]
     assert native_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
     assert native_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
@@ -437,6 +441,26 @@ def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() ->
         "Run literal clean NAS and Tailscale configuration acceptance"
     ]
     assert native["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
+    docker = _steps(jobs["nas-lane-acceptance"])[
+        "Run Docker 29.4.3 NAS compatibility acceptance"
+    ]
+    assert docker["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
+    for forbidden in (
+        "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT",
+        "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+    ):
+        assert forbidden not in docker["env"]
+
+    evidence = _steps(jobs["nas-lane-acceptance"])[
+        "Write exact NAS lane evidence"
+    ]
+    assert evidence["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == (
+        "${{ matrix.tailscale_mode }}"
+    )
+    assert "schema_version:2" in evidence["run"]
+    assert "tailscale_mode:$tailscale_mode" in evidence["run"]
 
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:

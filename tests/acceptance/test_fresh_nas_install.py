@@ -47,10 +47,13 @@ DEFAULT_SERVICES = {
     "tailscale-configurator",
     "tailscale-gateway",
 }
+TAILSCALE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
+LOCAL_SERVICES = DEFAULT_SERVICES - TAILSCALE_SERVICES
 HERMES_SERVICES = DEFAULT_SERVICES | {
     "hermes-agent",
     "hermes-litellm-key-provisioner",
 }
+LOCAL_HERMES_SERVICES = HERMES_SERVICES - TAILSCALE_SERVICES
 SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
@@ -76,6 +79,36 @@ def require_tailnet_client() -> bool:
             "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT must be true or false"
         )
     return value == "true"
+
+
+def tailscale_acceptance_mode() -> str:
+    value = os.environ.get("VONK_ACCEPTANCE_TAILSCALE_MODE", "full")
+    if value not in {"disabled", "full"}:
+        raise AcceptanceError(
+            "VONK_ACCEPTANCE_TAILSCALE_MODE must be disabled or full"
+        )
+    return value
+
+
+def tailscale_acceptance_credentials(mode: str) -> tuple[str, str]:
+    names = (
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+    )
+    if mode == "full":
+        return (
+            required_environment(names[0], secret=True),
+            required_environment(names[1], secret=True),
+        )
+    if (
+        mode != "disabled"
+        or "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT" in os.environ
+        or any(os.environ.get(name) for name in names)
+    ):
+        raise AcceptanceError(
+            "Tailscale-disabled acceptance must not receive client or OAuth inputs"
+        )
+    return ("tailscale-disabled-client", "tailscale-disabled-secret")
 
 
 def host_ipv4() -> str:
@@ -1307,12 +1340,17 @@ def exercise_compose(
     hermes_api_service: str = "svc:hermes-api",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
     require_external_tailnet_client: bool = True,
+    tailscale_mode: str = "full",
 ) -> None:
-    expected = HERMES_SERVICES if hermes else DEFAULT_SERVICES
+    if tailscale_mode not in {"disabled", "full"}:
+        raise AcceptanceError("NAS Compose Tailscale mode is invalid")
+    complete = HERMES_SERVICES if hermes else DEFAULT_SERVICES
+    local = LOCAL_HERMES_SERVICES if hermes else LOCAL_SERVICES
+    expected = complete if tailscale_mode == "full" else local
     configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
     if configured.stdout or configured.stderr:
         raise AcceptanceError("Compose validation emitted output")
-    if compose_services(bundle) != expected:
+    if compose_services(bundle) != complete:
         raise AcceptanceError("rendered Compose service topology is not canonical")
     images = run([*reference_compose(), "config", "--images"], cwd=bundle).stdout
     for image in images.splitlines():
@@ -1330,6 +1368,7 @@ def exercise_compose(
                     "--wait-timeout",
                     "360",
                     "--remove-orphans",
+                    *(() if tailscale_mode == "full" else tuple(sorted(expected))),
                 ],
                 cwd=bundle,
                 timeout=420,
@@ -1344,9 +1383,13 @@ def exercise_compose(
             [*reference_compose(), "ps", "--all", "--format", "json"],
             cwd=bundle,
         )
+        if tailscale_mode == "disabled":
+            assert_tailscale_services_absent(status.stdout)
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
         verify_postgres_databases(bundle)
+        if tailscale_mode == "disabled":
+            return
         if not require_external_tailnet_client:
             verify_tailscale_services(
                 bundle,
@@ -1410,6 +1453,18 @@ def exercise_compose(
         )
 
 
+def assert_tailscale_services_absent(raw: str) -> None:
+    observed = {
+        str(row.get("Service", ""))
+        for row in _compose_rows(raw)
+        if isinstance(row, dict)
+    }
+    if observed & TAILSCALE_SERVICES:
+        raise AcceptanceError(
+            "Tailscale-disabled acceptance created a Tailscale service"
+        )
+
+
 def reference_rollout_bundles(default: Path, hermes: Path) -> tuple[Path, ...]:
     """The Hermes graph is a superset, so one rollout covers all services."""
     del default
@@ -1439,16 +1494,19 @@ def main() -> None:
     ):
         raise AcceptanceError("acceptance Tailscale Service names are invalid")
     control_hostname = tailscale_service_hostname(services["control"], tailnet_suffix)
-    gateway_hostname = required_environment(
-        "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"
-    )
-    if TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None:
+    tailscale_mode = tailscale_acceptance_mode()
+    gateway_hostname = os.environ.get("VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME", "")
+    if (
+        tailscale_mode == "full"
+        and TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None
+    ):
         raise AcceptanceError("acceptance Tailscale gateway hostname is invalid")
-    oauth_client_id = required_environment(
-        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
-    )
-    oauth_client_secret = required_environment(
-        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret=True
+    if tailscale_mode == "disabled" and gateway_hostname:
+        raise AcceptanceError(
+            "Tailscale-disabled acceptance must not select a gateway hostname"
+        )
+    oauth_client_id, oauth_client_secret = tailscale_acceptance_credentials(
+        tailscale_mode
     )
     upstream_key = required_environment(
         "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
@@ -1504,12 +1562,13 @@ def main() -> None:
             responses=nas_responses(**common, hermes=True),
         )
         assert_repeatable(first, second)
-        for bundle in (first, hermes):
-            configure_tailnet_service_names(
-                bundle,
-                gateway_hostname=gateway_hostname,
-                **services,
-            )
+        if tailscale_mode == "full":
+            for bundle in (first, hermes):
+                configure_tailnet_service_names(
+                    bundle,
+                    gateway_hostname=gateway_hostname,
+                    **services,
+                )
         for bundle in (first, hermes):
             assert_compose_compatibility(
                 bundle,
@@ -1529,6 +1588,7 @@ def main() -> None:
                 hermes_api_service=services["hermes_api"],
                 hermes_dashboard_service=services["hermes_dashboard"],
                 require_external_tailnet_client=require_external_tailnet_client,
+                tailscale_mode=tailscale_mode,
             )
 
 

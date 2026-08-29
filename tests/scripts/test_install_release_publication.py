@@ -457,6 +457,10 @@ def _nas_lane_report(
     status: str = "passed",
     version: str = "1.2.3",
 ) -> Path:
+    tailscale_mode = {
+        "docker-29.4.3": "disabled",
+        "native": "full",
+    }[lane]
     _canonical(
         path,
         {
@@ -465,9 +469,10 @@ def _nas_lane_report(
             "generation": generation,
             "lane": lane,
             "run_id": run_id,
-            "schema_version": 1,
+            "schema_version": 2,
             "source_sha": source_sha,
             "status": status,
+            "tailscale_mode": tailscale_mode,
             "version": version,
         },
     )
@@ -544,6 +549,7 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
         ("run_id", 123457),
         ("source_sha", "d" * 40),
         ("status", "failed"),
+        ("tailscale_mode", "full"),
         ("version", "1.2.4"),
     ),
 )
