@@ -416,6 +416,9 @@ def test_build_jobs_accept_local_oci_content_before_artifact_upload() -> None:
     )
     assert "scripts/accept-development-image-archive" in build
     assert "development-role-receipt-${{ matrix.role }}" in build
+    assert "scripts/dev-image-publication-capsule create" in scan
+    assert "Upload thin Hermes publication capsule" in build
+    assert "matrix.role == 'hermes'" in build
     assert "dev-image-acceptance-receipt validate-archive" in scan
     receipt_tool = (ROOT / "scripts/dev-image-acceptance-receipt").read_text()
     assert "tarfile.open" in receipt_tool
@@ -490,7 +493,7 @@ def test_development_publication_parallelizes_roles_inside_one_safe_job() -> Non
     assert publisher[aliases:].count("refs/remotes/origin/main^{commit}") == 1
 
 
-def test_development_publication_prefetches_originals_while_acceptance_runs() -> None:
+def test_development_publication_prefetches_thin_hermes_capsule_while_acceptance_runs() -> None:
     text = DEV_WORKFLOW.read_text()
     acceptance = text[
         text.index("  build-and-accept:") : text.index("  publish-development-images:")
@@ -524,11 +527,11 @@ def test_development_publication_prefetches_originals_while_acceptance_runs() ->
             "- name: Confirm prefetched and accepted inputs"
         )
     ]
-    assert "Prefetch original immutable OCI archives" in prefetch
-    assert "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}" in (
-        prefetch
-    )
-    assert "merge-multiple: true" in prefetch
+    assert "Prefetch exact API OCI archive" in prefetch
+    assert "Prefetch exact worker OCI archive" in prefetch
+    assert "Prefetch thin Hermes publication capsule" in prefetch
+    assert "development-image-hermes-capsule-${{ github.sha }}" in prefetch
+    assert "development-image-hermes-${{ github.sha }}" not in prefetch
     assert "Wait for checksum-bound acceptance receipt" in prefetch
     assert "gh run download" in prefetch
     assert "accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID" in prefetch
@@ -536,6 +539,23 @@ def test_development_publication_prefetches_originals_while_acceptance_runs() ->
     login = publisher.index("- name: Log in to GHCR")
     publish = publisher.index("- name: Publish immutable tested API image")
     assert receipt_check < login < publish
+    hermes_publish = publisher.index("- name: Publish immutable tested Hermes image")
+    hermes_block = publisher[hermes_publish:]
+    assert "dev-image-publication-capsule publish" in hermes_block
+    assert ".roles.hermes.manifest_digest" in hermes_block
+    assert ".roles.hermes.publication_capsule.sha256" in hermes_block
+    assert '"$expected_digest" "$expected_capsule_sha256"' in hermes_block
+    assert "capsule_status != 75" in publisher[hermes_publish:]
+    assert "gh run download" in publisher[hermes_publish:]
+    assert "development-image-hermes-$GITHUB_SHA-$GITHUB_RUN_ID" in publisher[
+        hermes_publish:
+    ]
+    fallback = publisher[hermes_publish:]
+    fallback_download = fallback.index('gh run download "$GITHUB_RUN_ID"')
+    fallback_publish = fallback.index("scripts/publish-immutable-image hermes")
+    assert "refs/remotes/origin/main^{commit}" in fallback[
+        fallback_download:fallback_publish
+    ]
 
 
 def _write_receipt_fixture(root: Path) -> None:
@@ -594,24 +614,53 @@ def test_role_receipts_aggregate_without_retransferring_archives(
     tool = ROOT / "scripts/dev-image-acceptance-receipt"
     commit = "a" * 40
     run_id = "12345"
+    manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
+    expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
     for role in ("api", "worker", "hermes"):
-        result = subprocess.run(
-            [
-                tool,
-                "create-role",
-                role_root / f"{role}.role-receipt.json",
-                commit,
-                run_id,
-                role,
-                publication_root / f"vonk-forge-{role}.oci.tar",
-            ],
-            cwd=ROOT,
-            env=environment,
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
+        if role == "hermes":
+            capsule = publication_root / "vonk-forge-hermes.publication-capsule.tar"
+            capsule.write_bytes(b"receipt-bound-capsule")
+            archive = publication_root / "vonk-forge-hermes.oci.tar"
+            role_document = {
+                "schema": "vonk-forge.dev-image-role-acceptance.v2",
+                "commit": commit,
+                "run_id": run_id,
+                "role": role,
+                "archive": archive.name,
+                "artifact": f"development-image-{role}-{commit}-{run_id}",
+                "manifest_digest": expected_digest,
+                "publication_capsule": {
+                    "file": capsule.name,
+                    "artifact": (
+                        f"development-image-hermes-capsule-{commit}-{run_id}"
+                    ),
+                    "sha256": hashlib.sha256(capsule.read_bytes()).hexdigest(),
+                    "size": capsule.stat().st_size,
+                },
+                "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "size": archive.stat().st_size,
+            }
+            (role_root / f"{role}.role-receipt.json").write_text(
+                json.dumps(role_document)
+            )
+        else:
+            result = subprocess.run(
+                [
+                    tool,
+                    "create-role",
+                    role_root / f"{role}.role-receipt.json",
+                    commit,
+                    run_id,
+                    role,
+                    publication_root / f"vonk-forge-{role}.oci.tar",
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr
 
     collected = subprocess.run(
         [tool, "collect", role_root, commit, run_id],
@@ -630,11 +679,10 @@ def test_role_receipts_aggregate_without_retransferring_archives(
         check=False,
         text=True,
     )
+    (publication_root / "vonk-forge-hermes.publication-capsule.tar").unlink()
     verified = _receipt_command(tmp_path, "verify", receipt, publication_root)
 
     assert collected.returncode == 0, collected.stderr
-    manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
-    expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
     assert collected.stdout.splitlines() == [
         f"api_digest={expected_digest}",
         f"worker_digest={expected_digest}",
@@ -685,13 +733,14 @@ def test_development_image_receipt_binds_original_archives_and_compose(
     assert created.returncode == 0, created.stderr
     assert verified.returncode == 0, verified.stderr
     document = json.loads(receipt.read_text())
-    assert document["schema"] == "vonk-forge.dev-image-acceptance.v1"
+    assert document["schema"] == "vonk-forge.dev-image-acceptance.v2"
     assert set(document["roles"]) == {"api", "worker", "hermes"}
     assert document["roles"]["api"]["artifact"] == (
         f"development-image-api-{'a' * 40}-12345"
     )
     assert document["roles"]["api"]["archive"] == "vonk-forge-api.oci.tar"
     assert document["roles"]["api"]["manifest_digest"].startswith("sha256:")
+    assert document["roles"]["api"]["publication_capsule"] is None
     assert set(document["compose"]) == {
         "docker-compose.dev.yml",
         "docker-compose.pinned.yml",

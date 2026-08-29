@@ -161,5 +161,12 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   ((found_provenance == 1))
 done < <(scripts/verify-multiarch-image-manifest "$platform_index")
 
-scripts/dev-image-acceptance-receipt create-role \
-  "$receipt" "$commit" "$run_id" "$role" "$archive"
+if [[ "$role" == "hermes" ]]; then
+  capsule="$(dirname -- "$receipt")/vonk-forge-hermes.publication-capsule.tar"
+  scripts/dev-image-publication-capsule create "$layout" "$capsule"
+  scripts/dev-image-acceptance-receipt create-role \
+    "$receipt" "$commit" "$run_id" "$role" "$archive" "$capsule"
+else
+  scripts/dev-image-acceptance-receipt create-role \
+    "$receipt" "$commit" "$run_id" "$role" "$archive"
+fi

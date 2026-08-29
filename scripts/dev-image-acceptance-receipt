@@ -16,8 +16,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "vonk-forge.dev-image-acceptance.v1"
-ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v1"
+SCHEMA = "vonk-forge.dev-image-acceptance.v2"
+ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v2"
 ROLES = ("api", "worker", "hermes")
 COMPOSE_FILES = ("docker-compose.dev.yml", "docker-compose.pinned.yml")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -65,6 +65,33 @@ def _manifest_digest(archive: Path) -> str:
     return digest
 
 
+def _capsule_identity(commit: str, run_id: str) -> tuple[str, str]:
+    return (
+        "vonk-forge-hermes.publication-capsule.tar",
+        f"development-image-hermes-capsule-{commit}-{run_id}",
+    )
+
+
+def _validate_capsule_entry(
+    value: object, commit: str, run_id: str, context: str
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    entry = _require_keys(value, {"file", "artifact", "sha256", "size"}, context)
+    expected_file, expected_artifact = _capsule_identity(commit, run_id)
+    if (
+        entry["file"] != expected_file
+        or entry["artifact"] != expected_artifact
+        or not isinstance(entry["size"], int)
+        or isinstance(entry["size"], bool)
+        or entry["size"] <= 0
+        or not isinstance(entry["sha256"], str)
+        or SHA256.fullmatch(entry["sha256"]) is None
+    ):
+        raise ReceiptError(f"{context} is invalid")
+    return entry
+
+
 def _validate_identity(commit: str, run_id: str) -> None:
     if COMMIT.fullmatch(commit) is None or RUN_ID.fullmatch(run_id) is None:
         raise ReceiptError("acceptance identity is invalid")
@@ -98,7 +125,14 @@ def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
     for role in ROLES:
         entry = _require_keys(
             roles[role],
-            {"archive", "artifact", "manifest_digest", "sha256", "size"},
+            {
+                "archive",
+                "artifact",
+                "manifest_digest",
+                "publication_capsule",
+                "sha256",
+                "size",
+            },
             f"receipt role {role}",
         )
         expected_archive = f"vonk-forge-{role}.oci.tar"
@@ -118,6 +152,11 @@ def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
             or DIGEST.fullmatch(entry["manifest_digest"]) is None
         ):
             raise ReceiptError(f"receipt role {role} has invalid evidence")
+        capsule = _validate_capsule_entry(
+            entry["publication_capsule"], commit, run_id, f"receipt role {role} capsule"
+        )
+        if role != "hermes" and capsule is not None:
+            raise ReceiptError(f"receipt role {role} capsule identity is invalid")
     compose = _require_keys(root["compose"], set(COMPOSE_FILES), "receipt compose")
     for name in COMPOSE_FILES:
         entry = _require_keys(compose[name], {"sha256", "size"}, f"receipt {name}")
@@ -146,6 +185,7 @@ def _load_role_receipt(
             "archive",
             "artifact",
             "manifest_digest",
+            "publication_capsule",
             "sha256",
             "size",
         },
@@ -167,6 +207,11 @@ def _load_role_receipt(
         or DIGEST.fullmatch(entry["manifest_digest"]) is None
     ):
         raise ReceiptError(f"{role} acceptance receipt is invalid")
+    capsule = _validate_capsule_entry(
+        entry["publication_capsule"], commit, run_id, f"{role} acceptance capsule"
+    )
+    if (role == "hermes") != (capsule is not None):
+        raise ReceiptError(f"{role} acceptance capsule identity is invalid")
     return entry
 
 
@@ -228,11 +273,36 @@ def create_role(
     run_id: str,
     role: str,
     archive: Path,
+    capsule: Path | None,
 ) -> None:
     _validate_identity(commit, run_id)
     if role not in ROLES or archive.name != f"vonk-forge-{role}.oci.tar":
         raise ReceiptError("role acceptance identity is invalid")
     evidence = _file_evidence(archive)
+    manifest_digest = _manifest_digest(archive)
+    capsule_evidence: dict[str, Any] | None = None
+    if role == "hermes":
+        if capsule is None:
+            raise ReceiptError("Hermes acceptance requires a publication capsule")
+        expected_file, artifact = _capsule_identity(commit, run_id)
+        if capsule.name != expected_file:
+            raise ReceiptError("Hermes publication capsule identity is invalid")
+        subprocess.run(
+            [
+                Path(__file__).with_name("dev-image-publication-capsule"),
+                "verify",
+                capsule,
+                manifest_digest,
+            ],
+            check=True,
+        )
+        capsule_evidence = {
+            "file": expected_file,
+            "artifact": artifact,
+            **_file_evidence(capsule),
+        }
+    elif capsule is not None:
+        raise ReceiptError("only Hermes may carry a publication capsule")
     _write_json(
         output,
         {
@@ -242,7 +312,8 @@ def create_role(
             "role": role,
             "archive": archive.name,
             "artifact": f"development-image-{role}-{commit}-{run_id}",
-            "manifest_digest": _manifest_digest(archive),
+            "manifest_digest": manifest_digest,
+            "publication_capsule": capsule_evidence,
             **evidence,
         },
     )
@@ -284,6 +355,7 @@ def aggregate(
             key: value
             for key, value in roles[role].items()
             if key in {"archive", "artifact", "manifest_digest", "sha256", "size"}
+            or key == "publication_capsule"
         }
         for role in ROLES
     }
@@ -316,6 +388,7 @@ def create(output: Path, commit: str, run_id: str, publication_root: Path) -> No
             "archive": archive_name,
             "artifact": f"development-image-{role}-{commit}-{run_id}",
             "manifest_digest": _manifest_digest(archive),
+            "publication_capsule": None,
             **evidence,
         }
     compose = {name: _file_evidence(publication_root / name) for name in COMPOSE_FILES}
@@ -342,12 +415,42 @@ def verify(
     receipt = _load_receipt(receipt_path, commit, run_id)
     for role in ROLES:
         archive = publication_root / receipt["roles"][role]["archive"]
-        actual = _file_evidence(archive)
         expected = receipt["roles"][role]
-        if actual["size"] != expected["size"] or actual["sha256"] != expected["sha256"]:
-            raise ReceiptError(f"accepted {role} archive does not match its receipt")
-        if _manifest_digest(archive) != expected["manifest_digest"]:
-            raise ReceiptError(f"accepted {role} manifest does not match its receipt")
+        archive_present = archive.exists() or archive.is_symlink()
+        if archive_present:
+            actual = _file_evidence(archive)
+            if (
+                actual["size"] != expected["size"]
+                or actual["sha256"] != expected["sha256"]
+            ):
+                raise ReceiptError(f"accepted {role} archive does not match its receipt")
+            if _manifest_digest(archive) != expected["manifest_digest"]:
+                raise ReceiptError(f"accepted {role} manifest does not match its receipt")
+        capsule_entry = expected["publication_capsule"]
+        capsule_present = False
+        if capsule_entry is not None:
+            capsule = publication_root / capsule_entry["file"]
+            capsule_present = capsule.exists() or capsule.is_symlink()
+            if capsule_present:
+                actual_capsule = _file_evidence(capsule)
+                if actual_capsule != {
+                    "sha256": capsule_entry["sha256"],
+                    "size": capsule_entry["size"],
+                }:
+                    raise ReceiptError(
+                        f"accepted {role} publication capsule does not match its receipt"
+                    )
+                subprocess.run(
+                    [
+                        Path(__file__).with_name("dev-image-publication-capsule"),
+                        "verify",
+                        capsule,
+                        expected["manifest_digest"],
+                    ],
+                    check=True,
+                )
+        if not archive_present and not capsule_present:
+            raise ReceiptError(f"accepted {role} publication content is missing")
     for name in COMPOSE_FILES:
         actual = _file_evidence(publication_root / name)
         expected = receipt["compose"][name]
@@ -360,13 +463,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if len(arguments) == 2 and arguments[0] == "validate-archive":
             validate_archive_members(Path(arguments[1]))
-        elif len(arguments) == 6 and arguments[0] == "create-role":
+        elif len(arguments) in {6, 7} and arguments[0] == "create-role":
             create_role(
                 Path(arguments[1]),
                 arguments[2],
                 arguments[3],
                 arguments[4],
                 Path(arguments[5]),
+                Path(arguments[6]) if len(arguments) == 7 else None,
             )
         elif len(arguments) == 4 and arguments[0] == "collect":
             collect(Path(arguments[1]), arguments[2], arguments[3])
@@ -386,7 +490,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ReceiptError(
                 "usage: dev-image-acceptance-receipt "
                 "validate-archive ARCHIVE | "
-                "create-role RECEIPT COMMIT RUN_ID ROLE ARCHIVE | "
+                "create-role RECEIPT COMMIT RUN_ID ROLE ARCHIVE [CAPSULE] | "
                 "collect ROLE_ROOT COMMIT RUN_ID | "
                 "aggregate RECEIPT COMMIT RUN_ID ROLE_ROOT COMPOSE_ROOT | "
                 "verify RECEIPT COMMIT RUN_ID PUBLICATION_ROOT"
