@@ -443,13 +443,98 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         "add-job-id-key": "false",
     }
     run = steps["Test and build exact native setup programs"]["run"]
-    release_test = 'cargo test --locked --release --package "$binary"'
+    package_argument = 'package_args+=(--package "$binary")'
+    release_test = 'cargo test --locked --release "${package_args[@]}"'
     release_build = (
         'cargo build --locked --release --package "$binary" --bin "$binary"'
     )
+    assert 'read -r -a binaries <<< "$BINARIES"' in run
+    assert 'test "${#binaries[@]}" -ge 1' in run
+    assert package_argument in run
     assert release_test in run
     assert release_build in run
-    assert run.index(release_test) < run.index(release_build)
+    assert run.count("cargo test --locked --release") == 1
+    assert 'cargo test --locked --release --package "$binary"' not in run
+    assert run.index(package_argument) < run.index(release_test) < run.index(release_build)
+
+
+def test_setup_build_tests_all_packages_together_before_exact_binary_builds(
+    tmp_path: Path,
+) -> None:
+    workflow = _workflow(SETUPS)
+    run = _steps(workflow["jobs"]["build-and-test"])[
+        "Test and build exact native setup programs"
+    ]["run"]
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    cargo_log = tmp_path / "cargo.log"
+    cargo = commands / "cargo"
+    cargo.write_text(
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        "printf '%s\\n' \"$*\" >> \"$CARGO_LOG\"\n"
+        "if [[ \"$1\" == build ]]; then\n"
+        "  binary=\n"
+        "  while (($#)); do\n"
+        "    if [[ \"$1\" == --bin ]]; then shift; binary=$1; fi\n"
+        "    shift\n"
+        "  done\n"
+        "  test -n \"$binary\"\n"
+        "  mkdir -p target/release\n"
+        "  printf '%s\\n' \"$binary\" > \"target/release/$binary\"\n"
+        "fi\n"
+    )
+    cargo.chmod(0o755)
+    uname = commands / "uname"
+    uname.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  -s) printf '%s\\n' Linux ;;\n"
+        "  -m) printf '%s\\n' x86_64 ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n"
+    )
+    uname.chmod(0o755)
+    sha256sum = commands / "sha256sum"
+    sha256sum.write_text(
+        "#!/bin/sh\n"
+        "for path in \"$@\"; do\n"
+        "  test \"$path\" = -- && continue\n"
+        "  printf '%064d  %s\\n' 0 \"$path\"\n"
+        "done\n"
+    )
+    sha256sum.chmod(0o755)
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    result = subprocess.run(
+        ["bash", "-c", run],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        env=os.environ
+        | {
+            "BINARIES": "vonk-nas-setup vonk-spark-setup",
+            "CARGO_LOG": str(cargo_log),
+            "PATH": f"{commands}:{os.environ['PATH']}",
+            "PLATFORM": "linux-amd64",
+            "RUNNER_TEMP": str(runner_temp),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert cargo_log.read_text().splitlines() == [
+        "test --locked --release --package vonk-nas-setup --package vonk-spark-setup",
+        "build --locked --release --package vonk-nas-setup --bin vonk-nas-setup",
+        "build --locked --release --package vonk-spark-setup --bin vonk-spark-setup",
+    ]
+    output = runner_temp / "setup/linux-amd64"
+    assert (output / "vonk-nas-setup").read_text() == "vonk-nas-setup\n"
+    assert (output / "vonk-spark-setup").read_text() == "vonk-spark-setup\n"
+    assert (output / "SHA256SUMS").read_text().splitlines() == [
+        "0000000000000000000000000000000000000000000000000000000000000000  vonk-nas-setup",
+        "0000000000000000000000000000000000000000000000000000000000000000  vonk-spark-setup",
+    ]
 
 
 def test_setup_checksums_are_portable_and_exclude_the_manifest_itself() -> None:

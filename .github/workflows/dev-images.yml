@@ -93,9 +93,38 @@ jobs:
           compression-level: 0
           path: ${{ runner.temp }}/${{ matrix.archive }}
 
+  verify-runtime-images:
+    name: Verify pinned runtime images are pullable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: vonk-forge-development-runtime-images
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact runtime image lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pull every pinned runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t runtime_images < <(
+            jq -r '.images[]' deploy/compose/images.lock.json \
+              | sort -u
+          )
+          test "${#runtime_images[@]}" = 7
+          for runtime_image in "${runtime_images[@]}"; do
+            [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+            docker pull "$runtime_image"
+          done
+
   build-and-accept:
     name: Build and accept main images
-    needs: [build-oci-archives]
+    needs: [build-oci-archives, verify-runtime-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
@@ -217,35 +246,6 @@ jobs:
           test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"
           command -v skopeo >/dev/null
 
-      - parallel:
-          - name: Load tested images without pulling
-            shell: bash
-            run: |
-              set -euo pipefail
-              skopeo copy --override-os linux --override-arch amd64 \
-                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
-                docker-daemon:vonk-forge-api:dev-local
-              skopeo copy --override-os linux --override-arch amd64 \
-                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
-                docker-daemon:vonk-forge-worker:dev-local
-              skopeo copy --override-os linux --override-arch amd64 \
-                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
-                docker-daemon:vonk-forge-hermes:dev-local
-
-          - name: Preload pinned runtime dependencies
-            shell: bash
-            run: |
-              set -euo pipefail
-              mapfile -t runtime_images < <(
-                jq -r '.images[]' deploy/compose/images.lock.json \
-                  | sort -u
-              )
-              test "${#runtime_images[@]}" = 7
-              for runtime_image in "${runtime_images[@]}"; do
-                [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
-                docker pull "$runtime_image"
-              done
-
       - name: Render and validate disposable development Compose artifacts
         shell: bash
         run: |
@@ -324,20 +324,11 @@ jobs:
           printf '%s' 'task-6-publication-canary-worker' > "$canary_root/worker"
           chmod 0600 "$canary_root/api" "$canary_root/worker"
           for role in api worker hermes; do
-            case "$role" in
-              api) image=vonk-forge-api:dev-local ;;
-              worker) image=vonk-forge-worker:dev-local ;;
-              hermes) image=vonk-forge-hermes:dev-local ;;
-            esac
             archive="$publication_root/vonk-forge-$role.oci.tar"
             layout="$layout_root/$role"
             install -d -m 0700 "$layout"
             tar --extract --no-same-owner --file "$archive" --directory "$layout"
             cp "$layout/index.json" "$evidence_root/$role.index.json"
-            docker history --no-trunc --format '{{json .}}' "$image" \
-              > "$evidence_root/$role.history.jsonl"
-            docker image inspect "$image" \
-              > "$evidence_root/$role.config.json"
             index_queue=("$layout/index.json")
             platform_index=""
             declare -A visited_indexes=()
@@ -362,6 +353,8 @@ jobs:
                 [[ "$descriptor_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
                 descriptor_path="$layout/blobs/sha256/${descriptor_digest#sha256:}"
                 [[ -f "$descriptor_path" && ! -L "$descriptor_path" ]]
+                [[ "$(sha256sum "$descriptor_path" | cut -d ' ' -f 1)" == \
+                  "${descriptor_digest#sha256:}" ]]
                 case "$media_type" in
                   application/vnd.oci.image.index.v1+json)
                     index_queue+=("$descriptor_path")
@@ -384,9 +377,34 @@ jobs:
               config_digest=$(jq -er '.config.digest' "$runnable_path")
               [[ "$config_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
               config_path="$layout/blobs/sha256/${config_digest#sha256:}"
-              jq -e --arg revision "$GITHUB_SHA" \
-                '.config.Labels["org.opencontainers.image.revision"] == $revision' \
+              [[ -f "$config_path" && ! -L "$config_path" ]]
+              [[ "$(sha256sum "$config_path" | cut -d ' ' -f 1)" == \
+                "${config_digest#sha256:}" ]]
+              layer_count=$(jq -er '.layers | length' "$runnable_path")
+              jq -e --arg architecture "$architecture" \
+                --arg revision "$GITHUB_SHA" \
+                --argjson layer_count "$layer_count" \
+                '.architecture == $architecture
+                and .os == "linux"
+                and .rootfs.type == "layers"
+                and (.rootfs.diff_ids | type == "array" and length == $layer_count)
+                and (.history | type == "array")
+                and ([.history[] | select((.empty_layer // false) == false)]
+                  | length == $layer_count)
+                and .config.Labels["org.opencontainers.image.revision"] == $revision' \
                 "$config_path" >/dev/null
+              cp "$config_path" \
+                "$evidence_root/$role.$architecture.config.json"
+              jq -c '.history[]' "$config_path" \
+                > "$evidence_root/$role.$architecture.history.jsonl"
+              while IFS= read -r layer_descriptor; do
+                layer_digest=$(jq -r '.digest // empty' <<< "$layer_descriptor")
+                [[ "$layer_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+                layer_path="$layout/blobs/sha256/${layer_digest#sha256:}"
+                [[ -f "$layer_path" && ! -L "$layer_path" ]]
+                [[ "$(sha256sum "$layer_path" | cut -d ' ' -f 1)" == \
+                  "${layer_digest#sha256:}" ]]
+              done < <(jq -c '.layers[]' "$runnable_path")
               manifest_path="$layout/blobs/sha256/${attestation_digest#sha256:}"
               cp "$manifest_path" \
                 "$evidence_root/$role.$architecture.attestation-manifest.json"
@@ -403,6 +421,9 @@ jobs:
                   <<< "$statement_descriptor"
                 [[ "$statement_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
                 statement_path="$layout/blobs/sha256/${statement_digest#sha256:}"
+                [[ -f "$statement_path" && ! -L "$statement_path" ]]
+                [[ "$(sha256sum "$statement_path" | cut -d ' ' -f 1)" == \
+                  "${statement_digest#sha256:}" ]]
                 actual_predicate=$(jq -r '.predicateType // empty' "$statement_path")
                 [[ "$actual_predicate" == "$declared_predicate" ]]
                 cp "$statement_path" \
@@ -499,144 +520,96 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish immutable tested images
+      - parallel:
+          - name: Publish immutable tested API image
+            shell: bash
+            env:
+              IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: |
+              scripts/publish-immutable-image api \
+                "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
+                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/api.accepted-digest"
+
+          - name: Publish immutable tested worker image
+            shell: bash
+            env:
+              IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: |
+              scripts/publish-immutable-image worker \
+                "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
+                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/worker.accepted-digest"
+
+          - name: Publish immutable tested Hermes image
+            shell: bash
+            env:
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: |
+              scripts/publish-immutable-image hermes \
+                "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
+                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/hermes.accepted-digest"
+
+      - name: Collect immutable tested image digests
         id: publish
         shell: bash
-        env:
-          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-          HERMES_IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
-          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
-        run: |
-          set -euo pipefail
-          publish_immutable() {
-            local role=$1 archive=$2 image=$3
-            local manifest="$RUNNER_TEMP/${role}.manifest.json"
-            local digest_file="$RUNNER_TEMP/${role}.digest"
-            local inspect_error="$RUNNER_TEMP/${role}.inspect-error"
-            local expected observed pushed
-            skopeo inspect --raw "oci-archive:$archive" > "$manifest"
-            expected=$(skopeo manifest-digest "$manifest")
-            [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
-            if observed=$(skopeo inspect --format '{{.Digest}}' \
-              "docker://$image:${IMMUTABLE_TAG}" 2>"$inspect_error"); then
-              if [[ "$observed" != "$expected" ]]; then
-                echo "refusing to overwrite immutable $role image tag" >&2
-                return 1
-              fi
-            else
-              if ! grep -Eiq 'manifest unknown|name unknown|not found' \
-                "$inspect_error"; then
-                echo "immutable $role image lookup failed" >&2
-                return 1
-              fi
-              skopeo copy --all --preserve-digests \
-                --digestfile "$digest_file" \
-                "oci-archive:$archive" \
-                "docker://$image:${IMMUTABLE_TAG}" >&2
-              pushed=$(tr -d '\r\n' < "$digest_file")
-              if [[ "$pushed" != "$expected" ]]; then
-                echo "immutable $role image digest changed during publication" >&2
-                return 1
-              fi
-            fi
-            printf '%s\n' "$expected"
-          }
-          api_digest=$(publish_immutable api \
-            "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" "$API_IMAGE")
-          worker_digest=$(publish_immutable worker \
-            "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" "$WORKER_IMAGE")
-          hermes_digest=$(publish_immutable hermes \
-            "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" "$HERMES_IMAGE")
-          printf 'api_digest=%s\nworker_digest=%s\nhermes_digest=%s\n' \
-            "$api_digest" "$worker_digest" "$hermes_digest" \
-            >> "$GITHUB_OUTPUT"
-
-      - name: Verify immutable manifests and attestations
-        shell: bash
-        env:
-          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-          HERMES_DIGEST: ${{ steps.publish.outputs.hermes_digest }}
-          HERMES_IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
-          WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
           for identity in api worker hermes; do
-            case "$identity" in
-              api) image=$API_IMAGE; digest=$API_DIGEST ;;
-              worker) image=$WORKER_IMAGE; digest=$WORKER_DIGEST ;;
-              hermes) image=$HERMES_IMAGE; digest=$HERMES_DIGEST ;;
-            esac
-            observed=$(skopeo inspect --format '{{.Digest}}' \
-              "docker://$image:${IMMUTABLE_TAG}")
-            [[ "$observed" == "$digest" ]]
-            manifest_file=$(mktemp "$RUNNER_TEMP/$identity.manifest.XXXXXX")
-            docker buildx imagetools inspect "$image@$digest" \
-              --format '{{ json .Manifest }}' \
-              > "$manifest_file"
-            platform_records=$(mktemp "$RUNNER_TEMP/$identity.platforms.XXXXXX")
-            provenance_file=$(mktemp "$RUNNER_TEMP/$identity.provenance.XXXXXX")
-            sbom_file=$(mktemp "$RUNNER_TEMP/$identity.sbom.XXXXXX")
-            scripts/verify-multiarch-image-manifest "$manifest_file" \
-              > "$platform_records"
-            docker buildx imagetools inspect "$image@$digest" \
-              --format '{{ json .Provenance }}' \
-              > "$provenance_file"
-            docker buildx imagetools inspect "$image@$digest" \
-              --format '{{ json .SBOM }}' \
-              > "$sbom_file"
-            jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
-              "$provenance_file" >/dev/null
-            jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
-              "$sbom_file" >/dev/null
-            while IFS=$'\t' read -r architecture runnable_digest \
-              attestation_digest; do
-              skopeo inspect --config "docker://$image@$runnable_digest" \
-                | jq -e --arg revision "$GITHUB_SHA" \
-                  '.config.Labels["org.opencontainers.image.revision"] == $revision' \
-                  >/dev/null
-              jq -e --arg platform "linux/$architecture" \
-                --arg revision "$GITHUB_SHA" \
-                '(.[$platform] | ([.. | objects | select(
-                    ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
-                    or (((.SLSA?.buildType? // "") | length) > 0)
-                    or (((.buildDefinition?.buildType? // "") | length) > 0)
-                  )] | length > 0)
-                  and ([.. | strings | select(. == $revision)] | length > 0))' \
-                "$provenance_file" >/dev/null
-              jq -e --arg platform "linux/$architecture" \
-                '.[$platform] | [.. | objects | select(
-                    .SPDXID? == "SPDXRef-DOCUMENT"
-                    and ((.spdxVersion? // "") | startswith("SPDX-"))
-                  )] | length > 0' "$sbom_file" >/dev/null
-            done < "$platform_records"
-            rm -f -- "$manifest_file" "$platform_records" \
-              "$provenance_file" "$sbom_file"
+            digest_file="$RUNNER_TEMP/$identity.accepted-digest"
+            [[ -f "$digest_file" && ! -L "$digest_file" ]]
+            digest=$(tr -d '\r\n' < "$digest_file")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s_digest=%s\n' "$identity" "$digest" >> "$GITHUB_OUTPUT"
           done
 
-      - name: Sign accepted API image provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ needs.build-and-accept.outputs.api_image }}
-          subject-digest: ${{ steps.publish.outputs.api_digest }}
-          push-to-registry: true
+      - parallel:
+          - name: Verify immutable API manifest and attestations
+            shell: bash
+            env:
+              DIGEST: ${{ steps.publish.outputs.api_digest }}
+              IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: scripts/verify-published-image api "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
-      - name: Sign accepted worker image provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ needs.build-and-accept.outputs.worker_image }}
-          subject-digest: ${{ steps.publish.outputs.worker_digest }}
-          push-to-registry: true
+          - name: Verify immutable worker manifest and attestations
+            shell: bash
+            env:
+              DIGEST: ${{ steps.publish.outputs.worker_digest }}
+              IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: scripts/verify-published-image worker "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
-      - name: Sign accepted Hermes image provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
-          subject-digest: ${{ steps.publish.outputs.hermes_digest }}
-          push-to-registry: true
+          - name: Verify immutable Hermes manifest and attestations
+            shell: bash
+            env:
+              DIGEST: ${{ steps.publish.outputs.hermes_digest }}
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
+              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+            run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+
+      - parallel:
+          - name: Sign accepted API image provenance
+            uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+            with:
+              subject-name: ${{ needs.build-and-accept.outputs.api_image }}
+              subject-digest: ${{ steps.publish.outputs.api_digest }}
+              push-to-registry: true
+
+          - name: Sign accepted worker image provenance
+            uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+            with:
+              subject-name: ${{ needs.build-and-accept.outputs.worker_image }}
+              subject-digest: ${{ steps.publish.outputs.worker_digest }}
+              push-to-registry: true
+
+          - name: Sign accepted Hermes image provenance
+            uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+            with:
+              subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
+              subject-digest: ${{ steps.publish.outputs.hermes_digest }}
+              push-to-registry: true
 
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

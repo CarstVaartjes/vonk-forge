@@ -547,6 +547,7 @@ jobs:
           tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
           expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
           release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+          security_gate_mode: inline
 
   native-amd64-agent-lifecycle:
     name: Lifecycle-test accepted AMD64 release package on AMD64

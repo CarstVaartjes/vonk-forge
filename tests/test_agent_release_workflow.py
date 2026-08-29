@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
+SECURITY_WORKFLOW = ROOT / ".github/actions/agent-package-security/action.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
 NATIVE_LIFECYCLE = ROOT / "scripts/test-agent-package-native-lifecycle"
@@ -254,6 +255,7 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
         "tag_oid",
         "expected_fingerprint",
         "release_private_key",
+        "security_gate_mode",
     ):
         assert re.search(
             rf"^  {input_name}:\n    description: .+\n    required: true$",
@@ -388,6 +390,7 @@ def test_prebuild_authority_matches_signing_ed25519_key_id(tmp_path: Path) -> No
 
 def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     text = PACKAGE_WORKFLOW.read_text()
+    security = SECURITY_WORKFLOW.read_text()
 
     assert "cargo build" not in text
     assert text.count("scripts/build-agent-deb") >= 6
@@ -395,9 +398,12 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert 'IFS=. read -r major minor patch <<< "$VERSION"' not in text
     assert "cmp --silent" in text
     assert "scripts/verify-agent-deb" in text
-    assert "cargo fmt --all --check" in text
-    assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in text
-    assert "cargo test --workspace --locked" in text
+    assert "uses: ./.github/actions/agent-package-security" in text
+    assert "cargo fmt --all --check" in security
+    assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in security
+    assert "cargo test --workspace --locked" in security
+    assert "tests/scripts/test_agent_deb.py" in security
+    assert "tests/acceptance/test_rust_agent_parity.py" in security
     assert "scripts/verify-agent-systemd" in text
     assert "scripts/materialize-agent-tools --output-root target" in text
     materializer = (ROOT / "scripts/materialize-agent-tools").read_text()
@@ -599,6 +605,78 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     assert "verify-main-for-apt:" not in text
 
 
+def test_development_cancels_only_stale_keyless_and_package_build_work() -> None:
+    text = WORKFLOW.read_text()
+    workflow_header = text.split("\njobs:\n", 1)[0]
+    package = text.split("\n  build-test-sign:\n", 1)[1].split(
+        "\n  security-gates:\n", 1
+    )[0]
+    security = text.split("\n  security-gates:\n", 1)[1].split(
+        "\n  native-amd64-lifecycle:\n", 1
+    )[0]
+    native = text.split("\n  native-amd64-lifecycle:\n", 1)[1].split(
+        "\n  publish-apt:\n", 1
+    )[0]
+    publisher = text.split("\n  publish-apt:\n", 1)[1]
+
+    assert "concurrency:" not in workflow_header
+    assert "group: vonk-forge-agent-development-package" in package
+    assert "cancel-in-progress: true" in package
+    assert "group: vonk-forge-agent-development-security" in security
+    assert "cancel-in-progress: true" in security
+    assert "concurrency:" not in native
+    assert "group: vonk-forge-agent-apt-dev" in publisher
+    assert "cancel-in-progress: false" in publisher
+
+
+def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() -> None:
+    text = WORKFLOW.read_text()
+    security = text.split("\n  security-gates:\n", 1)[1].split(
+        "\n  native-amd64-lifecycle:\n", 1
+    )[0]
+    package = text.split("\n  build-test-sign:\n", 1)[1].split(
+        "\n  security-gates:\n", 1
+    )[0]
+    authority = workflow_step(
+        security, "Revalidate exact current main security source"
+    )
+
+    assert "needs: [package-metadata]" in security
+    assert "needs: [package-metadata]" in package
+    assert "runs-on: ubuntu-24.04-arm" in security
+    assert "uses: ./.github/actions/agent-package-security" in security
+    assert "shared-key: linux-arm64" in security
+    assert 'save-if: "false"' in security
+    assert 'test "$GITHUB_REF" = refs/heads/main' in authority
+    assert "+refs/heads/main:refs/remotes/origin/main" in authority
+    assert 'test "$GITHUB_SHA" =' in authority
+    for forbidden in (
+        "environment:",
+        "id-token: write",
+        "secrets.",
+        "VONK_AGENT_RELEASE_PRIVATE_KEY",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "R2_SECRET_ACCESS_KEY",
+    ):
+        assert forbidden not in security
+
+
+def test_package_security_gate_mode_is_explicit_and_channel_bound() -> None:
+    package = PACKAGE_WORKFLOW.read_text()
+    development = WORKFLOW.read_text()
+    stable = UNIFIED_WORKFLOW.read_text()
+    inline = package_step("Run Rust and packaging security gates")
+
+    assert "dev:agent-development:external" in package
+    assert "stable:agent-release:inline" in package
+    assert "security_gate_mode: external" in development
+    assert "security_gate_mode: inline" in stable
+    assert "if: inputs.security_gate_mode == 'inline'" in inline
+    assert "uses: ./.github/actions/agent-package-security" in inline
+    assert "cargo test --workspace --locked" not in package
+    assert "cargo test --workspace --locked" in SECURITY_WORKFLOW.read_text()
+
+
 def test_development_metadata_uses_actions_publication_sequence() -> None:
     text = WORKFLOW.read_text()
     metadata = workflow_step(text, "Derive immutable development package metadata")
@@ -624,7 +702,10 @@ def test_development_agent_workflow_binds_both_literal_environment_boundaries() 
     assert "source_sha: ${{ github.sha }}" in text
     assert "tag_name: ''" in text
     assert "tag_oid: ''" in text
-    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
+    assert (
+        "needs: [package-metadata, build-test-sign, security-gates, "
+        "native-amd64-lifecycle]" in text
+    )
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
     for architecture in ("arm64", "amd64"):
         assert (
@@ -656,7 +737,10 @@ def test_development_publication_requires_native_amd64_lifecycle() -> None:
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
     assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
-    assert "needs: [package-metadata, build-test-sign, native-amd64-lifecycle]" in text
+    assert (
+        "needs: [package-metadata, build-test-sign, security-gates, "
+        "native-amd64-lifecycle]" in text
+    )
 
 
 def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:

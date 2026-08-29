@@ -1,0 +1,16 @@
+name: Agent package security gates
+description: Run the Rust workspace and package contract gates required before publication
+
+runs:
+  using: composite
+  steps:
+    - name: Run Rust and packaging security gates
+      shell: bash
+      run: |
+        set -euo pipefail
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets --locked -- -D warnings
+        cargo test --workspace --locked
+        uvx --from pytest==9.1.1 pytest -q \
+          tests/scripts/test_agent_deb.py \
+          tests/acceptance/test_rust_agent_parity.py

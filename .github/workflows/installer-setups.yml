@@ -67,8 +67,14 @@ jobs:
           esac
           output="$RUNNER_TEMP/setup/$PLATFORM"
           install -d -m 0755 "$output"
-          for binary in $BINARIES; do
-            cargo test --locked --release --package "$binary"
+          read -r -a binaries <<< "$BINARIES"
+          test "${#binaries[@]}" -ge 1
+          package_args=()
+          for binary in "${binaries[@]}"; do
+            package_args+=(--package "$binary")
+          done
+          cargo test --locked --release "${package_args[@]}"
+          for binary in "${binaries[@]}"; do
             cargo build --locked --release --package "$binary" --bin "$binary"
             install -m 0555 "target/release/$binary" "$output/$binary"
           done

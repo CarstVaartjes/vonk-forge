@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 4)); then
+  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG" >&2
+  exit 64
+fi
+
+identity=$1
+image=$2
+digest=$3
+immutable_tag=$4
+
+case "$identity" in
+  api|worker|hermes) ;;
+  *) echo "unsupported published image identity: $identity" >&2; exit 64 ;;
+esac
+[[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9._/-]*$ ]]
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
+revision=${immutable_tag#dev-sha-}
+
+scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
+cleanup() {
+  rm -rf -- "$scratch"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+observed=$(skopeo inspect --format '{{.Digest}}' \
+  "docker://$image:$immutable_tag")
+[[ "$observed" == "$digest" ]]
+
+manifest_file="$scratch/manifest.json"
+platform_records="$scratch/platforms.tsv"
+provenance_file="$scratch/provenance.json"
+sbom_file="$scratch/sbom.json"
+docker buildx imagetools inspect "$image@$digest" \
+  --format '{{ json .Manifest }}' \
+  > "$manifest_file"
+scripts/verify-multiarch-image-manifest "$manifest_file" \
+  > "$platform_records"
+docker buildx imagetools inspect "$image@$digest" \
+  --format '{{ json .Provenance }}' \
+  > "$provenance_file"
+docker buildx imagetools inspect "$image@$digest" \
+  --format '{{ json .SBOM }}' \
+  > "$sbom_file"
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+  "$provenance_file" >/dev/null
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+  "$sbom_file" >/dev/null
+
+while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
+  [[ "$attestation_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  skopeo inspect --config "docker://$image@$runnable_digest" \
+    | jq -e --arg revision "$revision" \
+      '.config.Labels["org.opencontainers.image.revision"] == $revision' \
+      >/dev/null
+  jq -e --arg platform "linux/$architecture" \
+    --arg revision "$revision" \
+    '(.[$platform] | ([.. | objects | select(
+        ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+        or (((.SLSA?.buildType? // "") | length) > 0)
+        or (((.buildDefinition?.buildType? // "") | length) > 0)
+      )] | length > 0)
+      and ([.. | strings | select(. == $revision)] | length > 0))' \
+    "$provenance_file" >/dev/null
+  jq -e --arg platform "linux/$architecture" \
+    '.[$platform] | [.. | objects | select(
+        .SPDXID? == "SPDXRef-DOCUMENT"
+        and ((.spdxVersion? // "") | startswith("SPDX-"))
+      )] | length > 0' "$sbom_file" >/dev/null
+done < "$platform_records"
