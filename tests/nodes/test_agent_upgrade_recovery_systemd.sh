@@ -41,7 +41,31 @@ crash_observed=$test_root/crash-observed
 # The simulated old helper can write only its declared ReadWritePaths.
 upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename "$test_root")
 
+dump_failure_diagnostics() {
+  printf '%s\n' '--- agent upgrade recovery fixture diagnostics ---' >&2
+  systemctl --system --no-pager --full status \
+    "$helper_unit" "$socket_unit" "$recovery_unit" "$agent_unit" >&2 || true
+  journalctl --system --no-pager -n 200 \
+    -u "$helper_unit" -u "$socket_unit" -u "$recovery_unit" -u "$agent_unit" \
+    >&2 || true
+  dpkg-query -W -f='${db:Status-Abbrev} ${Version}\n' vonk-forge-agent \
+    >&2 || true
+  for state_file in \
+    /var/lib/vonk-forge/package-upgrade/intent \
+    /var/lib/vonk-forge/helper-upgrade.pending \
+    /var/lib/vonk-forge/helper-upgrade.receipt; do
+    if [[ -f "$state_file" ]]; then
+      printf '%s\n' "--- $state_file ---" >&2
+      sed -E 's/^(recovery_nonce)=.*/\1=<redacted>/' "$state_file" >&2 || true
+    fi
+  done
+}
+
 cleanup() {
+  cleanup_status=$?
+  if (( cleanup_status != 0 )); then
+    dump_failure_diagnostics
+  fi
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
   systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
     "$socket_unit" >/dev/null 2>&1 || true
@@ -57,11 +81,15 @@ cleanup() {
   systemctl --system daemon-reload >/dev/null 2>&1 || true
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- "$test_root"
+  return "$cleanup_status"
 }
 cleanup_test_root() {
   rm -rf -- "$test_root"
 }
-trap cleanup_test_root EXIT HUP INT TERM
+trap cleanup_test_root EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
   || systemctl --system cat "$agent_unit" >/dev/null 2>&1 \
@@ -83,7 +111,7 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
   printf '%s\n' 'agent upgrade recovery fixture would collide with host state' >&2
   exit 1
 fi
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
 
 mkdir -p "$test_root/target-bin" "$test_root/baseline-bin" \
   "$test_root/target-dist" "$test_root/baseline-dist"
@@ -193,6 +221,17 @@ case "$candidate_custody" in
     ;;
 esac
 
+# Install the synthetic lower version before creating the old helper mount
+# namespace. This makes every historical ReadWritePaths target exist on a clean
+# runner. Preserve the newly unpacked unit files so they can be restored on disk
+# after systemd has started the exact old helper sandbox, matching the live
+# state where the old process survives but the package payload is already new.
+SYSTEMD_OFFLINE=1 dpkg --unpack --force-confold "$baseline_package"
+test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent | cut -c1-2)" = iU
+test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$baseline_version"
+cp -- "$old_helper_unit" "$test_root/installed-helper.service"
+cp -- "$old_socket_unit" "$test_root/installed-helper.socket"
+
 stage_candidate() {
   case "$candidate_custody" in
     legacy)
@@ -263,7 +302,11 @@ RuntimeDirectoryMode=$helper_runtime_mode
 RuntimeDirectoryPreserve=$helper_runtime_preserve
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
 ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent
+BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports
+ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata
+TimeoutStartSec=30s
 TimeoutStopSec=15s
+KillMode=mixed
 UNIT
 cat > "$old_socket_unit" <<'UNIT'
 [Unit]
@@ -285,13 +328,12 @@ chmod 0644 "$old_helper_unit" "$old_socket_unit"
 systemctl --system daemon-reload
 systemctl --system enable --now "$socket_unit" >/dev/null
 systemctl --system start "$helper_unit"
+install -o root -g root -m 0644 "$test_root/installed-helper.service" \
+  "$old_helper_unit"
+install -o root -g root -m 0644 "$test_root/installed-helper.socket" \
+  "$old_socket_unit"
 stage_candidate
 
-# Model the live Spark's dev350 state: an older package is left unpacked while
-# the already-running dev335 helper retains its old executable and sandbox.
-SYSTEMD_OFFLINE=1 dpkg --unpack --force-confold "$baseline_package"
-test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent | cut -c1-2)" = iU
-test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$baseline_version"
 case "$stale_pending_format" in
   legacy2)
     printf '%s\n' \
@@ -314,15 +356,42 @@ esac
 chown root:root /var/lib/vonk-forge/helper-upgrade.pending
 chmod 0600 /var/lib/vonk-forge/helper-upgrade.pending
 cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
+printf '%s\n' \
+  "version=$version" \
+  "helper_sha256=$helper_digest" \
+  "agent_sha256=$agent_digest" \
+  > "$test_root/normalized-pending"
 
-# Kill the complete old-helper cgroup in the exact crash window after durable
-# intent commit but before preinst can replace the stale pending gate.
+# Kill the complete old-helper cgroup after durable intent commit. The target
+# preinst is allowed to normalize the safe stale gate before the watcher runs,
+# so capture and prove whichever exact safe state exists at the crash point.
 (
   for _ in {1..2400}; do
     if [[ -f /var/lib/vonk-forge/package-upgrade/intent ]]; then
       systemctl --system freeze "$helper_unit"
-      cmp -s "$test_root/stale-pending" \
-        /var/lib/vonk-forge/helper-upgrade.pending
+      # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
+      thaw_helper() {
+        systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+      }
+      trap thaw_helper EXIT
+      trap 'exit 129' HUP
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+      if [[ "$crash_mode" == full-cgroup ]]; then
+        systemctl --system stop "$recovery_unit" >/dev/null 2>&1 || true
+      fi
+      if cmp -s "$test_root/stale-pending" \
+          /var/lib/vonk-forge/helper-upgrade.pending; then
+        crash_pending_kind=stale
+      elif cmp -s "$test_root/normalized-pending" \
+          /var/lib/vonk-forge/helper-upgrade.pending; then
+        crash_pending_kind=normalized
+      else
+        exit 1
+      fi
+      cp -- /var/lib/vonk-forge/helper-upgrade.pending \
+        "$test_root/crash-point-pending"
+      printf '%s\n' "$crash_pending_kind" > "$test_root/crash-point-pending-kind"
       dpkg_pid=$(sed -n 's/^dpkg_pid=//p' \
         /var/lib/vonk-forge/package-upgrade/intent)
       case "$dpkg_pid" in ''|*[!0-9]*) exit 1 ;; esac
@@ -335,10 +404,9 @@ cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
       test "${dpkg_argv[3]}" = "$candidate"
       case "$crash_mode" in
         full-cgroup)
-          systemctl --system stop "$recovery_unit" >/dev/null 2>&1 || true
           systemctl --system kill --kill-whom=all --signal=KILL "$helper_unit"
           systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
-          cmp -s "$test_root/stale-pending" \
+          cmp -s "$test_root/crash-point-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
           ;;
         dpkg-only)
@@ -352,7 +420,7 @@ cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
             | cut -c1-2)" = iU
           test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" \
             = "$baseline_version"
-          cmp -s "$test_root/stale-pending" \
+          cmp -s "$test_root/normalized-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
           systemctl --system thaw "$helper_unit"
           ;;
@@ -360,6 +428,7 @@ cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
           exit 64
           ;;
       esac
+      trap - EXIT HUP INT TERM
       touch "$crash_observed"
       exit 0
     fi
@@ -374,7 +443,7 @@ wait "$crash_watcher"
 test -f "$crash_observed"
 test -f /var/lib/vonk-forge/package-upgrade/intent
 if [[ "$crash_mode" == full-cgroup ]]; then
-  cmp -s "$test_root/stale-pending" \
+  cmp -s "$test_root/crash-point-pending" \
     /var/lib/vonk-forge/helper-upgrade.pending
   test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent \
     | cut -c1-2)" = iU
@@ -393,6 +462,8 @@ if [[ "$crash_mode" == full-cgroup ]]; then
   systemctl --system stop "$socket_unit" >/dev/null
   systemctl --system start "$socket_unit" >/dev/null
 fi
+printf 'durable recovery crash-point pending gate: %s\n' \
+  "$(cat "$test_root/crash-point-pending-kind")"
 
 for _ in {1..1200}; do
   if [[ -f /var/lib/vonk-forge/helper-upgrade.receipt \
