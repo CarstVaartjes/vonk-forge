@@ -68,6 +68,9 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     rust_quality = "\n".join(_workflow_job_lines(workflow, "rust-quality"))
     rust_tests = "\n".join(_workflow_job_lines(workflow, "rust-tests"))
+    rust_quality_gate = "\n".join(
+        _workflow_job_lines(workflow, "rust-quality-gate")
+    )
     rust_platform = "\n".join(_workflow_job_lines(workflow, "rust-platform"))
     rust = "\n".join(_workflow_job_lines(workflow, "rust"))
     generated = "\n".join(_workflow_job_lines(workflow, "generated-clients"))
@@ -108,9 +111,14 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     )
     assert "save-if:" not in rust_quality
     assert 'save-if: "false"' in rust_platform
-    assert "needs: [rust-quality, rust-tests, rust-platform]" in rust
-    assert "needs.rust-quality.result" in rust
-    assert "needs.rust-tests.result" in rust
+    assert "name: Rust workspace lint" in rust_quality
+    assert "name: Rust workspace quality" in rust_quality_gate
+    assert "needs: [rust-quality, rust-tests]" in rust_quality_gate
+    assert "if: always()" in rust_quality_gate
+    assert "needs.rust-quality.result" in rust_quality_gate
+    assert "needs.rust-tests.result" in rust_quality_gate
+    assert "needs: [rust-quality-gate, rust-platform]" in rust
+    assert "needs.rust-quality-gate.result" in rust
     assert "needs.rust-platform.result" in rust
     assert "tests/control/test_openapi_clients.py" in generated
     assert "npm ci --prefix tools/openapi-client" in generated
