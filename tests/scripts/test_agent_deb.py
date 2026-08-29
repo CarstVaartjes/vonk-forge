@@ -537,11 +537,33 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert 'crash_pending_kind=normalized' in lifecycle
     assert '"$test_root/crash-point-pending"' in lifecycle
     assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
-    assert lifecycle.count("assert_interrupted_baseline_state") == 3
+    assert lifecycle.count("assert_interrupted_baseline_state") == 4
     assert '"iU |$baseline_version"|"iHR|$baseline_version"' in lifecycle
     assert "unexpected interrupted package state" in lifecycle
     assert "durable lower-interrupted" in lifecycle
     assert "trap thaw_helper EXIT" in lifecycle
+    crash_snapshot = lifecycle.index("crash_intent_digest=")
+    frozen_kill = lifecycle.index(
+        "systemctl --system kill --kill-whom=all --signal=SIGSTOP"
+    )
+    thaw_before_kill = lifecycle.index(
+        'systemctl --system thaw "$helper_unit"', frozen_kill
+    )
+    final_kill = lifecycle.index(
+        "systemctl --system kill --kill-whom=all --signal=SIGKILL",
+        thaw_before_kill,
+    )
+    assert crash_snapshot < frozen_kill < thaw_before_kill < final_kill
+    assert lifecycle.index("FreezerState", thaw_before_kill) < final_kill
+    crash_window = lifecycle[crash_snapshot:final_kill]
+    assert "helper_control_group" in crash_window
+    assert "all_helper_pids_stopped" in crash_window
+    assert "crash_intent_digest" in crash_window
+    post_kill = lifecycle[final_kill:]
+    assert "helper_main_pid_after" in post_kill
+    assert 'test "$helper_active_state" = failed' in post_kill
+    assert 'test "$helper_freezer_state" = running' in post_kill
+    assert "--property=Result" in post_kill
     boot_comment = lifecycle.index(
         "A real boot does not preserve the test-only cgroup"
     )

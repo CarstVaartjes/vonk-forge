@@ -421,6 +421,8 @@ printf '%s\n' \
       # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
       thaw_helper() {
         systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+        systemctl --system kill --kill-whom=all --signal=SIGCONT \
+          "$helper_unit" >/dev/null 2>&1 || true
       }
       trap thaw_helper EXIT
       trap 'exit 129' HUP
@@ -451,10 +453,77 @@ printf '%s\n' \
       test "${dpkg_argv[1]}" = --install
       test "${dpkg_argv[2]}" = --force-confold
       test "${dpkg_argv[3]}" = "$candidate"
+      crash_intent_digest=$(sha256sum \
+        /var/lib/vonk-forge/package-upgrade/intent | cut -d' ' -f1)
       case "$crash_mode" in
         full-cgroup)
-          systemctl --system kill --kill-whom=all --signal=KILL "$helper_unit"
-          systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+          # Keep every task stopped across the freezer release so dpkg cannot
+          # advance before the complete cgroup is killed. Killing only after
+          # thaw also avoids leaving systemd with a failed(frozen) test unit.
+          helper_main_pid=$(systemctl --system show --property=MainPID --value \
+            "$helper_unit")
+          helper_control_group=$(systemctl --system show \
+            --property=ControlGroup --value "$helper_unit")
+          case "$helper_control_group" in
+            /system.slice/*) ;;
+            *) exit 1 ;;
+          esac
+          mapfile -t helper_pids \
+            < "/sys/fs/cgroup$helper_control_group/cgroup.procs"
+          test "${#helper_pids[@]}" -ge 2
+          printf '%s\n' "${helper_pids[@]}" | grep -Fxq "$helper_main_pid"
+          printf '%s\n' "${helper_pids[@]}" | grep -Fxq "$dpkg_pid"
+          systemctl --system kill --kill-whom=all --signal=SIGSTOP \
+            "$helper_unit"
+          systemctl --system thaw "$helper_unit"
+          test "$(systemctl --system show --property=FreezerState --value \
+            "$helper_unit")" = running
+          for _ in {1..1000}; do
+            all_helper_pids_stopped=1
+            for helper_pid in "${helper_pids[@]}"; do
+              if [[ -r "/proc/$helper_pid/status" ]]; then
+                helper_pid_state=$(sed -n \
+                  's/^State:[[:space:]]*\([A-Za-z]\).*/\1/p' \
+                  "/proc/$helper_pid/status")
+                case "$helper_pid_state" in
+                  T|t) ;;
+                  *) all_helper_pids_stopped=0 ;;
+                esac
+              fi
+            done
+            (( all_helper_pids_stopped == 1 )) && break
+            sleep 0.005
+          done
+          test "$all_helper_pids_stopped" -eq 1
+          test -r "/proc/$dpkg_pid/status"
+          test "$(systemctl --system show --property=MainPID --value \
+            "$helper_unit")" = "$helper_main_pid"
+          test "$(sha256sum /var/lib/vonk-forge/package-upgrade/intent \
+            | cut -d' ' -f1)" = "$crash_intent_digest"
+          cmp -s "$test_root/crash-point-pending" \
+            /var/lib/vonk-forge/helper-upgrade.pending
+          assert_interrupted_baseline_state
+          systemctl --system kill --kill-whom=all --signal=SIGKILL \
+            "$helper_unit"
+          for _ in {1..1000}; do
+            helper_main_pid_after=$(systemctl --system show \
+              --property=MainPID --value "$helper_unit")
+            helper_active_state=$(systemctl --system show \
+              --property=ActiveState --value "$helper_unit")
+            helper_freezer_state=$(systemctl --system show \
+              --property=FreezerState --value "$helper_unit")
+            if [[ "$helper_main_pid_after" == 0 \
+              && "$helper_active_state" == failed \
+              && "$helper_freezer_state" == running ]]; then
+              break
+            fi
+            sleep 0.005
+          done
+          test "$helper_main_pid_after" = 0
+          test "$helper_active_state" = failed
+          test "$helper_freezer_state" = running
+          test "$(systemctl --system show --property=Result --value \
+            "$helper_unit")" = signal
           cmp -s "$test_root/crash-point-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
           ;;
