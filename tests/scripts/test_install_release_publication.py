@@ -322,9 +322,11 @@ def _fake_rclone_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
     executable.write_text(
         """#!/usr/bin/env python3
 import json
+import fcntl
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 command = sys.argv[1]
@@ -335,6 +337,23 @@ def object_path(value: str) -> Path:
     remote_path = value.split(":", 1)[1]
     key = remote_path.split("/", 1)[1]
     return object_root / key
+
+def update_activity(delta: int) -> None:
+    activity_path = os.environ.get("FAKE_RCLONE_ACTIVITY")
+    if activity_path is None:
+        return
+    with Path(activity_path).open("a+", encoding="utf-8") as activity:
+        fcntl.flock(activity.fileno(), fcntl.LOCK_EX)
+        activity.seek(0)
+        raw = activity.read()
+        state = json.loads(raw) if raw else {"active": 0, "maximum": 0}
+        state["active"] += delta
+        state["maximum"] = max(state["maximum"], state["active"])
+        activity.seek(0)
+        activity.truncate()
+        json.dump(state, activity)
+        activity.flush()
+        fcntl.flock(activity.fileno(), fcntl.LOCK_UN)
 
 if command == "lsjson":
     path = object_path(arguments[0])
@@ -350,12 +369,17 @@ elif command == "cat":
     if path.is_file():
         sys.stdout.buffer.write(path.read_bytes())
 elif command == "copyto":
-    source = Path(arguments[-2])
-    destination = object_path(arguments[-1])
-    if "--immutable" in arguments and destination.exists():
-        raise SystemExit(9)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    update_activity(1)
+    try:
+        time.sleep(float(os.environ.get("FAKE_RCLONE_COPY_DELAY", "0")))
+        source = Path(arguments[-2])
+        destination = object_path(arguments[-1])
+        if "--immutable" in arguments and destination.exists():
+            raise SystemExit(9)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    finally:
+        update_activity(-1)
 else:
     raise SystemExit(64)
 """,
@@ -1176,6 +1200,99 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
         publication / "objects/spark"
     ).read_bytes()
     assert (object_root / "artifacts/stable/current.manifest").is_file()
+
+
+def test_rclone_candidate_objects_publish_with_bounded_parallelism(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, _ = _fake_rclone_environment(tmp_path)
+    activity = tmp_path / "rclone-activity.json"
+    environment["FAKE_RCLONE_ACTIVITY"] = str(activity)
+    environment["FAKE_RCLONE_COPY_DELAY"] = "0.5"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(activity.read_text()) == {"active": 0, "maximum": 8}
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    immutable_keys = [
+        entry["key"] for entry in plan["objects"] if entry["phase"] == "immutable"
+    ]
+    receipt_keys = [json.loads(line)["key"] for line in result.stdout.splitlines()]
+    assert receipt_keys == immutable_keys
+
+    replay = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert replay.returncode == 0, replay.stderr
+    assert [json.loads(line)["key"] for line in replay.stdout.splitlines()] == (
+        immutable_keys
+    )
+
+
+def test_parallel_rclone_candidate_conflict_is_fail_closed_without_receipt(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    conflict = next(
+        entry for entry in plan["objects"] if entry["phase"] == "immutable"
+    )
+    conflict_path = object_root / conflict["key"]
+    conflict_path.parent.mkdir(parents=True)
+    conflict_path.write_bytes(b"conflicting immutable object\n")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "refusing to overwrite immutable object" in result.stderr
+    assert result.stdout == ""
+    assert conflict_path.read_bytes() == b"conflicting immutable object\n"
 
 
 def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(

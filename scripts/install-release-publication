@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -44,6 +45,7 @@ IMAGE = re.compile(
 KEY = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\Z")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
+MAX_RCLONE_CANDIDATE_WORKERS = 8
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
@@ -1304,9 +1306,28 @@ def _validate_existing_pointer(
 def publish_candidate(arguments: argparse.Namespace) -> None:
     _, entries, _ = _load_plan(arguments.bundle)
     filesystem, remote = _destination(arguments)
-    for entry, source in entries:
-        if entry["phase"] == "immutable":
+    immutable_entries = [
+        (entry, source) for entry, source in entries if entry["phase"] == "immutable"
+    ]
+    if filesystem is not None:
+        for entry, source in immutable_entries:
             _copy_publication_entry(filesystem, remote, entry, source)
+        return
+
+    assert remote is not None
+    workers = min(MAX_RCLONE_CANDIDATE_WORKERS, len(immutable_entries))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            entry["key"]: executor.submit(_rclone_copy, source, remote, entry)
+            for entry, source in immutable_entries
+        }
+        concurrent.futures.wait(futures.values())
+        for entry, _ in immutable_entries:
+            futures[entry["key"]].result()
+    for entry, _ in immutable_entries:
+        print(
+            json.dumps({"key": entry["key"], "phase": entry["phase"]}, sort_keys=True)
+        )
 
 
 def _verify_candidate_objects(
