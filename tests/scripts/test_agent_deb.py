@@ -567,13 +567,20 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     dpkg_only_start = lifecycle.index("        dpkg-only)", crash_snapshot)
     dpkg_only_end = lifecycle.index("\n          ;;", dpkg_only_start)
     dpkg_only = lifecycle[dpkg_only_start:dpkg_only_end]
+    crash_pending_check = dpkg_only.index(
+        'cmp -s "$test_root/crash-point-pending"'
+    )
+    assert '"$test_root/normalized-pending"' not in dpkg_only
     loop_start = dpkg_only.index("for _ in {1..100}; do")
+    recovery_pid_check = dpkg_only.index('"$recovery_unit")" -gt 0')
+    frozen_state_check = dpkg_only.index('"$helper_unit")" = frozen')
+    intent_digest_check = dpkg_only.index('= "$crash_intent_digest"')
     thaw = dpkg_only.index(
         'systemctl --system thaw "$helper_unit" \\\n'
         "              >/dev/null 2>&1 || true",
         loop_start,
     )
-    freezer_read = dpkg_only.index("--property=FreezerState")
+    freezer_read = dpkg_only.index("--property=FreezerState", thaw)
     running_break = dpkg_only.index(
         '[[ "$helper_freezer_state" == running ]]', freezer_read
     )
@@ -583,7 +590,11 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'test "$helper_freezer_state" = running', loop_end
     )
     assert (
-        loop_start
+        recovery_pid_check
+        < frozen_state_check
+        < intent_digest_check
+        < crash_pending_check
+        < loop_start
         < thaw
         < freezer_read
         < running_break
