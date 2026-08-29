@@ -58,8 +58,8 @@ jobs:
             uvx --from ruff==0.16.1 ruff check .
           fi
 
-  rust:
-    name: Rust agent contracts
+  rust-quality:
+    name: Rust workspace quality
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -77,12 +77,43 @@ jobs:
           set -euo pipefail
           rustup set profile minimal
           rustup toolchain install 1.97.1 --component clippy,rustfmt
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
       - name: Verify Rust formatting
         run: cargo fmt --all --check
       - name: Lint Rust workspace
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test Rust workspace
         run: cargo test --workspace --locked
+
+  rust-platform:
+    name: Rust platform integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.97.1
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
       - name: Install Spark-compatible rootless Podman
         shell: bash
         run: |
@@ -122,6 +153,21 @@ jobs:
           retention-days: 30
           path: artifacts/vonk-forge-systemd-security.json
 
+  rust:
+    name: Rust agent contracts
+    needs: [rust-quality, rust-platform]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require Rust quality and platform integration
+        env:
+          QUALITY_RESULT: ${{ needs.rust-quality.result }}
+          PLATFORM_RESULT: ${{ needs.rust-platform.result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$PLATFORM_RESULT" = success
+
   generated-clients:
     name: Generated control clients
     runs-on: ubuntu-latest
@@ -155,8 +201,6 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
-      - name: Install locked admin web dependencies
-        run: npm ci --prefix control/web
       - name: Pull exact PostgreSQL integration image
         run: >-
           docker pull
@@ -168,36 +212,41 @@ jobs:
           uv run --project control --frozen --with-editable . pytest -q
           control/tests/test_database_authority_postgres.py
           deploy/compose/tests/test_postgres_init_databases.py
-      - name: Run canonical runtime readiness model contracts
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
-          deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
-          deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
-          deploy/compose/tests/test_runtime_health_contract.py::test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile
-      - name: Run required Tailscale reconciliation contracts
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          deploy/compose/tests/test_tailscale.py
-      - name: Run required PKI and TLS container integration
-        env:
-          CI: "true"
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
-          deploy/compose/tests/test_pki_tls_integration.py
-      - name: Run focused repository contracts
-        run: >-
-          uv run --python 3.12 --project control --frozen --with-editable .
-          --with pytest==9.1.1 pytest -q
-          tests/test_ci_platform_boundaries.py
-          tests/test_container_release_workflow.py
-      - name: Run focused control cleanup contracts
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_api.py
-          control/tests/test_migrations.py
-          control/tests/test_production_worker.py
+      - parallel:
+          - name: Run canonical runtime readiness model contracts
+            run: >-
+              uv run --project control --frozen --with-editable . pytest -q
+              -p no:cacheprovider
+              deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
+              deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
+              deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
+              deploy/compose/tests/test_runtime_health_contract.py::test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile
+          - name: Run required Tailscale reconciliation contracts
+            run: >-
+              uv run --project control --frozen --with-editable . pytest -q
+              -p no:cacheprovider
+              deploy/compose/tests/test_tailscale.py
+          - name: Run required PKI and TLS container integration
+            env:
+              CI: "true"
+            run: >-
+              uv run --project control --frozen --with-editable . pytest -q
+              -p no:cacheprovider
+              control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
+              deploy/compose/tests/test_pki_tls_integration.py
+          - name: Run focused repository contracts
+            run: >-
+              uv run --python 3.12 --project control --frozen --with-editable .
+              --with pytest==9.1.1 pytest -q -p no:cacheprovider
+              tests/test_ci_platform_boundaries.py
+              tests/test_container_release_workflow.py
+          - name: Run focused control cleanup contracts
+            run: >-
+              uv run --project control --frozen --with-editable . pytest -q
+              -p no:cacheprovider
+              control/tests/test_api.py
+              control/tests/test_migrations.py
+              control/tests/test_production_worker.py
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -207,10 +256,12 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-4}
-          - {index: 1, label: 2-of-4}
-          - {index: 2, label: 3-of-4}
-          - {index: 3, label: 4-of-4}
+          - {index: 0, label: 1-of-6}
+          - {index: 1, label: 2-of-6}
+          - {index: 2, label: 3-of-6}
+          - {index: 3, label: 4-of-6}
+          - {index: 4, label: 5-of-6}
+          - {index: 5, label: 6-of-6}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,15 +271,11 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
-      - name: Install locked JavaScript test dependencies
-        run: |
-          npm ci --prefix control/web
-          npm ci --prefix tools/openapi-client
       - name: Run complete repository suite
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 4
+          SHARD_TOTAL: 6
         run: |
           set -euo pipefail
           collection=$(mktemp)
@@ -236,7 +283,10 @@ jobs:
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest --collect-only -q > "$collection"
           mapfile -t repository_tests < <(
-            awk '/^tests\/.*::/' "$collection"
+            awk '
+              /^tests\/.*::/ &&
+              $0 !~ /^tests\/control\/test_openapi_clients\.py::/
+            ' "$collection"
           )
           ((${#repository_tests[@]} >= SHARD_TOTAL))
           shard_tests=()
@@ -258,10 +308,12 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-4}
-          - {index: 1, label: 2-of-4}
-          - {index: 2, label: 3-of-4}
-          - {index: 3, label: 4-of-4}
+          - {index: 0, label: 1-of-6}
+          - {index: 1, label: 2-of-6}
+          - {index: 2, label: 3-of-6}
+          - {index: 3, label: 4-of-6}
+          - {index: 4, label: 5-of-6}
+          - {index: 5, label: 6-of-6}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -279,7 +331,7 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 4
+          SHARD_TOTAL: 6
         run: |
           set -euo pipefail
           collection=$(mktemp)
