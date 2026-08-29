@@ -5,18 +5,29 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.cookiejar
 import json
+import re
 import subprocess
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "control/src"))
 
+from vonk_control.catalog_contract import (
+    CatalogContractError,
+    CatalogKind,
+    CatalogReference,
+    catalog_content_sha256,
+    parse_catalog_reference,
+)
+from vonk_control.recipe_contract import RecipeContractError, recipe_references
 from vonk_control.source_bundles import generate_source_bundle
 
 ENTITY_DIRECTORIES = (
@@ -33,11 +44,36 @@ ENTITY_KINDS = {
     "runtime-distributions": "runtime-distribution",
     "patch-bundles": "patch-bundle",
 }
+ENTITY_ORDER = {
+    CatalogKind.MODEL_GROUP: 0,
+    CatalogKind.MODEL: 1,
+    CatalogKind.MODEL_VERSION: 2,
+    CatalogKind.RUNTIME_DISTRIBUTION: 3,
+    CatalogKind.PATCH_BUNDLE: 4,
+}
 MAX_RESPONSE_BYTES = 512 * 1024
+MUTATING_METHODS = frozenset({"DELETE", "PATCH", "POST", "PUT"})
+OPAQUE_BROWSER_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+DEFAULT_UPLOAD_TIMEOUT_SECONDS = 300
+MIN_UPLOAD_TIMEOUT_SECONDS = 30
+MAX_UPLOAD_TIMEOUT_SECONDS = 1_800
 
 
 class ImportError(RuntimeError):
     pass
+
+
+def _upload_timeout(value: str) -> int:
+    try:
+        seconds = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("upload timeout must be an integer") from error
+    if not MIN_UPLOAD_TIMEOUT_SECONDS <= seconds <= MAX_UPLOAD_TIMEOUT_SECONDS:
+        raise argparse.ArgumentTypeError(
+            f"upload timeout must be between {MIN_UPLOAD_TIMEOUT_SECONDS} and "
+            f"{MAX_UPLOAD_TIMEOUT_SECONDS} seconds"
+        )
+    return seconds
 
 
 def _args() -> argparse.Namespace:
@@ -49,11 +85,26 @@ def _args() -> argparse.Namespace:
     parser.add_argument(
         "--control-url", help="local control-plane URL; required with --apply"
     )
-    parser.add_argument(
-        "--token-file", type=Path, help="administrator bearer token file"
+    auth = parser.add_mutually_exclusive_group()
+    auth.add_argument("--token-file", type=Path, help="administrator bearer token file")
+    auth.add_argument(
+        "--cookie-file",
+        type=Path,
+        help="Netscape-format browser cookie file for an administrator session",
     )
     parser.add_argument(
         "--apply", action="store_true", help="perform the import after validation"
+    )
+    parser.add_argument(
+        "--upload-timeout-seconds",
+        type=_upload_timeout,
+        default=DEFAULT_UPLOAD_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=(
+            "source-bundle PUT timeout; bounded to "
+            f"{MIN_UPLOAD_TIMEOUT_SECONDS}-{MAX_UPLOAD_TIMEOUT_SECONDS} seconds "
+            f"(default: {DEFAULT_UPLOAD_TIMEOUT_SECONDS})"
+        ),
     )
     parser.add_argument(
         "--include-candidates",
@@ -95,6 +146,7 @@ def _commit(root: Path) -> str:
 
 def _validate(root: Path, platform: Path) -> None:
     command = [
+        sys.executable,
         str(platform / "scripts/validate-recipe-library"),
         "--library-root",
         str(root),
@@ -134,11 +186,7 @@ def _files(context: Path) -> dict[str, bytes]:
             raise ImportError(f"unsafe recipe build-context entry: {relative}")
         if path.is_dir():
             continue
-        if (
-            not path.is_file()
-            or "__pycache__" in path.parts
-            or path.suffix == ".pyc"
-        ):
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
             raise ImportError(f"unsafe recipe build-context entry: {relative}")
         result[relative] = path.read_bytes()
     return result
@@ -160,9 +208,117 @@ def _bundle(root: Path, recipe: dict[str, object]) -> tuple[str, bytes]:
 
 
 class ControlClient:
-    def __init__(self, base_url: str, token: str):
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None = None,
+        cookie_file: Path | None = None,
+    ):
+        if (token is None) == (cookie_file is None):
+            raise ImportError(
+                "exactly one control-plane authentication method is required"
+            )
         self.base_url = base_url.rstrip("/")
-        self.token = token
+        self._token = token
+        self._cookies: http.cookiejar.MozillaCookieJar | None = None
+        self._secrets = {token} if token is not None else set()
+        if cookie_file is not None:
+            cookies = http.cookiejar.MozillaCookieJar(str(cookie_file))
+            try:
+                cookies.load(ignore_discard=True, ignore_expires=False)
+            except FileNotFoundError as error:
+                raise ImportError("browser cookie file is unavailable") from error
+            except (OSError, http.cookiejar.LoadError) as error:
+                raise ImportError("browser cookie file is invalid") from error
+            self._cookies = cookies
+
+    def _auth_headers(self, method: str, url: str) -> dict[str, str]:
+        if self._token is not None:
+            return {"Authorization": f"Bearer {self._token}"}
+        assert self._cookies is not None
+        cookie_request = urllib.request.Request(url)
+        self._cookies.add_cookie_header(cookie_request)
+        cookie_header = cookie_request.get_header("Cookie")
+        if not cookie_header:
+            raise ImportError("browser cookie file has no cookies matching control URL")
+        pairs = [part.strip().split("=", 1) for part in cookie_header.split(";")]
+        values = [
+            value
+            for pair in pairs
+            if len(pair) == 2
+            for name, value in [pair]
+            if name == "vonk_csrf"
+        ]
+        self._secrets.update(pair[1] for pair in pairs if len(pair) == 2 and pair[1])
+        headers = {"Cookie": cookie_header}
+        if method.upper() in MUTATING_METHODS:
+            if len(values) != 1 or OPAQUE_BROWSER_TOKEN.fullmatch(values[0]) is None:
+                raise ImportError(
+                    "browser cookie file has no unique valid CSRF cookie for control URL"
+                )
+            headers["X-CSRF-Token"] = values[0]
+        return headers
+
+    def redact(self, value: object) -> str:
+        text = (
+            value.decode("utf-8", errors="replace")
+            if isinstance(value, bytes)
+            else str(value)
+        )
+        for secret in sorted(self._secrets, key=len, reverse=True):
+            if secret:
+                text = text.replace(secret, "[REDACTED]")
+        return text
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        payload: bytes | None,
+        content_type: str | None,
+        timeout: int = 30,
+    ) -> tuple[int, bytes]:
+        url = self.base_url + path
+        headers = {
+            **self._auth_headers(method, url),
+            "Accept": "application/json",
+            **({"Content-Type": content_type} if content_type is not None else {}),
+        }
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                content = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(content) > MAX_RESPONSE_BYTES:
+                    raise ImportError("control-plane response is too large")
+                return response.status, content
+        except urllib.error.HTTPError as error:
+            content = error.read(MAX_RESPONSE_BYTES + 1)
+            if len(content) > MAX_RESPONSE_BYTES:
+                raise ImportError("control-plane response is too large") from error
+            return error.code, content
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                raise ImportError(
+                    f"control-plane request timed out after {timeout} seconds: "
+                    f"{method} {path}"
+                ) from error
+            raise ImportError(
+                f"control-plane request failed: {method} {path}"
+            ) from error
+        except TimeoutError as error:
+            raise ImportError(
+                f"control-plane request timed out after {timeout} seconds: "
+                f"{method} {path}"
+            ) from error
+        except OSError as error:
+            raise ImportError(
+                f"control-plane request failed: {method} {path}"
+            ) from error
 
     def request(
         self, method: str, path: str, body: object | None = None
@@ -170,33 +326,25 @@ class ControlClient:
         payload = (
             None if body is None else json.dumps(body, separators=(",", ":")).encode()
         )
-        request = urllib.request.Request(
-            self.base_url + path,
-            data=payload,
-            method=method,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/json",
-                **({"Content-Type": "application/json"} if payload is not None else {}),
-            },
+        status, content = self._send(
+            method,
+            path,
+            payload,
+            "application/json" if payload is not None else None,
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                content = response.read(MAX_RESPONSE_BYTES + 1)
-                if len(content) > MAX_RESPONSE_BYTES:
-                    raise ImportError("control-plane response is too large")
-                return response.status, json.loads(content)
-        except urllib.error.HTTPError as error:
-            content = error.read(MAX_RESPONSE_BYTES + 1)
-            try:
-                value = json.loads(content)
-            except json.JSONDecodeError:
-                value = content
-            return error.code, value
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise ImportError(
-                f"control-plane request failed: {method} {path}"
-            ) from error
+            return status, json.loads(content)
+        except json.JSONDecodeError:
+            return status, content
+
+    def upload(
+        self,
+        path: str,
+        body: bytes,
+        content_type: str,
+        timeout: int = DEFAULT_UPLOAD_TIMEOUT_SECONDS,
+    ) -> tuple[int, bytes]:
+        return self._send("PUT", path, body, content_type, timeout=timeout)
 
 
 def _load_entities(root: Path) -> list[dict[str, object]]:
@@ -208,6 +356,177 @@ def _load_entities(root: Path) -> list[dict[str, object]]:
                 raise ImportError(f"entity kind does not match directory: {path}")
             result.append({"path": f"{directory}/{path.name}", "document": document})
     return result
+
+
+def _entity_reference(document: Mapping[str, object], path: str) -> CatalogReference:
+    identity = document.get("identity")
+    try:
+        if not isinstance(identity, Mapping):
+            raise TypeError("identity is missing")
+        kind = CatalogKind(document["kind"])
+        publisher = identity["publisher"]
+        slug = identity["slug"]
+        if not isinstance(publisher, str) or not isinstance(slug, str):
+            raise TypeError("identity is invalid")
+        return CatalogReference(
+            kind=kind,
+            publisher=publisher,
+            slug=slug,
+            content_sha256=catalog_content_sha256(document),
+        )
+    except (CatalogContractError, KeyError, TypeError, ValueError) as error:
+        raise ImportError(f"catalog entity identity is invalid: {path}") from error
+
+
+def _entity_references(
+    document: Mapping[str, object], path: str
+) -> tuple[CatalogReference, ...]:
+    """Return the dependency edges enforced by recipe-library validation."""
+
+    kind = document.get("kind")
+    references: list[CatalogReference] = []
+    try:
+        if kind == CatalogKind.MODEL.value:
+            references.append(
+                parse_catalog_reference(
+                    document["model_group"], expected_kind=CatalogKind.MODEL_GROUP
+                )
+            )
+        elif kind == CatalogKind.MODEL_VERSION.value:
+            references.append(
+                parse_catalog_reference(
+                    document["model"], expected_kind=CatalogKind.MODEL
+                )
+            )
+            lineage = document["lineage"]
+            if not isinstance(lineage, Mapping):
+                raise TypeError("lineage is invalid")
+            references.append(
+                parse_catalog_reference(
+                    lineage["source_model"], expected_kind=CatalogKind.MODEL
+                )
+            )
+        elif kind == CatalogKind.RUNTIME_DISTRIBUTION.value:
+            references.append(
+                parse_catalog_reference(
+                    document["implements_harness"],
+                    expected_kind=CatalogKind.EXECUTION_HARNESS,
+                )
+            )
+        elif kind == CatalogKind.PATCH_BUNDLE.value:
+            references.append(
+                parse_catalog_reference(
+                    document["applies_to"],
+                    expected_kind=CatalogKind.RUNTIME_DISTRIBUTION,
+                )
+            )
+            compatible: object = []
+            if "compatible_model_versions" in document:
+                compatible = document["compatible_model_versions"]
+            if not isinstance(compatible, list):
+                raise TypeError("compatible model versions are invalid")
+            references.extend(
+                parse_catalog_reference(value, expected_kind=CatalogKind.MODEL_VERSION)
+                for value in compatible
+            )
+    except (CatalogContractError, KeyError, TypeError, ValueError) as error:
+        raise ImportError(f"catalog entity dependency is invalid: {path}") from error
+    return tuple(references)
+
+
+def _platform_harnesses(platform: Path) -> list[dict[str, object]]:
+    content = platform / "config"
+    root = content if (content / "execution-harnesses").is_dir() else platform
+    harness_root = root / "execution-harnesses"
+    if not harness_root.is_dir():
+        raise ImportError("platform execution harnesses are unavailable")
+    result: list[dict[str, object]] = []
+    for path in sorted(harness_root.glob("*.json")):
+        document = _json(path)
+        if document.get("kind") != CatalogKind.EXECUTION_HARNESS.value:
+            raise ImportError(f"platform execution harness kind is invalid: {path}")
+        result.append({"path": str(path), "document": document})
+    if not result:
+        raise ImportError("platform execution harnesses are unavailable")
+    return result
+
+
+def _entity_closure(
+    entities: list[dict[str, object]],
+    recipes: list[dict[str, object]],
+    platform: Path,
+) -> list[dict[str, object]]:
+    importable: dict[CatalogReference, list[dict[str, object]]] = {}
+    available: dict[CatalogReference, list[dict[str, object]]] = {}
+    for item in entities:
+        document = item["document"]
+        path = str(item["path"])
+        if not isinstance(document, Mapping):
+            raise ImportError(f"catalog entity document is invalid: {path}")
+        reference = _entity_reference(document, path)
+        importable.setdefault(reference, []).append(item)
+        available.setdefault(reference, []).append(item)
+    for item in _platform_harnesses(platform):
+        document = item["document"]
+        path = str(item["path"])
+        if not isinstance(document, Mapping):
+            raise ImportError(f"catalog entity document is invalid: {path}")
+        reference = _entity_reference(document, path)
+        available.setdefault(reference, []).append(item)
+
+    pending: list[CatalogReference] = []
+    try:
+        for item in recipes:
+            document = item["document"]
+            if not isinstance(document, Mapping):
+                raise TypeError("recipe document is invalid")
+            pending.extend(recipe_references(document))
+    except (RecipeContractError, TypeError, ValueError) as error:
+        raise ImportError("selected recipe dependency is invalid") from error
+
+    selected: set[CatalogReference] = set()
+    visited: set[CatalogReference] = set()
+    while pending:
+        reference = pending.pop()
+        if reference in visited:
+            continue
+        matches = available.get(reference, [])
+        identity = "/".join(reference.portable_identity[:3])
+        if not matches:
+            raise ImportError(f"selected recipe dependency is missing: {identity}")
+        if len(matches) != 1:
+            raise ImportError(f"selected recipe dependency is ambiguous: {identity}")
+        visited.add(reference)
+        item = matches[0]
+        if reference in importable:
+            selected.add(reference)
+        document = item["document"]
+        assert isinstance(document, Mapping)
+        pending.extend(_entity_references(document, str(item["path"])))
+
+    chosen = [
+        items[0] for reference, items in importable.items() if reference in selected
+    ]
+    return sorted(
+        chosen,
+        key=lambda item: (
+            ENTITY_ORDER[_entity_reference(item["document"], str(item["path"])).kind],
+            _entity_reference(item["document"], str(item["path"])).publisher,
+            _entity_reference(item["document"], str(item["path"])).slug,
+            str(item["path"]),
+        ),
+    )
+
+
+def _scoped_entities(
+    entities: list[dict[str, object]],
+    recipes: list[dict[str, object]],
+    selected: set[str] | None,
+    platform: Path,
+) -> list[dict[str, object]]:
+    if selected is None:
+        return entities
+    return _entity_closure(entities, recipes, platform)
 
 
 def _load_recipes(
@@ -310,6 +629,7 @@ def main() -> int:
         entities = _load_entities(library)
         selected = set(args.recipes) if args.recipes else None
         recipes = _load_recipes(library, selected, args.include_candidates)
+        entities = _scoped_entities(entities, recipes, selected, platform)
         print(
             json.dumps(
                 {
@@ -322,25 +642,33 @@ def main() -> int:
         )
         if not args.apply:
             return 0
-        if not args.control_url or not args.token_file:
-            raise ImportError("--apply requires --control-url and --token-file")
-        client = ControlClient(args.control_url, _token(args.token_file))
+        if not args.control_url or (
+            args.token_file is None and args.cookie_file is None
+        ):
+            raise ImportError(
+                "--apply requires --control-url and one of --token-file or --cookie-file"
+            )
+        client = ControlClient(
+            args.control_url,
+            token=_token(args.token_file) if args.token_file is not None else None,
+            cookie_file=args.cookie_file,
+        )
         for item in entities:
             _apply_entity(client, item["document"])
         for item in recipes:
             recipe = item["document"]
             source_sha256, archive = _bundle(library, recipe)
-            upload = urllib.request.Request(
-                client.base_url + f"/api/v1/catalog/source-bundles/{source_sha256}",
-                data=archive,
-                method="PUT",
-                headers={
-                    "Authorization": f"Bearer {client.token}",
-                    "Content-Type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-                },
+            status, payload = client.upload(
+                f"/api/v1/catalog/source-bundles/{source_sha256}",
+                archive,
+                "application/vnd.vonk-forge.source-bundle.v1+tar",
+                timeout=args.upload_timeout_seconds,
             )
-            with urllib.request.urlopen(upload, timeout=60):
-                pass
+            if status not in (200, 201, 204):
+                raise ImportError(
+                    f"cannot upload source bundle for {item['path']}: "
+                    f"{client.redact(payload)}"
+                )
             digest = hashlib.sha256(
                 json.dumps(
                     recipe, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -357,7 +685,9 @@ def main() -> int:
                 },
             )
             if status not in (200, 201):
-                raise ImportError(f"cannot import {item['path']}: {payload}")
+                raise ImportError(
+                    f"cannot import {item['path']}: {client.redact(payload)}"
+                )
         return 0
     except ImportError as error:
         print(f"import-recipe-library: {error}", file=sys.stderr)
