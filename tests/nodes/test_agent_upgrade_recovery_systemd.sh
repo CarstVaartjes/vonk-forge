@@ -58,15 +58,32 @@ cleanup() {
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- "$test_root"
 }
-trap cleanup EXIT HUP INT TERM
+cleanup_test_root() {
+  rm -rf -- "$test_root"
+}
+trap cleanup_test_root EXIT HUP INT TERM
 
 if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
+  || systemctl --system cat "$agent_unit" >/dev/null 2>&1 \
   || systemctl --system cat "$helper_unit" >/dev/null 2>&1 \
   || systemctl --system cat "$socket_unit" >/dev/null 2>&1 \
-  || [[ -e /run/vonk-forge-package-candidates ]]; then
+  || systemctl --system cat "$recovery_unit" >/dev/null 2>&1 \
+  || [[ -e /var/lib/vonk-forge/package-upgrade \
+    || -L /var/lib/vonk-forge/package-upgrade ]] \
+  || [[ -e /var/lib/vonk-forge/helper-upgrade.pending \
+    || -L /var/lib/vonk-forge/helper-upgrade.pending ]] \
+  || [[ -e /var/lib/vonk-forge/helper-upgrade.receipt \
+    || -L /var/lib/vonk-forge/helper-upgrade.receipt ]] \
+  || [[ -e /lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf \
+    || -L /lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf ]] \
+  || [[ -e /lib/systemd/system/vonk-forge-package-helper.socket.d \
+    || -L /lib/systemd/system/vonk-forge-package-helper.socket.d ]] \
+  || [[ -e /run/vonk-forge-package-candidates \
+    || -L /run/vonk-forge-package-candidates ]]; then
   printf '%s\n' 'agent upgrade recovery fixture would collide with host state' >&2
   exit 1
 fi
+trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$test_root/target-bin" "$test_root/baseline-bin" \
   "$test_root/target-dist" "$test_root/baseline-dist"
@@ -245,6 +262,7 @@ RuntimeDirectory=$helper_runtime_directory
 RuntimeDirectoryMode=$helper_runtime_mode
 RuntimeDirectoryPreserve=$helper_runtime_preserve
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
+ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent
 TimeoutStopSec=15s
 UNIT
 cat > "$old_socket_unit" <<'UNIT'
