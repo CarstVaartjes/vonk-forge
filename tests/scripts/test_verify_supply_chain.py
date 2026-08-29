@@ -16,6 +16,7 @@ def _copy(tmp_path: Path) -> Path:
         ".github/workflows/ci.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
+        ".github/actions/agent-package-compile/action.yml",
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
@@ -99,6 +100,7 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-public-image-inputs",
         "scripts/verify-published-image",
         "scripts/verify-agent-deb",
+        "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
         "scripts/accept-recipe",
@@ -260,11 +262,13 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     (
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
+        ".github/actions/agent-package-compile/action.yml",
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",
+        "scripts/verify-agent-binaries",
     ),
 )
 def test_supply_chain_manifest_binds_agent_package_channel_authority(

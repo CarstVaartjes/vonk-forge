@@ -548,6 +548,8 @@ jobs:
           expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
           release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
           security_gate_mode: inline
+          binary_source_mode: compile
+          lifecycle_gate_mode: inline
 
   native-amd64-agent-lifecycle:
     name: Lifecycle-test accepted AMD64 release package on AMD64

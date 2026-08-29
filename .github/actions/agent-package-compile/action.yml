@@ -1,0 +1,183 @@
+name: Compile one agent package architecture
+description: Compile candidate and baseline agent binaries without release credentials
+
+inputs:
+  architecture:
+    description: Literal linux-arm64 or linux-amd64 target
+    required: true
+  channel:
+    description: Literal development package channel
+    required: true
+  publication_sequence:
+    description: Monotonic development publication sequence
+    required: true
+  version:
+    description: Exact development Debian package version
+    required: true
+  baseline_version:
+    description: Exact lower acceptance-only package version
+    required: true
+  artifact_name:
+    description: Final immutable package artifact name
+    required: true
+  source_sha:
+    description: Exact current main source commit
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate architecture compilation authority
+      id: target
+      shell: bash
+      env:
+        ARCHITECTURE: ${{ inputs.architecture }}
+        ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
+        CHANNEL: ${{ inputs.channel }}
+        PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        test "$CHANNEL" = dev
+        test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        test "$GITHUB_REF" = refs/heads/main
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        expected=$(
+          scripts/agent-package-metadata \
+            development "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
+            "$SOURCE_SHA" "$PUBLICATION_SEQUENCE"
+        )
+        value() {
+          local key=$1
+          printf '%s\n' "$expected" | sed -n "s/^${key}=//p"
+        }
+        test "$VERSION" = "$(value version)"
+        test "$BASELINE_VERSION" = "$(value baseline_version)"
+        test "$ARTIFACT_NAME" = "$(value artifact_name)"
+        case "$ARCHITECTURE" in
+          linux-arm64)
+            test "$(uname -m)" = aarch64
+            target=aarch64-unknown-linux-gnu
+            debian_architecture=arm64
+            ;;
+          linux-amd64)
+            test "$(uname -m)" = x86_64
+            target=x86_64-unknown-linux-gnu
+            debian_architecture=amd64
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+        test "$(value "${debian_architecture}_package")" = \
+          "vonk-forge-agent_${VERSION}_${debian_architecture}.deb"
+        printf '%s\n' \
+          "target=$target" \
+          "debian_architecture=$debian_architecture" \
+          "compiled_artifact_name=${ARTIFACT_NAME}-compiled-${debian_architecture}" \
+          >> "$GITHUB_OUTPUT"
+
+    - name: Revalidate exact current main compilation source
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -euo pipefail
+        git fetch --force --no-tags origin \
+          +refs/heads/main:refs/remotes/origin/main
+        test "$SOURCE_SHA" = \
+          "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+
+    - name: Install pinned native Rust toolchain
+      shell: bash
+      env:
+        TARGET: ${{ steps.target.outputs.target }}
+      run: |
+        set -euo pipefail
+        rustup set profile minimal
+        rustup toolchain install 1.97.1
+        rustup default 1.97.1
+        rustup target add "$TARGET"
+
+    - name: Restore architecture Rust dependency cache
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        shared-key: ${{ inputs.architecture }}
+        add-job-id-key: "false"
+
+    - name: Compile candidate and baseline binaries
+      shell: bash
+      env:
+        ARCHITECTURE: ${{ inputs.architecture }}
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
+        TARGET: ${{ steps.target.outputs.target }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+        candidate_semantic_version=${VERSION%%~*}
+        candidate_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" \
+            | sha256sum | cut -d' ' -f1
+        )"
+        baseline_semantic_version=${BASELINE_VERSION%%~*}
+        baseline_build_digest="sha256:$(
+          printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+            "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" "$BASELINE_VERSION" \
+            | sha256sum | cut -d' ' -f1
+        )"
+        export CARGO_INCREMENTAL=0 SOURCE_DATE_EPOCH="$epoch"
+        export VONK_AGENT_BUILD_DIGEST="$candidate_build_digest"
+        export VONK_AGENT_SEMANTIC_VERSION="$candidate_semantic_version"
+        cargo build --release --locked --target "$TARGET" --workspace
+        install -d -m 0755 compiled/candidate
+        install -m 0555 \
+          "target/$TARGET/release/vonk-agent" \
+          "target/$TARGET/release/vonk-agent-helper" \
+          compiled/candidate/
+        scripts/verify-agent-binaries \
+          --architecture "$ARCHITECTURE" \
+          --semantic-version "$candidate_semantic_version" \
+          --build-digest "$candidate_build_digest" \
+          --binaries-dir compiled/candidate \
+          > compiled/candidate.json
+
+        export VONK_AGENT_BUILD_DIGEST="$baseline_build_digest"
+        export VONK_AGENT_SEMANTIC_VERSION="$baseline_semantic_version"
+        cargo build --release --locked --target "$TARGET" --workspace
+        install -d -m 0755 compiled/baseline
+        install -m 0555 \
+          "target/$TARGET/release/vonk-agent" \
+          "target/$TARGET/release/vonk-agent-helper" \
+          compiled/baseline/
+        scripts/verify-agent-binaries \
+          --architecture "$ARCHITECTURE" \
+          --semantic-version "$baseline_semantic_version" \
+          --build-digest "$baseline_build_digest" \
+          --binaries-dir compiled/baseline \
+          > compiled/baseline.json
+
+    - name: Revalidate source before compiled artifact upload
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -euo pipefail
+        git fetch --force --no-tags origin \
+          +refs/heads/main:refs/remotes/origin/main
+        test "$SOURCE_SHA" = \
+          "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+
+    - name: Upload exact compiled binary set
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.target.outputs.compiled_artifact_name }}
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+        path: compiled
