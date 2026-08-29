@@ -424,13 +424,39 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
     workflow = _workflow(SETUPS)
     matrix = workflow["jobs"]["build-and-test"]["strategy"]["matrix"]["include"]
     actual = {
-        (entry["platform"], entry["runner"], entry["binaries"]) for entry in matrix
+        (
+            entry["platform"],
+            entry["runner"],
+            entry["binaries"],
+            entry["sccache_sha256"],
+        )
+        for entry in matrix
     }
     assert actual == {
-        ("linux-amd64", "ubuntu-24.04", "vonk-nas-setup vonk-spark-setup"),
-        ("linux-arm64", "ubuntu-24.04-arm", "vonk-nas-setup vonk-spark-setup"),
-        ("darwin-amd64", "macos-15-intel", "vonk-nas-setup"),
-        ("darwin-arm64", "macos-15", "vonk-nas-setup"),
+        (
+            "linux-amd64",
+            "ubuntu-24.04",
+            "vonk-nas-setup vonk-spark-setup",
+            "91544c5e9e3440aa0b75e0299cd3e880ac0be91ac537333adee69b507b3495c6",
+        ),
+        (
+            "linux-arm64",
+            "ubuntu-24.04-arm",
+            "vonk-nas-setup vonk-spark-setup",
+            "42998f3f9740df2a53d824cc1008f93337a85002a8801d4f4dc1d739b18aa787",
+        ),
+        (
+            "darwin-amd64",
+            "macos-15-intel",
+            "vonk-nas-setup",
+            "b3a564635eddda9119eeaffe3ada7400188e205907e6b68838c7400ec6f9103b",
+        ),
+        (
+            "darwin-arm64",
+            "macos-15",
+            "vonk-nas-setup",
+            "1e1da56216f82f4968a705ee19991ad1bcf474ab994cc440fd5cdfd045f7c4e8",
+        ),
     }
     assert all("target" not in entry for entry in matrix)
     steps = _steps(workflow["jobs"]["build-and-test"])
@@ -442,7 +468,33 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         "shared-key": "${{ matrix.platform }}",
         "add-job-id-key": "false",
     }
-    run = steps["Test and build exact native setup programs"]["run"]
+    compiler_cache = steps["Run Rust compiler cache"]
+    assert compiler_cache["uses"] == (
+        "mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba"
+    )
+    assert compiler_cache["with"] == {"version": "v0.16.0"}
+    verification = steps["Verify pinned Rust compiler cache binary"]
+    assert verification["env"] == {
+        "EXPECTED_SCCACHE_SHA256": "${{ matrix.sccache_sha256 }}"
+    }
+    verification_run = verification["run"]
+    assert 'test -n "${SCCACHE_PATH:-}"' in verification_run
+    assert 'test -x "$SCCACHE_PATH"' in verification_run
+    assert 'sha256sum "$SCCACHE_PATH"' in verification_run
+    assert 'shasum -a 256 "$SCCACHE_PATH"' in verification_run
+    assert '"$actual" != "$EXPECTED_SCCACHE_SHA256"' in verification_run
+    build_step = steps["Test and build exact native setup programs"]
+    assert build_step["env"] == {
+        "BINARIES": "${{ matrix.binaries }}",
+        "PLATFORM": "${{ matrix.platform }}",
+        "RUSTC_WRAPPER": "sccache",
+        "SCCACHE_GHA_ENABLED": "true",
+    }
+    run = build_step["run"]
+    step_names = [step["name"] for step in workflow["jobs"]["build-and-test"]["steps"]]
+    assert step_names.index("Verify pinned Rust compiler cache binary") < step_names.index(
+        "Test and build exact native setup programs"
+    )
     package_argument = 'package_args+=(--package "$binary")'
     release_test = 'cargo test --locked --release "${package_args[@]}"'
     release_build = (
