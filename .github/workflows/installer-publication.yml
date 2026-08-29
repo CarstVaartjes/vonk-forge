@@ -465,12 +465,12 @@ jobs:
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
     strategy:
-      # Both lanes use the already approved fixed Service names, but neither
-      # claims an external client boundary. Each independently proves its own
-      # gateway's Serve map and Self.PrimaryRoutes, so another HA Service host
-      # cannot satisfy its local gate.
+      # Both lanes use the same three fixed, pre-approved Tailscale Services.
+      # The control plane activates only one primary host for those Service
+      # routes at a time, so keep ownership exclusive even though the runners
+      # and Docker daemons are otherwise independent.
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         include:
           - lane: native

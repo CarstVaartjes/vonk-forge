@@ -83,7 +83,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     }
     assert jobs["nas-lane-acceptance"]["strategy"] == {
         "fail-fast": "false",
-        "max-parallel": "2",
+        "max-parallel": "1",
         "matrix": {
             "include": [
                 {
