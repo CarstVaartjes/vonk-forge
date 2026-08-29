@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_control.agent_upgrades import AgentUpgradePlan
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -28,14 +29,16 @@ class Jobs:
         self.calls = []
 
     def enqueue(self, kind, actor, authority_revision, targets, payload, *, request_id):
-        self.calls.append((kind, actor, authority_revision, targets, payload, request_id))
+        self.calls.append(
+            (kind, actor, authority_revision, targets, payload, request_id)
+        )
         return Enqueued()
 
     def get(self, job_id):
         return Enqueued(id=job_id)
 
 
-def _client(role: str, *, generic_jobs_enabled: bool = True):
+def _client(role: str, *, generic_jobs_enabled: bool = True, agent_upgrades=None):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     jobs = Jobs()
@@ -46,6 +49,7 @@ def _client(role: str, *, generic_jobs_enabled: bool = True):
         fleet=lambda: {"nodes": []},
         now=lambda: 10,
         generic_jobs_enabled=generic_jobs_enabled,
+        agent_upgrades=agent_upgrades,
     )
     client = TestClient(app)
     token = codec.issue(Actor(role, role), ttl_seconds=1000, now=0)
@@ -64,7 +68,7 @@ def _opaque(byte: int) -> str:
     return base64.urlsafe_b64encode(bytes([byte]) * 32).decode().rstrip("=")
 
 
-def _browser_client():
+def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -76,7 +80,7 @@ def _browser_client():
         db.add(
             User(
                 subject="admin",
-                role="administrator",
+                role=role,
                 disabled_at=None,
                 password_verifier=ADMIN_VERIFIER,
             )
@@ -100,9 +104,66 @@ def _browser_client():
         now=lambda: 10,
         generic_jobs_enabled=True,
         browser_auth=service,
+        agent_upgrades=agent_upgrades,
     )
     client = TestClient(app, base_url="https://forge.example.test")
     return client, issued, service, sessions, clock, codec, jobs
+
+
+class RepairPreviewUpgrades:
+    def __init__(self, current_package: dict[str, object] | None = None) -> None:
+        self.calls: list[tuple[object, object, object, object]] = []
+        self._current_package = current_package
+
+    def current_package(self):
+        assert self._current_package is not None
+        return dict(self._current_package)
+
+    def preview(self, node_ids, package, *, repair_manifest=None, strategy):
+        self.calls.append((node_ids, package, repair_manifest, strategy))
+        return AgentUpgradePlan(
+            authority_revision="c" * 64,
+            node_ids=tuple(node_ids),
+            package=dict(package),
+            plan_digest="d" * 64,
+            repair_manifest=(
+                None if repair_manifest is None else dict(repair_manifest)
+            ),
+            strategy=strategy,
+        )
+
+
+def repair_preview_document() -> dict[str, object]:
+    node_id = "spk_" + "a" * 32
+    authority = "1" * 64
+    package_sha = "2" * 64
+    package_url = (
+        f"https://install.vonkforge.ai/repair-capsules/{node_id}/{authority}/"
+        f"{package_sha}/vonk-forge-agent.deb"
+    )
+    package = {
+        "architecture": "linux-arm64",
+        "package_bytes": 6000000,
+        "package_sha256": package_sha,
+        "package_signature": "3" * 128,
+        "package_url": package_url,
+        "package_version": "0.1.0~dev.382+gd1cef9c7d1ce",
+        "schema_version": 1,
+        "target_binary_digest": "4" * 64,
+        "target_build_digest": "sha256:" + "5" * 64,
+    }
+    manifest = {
+        "schema_version": 1,
+        "kind": "agent-upgrade-repair",
+        "node_id": node_id,
+        "authority_sha256": authority,
+        "package": package,
+    }
+    return {
+        "node_ids": [node_id],
+        "repair_manifest": manifest,
+        "strategy": "one-at-a-time",
+    }
 
 
 def test_health_is_public_but_fleet_requires_authentication() -> None:
@@ -179,7 +240,10 @@ def test_admin_mutation_is_correlated_and_audited() -> None:
     )
     audit_response = client.get("/api/v1/audit", headers=headers)
     assert audit_response.status_code == 200
-    assert audit_response.json()["events"][0]["occurred_at"] == event.occurred_at.isoformat()
+    assert (
+        audit_response.json()["events"][0]["occurred_at"]
+        == event.occurred_at.isoformat()
+    )
 
 
 def test_generic_job_endpoint_cannot_create_reconciliation_authority() -> None:
@@ -190,7 +254,7 @@ def test_generic_job_endpoint_cannot_create_reconciliation_authority() -> None:
         headers=headers,
         json={
             "kind": "reconcile",
-            "authority_revision": "a"  * 64,
+            "authority_revision": "a" * 64,
             "targets": ["spk_" + "1" * 32],
             "payload": {"reconciliation_id": "attacker-controlled"},
         },
@@ -211,7 +275,7 @@ def test_production_boundary_rejects_direct_probe_job_submission() -> None:
         headers=headers,
         json={
             "kind": "probe",
-            "authority_revision": "a"  * 64,
+            "authority_revision": "a" * 64,
             "targets": ["spk_" + "1" * 32],
             "payload": {},
         },
@@ -260,6 +324,93 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
         ).status_code
         == 202
     )
+
+
+def test_browser_admin_can_preview_node_bound_repair_with_matching_csrf() -> None:
+    upgrades = RepairPreviewUpgrades()
+    client, issued, *_ = _browser_client(agent_upgrades=upgrades)
+    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("vonk_csrf", issued.csrf)
+    document = repair_preview_document()
+
+    response = client.post(
+        "/api/v1/agents/upgrades/preview",
+        headers={"x-csrf-token": issued.csrf},
+        json=document,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["repair_manifest"] == document["repair_manifest"]
+    assert upgrades.calls == [
+        (
+            document["node_ids"],
+            document["repair_manifest"]["package"],
+            document["repair_manifest"],
+            "one-at-a-time",
+        )
+    ]
+
+
+def test_browser_repair_preview_requires_csrf_and_administrator_role() -> None:
+    upgrades = RepairPreviewUpgrades()
+    client, issued, *_ = _browser_client(agent_upgrades=upgrades)
+    client.cookies.set("vonk_session", issued.token)
+    assert (
+        client.post(
+            "/api/v1/agents/upgrades/preview", json=repair_preview_document()
+        ).status_code
+        == 403
+    )
+    assert upgrades.calls == []
+
+    operator_upgrades = RepairPreviewUpgrades()
+    operator, operator_headers, *_ = _client(
+        "operator", agent_upgrades=operator_upgrades
+    )
+    assert (
+        operator.post(
+            "/api/v1/agents/upgrades/preview",
+            headers=operator_headers,
+            json=repair_preview_document(),
+        ).status_code
+        == 403
+    )
+    assert operator_upgrades.calls == []
+
+
+def test_upgrade_preview_accepts_current_package_echo_but_rejects_unsigned_custom() -> (
+    None
+):
+    repair_document = repair_preview_document()
+    current_package = repair_document["repair_manifest"]["package"]
+    upgrades = RepairPreviewUpgrades(current_package=current_package)
+    client, issued, *_ = _browser_client(agent_upgrades=upgrades)
+    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("vonk_csrf", issued.csrf)
+    headers = {"x-csrf-token": issued.csrf}
+    ordinary = {
+        "node_ids": repair_document["node_ids"],
+        "package": current_package,
+        "strategy": "one-at-a-time",
+    }
+
+    assert (
+        client.post(
+            "/api/v1/agents/upgrades/preview", headers=headers, json=ordinary
+        ).status_code
+        == 200
+    )
+    custom = {**current_package, "package_signature": "f" * 128}
+    response = client.post(
+        "/api/v1/agents/upgrades/preview",
+        headers=headers,
+        json={**ordinary, "package": custom},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "a custom agent package requires its node-bound repair manifest"
+    )
+    assert len(upgrades.calls) == 1
 
 
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:

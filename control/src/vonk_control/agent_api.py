@@ -317,15 +317,58 @@ class AgentUpgradePackageRequest(BaseModel):
     target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
+class AgentRepairManifestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]
+    kind: Literal["agent-upgrade-repair"]
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package: AgentUpgradePackageRequest
+
+
 class AgentUpgradePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
     package: AgentUpgradePackageRequest | None = None
+    repair_manifest: AgentRepairManifestRequest | None = None
     strategy: Literal["one-at-a-time", "all-at-once"] = "one-at-a-time"
 
 
 class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def _agent_upgrade_request_material(
+    body: AgentUpgradePreviewRequest,
+    upgrades: AgentUpgradeService,
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    repair_manifest = (
+        None
+        if body.repair_manifest is None
+        else body.repair_manifest.model_dump(mode="json")
+    )
+    if repair_manifest is not None:
+        manifest_package = repair_manifest["package"]
+        if (
+            body.package is not None
+            and body.package.model_dump(mode="json") != manifest_package
+        ):
+            raise AgentUpgradeConflict(
+                "agent repair manifest does not match its package descriptor"
+            )
+        assert isinstance(manifest_package, dict)
+        return manifest_package, repair_manifest
+    if body.package is None:
+        return upgrades.current_package(), None
+    package = body.package.model_dump(mode="json")
+    # Existing clients echo the controller-selected package from preview on
+    # apply. Preserve that ordinary path, while proving it is still the current
+    # published candidate rather than accepting an arbitrary custom package.
+    if package != upgrades.current_package():
+        raise AgentUpgradeConflict(
+            "a custom agent package requires its node-bound repair manifest"
+        )
+    return package, None
 
 
 class InventoryRequest(BaseModel):
@@ -1147,16 +1190,15 @@ def install_agent_routes(
     ) -> dict[str, object]:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
         if upgrades is None:
-            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
-        try:
-            package = (
-                upgrades.current_package()
-                if body.package is None
-                else body.package.model_dump()
+            raise HTTPException(
+                status_code=503, detail="agent upgrades are unavailable"
             )
+        try:
+            package, repair_manifest = _agent_upgrade_request_material(body, upgrades)
             plan = upgrades.preview(
                 body.node_ids,
                 package,
+                repair_manifest=repair_manifest,
                 strategy=body.strategy,
             )
         except AgentUpgradeConflict as error:
@@ -1166,6 +1208,11 @@ def install_agent_routes(
             "node_ids": list(plan.node_ids),
             "package": plan.package,
             "plan_digest": plan.plan_digest,
+            **(
+                {"repair_manifest": plan.repair_manifest}
+                if plan.repair_manifest is not None
+                else {}
+            ),
             "strategy": plan.strategy,
         }
 
@@ -1175,7 +1222,9 @@ def install_agent_routes(
     ) -> dict[str, object]:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
         if upgrades is None:
-            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
+            raise HTTPException(
+                status_code=503, detail="agent upgrades are unavailable"
+            )
         try:
             return upgrades.current_package()
         except AgentUpgradeConflict as error:
@@ -1189,19 +1238,18 @@ def install_agent_routes(
     ) -> dict[str, object]:
         _require_administrator(authenticated, "/api/v1/agents/upgrades")
         if upgrades is None:
-            raise HTTPException(status_code=503, detail="agent upgrades are unavailable")
-        try:
-            package = (
-                upgrades.current_package()
-                if body.package is None
-                else body.package.model_dump()
+            raise HTTPException(
+                status_code=503, detail="agent upgrades are unavailable"
             )
+        try:
+            package, repair_manifest = _agent_upgrade_request_material(body, upgrades)
             job = upgrades.apply(
                 body.node_ids,
                 package,
                 plan_digest=body.plan_digest,
                 actor=authenticated.subject,
                 request_id=request.state.request_id,
+                repair_manifest=repair_manifest,
                 strategy=body.strategy,
             )
         except AgentUpgradeConflict as error:

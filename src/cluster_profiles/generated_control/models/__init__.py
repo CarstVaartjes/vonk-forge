@@ -1,5 +1,6 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .agent_repair_manifest_request import AgentRepairManifestRequest
 from .agent_summary import AgentSummary
 from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
 from .agent_upgrade_apply_request_strategy import AgentUpgradeApplyRequestStrategy
@@ -311,6 +312,7 @@ from .visual_territorial_restrictions import VisualTerritorialRestrictions
 from .visual_validation import VisualValidation
 
 __all__ = (
+    "AgentRepairManifestRequest",
     "AgentsResponse",
     "AgentSummary",
     "AgentUpgradeApplyRequest",

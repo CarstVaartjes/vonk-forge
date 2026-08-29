@@ -1,6 +1,43 @@
 {
   "components": {
     "schemas": {
+      "AgentRepairManifestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "const": "agent-upgrade-repair",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/AgentUpgradePackageRequest"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "node_id",
+          "authority_sha256",
+          "package"
+        ],
+        "title": "AgentRepairManifestRequest",
+        "type": "object"
+      },
       "AgentSummary": {
         "additionalProperties": false,
         "properties": {
@@ -151,6 +188,16 @@
             "pattern": "^[0-9a-f]{64}$",
             "title": "Plan Digest",
             "type": "string"
+          },
+          "repair_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairManifestRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "strategy": {
             "default": "one-at-a-time",
@@ -350,6 +397,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AgentUpgradePackageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repair_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairManifestRequest"
               },
               {
                 "type": "null"

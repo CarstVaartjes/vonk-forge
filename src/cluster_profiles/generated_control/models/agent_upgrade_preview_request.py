@@ -14,6 +14,7 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.agent_repair_manifest_request import AgentRepairManifestRequest
   from ..models.agent_upgrade_package_request import AgentUpgradePackageRequest
 
 
@@ -30,11 +31,13 @@ class AgentUpgradePreviewRequest:
         Attributes:
             node_ids (Union[None, Unset, list[str]]):
             package (Union['AgentUpgradePackageRequest', None, Unset]):
+            repair_manifest (Union['AgentRepairManifestRequest', None, Unset]):
             strategy (Union[Unset, AgentUpgradePreviewRequestStrategy]):  Default: 'one-at-a-time'.
      """
 
     node_ids: Union[None, Unset, list[str]] = UNSET
     package: Union['AgentUpgradePackageRequest', None, Unset] = UNSET
+    repair_manifest: Union['AgentRepairManifestRequest', None, Unset] = UNSET
     strategy: Union[Unset, AgentUpgradePreviewRequestStrategy] = 'one-at-a-time'
 
 
@@ -42,6 +45,7 @@ class AgentUpgradePreviewRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.agent_repair_manifest_request import AgentRepairManifestRequest
         from ..models.agent_upgrade_package_request import AgentUpgradePackageRequest
         node_ids: Union[None, Unset, list[str]]
         if isinstance(self.node_ids, Unset):
@@ -61,6 +65,14 @@ class AgentUpgradePreviewRequest:
         else:
             package = self.package
 
+        repair_manifest: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.repair_manifest, Unset):
+            repair_manifest = UNSET
+        elif isinstance(self.repair_manifest, AgentRepairManifestRequest):
+            repair_manifest = self.repair_manifest.to_dict()
+        else:
+            repair_manifest = self.repair_manifest
+
         strategy: Union[Unset, str] = UNSET
         if not isinstance(self.strategy, Unset):
             strategy = self.strategy
@@ -75,6 +87,8 @@ class AgentUpgradePreviewRequest:
             field_dict["node_ids"] = node_ids
         if package is not UNSET:
             field_dict["package"] = package
+        if repair_manifest is not UNSET:
+            field_dict["repair_manifest"] = repair_manifest
         if strategy is not UNSET:
             field_dict["strategy"] = strategy
 
@@ -84,6 +98,7 @@ class AgentUpgradePreviewRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.agent_repair_manifest_request import AgentRepairManifestRequest
         from ..models.agent_upgrade_package_request import AgentUpgradePackageRequest
         d = dict(src_dict)
         def _parse_node_ids(data: object) -> Union[None, Unset, list[str]]:
@@ -124,6 +139,26 @@ class AgentUpgradePreviewRequest:
         package = _parse_package(d.pop("package", UNSET))
 
 
+        def _parse_repair_manifest(data: object) -> Union['AgentRepairManifestRequest', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                repair_manifest_type_0 = AgentRepairManifestRequest.from_dict(data)
+
+
+
+                return repair_manifest_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['AgentRepairManifestRequest', None, Unset], data)
+
+        repair_manifest = _parse_repair_manifest(d.pop("repair_manifest", UNSET))
+
+
         _strategy = d.pop("strategy", UNSET)
         strategy: Union[Unset, AgentUpgradePreviewRequestStrategy]
         if isinstance(_strategy,  Unset):
@@ -137,6 +172,7 @@ class AgentUpgradePreviewRequest:
         agent_upgrade_preview_request = cls(
             node_ids=node_ids,
             package=package,
+            repair_manifest=repair_manifest,
             strategy=strategy,
         )
 
