@@ -128,23 +128,48 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Run focused source and Compose contracts
+      - name: Install locked admin web dependencies
+        shell: bash
+        run: npm ci --prefix control/web
+
+      - parallel:
+          - name: Run focused Compose contracts
+            shell: bash
+            run: |
+              set -euo pipefail
+              uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
+                -p no:cacheprovider \
+                deploy/compose/tests/test_production_shaped_development.py \
+                scripts/tests/test_render_production_compose.py
+
+          - name: Test and build admin web
+            shell: bash
+            run: |
+              set -euo pipefail
+              npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
+              npm run build --prefix control/web
+
+          - name: Run focused control authentication contracts
+            shell: bash
+            run: |
+              set -euo pipefail
+              uv run --project control --frozen pytest -q \
+                -p no:cacheprovider \
+                control/tests/test_passwords.py \
+                control/tests/test_browser_auth.py \
+                control/tests/test_auth_api.py \
+                control/tests/test_api.py \
+                control/tests/test_settings.py
+
+          - name: Scan public image source inputs
+            shell: bash
+            run: scripts/verify-public-image-inputs
+
+      - name: Confirm parallel source contracts completed
         shell: bash
         run: |
           set -euo pipefail
-          uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
-            deploy/compose/tests/test_production_shaped_development.py \
-            scripts/tests/test_render_production_compose.py
-          npm ci --prefix control/web
-          npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
-          npm run build --prefix control/web
-          uv run --project control --frozen pytest -q \
-            control/tests/test_passwords.py \
-            control/tests/test_browser_auth.py \
-            control/tests/test_auth_api.py \
-            control/tests/test_api.py \
-            control/tests/test_settings.py
-          scripts/verify-public-image-inputs
+          test -d control/web/dist
 
       - name: Download exact OCI archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
