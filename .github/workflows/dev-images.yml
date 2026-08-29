@@ -9,139 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  build-oci-archives:
-    name: Build ${{ matrix.role }} OCI archive
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    concurrency:
-      group: vonk-forge-development-image-build-${{ matrix.role }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        include:
-          - role: api
-            archive: vonk-forge-api.oci.tar
-            context: .
-            dockerfile: control/Dockerfile
-            target: api
-            cache_from: type=gha,scope=vonk-forge-api
-            cache_to: type=gha,mode=max,scope=vonk-forge-api
-          - role: worker
-            archive: vonk-forge-worker.oci.tar
-            context: .
-            dockerfile: control/Dockerfile
-            target: worker
-            cache_from: type=gha,scope=vonk-forge-worker
-            cache_to: type=gha,mode=max,scope=vonk-forge-worker
-          - role: hermes
-            archive: vonk-forge-hermes.oci.tar
-            context: deploy/compose/hermes-agent
-            dockerfile: deploy/compose/hermes-agent/Dockerfile
-            target: managed
-            cache_from: ""
-            cache_to: ""
-    steps:
-      - name: Check out exact source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-        with:
-          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-          platforms: arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
-      - name: Validate image build matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          case "${{ matrix.role }}:${{ matrix.archive }}:${{ matrix.dockerfile }}:${{ matrix.target }}:${{ matrix.context }}" in
-            api:vonk-forge-api.oci.tar:control/Dockerfile:api:.|worker:vonk-forge-worker.oci.tar:control/Dockerfile:worker:.|hermes:vonk-forge-hermes.oci.tar:deploy/compose/hermes-agent/Dockerfile:managed:deploy/compose/hermes-agent) ;;
-            *) echo "development image matrix is invalid" >&2; exit 64 ;;
-          esac
-
-      - name: Build exact OCI archive
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
-          outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.archive }}
-          sbom: true
-          provenance: mode=max
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: ${{ matrix.cache_from }}
-          cache-to: ${{ matrix.cache_to }}
-
-      - name: Install Skopeo from Ubuntu
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v skopeo >/dev/null 2>&1; then
-            exit 0
-          fi
-          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-            exit 0
-          fi
-          for attempt in 1 2 3; do
-            timeout --foreground 120s sudo apt-get update \
-              -o Acquire::Retries=3 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 || true
-            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-              exit 0
-            fi
-          done
-          echo "unable to install skopeo after bounded retries" >&2
-          exit 1
-
-      - name: Accept exact local OCI archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/accept-development-image-archive \
-            "${{ matrix.role }}" "$RUNNER_TEMP/${{ matrix.archive }}" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" \
-            "$RUNNER_TEMP/${{ matrix.role }}.role-receipt.json"
-
-      - parallel:
-          - name: Upload exact OCI archive
-            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-            with:
-              name: development-image-${{ matrix.role }}-${{ github.sha }}-${{ github.run_id }}
-              if-no-files-found: error
-              retention-days: 1
-              compression-level: 0
-              path: ${{ runner.temp }}/${{ matrix.archive }}
-
-          - name: Upload exact OCI acceptance evidence
-            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-            with:
-              name: development-role-receipt-${{ matrix.role }}-${{ github.sha }}-${{ github.run_id }}
-              if-no-files-found: error
-              retention-days: 1
-              path: ${{ runner.temp }}/${{ matrix.role }}.role-receipt.json
-
-          - name: Upload thin Hermes publication capsule
-            if: matrix.role == 'hermes'
-            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-            with:
-              name: development-image-hermes-capsule-${{ github.sha }}-${{ github.run_id }}
-              if-no-files-found: error
-              retention-days: 1
-              path: ${{ runner.temp }}/vonk-forge-hermes.publication-capsule.tar
-
   verify-runtime-images:
     name: Verify pinned runtime images are pullable
     runs-on: ubuntu-24.04
@@ -172,7 +39,7 @@ jobs:
           done
 
   build-and-accept:
-    name: Build and accept main images
+    name: Test and accept main images
     needs: [verify-runtime-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -275,7 +142,7 @@ jobs:
                 fi
                 ready=1
                 for role in api worker hermes; do
-                  artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID"
+                  artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
                   count=$(jq --arg name "$artifact_name" \
                     '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
                     <<< "$response")
@@ -288,7 +155,7 @@ jobs:
                 if ((ready == 1)); then
                   download_complete=1
                   for role in api worker hermes; do
-                    artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID"
+                    artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
                     if ! gh run download "$GITHUB_RUN_ID" \
                       --repo "$GITHUB_REPOSITORY" \
                       --name "$artifact_name" --dir "$evidence_root"; then
@@ -322,6 +189,7 @@ jobs:
           set -euo pipefail
           scripts/dev-image-acceptance-receipt collect \
             "$RUNNER_TEMP/accepted-evidence" "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            "$GITHUB_RUN_ATTEMPT" \
             >> "$GITHUB_OUTPUT"
 
       - name: Render and validate disposable development Compose artifacts
@@ -362,13 +230,13 @@ jobs:
           set -euo pipefail
           scripts/dev-image-acceptance-receipt aggregate \
             "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/accepted-evidence" "$RUNNER_TEMP/accepted"
 
       - name: Upload accepted receipt and Compose inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: accepted-development-receipt-${{ github.sha }}-${{ github.run_id }}
+          name: accepted-development-receipt-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 1
           path: |
@@ -377,8 +245,7 @@ jobs:
             ${{ runner.temp }}/accepted/docker-compose.dev.yml
 
   publish-development-images:
-    name: Prefetch and publish accepted main images
-    needs: [build-oci-archives]
+    name: Build once and publish accepted main images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -397,7 +264,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact main before prefetch
+      - name: Verify exact main before building
         id: metadata
         shell: bash
         run: |
@@ -408,6 +275,12 @@ jobs:
             "$GITHUB_REF" "$GITHUB_SHA" \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Set up ARM64 emulation
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
 
       - parallel:
           - name: Set up Docker Buildx
@@ -435,23 +308,160 @@ jobs:
               echo "unable to install skopeo after bounded retries" >&2
               exit 1
 
-          - name: Prefetch exact API OCI archive
-            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-            with:
-              name: development-image-api-${{ github.sha }}-${{ github.run_id }}
-              path: ${{ runner.temp }}/accepted
+      - name: Log in for digest-only image staging
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-          - name: Prefetch exact worker OCI archive
-            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - parallel:
+          - name: Build API once to local OCI and exact registry digest
+            id: build_api
+            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
             with:
-              name: development-image-worker-${{ github.sha }}-${{ github.run_id }}
-              path: ${{ runner.temp }}/accepted
+              context: .
+              file: control/Dockerfile
+              target: api
+              platforms: linux/amd64,linux/arm64
+              outputs: |
+                type=oci,dest=${{ runner.temp }}/vonk-forge-api.oci.tar
+                type=image,name=${{ steps.metadata.outputs.api_image }},push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
+              sbom: true
+              provenance: mode=max
+              labels: |
+                org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                org.opencontainers.image.revision=${{ github.sha }}
+              cache-from: type=gha,scope=vonk-forge-api
+              cache-to: type=gha,mode=max,scope=vonk-forge-api
 
-          - name: Prefetch thin Hermes publication capsule
-            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+          - name: Build worker once to local OCI and exact registry digest
+            id: build_worker
+            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
             with:
-              name: development-image-hermes-capsule-${{ github.sha }}-${{ github.run_id }}
-              path: ${{ runner.temp }}/accepted
+              context: .
+              file: control/Dockerfile
+              target: worker
+              platforms: linux/amd64,linux/arm64
+              outputs: |
+                type=oci,dest=${{ runner.temp }}/vonk-forge-worker.oci.tar
+                type=image,name=${{ steps.metadata.outputs.worker_image }},push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
+              sbom: true
+              provenance: mode=max
+              labels: |
+                org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                org.opencontainers.image.revision=${{ github.sha }}
+              cache-from: type=gha,scope=vonk-forge-worker
+              cache-to: type=gha,mode=max,scope=vonk-forge-worker
+
+          - name: Build Hermes once to local OCI and exact registry digest
+            id: build_hermes
+            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            with:
+              context: deploy/compose/hermes-agent
+              file: deploy/compose/hermes-agent/Dockerfile
+              target: managed
+              platforms: linux/amd64,linux/arm64
+              outputs: |
+                type=oci,dest=${{ runner.temp }}/vonk-forge-hermes.oci.tar
+                type=image,name=ghcr.io/carstvaartjes/vonk-forge-hermes,push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
+              sbom: true
+              provenance: mode=max
+              labels: |
+                org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Remove registry write credentials before acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+          docker_config="${DOCKER_CONFIG:-${HOME:?}/.docker}/config.json"
+          if [[ -f "$docker_config" ]]; then
+            jq -e '
+              ((.auths // {}) | has("ghcr.io") | not)
+              and ((.credHelpers // {}) | has("ghcr.io") | not)
+            ' \
+              "$docker_config" >/dev/null
+          fi
+
+      - parallel:
+          - name: Deep-scan exact API build and bind its remote digest
+            shell: bash
+            run: |
+              scripts/accept-development-image-archive \
+                api "$RUNNER_TEMP/vonk-forge-api.oci.tar" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+                "${{ steps.metadata.outputs.api_image }}" \
+                "${{ steps.build_api.outputs.digest }}" \
+                "$RUNNER_TEMP/api.role-receipt.json"
+
+          - name: Deep-scan exact worker build and bind its remote digest
+            shell: bash
+            run: |
+              scripts/accept-development-image-archive \
+                worker "$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+                "${{ steps.metadata.outputs.worker_image }}" \
+                "${{ steps.build_worker.outputs.digest }}" \
+                "$RUNNER_TEMP/worker.role-receipt.json"
+
+          - name: Deep-scan exact Hermes build and bind its remote digest
+            shell: bash
+            run: |
+              scripts/accept-development-image-archive \
+                hermes "$RUNNER_TEMP/vonk-forge-hermes.oci.tar" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+                ghcr.io/carstvaartjes/vonk-forge-hermes \
+                "${{ steps.build_hermes.outputs.digest }}" \
+                "$RUNNER_TEMP/hermes.role-receipt.json"
+
+      - parallel:
+          - name: Upload exact API acceptance receipt
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-api-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/api.role-receipt.json
+
+          - name: Upload exact worker acceptance receipt
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-worker-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/worker.role-receipt.json
+
+          - name: Upload exact Hermes acceptance receipt
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-hermes-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/hermes.role-receipt.json
+
+      - parallel:
+          - name: Verify exact digest-only API manifest and attestations
+            shell: bash
+            run: >-
+              scripts/verify-published-image api
+              "${{ steps.metadata.outputs.api_image }}"
+              "${{ steps.build_api.outputs.digest }}" - "$GITHUB_SHA"
+
+          - name: Verify exact digest-only worker manifest and attestations
+            shell: bash
+            run: >-
+              scripts/verify-published-image worker
+              "${{ steps.metadata.outputs.worker_image }}"
+              "${{ steps.build_worker.outputs.digest }}" - "$GITHUB_SHA"
+
+          - name: Verify exact digest-only Hermes manifest and attestations
+            shell: bash
+            run: >-
+              scripts/verify-published-image hermes
+              ghcr.io/carstvaartjes/vonk-forge-hermes
+              "${{ steps.build_hermes.outputs.digest }}" - "$GITHUB_SHA"
 
           - name: Wait for checksum-bound acceptance receipt
             shell: bash
@@ -459,7 +469,7 @@ jobs:
               GH_TOKEN: ${{ github.token }}
             run: |
               set -euo pipefail
-              receipt_name="accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID"
+              receipt_name="accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
               receipt_root="$RUNNER_TEMP/accepted-receipt"
               install -d -m 0700 "$receipt_root"
               for attempt in $(seq 1 60); do
@@ -490,37 +500,47 @@ jobs:
               echo "accepted development image receipt was not published in time" >&2
               exit 1
 
-      - name: Confirm prefetched and accepted inputs
+      - name: Confirm accepted inputs
         shell: bash
         run: |
           set -euo pipefail
-          for role in api worker; do
-            test -f "$RUNNER_TEMP/accepted/vonk-forge-$role.oci.tar"
-          done
-          test -f \
-            "$RUNNER_TEMP/accepted/vonk-forge-hermes.publication-capsule.tar"
           test -f "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
           test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml"
           test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml"
           command -v skopeo >/dev/null
 
       - name: Verify receipt and recheck exact main before publication
+        id: accepted
         shell: bash
         run: |
           set -euo pipefail
+          install -d -m 0700 "$RUNNER_TEMP/accepted"
           cp "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml" \
             "$RUNNER_TEMP/accepted/docker-compose.pinned.yml"
           cp "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml" \
             "$RUNNER_TEMP/accepted/docker-compose.dev.yml"
           scripts/dev-image-acceptance-receipt verify \
             "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$RUNNER_TEMP/accepted"
+          for role in api worker hermes; do
+            accepted_digest=$(jq -er \
+              --arg role "$role" \
+              '.roles[$role].manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+              "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json")
+            local_digest=$(jq -er \
+              '.manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+              "$RUNNER_TEMP/$role.role-receipt.json")
+            [[ "$accepted_digest" == "$local_digest" ]]
+            printf '%s_digest=%s\n' "$role" "$accepted_digest" \
+              >> "$GITHUB_OUTPUT"
+          done
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           [[ "$GITHUB_SHA" == \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
 
-      - name: Log in to GHCR
+      - name: Log in to publish accepted image tags
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -532,67 +552,34 @@ jobs:
             shell: bash
             env:
               IMAGE: ${{ steps.metadata.outputs.api_image }}
+              DIGEST: ${{ steps.accepted.outputs.api_digest }}
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
               scripts/publish-immutable-image api \
-                "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
-                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/api.accepted-digest"
+                "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
+                "$RUNNER_TEMP/api.accepted-digest"
 
           - name: Publish immutable tested worker image
             shell: bash
             env:
               IMAGE: ${{ steps.metadata.outputs.worker_image }}
+              DIGEST: ${{ steps.accepted.outputs.worker_digest }}
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
               scripts/publish-immutable-image worker \
-                "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
-                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/worker.accepted-digest"
+                "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
+                "$RUNNER_TEMP/worker.accepted-digest"
 
           - name: Publish immutable tested Hermes image
             shell: bash
             env:
-              GH_TOKEN: ${{ github.token }}
               IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
+              DIGEST: ${{ steps.accepted.outputs.hermes_digest }}
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
-              set -euo pipefail
-              capsule="$RUNNER_TEMP/accepted/vonk-forge-hermes.publication-capsule.tar"
-              receipt="$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
-              expected_digest=$(jq -er \
-                '.roles.hermes.manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
-                "$receipt")
-              expected_capsule_sha256=$(jq -er \
-                '.roles.hermes.publication_capsule.sha256 | select(test("^[0-9a-f]{64}$"))' \
-                "$receipt")
-              set +e
-              scripts/dev-image-publication-capsule publish \
-                "$capsule" "$IMAGE" "$IMMUTABLE_TAG" \
-                "$expected_digest" "$expected_capsule_sha256" \
-                "$RUNNER_TEMP/hermes.accepted-digest"
-              capsule_status=$?
-              set -e
-              if ((capsule_status == 0)); then
-                exit 0
-              fi
-              if ((capsule_status != 75)); then
-                exit "$capsule_status"
-              fi
-
-              echo "Accepted Hermes layers are not reusable; downloading full archive" >&2
-              gh run download "$GITHUB_RUN_ID" \
-                --repo "$GITHUB_REPOSITORY" \
-                --name "development-image-hermes-$GITHUB_SHA-$GITHUB_RUN_ID" \
-                --dir "$RUNNER_TEMP/accepted"
-              scripts/dev-image-acceptance-receipt verify \
-                "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
-                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
-              git fetch --force --no-tags origin \
-                +refs/heads/main:refs/remotes/origin/main
-              [[ "$GITHUB_SHA" == \
-                "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
               scripts/publish-immutable-image hermes \
-                "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
-                "$IMAGE" "$IMMUTABLE_TAG" "$RUNNER_TEMP/hermes.accepted-digest"
+                "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
+                "$RUNNER_TEMP/hermes.accepted-digest"
 
       - name: Collect immutable tested image digests
         id: publish
@@ -631,6 +618,15 @@ jobs:
               IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+
+      - name: Recheck exact main before signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          [[ "$GITHUB_SHA" == \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
 
       - parallel:
           - name: Sign accepted API image provenance
@@ -691,4 +687,11 @@ jobs:
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
           scripts/promote-image-aliases \
             "$API_IMAGE" "$API_DIGEST" \
-            "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"
+            "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS" \
+            --postcondition bash -c '
+              set -euo pipefail
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              [[ "$GITHUB_SHA" == \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+            '

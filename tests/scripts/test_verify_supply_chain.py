@@ -88,7 +88,6 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/agent-apt-state",
         "scripts/dev-image-acceptance-receipt",
         "scripts/dev-image-metadata",
-        "scripts/dev-image-publication-capsule",
         "scripts/publish-immutable-image",
         "scripts/promote-image-aliases",
         "scripts/verify-release-tag-authority",
