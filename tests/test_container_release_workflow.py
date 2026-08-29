@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
@@ -71,6 +72,10 @@ def development_step_run(step_name: str) -> str:
             break
         run_lines.append(line[10:] if line else "")
     return "\n".join(run_lines)
+
+
+def development_workflow() -> dict[str, object]:
+    return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
 
 
 def write_executable(path: Path, body: str) -> None:
@@ -169,8 +174,15 @@ esac
     ]
 
 
-def test_development_images_build_supported_linux_architectures_with_cache() -> None:
+def test_development_images_build_supported_linux_architectures_with_targeted_cache() -> None:
     text = DEV_WORKFLOW.read_text()
+    workflow_data = yaml.safe_load(text)
+    images = {
+        image["role"]: image
+        for image in workflow_data["jobs"]["build-oci-archives"]["strategy"]["matrix"][
+            "include"
+        ]
+    }
     build = text[
         text.index("      - name: Build exact OCI archive") : text.index(
             "      - name: Upload exact OCI archive"
@@ -182,8 +194,56 @@ def test_development_images_build_supported_linux_architectures_with_cache() -> 
     assert "outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.archive }}" in build
     assert "sbom: true" in build
     assert "provenance: mode=max" in build
-    assert "cache-from: type=gha,scope=vonk-forge-${{ matrix.role }}" in build
-    assert "cache-to: type=gha,mode=max,scope=vonk-forge-${{ matrix.role }}" in build
+    assert "cache-from: ${{ matrix.cache_from }}" in build
+    assert "cache-to: ${{ matrix.cache_to }}" in build
+
+    for role in ("api", "worker"):
+        assert images[role]["cache_from"] == f"type=gha,scope=vonk-forge-{role}"
+        assert images[role]["cache_to"] == (
+            f"type=gha,mode=max,scope=vonk-forge-{role}"
+        )
+    assert images["hermes"]["cache_from"] == ""
+    assert images["hermes"]["cache_to"] == ""
+
+
+def test_stale_development_builds_cancel_without_interrupting_publication() -> None:
+    workflow = development_workflow()
+    jobs = workflow["jobs"]
+
+    assert "concurrency" not in workflow
+    assert jobs["build-oci-archives"]["concurrency"] == {
+        "group": "vonk-forge-development-image-build-${{ matrix.role }}",
+        "cancel-in-progress": "true",
+    }
+    assert jobs["build-and-accept"]["concurrency"] == {
+        "group": "vonk-forge-development-image-acceptance",
+        "cancel-in-progress": "true",
+    }
+    assert jobs["publish-development-images"]["concurrency"] == {
+        "group": "vonk-forge-development-image-publication",
+        "cancel-in-progress": "false",
+    }
+
+
+def test_development_publication_rechecks_exact_main_at_both_boundaries() -> None:
+    jobs = development_workflow()["jobs"]
+    acceptance_steps = {
+        step["name"]: step
+        for step in jobs["build-and-accept"]["steps"]
+        if "name" in step
+    }
+    publication_steps = {
+        step["name"]: step for step in jobs["publish-development-images"]["steps"]
+    }
+
+    acceptance_check = acceptance_steps["Verify exact main tip"]["run"]
+    publication_check = publication_steps["Recheck exact main before publication"]["run"]
+    exact_main = "refs/remotes/origin/main^{commit}"
+    assert exact_main in acceptance_check
+    assert "scripts/dev-image-metadata" in acceptance_check
+    assert '"$GITHUB_REF" "$GITHUB_SHA"' in acceptance_check
+    assert exact_main in publication_check
+    assert '[[ "$GITHUB_SHA" ==' in publication_check
 
 
 def test_development_images_enable_arm64_emulation_before_building() -> None:
@@ -230,18 +290,47 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
 
     install = validation.index("- name: Install locked admin web dependencies")
     parallel = validation.index("      - parallel:")
-    confirmation = validation.index("- name: Confirm parallel source contracts completed")
+    confirmation = validation.index(
+        "- name: Confirm parallel source and image prerequisites completed"
+    )
     assert install < parallel < confirmation
+    assert (
+        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0"
+        in validation[:install]
+    )
+    assert 'node-version: "24"' in validation[:install]
+    assert "cache: npm" in validation[:install]
+    assert (
+        "cache-dependency-path: control/web/package-lock.json"
+        in validation[:install]
+    )
+    assert "tools/openapi-client/package-lock.json" not in validation
+    assert "node_modules" not in validation
     for step in (
         "Run focused Compose contracts",
         "Test and build admin web",
         "Run focused control authentication contracts",
         "Scan public image source inputs",
+        "Download exact OCI archives",
+        "Install Skopeo from Ubuntu",
     ):
         assert f"          - name: {step}" in validation[parallel:confirmation]
     assert validation.count("npm ci --prefix control/web") == 1
     assert validation.count("-p no:cacheprovider") == 2
     assert "test -d control/web/dist" in validation[confirmation:]
+    assert 'test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"' in validation[
+        confirmation:
+    ]
+    second_parallel = validation.index("      - parallel:", parallel + 1)
+    render = validation.index(
+        "- name: Render and validate disposable development Compose artifacts"
+    )
+    assert confirmation < second_parallel < render
+    for step in (
+        "Load tested images without pulling",
+        "Preload pinned runtime dependencies",
+    ):
+        assert f"          - name: {step}" in validation[second_parallel:render]
 
 
 def test_development_image_publication_requires_both_platforms() -> None:

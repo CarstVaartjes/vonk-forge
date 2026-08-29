@@ -8,15 +8,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: vonk-forge-development-images
-  cancel-in-progress: false
-
 jobs:
   build-oci-archives:
     name: Build ${{ matrix.role }} OCI archive
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    concurrency:
+      group: vonk-forge-development-image-build-${{ matrix.role }}
+      cancel-in-progress: true
     permissions:
       contents: read
     strategy:
@@ -29,16 +28,22 @@ jobs:
             context: .
             dockerfile: control/Dockerfile
             target: api
+            cache_from: type=gha,scope=vonk-forge-api
+            cache_to: type=gha,mode=max,scope=vonk-forge-api
           - role: worker
             archive: vonk-forge-worker.oci.tar
             context: .
             dockerfile: control/Dockerfile
             target: worker
+            cache_from: type=gha,scope=vonk-forge-worker
+            cache_to: type=gha,mode=max,scope=vonk-forge-worker
           - role: hermes
             archive: vonk-forge-hermes.oci.tar
             context: deploy/compose/hermes-agent
             dockerfile: deploy/compose/hermes-agent/Dockerfile
             target: managed
+            cache_from: ""
+            cache_to: ""
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,8 +81,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=vonk-forge-${{ matrix.role }}
-          cache-to: type=gha,mode=max,scope=vonk-forge-${{ matrix.role }}
+          cache-from: ${{ matrix.cache_from }}
+          cache-to: ${{ matrix.cache_to }}
 
       - name: Upload exact OCI archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -93,6 +98,9 @@ jobs:
     needs: [build-oci-archives]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    concurrency:
+      group: vonk-forge-development-image-acceptance
+      cancel-in-progress: true
     permissions:
       contents: read
     outputs:
@@ -127,6 +135,13 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+
+      - name: Install pinned Node.js with admin web dependency cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: control/web/package-lock.json
 
       - name: Install locked admin web dependencies
         shell: bash
@@ -165,68 +180,71 @@ jobs:
             shell: bash
             run: scripts/verify-public-image-inputs
 
-      - name: Confirm parallel source contracts completed
+          - name: Download exact OCI archives
+            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+            with:
+              pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}
+              merge-multiple: true
+              path: ${{ runner.temp }}/accepted
+
+          - name: Install Skopeo from Ubuntu
+            shell: bash
+            run: |
+              set -euo pipefail
+              if command -v skopeo >/dev/null 2>&1; then
+                exit 0
+              fi
+              if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+                exit 0
+              fi
+              for attempt in 1 2 3; do
+                timeout --foreground 120s sudo apt-get update \
+                  -o Acquire::Retries=3 \
+                  -o Acquire::http::Timeout=30 \
+                  -o Acquire::https::Timeout=30 || true
+                if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+                  exit 0
+                fi
+              done
+              echo "unable to install skopeo after bounded retries" >&2
+              exit 1
+
+      - name: Confirm parallel source and image prerequisites completed
         shell: bash
         run: |
           set -euo pipefail
           test -d control/web/dist
+          test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"
+          command -v skopeo >/dev/null
 
-      - name: Download exact OCI archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/accepted
+      - parallel:
+          - name: Load tested images without pulling
+            shell: bash
+            run: |
+              set -euo pipefail
+              skopeo copy --override-os linux --override-arch amd64 \
+                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
+                docker-daemon:vonk-forge-api:dev-local
+              skopeo copy --override-os linux --override-arch amd64 \
+                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
+                docker-daemon:vonk-forge-worker:dev-local
+              skopeo copy --override-os linux --override-arch amd64 \
+                "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
+                docker-daemon:vonk-forge-hermes:dev-local
 
-      - name: Install Skopeo from Ubuntu
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v skopeo >/dev/null 2>&1; then
-            exit 0
-          fi
-          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-            exit 0
-          fi
-          for attempt in 1 2 3; do
-            timeout --foreground 120s sudo apt-get update \
-              -o Acquire::Retries=3 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 || true
-            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-              exit 0
-            fi
-          done
-          echo "unable to install skopeo after bounded retries" >&2
-          exit 1
-
-      - name: Load tested images without pulling
-        shell: bash
-        run: |
-          set -euo pipefail
-          skopeo copy --override-os linux --override-arch amd64 \
-            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
-            docker-daemon:vonk-forge-api:dev-local
-          skopeo copy --override-os linux --override-arch amd64 \
-            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
-            docker-daemon:vonk-forge-worker:dev-local
-          skopeo copy --override-os linux --override-arch amd64 \
-            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
-            docker-daemon:vonk-forge-hermes:dev-local
-
-      - name: Preload pinned runtime dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t runtime_images < <(
-            jq -r '.images[]' deploy/compose/images.lock.json \
-              | sort -u
-          )
-          test "${#runtime_images[@]}" = 7
-          for runtime_image in "${runtime_images[@]}"; do
-            [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
-            docker pull "$runtime_image"
-          done
+          - name: Preload pinned runtime dependencies
+            shell: bash
+            run: |
+              set -euo pipefail
+              mapfile -t runtime_images < <(
+                jq -r '.images[]' deploy/compose/images.lock.json \
+                  | sort -u
+              )
+              test "${#runtime_images[@]}" = 7
+              for runtime_image in "${runtime_images[@]}"; do
+                [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+                docker pull "$runtime_image"
+              done
 
       - name: Render and validate disposable development Compose artifacts
         shell: bash
@@ -423,6 +441,9 @@ jobs:
     needs: [build-and-accept]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: vonk-forge-development-image-publication
+      cancel-in-progress: false
     permissions:
       attestations: write
       contents: read

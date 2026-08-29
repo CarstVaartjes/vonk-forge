@@ -65,12 +65,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -121,29 +115,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             aptly fuse-overlayfs podman uidmap
-      - name: Test bounded aptly state compaction
-        run: >-
-          uv run --python 3.12 --frozen --with pytest==9.1.1
-          pytest -q tests/scripts/test_agent_apt_compaction_integration.py
-      - name: Test Spark rootless Podman OCI import
-        run: >-
-          cargo test --locked -p vonk-agent --test recipe_builder
-          faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
-      - name: Verify Python protocol parity
-        run: >-
-          uv run --project agent_protocol --frozen pytest -q
-          agent_protocol/tests/test_rust_fixtures.py
-      - name: Verify controller host-helper authority
-        run: >-
-          uv run --project control --frozen pytest -q
-          control/tests/test_host_helper_authority.py
-      - name: Record GPU node service exposure
-        shell: bash
-        run: |
-          set -euo pipefail
-          install -d -m 0755 artifacts
-          scripts/verify-agent-systemd --json \
-            | tee artifacts/vonk-forge-systemd-security.json
+      - parallel:
+          - name: Test bounded aptly state compaction
+            run: >-
+              uv run --python 3.12 --frozen --with pytest==9.1.1
+              pytest -q tests/scripts/test_agent_apt_compaction_integration.py
+          - name: Test Spark rootless Podman OCI import
+            run: >-
+              cargo test --locked -p vonk-agent --test recipe_builder
+              faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
+          - name: Verify Python protocol parity
+            run: >-
+              uv run --project agent_protocol --frozen pytest -q
+              agent_protocol/tests/test_rust_fixtures.py
+          - name: Verify controller host-helper authority
+            run: >-
+              uv run --project control --frozen pytest -q
+              control/tests/test_host_helper_authority.py
+          - name: Record GPU node service exposure
+            shell: bash
+            run: |
+              set -euo pipefail
+              install -d -m 0755 artifacts
+              scripts/verify-agent-systemd --json \
+                | tee artifacts/vonk-forge-systemd-security.json
       - name: Upload GPU node service exposure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -175,6 +170,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Node.js with generator dependency cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -323,10 +324,6 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
-      - name: Pull PostgreSQL test image
-        run: >-
-          docker pull
-          postgres:18.6@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
       - name: Run complete control suite
         shell: bash
         env:
@@ -360,6 +357,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Node.js with admin web dependency cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: control/web/package-lock.json
       - name: Install locked admin web dependencies
         run: npm ci --prefix control/web
       - name: Run complete admin web suite
@@ -374,6 +377,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Node.js with admin web dependency cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: control/web/package-lock.json
       - name: Install locked admin web dependencies
         run: npm ci --prefix control/web
       - name: Install pinned Chromium browser

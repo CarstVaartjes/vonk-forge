@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import gzip
 import hashlib
 import io
@@ -52,6 +53,7 @@ RCLONE_SECRET_ENVIRONMENT = (
     "RCLONE_CONFIG_R2_SECRET_ACCESS_KEY",
     "RCLONE_CONFIG_R2_ENDPOINT",
 )
+MAX_OBJECT_STORE_WORKERS = 8
 
 
 class StateError(RuntimeError):
@@ -412,6 +414,66 @@ def _write_immutable(store: ObjectStore, key: str, raw: bytes) -> None:
         raise StateError(f"persisted object hash mismatch: {key}")
 
 
+def _bounded_object_operations(
+    objects: dict[str, bytes], operation: Any
+) -> dict[str, Any]:
+    """Run one object-store phase concurrently without crossing its boundary."""
+    if not objects:
+        return {}
+    ordered = sorted(objects)
+    workers = min(MAX_OBJECT_STORE_WORKERS, len(ordered))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            key: executor.submit(operation, key, objects[key]) for key in ordered
+        }
+        concurrent.futures.wait(futures.values())
+        return {key: futures[key].result() for key in ordered}
+
+
+def _write_objects(store: ObjectStore, objects: dict[str, bytes]) -> None:
+    _bounded_object_operations(
+        objects, lambda key, raw: store.write(key, raw)
+    )
+
+
+def _write_immutable_objects(
+    store: ObjectStore,
+    objects: dict[str, bytes],
+    *,
+    description: str = "immutable object",
+) -> None:
+    """Preflight, persist, and verify an immutable object phase."""
+    existing = _bounded_object_operations(
+        objects, lambda key, _raw: store.list(key)
+    )
+    present: set[str] = set()
+    for key in sorted(objects):
+        keys = existing[key]
+        if key in keys:
+            if keys != [key]:
+                raise StateError(f"{description} path conflict: {key}")
+            present.add(key)
+        elif keys:
+            raise StateError(f"{description} path conflict: {key}")
+
+    existing_bytes = _bounded_object_operations(
+        {key: objects[key] for key in present},
+        lambda key, _raw: store.read(key),
+    )
+    for key in sorted(present):
+        if existing_bytes[key] != objects[key]:
+            raise StateError(f"{description} conflict: {key}")
+
+    missing = {key: raw for key, raw in objects.items() if key not in present}
+    _write_objects(store, missing)
+    persisted = _bounded_object_operations(
+        missing, lambda key, _raw: store.read(key)
+    )
+    for key in sorted(missing):
+        if persisted[key] != missing[key]:
+            raise StateError(f"persisted object hash mismatch: {key}")
+
+
 def commit_candidate(
     store: ObjectStore,
     publication: dict[str, Any],
@@ -423,27 +485,48 @@ def commit_candidate(
     validate_bundle(public_bundle, "public", receipt)
     prefix = _prefix(receipt)
     manifest = _manifest(receipt, state_bundle, public_bundle)
-    _write_immutable(store, f"{prefix}/aptly-state.tar.gz", state_bundle)
-    _write_immutable(store, f"{prefix}/public-tree.tar.gz", public_bundle)
+    _write_immutable_objects(
+        store,
+        {
+            f"{prefix}/aptly-state.tar.gz": state_bundle,
+            f"{prefix}/public-tree.tar.gz": public_bundle,
+        },
+    )
     _write_immutable(store, f"{prefix}/commit.json", manifest)
     return manifest
 
 
-def _read_committed(
-    store: ObjectStore, key: str, raw: bytes | None = None
-) -> tuple[dict[str, Any], bytes, bytes]:
+def _read_committed_objects(
+    store: ObjectStore,
+    key: str,
+    names: frozenset[str],
+    raw: bytes | None = None,
+) -> tuple[dict[str, Any], dict[str, bytes]]:
+    if not names or not names.issubset({"aptly_state", "public_tree"}):
+        raise StateError("committed object selection is invalid")
     manifest_raw = store.read(key) if raw is None else raw
     manifest = _validate_manifest(manifest_raw, key)
     bundles: dict[str, bytes] = {}
-    for name in ("aptly_state", "public_tree"):
+    for name in sorted(names):
         record = manifest["objects"][name]
         bundle = store.read(record["key"])
         if len(bundle) != record["size"] or sha256(bundle) != record["sha256"]:
             raise StateError("committed object hash mismatch")
         bundles[name] = bundle
     receipt = manifest["publication"]
-    validate_bundle(bundles["aptly_state"], "state", receipt)
-    validate_bundle(bundles["public_tree"], "public", receipt)
+    if "aptly_state" in bundles:
+        validate_bundle(bundles["aptly_state"], "state", receipt)
+    if "public_tree" in bundles:
+        validate_bundle(bundles["public_tree"], "public", receipt)
+    return manifest, bundles
+
+
+def _read_committed(
+    store: ObjectStore, key: str, raw: bytes | None = None
+) -> tuple[dict[str, Any], bytes, bytes]:
+    manifest, bundles = _read_committed_objects(
+        store, key, frozenset({"aptly_state", "public_tree"}), raw
+    )
     return manifest, bundles["aptly_state"], bundles["public_tree"]
 
 
@@ -523,7 +606,10 @@ def prepare_candidate(
         validate_bundle(requested_public, "public", requested)
     base_state = requested_state
     if base_state is None and high is not None:
-        _, base_state, _ = _read_committed(store, high[1], high[2])
+        _, bundles = _read_committed_objects(
+            store, high[1], frozenset({"aptly_state"}), high[2]
+        )
+        base_state = bundles["aptly_state"]
     return Preparation(
         mode="pending",
         state_bundle=base_state,
@@ -542,9 +628,10 @@ def publish_committed(
     receipt = _validate_receipt(publication)
     commit_key = f"{_prefix(receipt)}/commit.json"
     manifest_raw = state_store.read(commit_key)
-    manifest, _, public_bundle = _read_committed(
-        state_store, commit_key, manifest_raw
+    manifest, bundles = _read_committed_objects(
+        state_store, commit_key, frozenset({"public_tree"}), manifest_raw
     )
+    public_bundle = bundles["public_tree"]
     if manifest["publication"] != receipt:
         raise StateError("committed publication conflicts with request")
     validated = validate_bundle(public_bundle, "public", receipt)
@@ -564,22 +651,24 @@ def publish_committed(
         or name.startswith(f"dists/{receipt['distribution']}/")
         and "/by-hash/" in name
     }
-    for name in sorted(immutable_objects):
-        existing = public_store.list(name)
-        if existing == [name]:
-            if public_store.read(name) != public_files[name]:
-                raise StateError(f"immutable public object conflict: {name}")
-        elif existing:
-            raise StateError(f"immutable public object path conflict: {name}")
-    for name in sorted(immutable_objects):
-        _write_immutable(public_store, name, public_files[name])
-    upload_order = [
-        *sorted(set(public_files) - commit_objects - immutable_objects),
-        *(name for name in (release, release_gpg) if name in public_files),
-        inrelease,
-    ]
-    for name in upload_order:
-        public_store.write(name, public_files[name])
+    _write_immutable_objects(
+        public_store,
+        {name: public_files[name] for name in immutable_objects},
+        description="immutable public object",
+    )
+    ordinary = set(public_files) - commit_objects - immutable_objects
+    _write_objects(
+        public_store, {name: public_files[name] for name in ordinary}
+    )
+    _write_objects(
+        public_store,
+        {
+            name: public_files[name]
+            for name in (release, release_gpg)
+            if name in public_files
+        },
+    )
+    public_store.write(inrelease, public_files[inrelease])
     pointer = canonical_json(
         {
             "channel": receipt["channel"],

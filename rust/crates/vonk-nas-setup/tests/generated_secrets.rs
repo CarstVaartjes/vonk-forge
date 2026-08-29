@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
@@ -12,7 +13,7 @@ use rcgen::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 use vonk_nas_setup::{
     CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SetupRequest,
     prepare,
@@ -204,6 +205,87 @@ fn install_pki_bundle(output_root: &Path) -> PathBuf {
     .root
 }
 
+struct PkiFixture {
+    _root: TempDir,
+    bundle: PathBuf,
+}
+
+static PKI_FIXTURE: OnceLock<PkiFixture> = OnceLock::new();
+
+fn pki_fixture() -> &'static Path {
+    PKI_FIXTURE
+        .get_or_init(|| {
+            let root = tempdir().expect("PKI fixture directory");
+            let bundle = install_pki_bundle(root.path());
+            PkiFixture {
+                _root: root,
+                bundle,
+            }
+        })
+        .bundle
+        .as_path()
+}
+
+fn copy_fixture_tree(source: &Path, destination: &Path) {
+    let metadata = std::fs::symlink_metadata(source)
+        .unwrap_or_else(|error| panic!("inspect fixture path {}: {error}", source.display()));
+    let file_type = metadata.file_type();
+    assert!(
+        !file_type.is_symlink(),
+        "fixture source must not contain symbolic links: {}",
+        source.display()
+    );
+
+    if file_type.is_dir() {
+        std::fs::create_dir(destination).unwrap_or_else(|error| {
+            panic!(
+                "create fixture directory {}: {error}",
+                destination.display()
+            )
+        });
+        for entry in std::fs::read_dir(source)
+            .unwrap_or_else(|error| panic!("read fixture directory {}: {error}", source.display()))
+        {
+            let entry = entry.expect("fixture directory entry");
+            copy_fixture_tree(&entry.path(), &destination.join(entry.file_name()));
+        }
+        std::fs::set_permissions(destination, metadata.permissions()).unwrap_or_else(|error| {
+            panic!(
+                "preserve fixture directory permissions {}: {error}",
+                destination.display()
+            )
+        });
+        return;
+    }
+
+    assert!(
+        file_type.is_file(),
+        "fixture source must contain only directories and regular files: {}",
+        source.display()
+    );
+    std::fs::copy(source, destination).unwrap_or_else(|error| {
+        panic!(
+            "copy fixture file {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    });
+    std::fs::set_permissions(destination, metadata.permissions()).unwrap_or_else(|error| {
+        panic!(
+            "preserve fixture file permissions {}: {error}",
+            destination.display()
+        )
+    });
+}
+
+fn clone_pki_bundle(output_root: &Path) -> PathBuf {
+    let source = pki_fixture();
+    let bundle_name = source.file_name().expect("PKI fixture bundle name");
+    let destination = output_root.join(bundle_name);
+    copy_fixture_tree(source, &destination);
+    destination
+}
+
 fn replace_controller_leaf(
     secrets: &Path,
     not_before: time::OffsetDateTime,
@@ -362,7 +444,7 @@ fn assert_controller_pair_is_current_and_coherent(secrets: &Path) {
 #[test]
 fn upgrade_renews_controller_leaf_with_29_days_remaining_and_preserves_authority() {
     let temporary = tempdir().expect("temporary directory");
-    let bundle = install_pki_bundle(temporary.path());
+    let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
     let now = time::OffsetDateTime::now_utc();
     replace_controller_leaf(
@@ -426,7 +508,7 @@ fn upgrade_renews_controller_leaf_with_29_days_remaining_and_preserves_authority
 #[test]
 fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
     let temporary = tempdir().expect("temporary directory");
-    let bundle = install_pki_bundle(temporary.path());
+    let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
     let now = time::OffsetDateTime::now_utc();
     replace_controller_leaf(
@@ -453,7 +535,7 @@ fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
 #[test]
 fn upgrade_recovers_an_expired_controller_leaf_without_rotating_authority() {
     let temporary = tempdir().expect("temporary directory");
-    let bundle = install_pki_bundle(temporary.path());
+    let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
     let now = time::OffsetDateTime::now_utc();
     replace_controller_leaf(
@@ -483,7 +565,7 @@ fn upgrade_recovers_an_expired_controller_leaf_without_rotating_authority() {
 #[test]
 fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
     let temporary = tempdir().expect("temporary directory");
-    let bundle = install_pki_bundle(temporary.path());
+    let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
     let now = time::OffsetDateTime::now_utc();
     replace_controller_leaf(
@@ -519,25 +601,8 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
 #[test]
 fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     let payload = pki_payload();
-    let temporary = tempdir().expect("temporary directory");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(
-        Cursor::new(
-            b"control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n\n"
-                .to_vec(),
-        ),
-        &mut output,
-    );
-    let generator = SequenceGenerator::new(["step-ca-password"]);
-
-    let result = prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &generator,
-    )
-    .expect("generated PKI bundle");
-    let secrets = result.root.join("secrets");
+    let generated_bundle = pki_fixture();
+    let secrets = generated_bundle.join("secrets");
 
     let root_pem = std::fs::read(secrets.join("step-ca/root-certificate")).expect("root");
     let intermediate_pem =
@@ -645,7 +710,7 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         ca_config["authority"]["provisioners"][0]["name"],
         "vonk-forge-agent"
     );
-    let environment = std::fs::read_to_string(result.root.join(".env")).expect("environment");
+    let environment = std::fs::read_to_string(generated_bundle.join(".env")).expect("environment");
     assert!(environment.contains(&format!("AGENT_CA_PROVISIONER_KID={expected_kid}\n")));
 
     #[cfg(unix)]
@@ -665,6 +730,9 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         }
     }
 
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
     let private_jwk_before =
         std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK before upgrade");
     let mut upgrade_output = Vec::new();
@@ -698,22 +766,8 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
 #[test]
 fn complete_existing_pki_can_be_imported_without_regeneration() {
     let source = tempdir().expect("source directory");
+    let source_bundle = clone_pki_bundle(source.path());
     let payload = pki_payload();
-    let mut source_output = Vec::new();
-    let mut source_prompt = PromptIo::new(
-        Cursor::new(
-            b"control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n\n"
-                .to_vec(),
-        ),
-        &mut source_output,
-    );
-    let source_result = prepare(
-        &payload,
-        SetupRequest::install(source.path()),
-        &mut source_prompt,
-        &SequenceGenerator::new(["imported-step-ca-password"]),
-    )
-    .expect("source PKI");
 
     let target = tempdir().expect("target directory");
     #[cfg(unix)]
@@ -721,11 +775,11 @@ fn complete_existing_pki_can_be_imported_without_regeneration() {
         use std::os::unix::fs::symlink;
 
         let linked_bundle = target.path().join("linked-source-bundle");
-        symlink(&source_result.root, &linked_bundle).expect("import ancestor symlink");
+        symlink(&source_bundle, &linked_bundle).expect("import ancestor symlink");
         linked_bundle.join("secrets")
     };
     #[cfg(not(unix))]
-    let import_directory = source_result.root.join("secrets");
+    let import_directory = source_bundle.join("secrets");
     let input = format!(
         "control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n{}\n",
         import_directory.display()
@@ -742,7 +796,7 @@ fn complete_existing_pki_can_be_imported_without_regeneration() {
 
     for path in PKI_FILES {
         assert_eq!(
-            std::fs::read(source_result.root.join("secrets").join(path))
+            std::fs::read(source_bundle.join("secrets").join(path))
                 .unwrap_or_else(|error| panic!("source {path}: {error}")),
             std::fs::read(target_result.root.join("secrets").join(path))
                 .unwrap_or_else(|error| panic!("target {path}: {error}")),
@@ -750,7 +804,7 @@ fn complete_existing_pki_can_be_imported_without_regeneration() {
         );
     }
     assert_eq!(
-        std::fs::read_to_string(source_result.root.join(".env")).expect("source environment"),
+        std::fs::read_to_string(source_bundle.join(".env")).expect("source environment"),
         std::fs::read_to_string(target_result.root.join(".env")).expect("target environment")
     );
 }
@@ -761,7 +815,7 @@ fn pki_import_rejects_a_symlink_selected_as_the_directory_leaf() {
     use std::os::unix::fs::symlink;
 
     let source = tempdir().expect("source directory");
-    let source_result = install_pki_bundle(source.path());
+    let source_result = clone_pki_bundle(source.path());
     let target = tempdir().expect("target directory");
     let linked_secrets = target.path().join("linked-secrets");
     symlink(source_result.join("secrets"), &linked_secrets).expect("import leaf symlink");

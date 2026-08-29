@@ -4,6 +4,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SETUP_NODE = (
+    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0"
+)
 
 
 def _workflow_job_lines(workflow: str, job_name: str) -> list[str]:
@@ -74,7 +77,18 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
     assert "cargo test --workspace --locked" in rust_quality
+    assert "Install uv and Python" not in rust_quality
+    assert "setup-uv@" not in rust_quality
     assert "uv run --project agent_protocol --frozen pytest -q" in rust_platform
+    assert "      - parallel:" in rust_platform
+    assert rust_platform.index("Install Spark-compatible rootless Podman") < (
+        rust_platform.index("      - parallel:")
+    )
+    assert rust_platform.index("      - parallel:") < rust_platform.index(
+        "Upload GPU node service exposure"
+    )
+    assert "Install uv and Python" in rust_platform
+    assert "setup-uv@" in rust_platform
     assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in (
         rust_quality
     )
@@ -84,6 +98,14 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "needs.rust-platform.result" in rust
     assert "tests/control/test_openapi_clients.py" in generated
     assert "npm ci --prefix tools/openapi-client" in generated
+    assert SETUP_NODE in generated
+    assert 'node-version: "24"' in generated
+    assert "cache: npm" in generated
+    assert (
+        "cache-dependency-path: tools/openapi-client/package-lock.json" in generated
+    )
+    assert "control/web/package-lock.json" not in generated
+    assert "node_modules" not in generated
     assert "name: Complete repository suite (${{ matrix.shard.label }})" in repository
     assert "fail-fast: false" in repository
     assert repository.count("index:") == 6
@@ -108,9 +130,19 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "pytest-xdist==3.8.0" in control
     assert "pytest -q -n auto --dist loadfile" in control
     assert "--python 3.12" in control
+    assert "Pull PostgreSQL test image" not in control
+    assert "docker pull" not in control
+    assert "postgres:18.6@sha256:" not in control
     assert "npm test --prefix control/web -- --run" in web
     assert "npm run build --prefix control/web" in web
     assert "npm run test:e2e --prefix control/web -- --project=chromium" in browser
+    for node_job in (web, browser):
+        assert SETUP_NODE in node_job
+        assert 'node-version: "24"' in node_job
+        assert "cache: npm" in node_job
+        assert "cache-dependency-path: control/web/package-lock.json" in node_job
+        assert "tools/openapi-client/package-lock.json" not in node_job
+        assert "node_modules" not in node_job
     assert "name: Catalog and service suites" in aggregate
     assert (
         "needs: [repository-suite, control-suite, web-suite, web-browser-acceptance]"
@@ -124,3 +156,10 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "  agent-suite:" not in workflow
     assert "AGENT_RESULT" not in aggregate
     assert "scripts/update-global-contracts" not in workflow
+
+
+def test_browser_acceptance_balances_individual_tests_across_two_workers() -> None:
+    config = (ROOT / "control/web/playwright.config.ts").read_text()
+
+    assert "fullyParallel: true" in config
+    assert "workers: 2" in config
