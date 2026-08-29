@@ -56,6 +56,12 @@ inputs:
   security_gate_mode:
     description: Run package security gates inline or require an external caller gate
     required: true
+  binary_source_mode:
+    description: Compile binaries inline or consume exact precompiled architecture artifacts
+    required: true
+  lifecycle_gate_mode:
+    description: Run ARM64 lifecycle gates inline or require an external caller gate
+    required: true
 
 outputs:
   version:
@@ -116,16 +122,18 @@ runs:
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
         SECURITY_GATE_MODE: ${{ inputs.security_gate_mode }}
+        BINARY_SOURCE_MODE: ${{ inputs.binary_source_mode }}
+        LIFECYCLE_GATE_MODE: ${{ inputs.lifecycle_gate_mode }}
         NEXT_VERSION: ${{ inputs.next_version }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}:${SECURITY_GATE_MODE}" in
-          dev:agent-development:external)
+        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}:${SECURITY_GATE_MODE}:${BINARY_SOURCE_MODE}:${LIFECYCLE_GATE_MODE}" in
+          dev:agent-development:external:prebuilt:external)
             test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
             release=development
             ;;
-          stable:agent-release:inline)
+          stable:agent-release:inline:compile:inline)
             test "$PUBLICATION_SEQUENCE" = 0
             release=production
             ;;
@@ -168,6 +176,7 @@ runs:
           >> "$GITHUB_OUTPUT"
 
     - name: Install pinned Rust toolchain
+      if: inputs.binary_source_mode == 'compile'
       shell: bash
       run: |
         set -euo pipefail
@@ -182,6 +191,7 @@ runs:
         rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
 
     - name: Restore Rust dependency cache
+      if: inputs.binary_source_mode == 'compile'
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         shared-key: linux-arm64
@@ -221,6 +231,75 @@ runs:
       run: |
         set -euo pipefail
         scripts/materialize-agent-tools --output-root target
+
+    - name: Validate exact precompiled architecture binary sets
+      if: inputs.binary_source_mode == 'prebuilt'
+      shell: bash
+      env:
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        expected=$(printf '%s\n' \
+          prebuilt/amd64/baseline.json \
+          prebuilt/amd64/baseline/vonk-agent \
+          prebuilt/amd64/baseline/vonk-agent-helper \
+          prebuilt/amd64/candidate.json \
+          prebuilt/amd64/candidate/vonk-agent \
+          prebuilt/amd64/candidate/vonk-agent-helper \
+          prebuilt/arm64/baseline.json \
+          prebuilt/arm64/baseline/vonk-agent \
+          prebuilt/arm64/baseline/vonk-agent-helper \
+          prebuilt/arm64/candidate.json \
+          prebuilt/arm64/candidate/vonk-agent \
+          prebuilt/arm64/candidate/vonk-agent-helper)
+        actual=$(find prebuilt -type f -print | LC_ALL=C sort)
+        test "$actual" = "$expected"
+        test -z "$(find prebuilt -type l -print -quit)"
+        test -z "$(find prebuilt ! -type d ! -type f ! -type l -print -quit)"
+        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+        candidate_semantic_version=${VERSION%%~*}
+        baseline_semantic_version=${BASELINE_VERSION%%~*}
+        for architecture in arm64 amd64; do
+          platform="linux-$architecture"
+          candidate_build_digest="sha256:$(
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+              "$GITHUB_SHA" "$platform" "$lock_digest" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          baseline_build_digest="sha256:$(
+            printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+              "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          scripts/verify-agent-binaries \
+            --architecture "$platform" \
+            --semantic-version "$candidate_semantic_version" \
+            --build-digest "$candidate_build_digest" \
+            --binaries-dir "prebuilt/$architecture/candidate" \
+            > "$RUNNER_TEMP/$architecture-candidate.json"
+          cmp --silent \
+            "prebuilt/$architecture/candidate.json" \
+            "$RUNNER_TEMP/$architecture-candidate.json"
+          scripts/verify-agent-binaries \
+            --architecture "$platform" \
+            --semantic-version "$baseline_semantic_version" \
+            --build-digest "$baseline_build_digest" \
+            --binaries-dir "prebuilt/$architecture/baseline" \
+            > "$RUNNER_TEMP/$architecture-baseline.json"
+          cmp --silent \
+            "prebuilt/$architecture/baseline.json" \
+            "$RUNNER_TEMP/$architecture-baseline.json"
+          target=$([ "$architecture" = arm64 ] \
+            && printf aarch64-unknown-linux-gnu \
+            || printf x86_64-unknown-linux-gnu)
+          for set in candidate baseline; do
+            install -m 0555 "target/$target/release/oras" \
+              "prebuilt/$architecture/$set/oras"
+            install -m 0444 "target/$target/release/oras.LICENSE" \
+              "prebuilt/$architecture/$set/oras.LICENSE"
+          done
+        done
 
     - name: Materialize and verify protected agent key
       shell: bash
@@ -269,11 +348,22 @@ runs:
           printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
             "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
         )"
+        arm64_initial_args=()
+        amd64_initial_args=()
+        arm64_reproducible_args=(--binaries-dir target/aarch64-unknown-linux-gnu/release)
+        amd64_reproducible_args=(--binaries-dir target/x86_64-unknown-linux-gnu/release)
+        if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
+          arm64_initial_args=(--binaries-dir prebuilt/arm64/candidate)
+          amd64_initial_args=(--binaries-dir prebuilt/amd64/candidate)
+          arm64_reproducible_args=(--binaries-dir prebuilt/arm64/candidate)
+          amd64_reproducible_args=(--binaries-dir prebuilt/amd64/candidate)
+        fi
         scripts/build-agent-deb \
           --version "$VERSION" \
           --architecture linux-arm64 \
           --build-digest "$arm64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          "${arm64_initial_args[@]}" \
           --source-date-epoch "$epoch" \
           --output-dir dist
         scripts/build-agent-deb \
@@ -281,7 +371,7 @@ runs:
           --architecture linux-arm64 \
           --build-digest "$arm64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          --binaries-dir target/aarch64-unknown-linux-gnu/release \
+          "${arm64_reproducible_args[@]}" \
           --source-date-epoch "$epoch" \
           --output-dir reproducible
         scripts/build-agent-deb \
@@ -289,6 +379,7 @@ runs:
           --architecture linux-amd64 \
           --build-digest "$amd64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          "${amd64_initial_args[@]}" \
           --source-date-epoch "$epoch" \
           --output-dir dist
         scripts/build-agent-deb \
@@ -296,7 +387,7 @@ runs:
           --architecture linux-amd64 \
           --build-digest "$amd64_build_digest" \
           --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          --binaries-dir target/x86_64-unknown-linux-gnu/release \
+          "${amd64_reproducible_args[@]}" \
           --source-date-epoch "$epoch" \
           --output-dir reproducible
         cmp --silent \
@@ -324,7 +415,7 @@ runs:
         scripts/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
 
-    - name: Test fresh, offline, upgrade, downgrade, remove lifecycle
+    - name: Build lifecycle and acceptance package sets
       shell: bash
       env:
         BASELINE_VERSION: ${{ inputs.baseline_version }}
@@ -334,6 +425,82 @@ runs:
         VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
       run: |
         set -euo pipefail
+        epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+        arm64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
+        amd64_build_digest="sha256:$(
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
+        )"
+        arm64_candidate_args=(--binaries-dir target/aarch64-unknown-linux-gnu/release)
+        amd64_candidate_args=(--binaries-dir target/x86_64-unknown-linux-gnu/release)
+        if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
+          arm64_candidate_args=(--binaries-dir prebuilt/arm64/candidate)
+          amd64_candidate_args=(--binaries-dir prebuilt/amd64/candidate)
+        fi
+        scripts/build-agent-deb \
+          --version "$NEXT_VERSION" \
+          --architecture linux-arm64 \
+          --build-digest "$arm64_build_digest" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          "${arm64_candidate_args[@]}" \
+          --source-date-epoch "$epoch" \
+          --output-dir lifecycle
+        scripts/build-agent-deb \
+          --version "$NEXT_VERSION" \
+          --architecture linux-amd64 \
+          --build-digest "$amd64_build_digest" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          "${amd64_candidate_args[@]}" \
+          --source-date-epoch "$epoch" \
+          --output-dir lifecycle
+        scripts/verify-agent-deb --json \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+        scripts/verify-agent-deb --json \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
+        for architecture in arm64 amd64; do
+          platform="linux-$architecture"
+          baseline_binary_args=()
+          if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
+            baseline_binary_args=(--binaries-dir "prebuilt/$architecture/baseline")
+          fi
+          baseline_build_digest="sha256:$(
+            printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
+              "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          scripts/build-agent-deb \
+            --acceptance-baseline \
+            --version "$BASELINE_VERSION" \
+            --architecture "$platform" \
+            --build-digest "$baseline_build_digest" \
+            --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+            "${baseline_binary_args[@]}" \
+            --source-date-epoch "$epoch" \
+            --output-dir baseline
+          scripts/verify-agent-deb --json \
+            "baseline/vonk-forge-agent_${BASELINE_VERSION}_${architecture}.deb"
+        done
+        rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
+        test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
+
+    - name: Remove protected agent key
+      if: ${{ always() }}
+      shell: bash
+      run: rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
+
+    - name: Run inline ARM64 package lifecycle acceptance
+      if: inputs.lifecycle_gate_mode == 'inline' && success()
+      shell: bash
+      env:
+        BASELINE_VERSION: ${{ inputs.baseline_version }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
         trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
         sudo apt-get update
         sudo apt-get install --no-install-recommends -y \
@@ -358,67 +525,11 @@ runs:
         sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
           CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root \
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
-
-        epoch=$(git show -s --format=%ct "$GITHUB_SHA")
-        lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
-        arm64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
-        )"
-        amd64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
-        )"
-        scripts/build-agent-deb \
-          --version "$NEXT_VERSION" \
-          --architecture linux-arm64 \
-          --build-digest "$arm64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          --binaries-dir target/aarch64-unknown-linux-gnu/release \
-          --source-date-epoch "$epoch" \
-          --output-dir lifecycle
-        scripts/build-agent-deb \
-          --version "$NEXT_VERSION" \
-          --architecture linux-amd64 \
-          --build-digest "$amd64_build_digest" \
-          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-          --binaries-dir target/x86_64-unknown-linux-gnu/release \
-          --source-date-epoch "$epoch" \
-          --output-dir lifecycle
-        scripts/verify-agent-deb --json \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
-        scripts/verify-agent-deb --json \
-          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
-        for architecture in arm64 amd64; do
-          platform="linux-$architecture"
-          baseline_build_digest="sha256:$(
-            printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
-              "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
-              | sha256sum | cut -d' ' -f1
-          )"
-          scripts/build-agent-deb \
-            --acceptance-baseline \
-            --version "$BASELINE_VERSION" \
-            --architecture "$platform" \
-            --build-digest "$baseline_build_digest" \
-            --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
-            --source-date-epoch "$epoch" \
-            --output-dir baseline
-          scripts/verify-agent-deb --json \
-            "baseline/vonk-forge-agent_${BASELINE_VERSION}_${architecture}.deb"
-        done
-        rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
-        test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
         sudo scripts/test-agent-package-native-lifecycle \
           linux-arm64 \
           "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
           "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
           "$BASELINE_VERSION" "$VERSION"
-
-    - name: Remove protected agent key
-      if: ${{ always() }}
-      shell: bash
-      run: rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
 
     - name: Upload short-lived AMD64 lifecycle package
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

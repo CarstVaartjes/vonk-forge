@@ -118,6 +118,7 @@ def rust_package_inputs(root: Path) -> tuple[str, ...]:
         "scripts/materialize-agent-tools",
         "scripts/build-agent-package-evidence",
         "scripts/verify-agent-deb",
+        "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
     ]
     for relative in ("rust", "packaging"):
@@ -355,6 +356,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         ".github/workflows/ci.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
+        ".github/actions/agent-package-compile/action.yml",
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",

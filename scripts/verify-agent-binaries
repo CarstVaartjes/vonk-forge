@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Fail-closed verification for precompiled Vonk Forge agent binaries."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import stat
+import struct
+import sys
+from pathlib import Path
+
+ARCHITECTURES = {
+    "linux-arm64": 183,
+    "linux-amd64": 62,
+}
+BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+SEMVER = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z"
+)
+MAXIMUM_BINARY_BYTES = 512 * 1024 * 1024
+
+
+class VerificationError(RuntimeError):
+    """The precompiled binary set is incomplete or unsafe."""
+
+
+def read_regular(path: Path) -> bytes:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise VerificationError(f"binary is unavailable or unsafe: {path.name}") from error
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or not 64 <= before.st_size <= MAXIMUM_BINARY_BYTES
+            or before.st_mode & 0o022
+        ):
+            raise VerificationError(f"binary is unavailable or unsafe: {path.name}")
+        content = bytearray()
+        while len(content) < before.st_size:
+            chunk = os.read(descriptor, before.st_size - len(content))
+            if not chunk:
+                raise VerificationError(f"binary changed while read: {path.name}")
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_nlink,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+        if identity(before) != identity(after):
+            raise VerificationError(f"binary changed while read: {path.name}")
+        return bytes(content)
+    finally:
+        os.close(descriptor)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="verify-agent-binaries")
+    parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), required=True)
+    parser.add_argument("--semantic-version", required=True)
+    parser.add_argument("--build-digest", required=True)
+    parser.add_argument("--binaries-dir", required=True, type=Path)
+    arguments = parser.parse_args(argv)
+    try:
+        if SEMVER.fullmatch(arguments.semantic_version) is None:
+            raise VerificationError("semantic version is invalid")
+        if BUILD_DIGEST.fullmatch(arguments.build_digest) is None:
+            raise VerificationError("build digest is invalid")
+        root = arguments.binaries_dir
+        if not root.is_dir() or root.is_symlink():
+            raise VerificationError("binary directory is unavailable or unsafe")
+        expected_names = {"vonk-agent", "vonk-agent-helper"}
+        actual_names = {path.name for path in root.iterdir()}
+        if actual_names != expected_names:
+            raise VerificationError("binary directory does not contain the exact file set")
+        machine = ARCHITECTURES[arguments.architecture]
+        evidence: dict[str, object] = {
+            "architecture": arguments.architecture,
+            "build_digest": arguments.build_digest,
+            "files": {},
+            "semantic_version": arguments.semantic_version,
+        }
+        files: dict[str, object] = {}
+        for name in sorted(expected_names):
+            raw = read_regular(root / name)
+            if raw[:7] != b"\x7fELF\x02\x01\x01" or struct.unpack_from(
+                "<H", raw, 18
+            )[0] != machine:
+                raise VerificationError(f"binary architecture is invalid: {name}")
+            if name == "vonk-agent":
+                required_markers = (
+                    f"VONK_AGENT_BUILD_DIGEST={arguments.build_digest}".encode(),
+                    f"VONK_AGENT_SEMANTIC_VERSION={arguments.semantic_version}".encode(),
+                )
+                if any(marker not in raw for marker in required_markers):
+                    raise VerificationError("agent embedded identity is invalid")
+            files[name] = {
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "size": len(raw),
+            }
+        evidence["files"] = files
+        print(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
+    except (OSError, VerificationError) as error:
+        print(f"verify-agent-binaries: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

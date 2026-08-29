@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
+COMPILE_WORKFLOW = ROOT / ".github/actions/agent-package-compile/action.yml"
 SECURITY_WORKFLOW = ROOT / ".github/actions/agent-package-security/action.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
@@ -22,15 +23,9 @@ EXPECTED_ACTION_OUTPUTS = {
     "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
     "baseline_version": "${{ steps.accepted.outputs.baseline_version }}",
-    "arm64_baseline_package": (
-        "${{ steps.accepted.outputs.arm64_baseline_package }}"
-    ),
-    "amd64_baseline_package": (
-        "${{ steps.accepted.outputs.amd64_baseline_package }}"
-    ),
-    "baseline_artifact_name": (
-        "${{ steps.accepted.outputs.baseline_artifact_name }}"
-    ),
+    "arm64_baseline_package": ("${{ steps.accepted.outputs.arm64_baseline_package }}"),
+    "amd64_baseline_package": ("${{ steps.accepted.outputs.amd64_baseline_package }}"),
+    "baseline_artifact_name": ("${{ steps.accepted.outputs.baseline_artifact_name }}"),
     "amd64_lifecycle_package": (
         "${{ steps.accepted.outputs.amd64_lifecycle_package }}"
     ),
@@ -68,9 +63,7 @@ def workflow_action_pin_errors(root: Path) -> dict[str, list[str]]:
 
 def workflow_step(text: str, step_name: str) -> str:
     lines = text.splitlines()
-    marker = next(
-        line for line in lines if line.strip() == f"- name: {step_name}"
-    )
+    marker = next(line for line in lines if line.strip() == f"- name: {step_name}")
     indent = len(marker) - len(marker.lstrip())
     step_start = lines.index(marker)
     step_lines: list[str] = []
@@ -83,9 +76,7 @@ def workflow_step(text: str, step_name: str) -> str:
 
 def workflow_step_run(text: str, step_name: str) -> str:
     lines = text.splitlines()
-    marker = next(
-        line for line in lines if line.strip() == f"- name: {step_name}"
-    )
+    marker = next(line for line in lines if line.strip() == f"- name: {step_name}")
     indent = len(marker) - len(marker.lstrip())
     step_start = lines.index(marker)
     run_marker = f"{' ' * (indent + 2)}run: |"
@@ -234,7 +225,10 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     assert extracted.returncode == 0, extracted.stderr
 
     assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
-    assert b"vonkforge.invalid" not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
+    assert (
+        b"vonkforge.invalid"
+        not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
+    )
 
 
 def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
@@ -263,15 +257,18 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
             re.MULTILINE,
         )
     action_outputs = text.split("\noutputs:\n", 1)[1].split("\nruns:\n", 1)[0]
-    assert dict(
-        re.findall(
-            r"^  ([A-Za-z_][A-Za-z0-9_-]*):\n"
-            r"    description: .+\n"
-            r"    value: (.+)$",
-            action_outputs,
-            re.MULTILINE,
+    assert (
+        dict(
+            re.findall(
+                r"^  ([A-Za-z_][A-Za-z0-9_-]*):\n"
+                r"    description: .+\n"
+                r"    value: (.+)$",
+                action_outputs,
+                re.MULTILINE,
+            )
         )
-    ) == EXPECTED_ACTION_OUTPUTS
+        == EXPECTED_ACTION_OUTPUTS
+    )
     assert "secrets." not in text
     assert "vars." not in text
     cache = package_step("Restore Rust dependency cache")
@@ -369,9 +366,7 @@ def test_prebuild_authority_rejects_non_ed25519_with_matching_spki_hash(
     result = run_key_authority(private_key, old_workflow_fingerprint, runner_temp)
 
     assert result.returncode != 0
-    assert {path.name for path in runner_temp.iterdir()} == {
-        "vonk-agent-release.pem"
-    }
+    assert {path.name for path in runner_temp.iterdir()} == {"vonk-agent-release.pem"}
 
 
 def test_prebuild_authority_matches_signing_ed25519_key_id(tmp_path: Path) -> None:
@@ -383,9 +378,7 @@ def test_prebuild_authority_matches_signing_ed25519_key_id(tmp_path: Path) -> No
     result = run_key_authority(private_key, expected_key_id, runner_temp)
 
     assert result.returncode == 0, result.stderr
-    assert {path.name for path in runner_temp.iterdir()} == {
-        "vonk-agent-release.pem"
-    }
+    assert {path.name for path in runner_temp.iterdir()} == {"vonk-agent-release.pem"}
 
 
 def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
@@ -416,7 +409,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     for architecture in ("linux-arm64", "linux-amd64"):
         assert f"--architecture {architecture}" in text
     for architecture in ("arm64", "amd64"):
-        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in text
+        assert f"vonk-forge-agent_${{VERSION}}_{architecture}.deb" in text
     assert "vonk-agent-supervisor" not in text
     assert "/var/lib/vonk-forge/slots" not in text
     assert "/var/lib/vonk-forge/supervisor" not in text
@@ -443,9 +436,8 @@ def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
 def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:
     text = PACKAGE_WORKFLOW.read_text()
     validation = package_step("Validate package metadata and environment")
-    lifecycle = package_step_run(
-        "Test fresh, offline, upgrade, downgrade, remove lifecycle"
-    )
+    lifecycle = package_step_run("Build lifecycle and acceptance package sets")
+    inline = package_step_run("Run inline ARM64 package lifecycle acceptance")
     upload = package_step("Upload immutable acceptance baseline packages")
 
     assert "baseline_version:" in text
@@ -454,9 +446,12 @@ def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -
     assert "baseline_artifact_name:" in text
     assert "BASELINE_VERSION: ${{ inputs.baseline_version }}" in validation
     assert "--acceptance-baseline" in lifecycle
-    assert '"$BASELINE_VERSION" "$VERSION"' in lifecycle
+    assert '"$BASELINE_VERSION" "$VERSION"' in inline
     for architecture in ("arm64", "amd64"):
-        assert f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb" in upload
+        assert (
+            f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
+            in upload
+        )
     assert "retention-days: 7" in upload
     assert "overwrite: false" in upload
 
@@ -473,7 +468,7 @@ def test_package_build_outputs_and_attestations_name_both_architectures() -> Non
 
 def assert_agent_key_cleanup_contract(text: str) -> None:
     step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
-    lifecycle_name = "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    lifecycle_name = "Build lifecycle and acceptance package sets"
     lifecycle_index = step_names.index(lifecycle_name)
     fallback_name = "Remove protected agent key"
     cosign_name = "Install Cosign"
@@ -490,24 +485,28 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     assert "--architecture linux-amd64" in lifecycle
     final_build = lifecycle.rindex("scripts/build-agent-deb")
     cleanup = lifecycle.index(immediate_cleanup)
-    helper = lifecycle.rindex("sudo scripts/test-agent-package-native-lifecycle")
-    assert final_build < cleanup < helper
-    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in lifecycle[helper:]
+    assert final_build < cleanup
     assert immediate_cleanup in fallback
     assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
     assert step_names[lifecycle_index : lifecycle_index + 3] == [
         lifecycle_name,
         fallback_name,
-        "Upload short-lived AMD64 lifecycle package",
+        "Run inline ARM64 package lifecycle acceptance",
     ]
     assert step_names[lifecycle_index + 3 : lifecycle_index + 5] == [
+        "Upload short-lived AMD64 lifecycle package",
         "Upload immutable acceptance baseline packages",
-        cosign_name,
     ]
+    assert step_names[lifecycle_index + 5] == cosign_name
+    inline = workflow_step_run(text, "Run inline ARM64 package lifecycle acceptance")
+    assert 'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"' in inline
+    assert "sudo scripts/test-agent-package-native-lifecycle" in inline
     assert text.count(immediate_cleanup) == 2
 
 
-def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> None:
+def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> (
+    None
+):
     assert_agent_key_cleanup_contract(PACKAGE_WORKFLOW.read_text())
 
 
@@ -517,8 +516,7 @@ def test_agent_key_cleanup_guard_rejects_fallback_before_lifecycle() -> None:
     lifecycle_marker = next(
         line
         for line in text.splitlines()
-        if line.strip()
-        == "- name: Test fresh, offline, upgrade, downgrade, remove lifecycle"
+        if line.strip() == "- name: Build lifecycle and acceptance package sets"
     )
     mutated = text.replace(f"{fallback}\n\n", "", 1).replace(
         lifecycle_marker,
@@ -556,7 +554,9 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
     )
 
 
-def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_sets() -> None:
+def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_sets() -> (
+    None
+):
     text = PACKAGE_WORKFLOW.read_text()
 
     assert text.count("actions/upload-artifact@") == 3
@@ -575,7 +575,9 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
         )
         assert package in baseline
         assert f"{package}.sha256" in baseline
-    assert "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
+    assert (
+        "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
+    )
     assert "retention-days: 1" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
@@ -587,7 +589,7 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
 
 def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
-    metadata = text.split("\n  build-test-sign:\n", 1)[0]
+    metadata = text.split("\n  compile-arm64:\n", 1)[0]
 
     assert "  push:\n    branches: [main]\n  workflow_dispatch:" in text
     assert "paths:" not in text.split("  workflow_dispatch:", 1)[0]
@@ -618,8 +620,16 @@ def test_development_cancels_only_stale_keyless_and_package_build_work() -> None
         "\n  publish-apt:\n", 1
     )[0]
     publisher = text.split("\n  publish-apt:\n", 1)[1]
+    arm64 = text.split("\n  compile-arm64:\n", 1)[1].split("\n  compile-amd64:\n", 1)[0]
+    amd64 = text.split("\n  compile-amd64:\n", 1)[1].split("\n  build-test-sign:\n", 1)[
+        0
+    ]
 
     assert "concurrency:" not in workflow_header
+    assert "group: vonk-forge-agent-development-compile-arm64" in arm64
+    assert "cancel-in-progress: true" in arm64
+    assert "group: vonk-forge-agent-development-compile-amd64" in amd64
+    assert "cancel-in-progress: true" in amd64
     assert "group: vonk-forge-agent-development-package" in package
     assert "cancel-in-progress: true" in package
     assert "group: vonk-forge-agent-development-security" in security
@@ -637,12 +647,10 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
     package = text.split("\n  build-test-sign:\n", 1)[1].split(
         "\n  security-gates:\n", 1
     )[0]
-    authority = workflow_step(
-        security, "Revalidate exact current main security source"
-    )
+    authority = workflow_step(security, "Revalidate exact current main security source")
 
     assert "needs: [package-metadata]" in security
-    assert "needs: [package-metadata]" in package
+    assert "needs: [package-metadata, compile-arm64, compile-amd64]" in package
     assert "runs-on: ubuntu-24.04-arm" in security
     assert "uses: ./.github/actions/agent-package-security" in security
     assert "shared-key: linux-arm64" in security
@@ -661,16 +669,132 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
         assert forbidden not in security
 
 
+def test_development_compiles_architectures_in_parallel_without_release_authority() -> (
+    None
+):
+    text = WORKFLOW.read_text()
+    arm64 = text.split("\n  compile-arm64:\n", 1)[1].split("\n  compile-amd64:\n", 1)[0]
+    amd64 = text.split("\n  compile-amd64:\n", 1)[1].split("\n  build-test-sign:\n", 1)[
+        0
+    ]
+    package = text.split("\n  build-test-sign:\n", 1)[1].split(
+        "\n  security-gates:\n", 1
+    )[0]
+
+    for job, architecture, runner in (
+        (arm64, "linux-arm64", "ubuntu-24.04-arm"),
+        (amd64, "linux-amd64", "ubuntu-24.04"),
+    ):
+        assert "needs: [package-metadata]" in job
+        assert f"runs-on: {runner}" in job
+        assert "uses: ./.github/actions/agent-package-compile" in job
+        assert f"architecture: {architecture}" in job
+        assert "source_sha: ${{ github.sha }}" in job
+        for forbidden in (
+            "environment:",
+            "id-token: write",
+            "attestations: write",
+            "secrets.",
+            "VONK_AGENT_RELEASE_PRIVATE_KEY",
+            "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        ):
+            assert forbidden not in job
+    assert "needs: [package-metadata, compile-arm64, compile-amd64]" in package
+    assert "environment: agent-development" in package
+    assert (
+        text.count("release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}")
+        == 1
+    )
+    for architecture in ("arm64", "amd64"):
+        assert (
+            "name: ${{ needs.package-metadata.outputs.artifact_name }}"
+            f"-compiled-{architecture}"
+        ) in package
+        assert f"path: prebuilt/{architecture}" in package
+
+
+def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() -> None:
+    text = COMPILE_WORKFLOW.read_text()
+    validation = workflow_step(text, "Validate architecture compilation authority")
+    authority = workflow_step(text, "Revalidate exact current main compilation source")
+    compile_step = workflow_step(text, "Compile candidate and baseline binaries")
+    upload_authority = workflow_step(
+        text, "Revalidate source before compiled artifact upload"
+    )
+    upload = workflow_step(text, "Upload exact compiled binary set")
+
+    assert 'test "$CHANNEL" = dev' in validation
+    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in validation
+    assert 'test "$SOURCE_SHA" = "$GITHUB_SHA"' in validation
+    assert 'test "$GITHUB_REF" = refs/heads/main' in validation
+    assert "scripts/agent-package-metadata" in validation
+    assert "+refs/heads/main:refs/remotes/origin/main" in authority
+    assert "+refs/heads/main:refs/remotes/origin/main" in upload_authority
+    assert compile_step.count("cargo build --release --locked") == 2
+    assert "VONK_AGENT_BUILD_DIGEST" in compile_step
+    assert "VONK_AGENT_SEMANTIC_VERSION" in compile_step
+    assert compile_step.count("scripts/verify-agent-binaries") == 2
+    assert "name: ${{ steps.target.outputs.compiled_artifact_name }}" in upload
+    assert "retention-days: 1" in upload
+    assert "overwrite: false" in upload
+    assert (
+        text.index("Revalidate exact current main compilation source")
+        < text.index("Compile candidate and baseline binaries")
+        < text.index("Revalidate source before compiled artifact upload")
+        < text.index("Upload exact compiled binary set")
+    )
+    for forbidden in (
+        "release_private_key",
+        "VONK_AGENT_RELEASE_PRIVATE_KEY",
+        "cosign",
+        "actions/attest",
+        "agent-development",
+        "apt-development",
+    ):
+        assert forbidden not in text
+
+
+def test_protected_signer_validates_precompiled_bytes_before_key_materialization() -> (
+    None
+):
+    text = PACKAGE_WORKFLOW.read_text()
+    validation = package_step("Validate exact precompiled architecture binary sets")
+
+    assert "binary_source_mode:" in text
+    assert "dev:agent-development:external:prebuilt:external" in text
+    assert "stable:agent-release:inline:compile:inline" in text
+    assert (
+        text.index("Materialize pinned package tools")
+        < text.index("Validate exact precompiled architecture binary sets")
+        < text.index("Materialize and verify protected agent key")
+    )
+    assert "find prebuilt -type f" in validation
+    assert "find prebuilt -type l" in validation
+    assert validation.count("scripts/verify-agent-binaries") == 2
+    assert validation.count("cmp --silent") == 2
+    assert "RELEASE_PRIVATE_KEY" not in validation
+    build = package_step("Build package twice reproducibly")
+    lifecycle = package_step("Build lifecycle and acceptance package sets")
+    assert "prebuilt/arm64/candidate" in build
+    assert "prebuilt/amd64/candidate" in build
+    assert "prebuilt/$architecture/baseline" in lifecycle
+
+
 def test_package_security_gate_mode_is_explicit_and_channel_bound() -> None:
     package = PACKAGE_WORKFLOW.read_text()
     development = WORKFLOW.read_text()
     stable = UNIFIED_WORKFLOW.read_text()
     inline = package_step("Run Rust and packaging security gates")
 
-    assert "dev:agent-development:external" in package
-    assert "stable:agent-release:inline" in package
+    assert "dev:agent-development:external:prebuilt:external" in package
+    assert "stable:agent-release:inline:compile:inline" in package
     assert "security_gate_mode: external" in development
     assert "security_gate_mode: inline" in stable
+    assert "binary_source_mode: prebuilt" in development
+    assert "binary_source_mode: compile" in stable
+    assert "lifecycle_gate_mode: external" in development
+    assert "lifecycle_gate_mode: inline" in stable
+    assert "if: inputs.lifecycle_gate_mode == 'inline' && success()" in package
     assert "if: inputs.security_gate_mode == 'inline'" in inline
     assert "uses: ./.github/actions/agent-package-security" in inline
     assert "cargo test --workspace --locked" not in package
@@ -704,7 +828,7 @@ def test_development_agent_workflow_binds_both_literal_environment_boundaries() 
     assert "tag_oid: ''" in text
     assert (
         "needs: [package-metadata, build-test-sign, security-gates, "
-        "native-amd64-lifecycle]" in text
+        "native-arm64-lifecycle, native-amd64-lifecycle]" in text
     )
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
     for architecture in ("arm64", "amd64"):
@@ -736,11 +860,44 @@ def test_development_publication_requires_native_amd64_lifecycle() -> None:
     assert "podman shellcheck slirp4netns uidmap" in lifecycle
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
-    assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
+    assert "/usr/lib/vonk-forge/vonk-agent --version" in lifecycle
     assert (
         "needs: [package-metadata, build-test-sign, security-gates, "
-        "native-amd64-lifecycle]" in text
+        "native-arm64-lifecycle, native-amd64-lifecycle]" in text
     )
+
+
+def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:
+    text = WORKFLOW.read_text()
+    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1].split(
+        "\n  native-amd64-lifecycle:\n", 1
+    )[0]
+
+    assert "needs: [package-metadata, build-test-sign]" in lifecycle
+    assert "runs-on: ubuntu-24.04-arm" in lifecycle
+    assert "Revalidate exact current main ARM64 acceptance source" in lifecycle
+    assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
+    assert lifecycle.count("actions/download-artifact@") == 2
+    assert "outputs.artifact_name" in lifecycle
+    assert "outputs.baseline_artifact_name" in lifecycle
+    assert 'test "$(uname -m)" = aarch64' in lifecycle
+    assert "scripts/test-agent-package-native-lifecycle" in lifecycle
+    assert lifecycle.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 5
+    for exact_gate in (
+        "STALE_PENDING_FORMAT=legacy2 \\\n            CRASH_MODE=full-cgroup",
+        "STALE_PENDING_FORMAT=prior3 \\\n            CRASH_MODE=full-cgroup",
+        "STALE_PENDING_FORMAT=prior3 \\\n            CRASH_MODE=dpkg-only",
+        "STALE_PENDING_FORMAT=prior3 \\\n            CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root",
+    ):
+        assert exact_gate in lifecycle
+    for forbidden in (
+        "environment:",
+        "id-token: write",
+        "secrets.",
+        "VONK_AGENT_RELEASE_PRIVATE_KEY",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+    ):
+        assert forbidden not in lifecycle
 
 
 def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
@@ -748,12 +905,13 @@ def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
     package_text = PACKAGE_WORKFLOW.read_text()
     allowed_steps = (
         package_step("Build package twice reproducibly"),
-        package_step("Test fresh, offline, upgrade, downgrade, remove lifecycle"),
+        package_step("Build lifecycle and acceptance package sets"),
     )
 
     assert timestamp.findall(WORKFLOW.read_text()) == []
     assert timestamp.findall(UNIFIED_WORKFLOW.read_text()) == []
     assert len(timestamp.findall(package_text)) == 2
+    assert len(timestamp.findall(COMPILE_WORKFLOW.read_text())) == 1
     for step in allowed_steps:
         assert len(timestamp.findall(step)) == 1
         assert '--source-date-epoch "$epoch"' in step
@@ -788,9 +946,10 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
             re.MULTILINE,
         )
     for forbidden in ("repository:", "distribution:", "keyring:", "state_prefix:"):
-        assert f"  {forbidden}" not in text.split("\ninputs:\n", 1)[1].split(
-            "\nruns:\n", 1
-        )[0]
+        assert (
+            f"  {forbidden}"
+            not in text.split("\ninputs:\n", 1)[1].split("\nruns:\n", 1)[0]
+        )
     assert "dev:apt-development" in text
     assert "stable:apt-release" in text
     assert "secrets." not in text
@@ -809,13 +968,13 @@ def test_apt_publisher_verifies_and_indexes_both_architectures_as_one_release() 
     state = APT_STATE.read_text()
 
     for architecture in ("arm64", "amd64"):
-        assert f'vonk-forge-agent_${{VERSION}}_{architecture}.deb' in verify
-    assert '.architecture == $architecture' in verify
+        assert f"vonk-forge-agent_${{VERSION}}_{architecture}.deb" in verify
+    assert ".architecture == $architecture" in verify
     assert 'for architecture in ("amd64", "arm64")' in state
     assert 'publication["packages"][architecture]["sha256"]' in state
-    assert 'str(package_paths[architecture])' in state
+    assert "str(package_paths[architecture])" in state
     assert "--phase prepare" in generation
-    assert 'binary-$architecture/Packages' in generation
+    assert "binary-$architecture/Packages" in generation
     assert 'architectures:["amd64","arm64"]' in generation
     assert "-architectures=amd64,arm64" in generation
 
@@ -845,9 +1004,7 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
     text = apt_workflow()
     authority = apt_step("Reverify accepted development source authority")
     step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
-    authority_index = step_names.index(
-        "Reverify accepted development source authority"
-    )
+    authority_index = step_names.index("Reverify accepted development source authority")
 
     assert "environment: apt-development" in WORKFLOW.read_text()
     assert "environment: apt-release" in UNIFIED_WORKFLOW.read_text()
@@ -874,7 +1031,9 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
         assert forbidden not in authority
 
 
-def test_reusable_publishers_revalidate_stable_authority_at_mutation_boundaries() -> None:
+def test_reusable_publishers_revalidate_stable_authority_at_mutation_boundaries() -> (
+    None
+):
     package_text = PACKAGE_WORKFLOW.read_text()
     apt_text = APT_WORKFLOW.read_text()
 
@@ -1024,9 +1183,7 @@ def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> No
 def test_reusable_apt_publisher_supports_bucket_scoped_r2_tokens() -> None:
     text = apt_workflow()
     remote_count = text.count("RCLONE_CONFIG_R2_TYPE: s3")
-    no_bucket_check_count = text.count(
-        'RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"'
-    )
+    no_bucket_check_count = text.count('RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"')
 
     assert remote_count == 3
     assert no_bucket_check_count == remote_count
@@ -1037,8 +1194,13 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
     unified_text = UNIFIED_WORKFLOW.read_text()
     package_text = PACKAGE_WORKFLOW.read_text()
     apt_text = APT_WORKFLOW.read_text()
-    assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in agent_text
-    assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in unified_text
+    assert (
+        "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in agent_text
+    )
+    assert (
+        "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+        in unified_text
+    )
     assert (
         "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         in package_text
@@ -1057,9 +1219,10 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
         assert invalid_external_action_refs(f"uses: {bad_reference}\n") == [
             bad_reference
         ]
-    assert invalid_external_action_refs(
-        "uses: ./.github/actions/agent-package-build\n"
-    ) == []
+    assert (
+        invalid_external_action_refs("uses: ./.github/actions/agent-package-build\n")
+        == []
+    )
     assert "permissions:\n  contents: read" in agent_text
     assert "contents: write" in unified_text
     assert "id-token: write" in agent_text
