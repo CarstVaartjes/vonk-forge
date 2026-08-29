@@ -420,9 +420,65 @@ printf '%s\n' \
 # exists at the crash point.
 (
   intent_sync_quiescent=0
+  # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
+  release_held_dpkg() {
+    if [[ -n "${held_dpkg_pid:-}" \
+      && -n "${held_dpkg_start:-}" \
+      && -r "/proc/$held_dpkg_pid/stat" ]]; then
+      held_dpkg_current_start=$(awk '{ print $22 }' \
+        "/proc/$held_dpkg_pid/stat") || return 0
+      if [[ "$held_dpkg_current_start" = "$held_dpkg_start" ]]; then
+        kill -CONT "$held_dpkg_pid" >/dev/null 2>&1 || true
+      fi
+    fi
+  }
+  trap release_held_dpkg EXIT
   for _ in {1..2400}; do
     if [[ -f /var/lib/vonk-forge/package-upgrade/intent \
       && -f /var/lib/vonk-forge/package-upgrade/agent-blocked ]]; then
+      if [[ "$crash_mode" == dpkg-only \
+        && -z "${held_dpkg_pid:-}" ]]; then
+        candidate_dpkg_pid=$(sed -n 's/^dpkg_pid=//p' \
+          /var/lib/vonk-forge/package-upgrade/intent)
+        candidate_dpkg_start=$(sed -n 's/^dpkg_start_time=//p' \
+          /var/lib/vonk-forge/package-upgrade/intent)
+        case "$candidate_dpkg_pid" in ''|*[!0-9]*) exit 1 ;; esac
+        test "$candidate_dpkg_pid" -gt 1
+        case "$candidate_dpkg_start" in ''|*[!0-9]*) exit 1 ;; esac
+        test "$(awk '{ print $22 }' "/proc/$candidate_dpkg_pid/stat")" \
+          = "$candidate_dpkg_start"
+        test "$(readlink -f "/proc/$candidate_dpkg_pid/exe")" \
+          = /usr/bin/dpkg
+        held_dpkg_argv=()
+        mapfile -d '' -t held_dpkg_argv \
+          < "/proc/$candidate_dpkg_pid/cmdline"
+        test "${#held_dpkg_argv[@]}" -eq 4
+        test "${held_dpkg_argv[0]}" = /usr/bin/dpkg
+        test "${held_dpkg_argv[1]}" = --install
+        test "${held_dpkg_argv[2]}" = --force-confold
+        test "${held_dpkg_argv[3]}" = "$candidate"
+        readonly held_dpkg_pid=$candidate_dpkg_pid
+        readonly held_dpkg_start=$candidate_dpkg_start
+        kill -STOP "$held_dpkg_pid"
+        held_dpkg_state=
+        for _ in {1..1000}; do
+          test "$(awk '{ print $22 }' "/proc/$held_dpkg_pid/stat")" \
+            = "$held_dpkg_start"
+          held_dpkg_state=$(sed -n \
+            's/^State:[[:space:]]*\([A-Za-z]\).*/\1/p' \
+            "/proc/$held_dpkg_pid/status")
+          case "$held_dpkg_state" in
+            T|t) break ;;
+          esac
+          sleep 0.005
+        done
+        case "$held_dpkg_state" in
+          T|t) ;;
+          *) exit 1 ;;
+        esac
+        test "$(awk '{ print $22 }' "/proc/$held_dpkg_pid/stat")" \
+          = "$held_dpkg_start"
+      fi
       helper_control_group=$(systemctl --system show \
         --property=ControlGroup --value "$helper_unit")
       case "$helper_control_group" in
@@ -456,14 +512,15 @@ printf '%s\n' \
         sleep 0.005
         continue
       fi
-      systemctl --system freeze "$helper_unit"
       # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
       thaw_helper() {
         systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
         systemctl --system kill --kill-whom=all --signal=SIGCONT \
           "$helper_unit" >/dev/null 2>&1 || true
+        release_held_dpkg
       }
       trap thaw_helper EXIT
+      systemctl --system freeze "$helper_unit"
       trap 'exit 129' HUP
       trap 'exit 130' INT
       trap 'exit 143' TERM

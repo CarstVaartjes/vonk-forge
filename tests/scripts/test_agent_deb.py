@@ -544,6 +544,30 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert sync_gate < freeze
     sync_window = lifecycle[sync_gate:freeze]
     assert "-f /var/lib/vonk-forge/package-upgrade/agent-blocked" in sync_window
+    dpkg_only = sync_window.index('[[ "$crash_mode" == dpkg-only')
+    dpkg_hold = sync_window.index('kill -STOP "$held_dpkg_pid"')
+    sync_scan = sync_window.index("intent_sync_active=0")
+    assert dpkg_only < dpkg_hold < sync_scan
+    hold_window = sync_window[dpkg_only:sync_scan]
+    assert 'readonly held_dpkg_pid=$candidate_dpkg_pid' in hold_window
+    assert 'readonly held_dpkg_start=$candidate_dpkg_start' in hold_window
+    assert "dpkg_start_time=" in hold_window
+    assert "awk '{ print $22 }'" in hold_window
+    assert 'readlink -f "/proc/$candidate_dpkg_pid/exe"' in hold_window
+    for argv_part in (
+        "/usr/bin/dpkg",
+        "--install",
+        "--force-confold",
+        '"$candidate"',
+    ):
+        assert argv_part in hold_window
+    assert '"/proc/$held_dpkg_pid/status"' in hold_window
+    assert "T|t) break" in hold_window
+    assert 'trap release_held_dpkg EXIT' in sync_window[:dpkg_only]
+    cleanup_window = lifecycle[lifecycle.index("release_held_dpkg() {"):freeze]
+    assert '"$held_dpkg_current_start" = "$held_dpkg_start"' in cleanup_window
+    thaw_trap = sync_window.index("trap thaw_helper EXIT")
+    assert thaw_trap < freeze - sync_gate
     assert "/sys/fs/cgroup$helper_control_group/cgroup.procs" in sync_window
     assert "${intent_sync_argv[0]}" in sync_window
     assert "/usr/bin/sync" in sync_window
