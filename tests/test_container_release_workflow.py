@@ -586,6 +586,12 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert "https://spdx.dev/Document" in scan
     assert "https://slsa.dev/provenance/" in scan
     assert "docker://$image@$expected_digest" in scan
+    assert '[[ "$remote_digest" != "$expected_digest" ]]' in scan
+    assert '[[ "$local_digest" == "$expected_digest" ]]' not in scan
+    assert 'cut -f 1,2 "$local_platform_records"' in scan
+    assert 'cut -f 1,2 "$remote_platform_records"' in scan
+    assert '"$scan_root/local-runnable-platforms.tsv"' in scan
+    assert '"$scan_root/remote-runnable-platforms.tsv"' in scan
     assert "docker-daemon:" not in scan
 
 

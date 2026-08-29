@@ -106,6 +106,9 @@ while ((${#index_queue[@]} > 0)); do
 done
 [[ -n "$platform_index" ]]
 
+local_platform_records="$scan_root/local-platforms.tsv"
+scripts/verify-multiarch-image-manifest "$platform_index" \
+  > "$local_platform_records"
 while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   runnable_path="$layout/blobs/sha256/${runnable_digest#sha256:}"
   config_digest=$(jq -er '.config.digest' "$runnable_path")
@@ -167,16 +170,41 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   done
   ((found_sbom == 1))
   ((found_provenance == 1))
-done < <(scripts/verify-multiarch-image-manifest "$platform_index")
+done < "$local_platform_records"
 
 local_manifest="$scan_root/local-manifest.json"
 remote_manifest="$scan_root/remote-manifest.json"
 skopeo inspect --raw "oci-archive:$archive" > "$local_manifest"
 local_digest=$(skopeo manifest-digest "$local_manifest")
-[[ "$local_digest" == "$expected_digest" ]]
+if [[ ! "$local_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "local $role OCI root digest is invalid" >&2
+  exit 1
+fi
 skopeo inspect --raw "docker://$image@$expected_digest" > "$remote_manifest"
 remote_digest=$(skopeo manifest-digest "$remote_manifest")
-[[ "$remote_digest" == "$expected_digest" ]]
+if [[ "$remote_digest" != "$expected_digest" ]]; then
+  echo "remote $role root digest does not match the build result" >&2
+  exit 1
+fi
+
+# BuildKit emits exporter-specific attestation manifests, so the OCI archive
+# and registry root indexes intentionally have different digests. Their
+# runnable manifests must still be byte-identical; that binds the deeply
+# scanned local configs and layers to the exact remote image digest. Local and
+# remote SBOM/provenance attestations are verified independently.
+remote_platform_records="$scan_root/remote-platforms.tsv"
+scripts/verify-multiarch-image-manifest "$remote_manifest" \
+  > "$remote_platform_records"
+cut -f 1,2 "$local_platform_records" | sort \
+  > "$scan_root/local-runnable-platforms.tsv"
+cut -f 1,2 "$remote_platform_records" | sort \
+  > "$scan_root/remote-runnable-platforms.tsv"
+if ! cmp --silent \
+  "$scan_root/local-runnable-platforms.tsv" \
+  "$scan_root/remote-runnable-platforms.tsv"; then
+  echo "local and remote $role runnable manifests do not match" >&2
+  exit 1
+fi
 
 scripts/dev-image-acceptance-receipt create-role \
   "$receipt" "$commit" "$run_id" "$run_attempt" \
