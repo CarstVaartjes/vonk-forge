@@ -81,6 +81,16 @@ def development_workflow() -> dict[str, object]:
     return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
 
 
+def development_job_step(job_name: str, step_name: str) -> dict[str, str]:
+    steps = development_workflow()["jobs"][job_name]["steps"]
+    for entry in steps:
+        candidates = entry.get("parallel", [entry])
+        for candidate in candidates:
+            if candidate.get("name") == step_name:
+                return candidate
+    raise AssertionError(f"development workflow step not found: {step_name}")
+
+
 def write_executable(path: Path, body: str) -> None:
     path.write_text(f"#!/usr/bin/env bash\nset -euo pipefail\n{body}\n")
     path.chmod(0o755)
@@ -316,18 +326,147 @@ def test_development_image_acceptance_consumes_only_small_role_receipts() -> Non
         text.index("  build-and-accept:") : text.index("  publish-development-images:")
     ]
 
-    assert "needs: [build-oci-archives, verify-runtime-images]" in validation
+    assert "needs: [verify-runtime-images]" in validation
+    assert "actions: read" in validation
+    assert "for role in api worker hermes" in validation
     assert (
-        "pattern: development-role-receipt-*-${{ github.sha }}-${{ github.run_id }}"
+        'artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID"'
         in validation
     )
-    assert "merge-multiple: true" in validation
+    assert "actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" in validation
+    assert '[[ "$count" == 1 ]]' in validation
+    assert 'gh run download "$GITHUB_RUN_ID"' in validation
+    assert "seq 1 600" in validation
     assert validation.index(
-        "Download exact OCI acceptance evidence"
+        "Wait for exact OCI acceptance evidence"
     ) < validation.index("Validate accepted image evidence")
     assert "vonk-forge-api.oci.tar" not in validation
     assert "tar --extract" not in validation
     assert "skopeo inspect" not in validation
+
+
+def test_development_image_acceptance_waits_for_all_exact_role_receipts(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    state = tmp_path / "api-calls"
+    state.write_text("0\n")
+    write_executable(
+        fake_bin / "sleep",
+        ":",
+    )
+    write_executable(
+        fake_bin / "gh",
+        f"""
+case "$1:$2" in
+  api:*)
+    calls=$(cat {state})
+    calls=$((calls + 1))
+    printf '%s\n' "$calls" > {state}
+    if ((calls == 1)); then
+      printf '{{"artifacts":[]}}\n'
+      exit 0
+    fi
+    printf '%s\n' '{{"artifacts":[
+      {{"name":"development-role-receipt-api-{"a" * 40}-123","expired":false}},
+      {{"name":"development-role-receipt-worker-{"a" * 40}-123","expired":false}},
+      {{"name":"development-role-receipt-hermes-{"a" * 40}-123","expired":false}}
+    ]}}'
+    ;;
+  run:download)
+    shift 2
+    name=
+    destination=
+    while (($#)); do
+      case "$1" in
+        --name) name=$2; shift 2 ;;
+        --dir) destination=$2; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    role=${{name#development-role-receipt-}}
+    role=${{role%%-*}}
+    printf '{{}}\n' > "$destination/$role.role-receipt.json"
+    ;;
+  *) exit 64 ;;
+esac
+""",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            development_job_step(
+                "build-and-accept", "Wait for exact OCI acceptance evidence"
+            )["run"],
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
+            "GITHUB_RUN_ID": "123",
+            "GITHUB_SHA": "a" * 40,
+            "GH_TOKEN": "test-token",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert state.read_text() == "2\n"
+    for role in ("api", "worker", "hermes"):
+        assert (tmp_path / "accepted-evidence" / f"{role}.role-receipt.json").is_file()
+
+
+def test_development_image_acceptance_rejects_duplicate_role_artifacts(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    write_executable(fake_bin / "sleep", ":")
+    write_executable(
+        fake_bin / "gh",
+        f"""
+if [[ "$1" == api ]]; then
+  printf '%s\n' '{{"artifacts":[
+    {{"name":"development-role-receipt-api-{"a" * 40}-123","expired":false}},
+    {{"name":"development-role-receipt-api-{"a" * 40}-123","expired":false}}
+  ]}}'
+  exit 0
+fi
+exit 64
+""",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            development_job_step(
+                "build-and-accept", "Wait for exact OCI acceptance evidence"
+            )["run"],
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
+            "GITHUB_RUN_ID": "123",
+            "GITHUB_SHA": "a" * 40,
+            "GH_TOKEN": "test-token",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
 
 
 def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> None:
@@ -346,7 +485,7 @@ def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> N
     ]
 
     assert "needs" not in runtime
-    assert acceptance["needs"] == ["build-oci-archives", "verify-runtime-images"]
+    assert acceptance["needs"] == ["verify-runtime-images"]
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in runtime_text
     assert 'test "${#runtime_images[@]}" = 7' in runtime_text
     assert "sort -u" in runtime_text
@@ -383,7 +522,7 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
         "Test and build admin web",
         "Run focused control authentication contracts",
         "Scan public image source inputs",
-        "Download exact OCI acceptance evidence",
+        "Wait for exact OCI acceptance evidence",
     ):
         assert f"          - name: {step}" in validation[parallel:confirmation]
     assert validation.count("npm ci --prefix control/web") == 1
@@ -493,7 +632,9 @@ def test_development_publication_parallelizes_roles_inside_one_safe_job() -> Non
     assert publisher[aliases:].count("refs/remotes/origin/main^{commit}") == 1
 
 
-def test_development_publication_prefetches_thin_hermes_capsule_while_acceptance_runs() -> None:
+def test_development_publication_prefetches_thin_hermes_capsule_while_acceptance_runs() -> (
+    None
+):
     text = DEV_WORKFLOW.read_text()
     acceptance = text[
         text.index("  build-and-accept:") : text.index("  publish-development-images:")
@@ -503,6 +644,9 @@ def test_development_publication_prefetches_thin_hermes_capsule_while_acceptance
     publish_job = workflow_data["jobs"]["publish-development-images"]
 
     assert publish_job["needs"] == ["build-oci-archives"]
+    assert workflow_data["jobs"]["build-and-accept"]["needs"] == [
+        "verify-runtime-images"
+    ]
     assert publish_job["permissions"] == {
         "actions": "read",
         "attestations": "write",
@@ -547,15 +691,17 @@ def test_development_publication_prefetches_thin_hermes_capsule_while_acceptance
     assert '"$expected_digest" "$expected_capsule_sha256"' in hermes_block
     assert "capsule_status != 75" in publisher[hermes_publish:]
     assert "gh run download" in publisher[hermes_publish:]
-    assert "development-image-hermes-$GITHUB_SHA-$GITHUB_RUN_ID" in publisher[
-        hermes_publish:
-    ]
+    assert (
+        "development-image-hermes-$GITHUB_SHA-$GITHUB_RUN_ID"
+        in publisher[hermes_publish:]
+    )
     fallback = publisher[hermes_publish:]
     fallback_download = fallback.index('gh run download "$GITHUB_RUN_ID"')
     fallback_publish = fallback.index("scripts/publish-immutable-image hermes")
-    assert "refs/remotes/origin/main^{commit}" in fallback[
-        fallback_download:fallback_publish
-    ]
+    assert (
+        "refs/remotes/origin/main^{commit}"
+        in fallback[fallback_download:fallback_publish]
+    )
 
 
 def _write_receipt_fixture(root: Path) -> None:
@@ -631,9 +777,7 @@ def test_role_receipts_aggregate_without_retransferring_archives(
                 "manifest_digest": expected_digest,
                 "publication_capsule": {
                     "file": capsule.name,
-                    "artifact": (
-                        f"development-image-hermes-capsule-{commit}-{run_id}"
-                    ),
+                    "artifact": (f"development-image-hermes-capsule-{commit}-{run_id}"),
                     "sha256": hashlib.sha256(capsule.read_bytes()).hexdigest(),
                     "size": capsule.stat().st_size,
                 },

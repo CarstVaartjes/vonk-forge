@@ -393,8 +393,10 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     security = SECURITY_WORKFLOW.read_text()
 
     assert "cargo build" not in text
-    assert text.count("scripts/build-agent-deb") >= 6
-    assert "NEXT_VERSION: ${{ inputs.next_version }}" in text
+    assert text.count("scripts/build-agent-deb") == 3
+    assert "NEXT_VERSION: ${{ inputs.next_version }}" in package_step(
+        "Validate package metadata and environment"
+    )
     assert 'IFS=. read -r major minor patch <<< "$VERSION"' not in text
     assert "cmp --silent" in text
     assert "scripts/verify-agent-deb" in text
@@ -414,7 +416,8 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert text.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 5
     assert "CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root" in text
     for architecture in ("linux-arm64", "linux-amd64"):
-        assert f"--architecture {architecture}" in text
+        assert f"build_package {architecture}" in text
+        assert f"build_baseline {architecture}" in text
     for architecture in ("arm64", "amd64"):
         assert f"vonk-forge-agent_${{VERSION}}_{architecture}.deb" in text
     assert "vonk-agent-supervisor" not in text
@@ -427,6 +430,31 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cosign sign-blob --yes --bundle" in text
     assert "agent-release\\.yml@refs/heads/main" in text
     assert "ci\\.yml@refs/tags/v" in text
+
+
+def test_development_parallelizes_only_prebuilt_deterministic_package_assembly() -> (
+    None
+):
+    candidate = package_step_run("Build package twice reproducibly")
+    baseline = package_step_run("Build lifecycle acceptance baseline packages")
+
+    assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in candidate
+    assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in baseline
+    assert candidate.count('package_pids+=("$!")') == 4
+    assert baseline.count('package_pids+=("$!")') == 2
+    assert candidate.count('wait_for_packages "${package_pids[@]}"') == 1
+    assert baseline.count('wait_for_packages "${package_pids[@]}"') == 1
+    assert candidate.count("build_package linux-arm64") == 4
+    assert candidate.count("build_package linux-amd64") == 4
+    assert baseline.count("build_baseline linux-arm64") == 2
+    assert baseline.count("build_baseline linux-amd64") == 2
+    assert baseline.count("build_lifecycle linux-arm64") == 1
+    assert baseline.count("build_lifecycle linux-amd64") == 1
+    assert baseline.index(
+        'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]'
+    ) < baseline.index("build_lifecycle linux-arm64")
+    assert 'return "$failed"' in candidate
+    assert 'return "$failed"' in baseline
 
 
 def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
@@ -443,7 +471,7 @@ def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
 def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:
     text = PACKAGE_WORKFLOW.read_text()
     validation = package_step("Validate package metadata and environment")
-    lifecycle = package_step_run("Build lifecycle and acceptance package sets")
+    lifecycle = package_step_run("Build lifecycle acceptance baseline packages")
     inline = package_step_run("Run inline ARM64 package lifecycle acceptance")
     upload = package_step("Upload immutable acceptance baseline packages")
 
@@ -475,7 +503,7 @@ def test_package_build_outputs_and_attestations_name_both_architectures() -> Non
 
 def assert_agent_key_cleanup_contract(text: str) -> None:
     step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
-    lifecycle_name = "Build lifecycle and acceptance package sets"
+    lifecycle_name = "Build lifecycle acceptance baseline packages"
     lifecycle_index = step_names.index(lifecycle_name)
     fallback_name = "Remove protected agent key"
     cosign_name = "Install Cosign"
@@ -486,13 +514,14 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert lifecycle.count("scripts/build-agent-deb") == 3
+    assert lifecycle.count("scripts/build-agent-deb") == 2
     assert "--acceptance-baseline" in lifecycle
-    assert "--architecture linux-arm64" in lifecycle
-    assert "--architecture linux-amd64" in lifecycle
+    assert "build_baseline linux-arm64" in lifecycle
+    assert "build_baseline linux-amd64" in lifecycle
     final_build = lifecycle.rindex("scripts/build-agent-deb")
+    wait = lifecycle.index('wait_for_packages "${package_pids[@]}"')
     cleanup = lifecycle.index(immediate_cleanup)
-    assert final_build < cleanup
+    assert final_build < wait < cleanup
     assert immediate_cleanup in fallback
     assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
     assert step_names[lifecycle_index : lifecycle_index + 3] == [
@@ -523,7 +552,7 @@ def test_agent_key_cleanup_guard_rejects_fallback_before_lifecycle() -> None:
     lifecycle_marker = next(
         line
         for line in text.splitlines()
-        if line.strip() == "- name: Build lifecycle and acceptance package sets"
+        if line.strip() == "- name: Build lifecycle acceptance baseline packages"
     )
     mutated = text.replace(f"{fallback}\n\n", "", 1).replace(
         lifecycle_marker,
@@ -586,6 +615,7 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
     assert (
         "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
     )
+    assert "if: inputs.lifecycle_gate_mode == 'inline'" in lifecycle
     assert "retention-days: 1" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
     assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
@@ -723,12 +753,13 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
         == 1
     )
     for architecture in ("arm64", "amd64"):
-        for binary_set in ("candidate", "baseline"):
-            assert (
-                "name: ${{ needs.package-metadata.outputs.artifact_name }}"
-                f"-compiled-{architecture}-{binary_set}"
-            ) in package
-        assert package.count(f"path: prebuilt/{architecture}") == 2
+        assert (
+            "pattern: ${{ needs.package-metadata.outputs.artifact_name }}"
+            f"-compiled-{architecture}-*"
+        ) in package
+        assert package.count(f"path: prebuilt/{architecture}") == 1
+    assert package.count("merge-multiple: true") == 2
+    assert package.count("actions/download-artifact@") == 2
 
 
 def test_development_compiler_fanout_is_role_complete_and_collision_free() -> None:
@@ -764,7 +795,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert 'test "$GITHUB_REF" = refs/heads/main' in validation
     assert "scripts/agent-package-metadata" in validation
     assert "candidate|baseline" in validation
-    assert '${debian_architecture}_baseline_package' in validation
+    assert "${debian_architecture}_baseline_package" in validation
     assert "-compiled-${debian_architecture}-${BINARY_SET}" in validation
     assert "shared-key: ${{ inputs.architecture }}-${{ inputs.binary_set }}" in text
     assert 'cache-workspace-crates: "false"' in text
@@ -825,10 +856,11 @@ def test_protected_signer_validates_precompiled_bytes_before_key_materialization
     assert validation.count("cmp --silent") == 2
     assert "RELEASE_PRIVATE_KEY" not in validation
     build = package_step("Build package twice reproducibly")
-    lifecycle = package_step("Build lifecycle and acceptance package sets")
+    lifecycle = package_step("Build lifecycle acceptance baseline packages")
     assert "prebuilt/arm64/candidate" in build
     assert "prebuilt/amd64/candidate" in build
-    assert "prebuilt/$architecture/baseline" in lifecycle
+    assert "prebuilt/arm64/baseline" in lifecycle
+    assert "prebuilt/amd64/baseline" in lifecycle
 
 
 def test_package_security_gate_mode_is_explicit_and_channel_bound() -> None:
@@ -956,7 +988,7 @@ def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
     package_text = PACKAGE_WORKFLOW.read_text()
     allowed_steps = (
         package_step("Build package twice reproducibly"),
-        package_step("Build lifecycle and acceptance package sets"),
+        package_step("Build lifecycle acceptance baseline packages"),
     )
 
     assert timestamp.findall(WORKFLOW.read_text()) == []
