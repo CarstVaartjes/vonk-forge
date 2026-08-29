@@ -411,51 +411,14 @@ printf '%s\n' \
   "agent_sha256=$agent_digest" \
   > "$test_root/normalized-pending"
 
-# Kill the complete old-helper cgroup after durable intent commit. Merely
-# observing the intent pathname can race the directory fsync inside atomic_text.
-# The later agent blocker proves the intent commit returned; a short quiescent
-# window with no exact state-directory sync descendant then avoids freezing the
-# blocker's own fsync. The target preinst is allowed to normalize the safe stale
-# gate before the watcher runs, so capture and prove whichever exact safe state
-# exists at the crash point.
+# Kill the complete old-helper cgroup after atomic intent rename. The watcher
+# can freeze a known durability sync before it returns; the post-freeze process
+# classifier below proves that exact safe case. The target preinst is allowed to
+# normalize the safe stale gate before the watcher runs, so capture and prove
+# whichever exact safe state exists at the crash point.
 (
-  intent_sync_quiescent=0
   for _ in {1..2400}; do
-    if [[ -f /var/lib/vonk-forge/package-upgrade/intent \
-      && -f /var/lib/vonk-forge/package-upgrade/agent-blocked ]]; then
-      helper_control_group=$(systemctl --system show \
-        --property=ControlGroup --value "$helper_unit")
-      case "$helper_control_group" in
-        /system.slice/*) ;;
-        *) exit 1 ;;
-      esac
-      intent_sync_active=0
-      mapfile -t intent_sync_pids \
-        < "/sys/fs/cgroup$helper_control_group/cgroup.procs"
-      for intent_sync_pid in "${intent_sync_pids[@]}"; do
-        intent_sync_argv=()
-        if [[ -r "/proc/$intent_sync_pid/cmdline" ]] \
-          && mapfile -d '' -t intent_sync_argv \
-            < "/proc/$intent_sync_pid/cmdline" \
-          && [[ "${#intent_sync_argv[@]}" -eq 3 \
-            && "${intent_sync_argv[0]}" = /usr/bin/sync \
-            && "${intent_sync_argv[1]}" = -f \
-            && "${intent_sync_argv[2]}" \
-              = /var/lib/vonk-forge/package-upgrade ]]; then
-          intent_sync_active=1
-          break
-        fi
-      done
-      if (( intent_sync_active == 1 )); then
-        intent_sync_quiescent=0
-        sleep 0.005
-        continue
-      fi
-      intent_sync_quiescent=$((intent_sync_quiescent + 1))
-      if (( intent_sync_quiescent < 5 )); then
-        sleep 0.005
-        continue
-      fi
+    if [[ -f /var/lib/vonk-forge/package-upgrade/intent ]]; then
       systemctl --system freeze "$helper_unit"
       # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
       thaw_helper() {
@@ -518,23 +481,106 @@ printf '%s\n' \
           test "$(systemctl --system show --property=FreezerState --value \
             "$helper_unit")" = running
           for _ in {1..1000}; do
-            all_helper_pids_stopped=1
+            all_helper_pids_quiescent=1
             for helper_pid in "${helper_pids[@]}"; do
               if [[ -r "/proc/$helper_pid/status" ]]; then
-                helper_pid_state=$(sed -n \
-                  's/^State:[[:space:]]*\([A-Za-z]\).*/\1/p' \
-                  "/proc/$helper_pid/status")
+                helper_pid_state=
+                while IFS=$' \t' read -r status_key status_value _; do
+                  if [[ "$status_key" == State: ]]; then
+                    helper_pid_state=$status_value
+                    break
+                  fi
+                done < "/proc/$helper_pid/status" 2>/dev/null || continue
                 case "$helper_pid_state" in
-                  T|t) ;;
-                  *) all_helper_pids_stopped=0 ;;
+                  T|t|Z) ;;
+                  D)
+                    # A known atomic-text durability flush cannot execute
+                    # userspace while blocked in D, and its queued SIGSTOP is
+                    # delivered before it can return. Accept only the exact
+                    # root-owned state paths reachable after intent rename.
+                    helper_pid_exe=$(readlink -f "/proc/$helper_pid/exe" \
+                      2>/dev/null || true)
+                    helper_pid_argv=()
+                    mapfile -d '' -t helper_pid_argv \
+                      < "/proc/$helper_pid/cmdline" || true
+                    safe_sync_target=0
+                    if [[ "${#helper_pid_argv[@]}" -eq 3 ]]; then
+                      case "${helper_pid_argv[2]}" in
+                        /var/lib/vonk-forge/package-upgrade)
+                          [[ -d "${helper_pid_argv[2]}" \
+                            && ! -L "${helper_pid_argv[2]}" \
+                            && "$(stat -c %u:%g:%a \
+                              "${helper_pid_argv[2]}" 2>/dev/null || true)" \
+                              == '0:0:700' ]] \
+                            && safe_sync_target=1
+                          ;;
+                        /var/lib/vonk-forge)
+                          [[ -d "${helper_pid_argv[2]}" \
+                            && ! -L "${helper_pid_argv[2]}" \
+                            && "$(stat -c %u:%g:%a \
+                              "${helper_pid_argv[2]}" 2>/dev/null || true)" \
+                              == '0:0:755' ]] \
+                            && safe_sync_target=1
+                          ;;
+                        *)
+                          if [[ "${helper_pid_argv[2]}" \
+                            =~ ^/var/lib/vonk-forge(/package-upgrade)?/\.vonk-upgrade\.[0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]{6}$ \
+                            && -f "${helper_pid_argv[2]}" \
+                            && ! -L "${helper_pid_argv[2]}" \
+                            && "$(stat -c %u:%g:%a:%h \
+                              "${helper_pid_argv[2]}" 2>/dev/null || true)" \
+                              == '0:0:600:1' ]]; then
+                            safe_sync_target=1
+                          fi
+                          ;;
+                      esac
+                    fi
+                    if [[ "$helper_pid_exe" != /usr/bin/sync \
+                      || "${#helper_pid_argv[@]}" -ne 3 \
+                      || "${helper_pid_argv[0]}" != /usr/bin/sync \
+                      || "${helper_pid_argv[1]}" != -f \
+                      || "$safe_sync_target" -ne 1 ]]; then
+                      all_helper_pids_quiescent=0
+                    fi
+                    ;;
+                  *) all_helper_pids_quiescent=0 ;;
                 esac
               fi
             done
-            (( all_helper_pids_stopped == 1 )) && break
+            (( all_helper_pids_quiescent == 1 )) && break
             sleep 0.005
           done
-          test "$all_helper_pids_stopped" -eq 1
+          if (( all_helper_pids_quiescent != 1 )); then
+            for helper_pid in "${helper_pids[@]}"; do
+              [[ -r "/proc/$helper_pid/status" ]] || continue
+              helper_pid_state=
+              while IFS=$' \t' read -r status_key status_value _; do
+                if [[ "$status_key" == State: ]]; then
+                  helper_pid_state=$status_value
+                  break
+                fi
+              done < "/proc/$helper_pid/status" 2>/dev/null || continue
+              helper_pid_exe=$(readlink -f "/proc/$helper_pid/exe" \
+                2>/dev/null || true)
+              helper_pid_argv=()
+              mapfile -d '' -t helper_pid_argv \
+                < "/proc/$helper_pid/cmdline" || true
+              printf 'captured helper pid=%s state=%s exe=%q argv=' \
+                "$helper_pid" "$helper_pid_state" "$helper_pid_exe" >&2
+              printf ' %q' "${helper_pid_argv[@]}" >&2
+              printf '\n' >&2
+            done
+          fi
+          test "$all_helper_pids_quiescent" -eq 1
           test -r "/proc/$dpkg_pid/status"
+          dpkg_pid_state=
+          while IFS=$' \t' read -r status_key status_value _; do
+            if [[ "$status_key" == State: ]]; then
+              dpkg_pid_state=$status_value
+              break
+            fi
+          done < "/proc/$dpkg_pid/status" 2>/dev/null || exit 1
+          case "$dpkg_pid_state" in T|t) ;; *) exit 1 ;; esac
           test "$(systemctl --system show --property=MainPID --value \
             "$helper_unit")" = "$helper_main_pid"
           test "$(sha256sum /var/lib/vonk-forge/package-upgrade/intent \
@@ -567,23 +613,29 @@ printf '%s\n' \
             /var/lib/vonk-forge/helper-upgrade.pending
           ;;
         dpkg-only)
-          systemctl --system daemon-reload
-          systemctl --system --no-block start "$recovery_unit"
-          kill -KILL "$dpkg_pid"
-          sleep 1
-          test "$(systemctl --system show --property=ActiveState --value \
-            "$recovery_unit")" = activating
-          test "$(systemctl --system show --property=MainPID --value \
-            "$recovery_unit")" -gt 0
           test "$(systemctl --system show --property=FreezerState --value \
             "$helper_unit")" = frozen
+          cmp -s "$test_root/crash-point-pending" \
+            /var/lib/vonk-forge/helper-upgrade.pending
           test "$(sha256sum /var/lib/vonk-forge/package-upgrade/intent \
             | cut -d' ' -f1)" = "$crash_intent_digest"
           assert_interrupted_baseline_state
-          # The surviving preinst that may normalize this gate is still frozen.
-          # Preserve the exact safe state captured before killing its dpkg parent.
-          cmp -s "$test_root/crash-point-pending" \
-            /var/lib/vonk-forge/helper-upgrade.pending
+          systemctl --system daemon-reload
+          systemctl --system --no-block start "$recovery_unit"
+          kill -KILL "$dpkg_pid"
+          for _ in {1..100}; do
+            recovery_active_state=$(systemctl --system show \
+              --property=ActiveState --value "$recovery_unit")
+            recovery_main_pid=$(systemctl --system show \
+              --property=MainPID --value "$recovery_unit")
+            if [[ "$recovery_active_state" == activating \
+              && "$recovery_main_pid" -gt 0 ]]; then
+              break
+            fi
+            sleep 0.01
+          done
+          test "$recovery_active_state" = activating
+          test "$recovery_main_pid" -gt 0
           # Recovery may auto-thaw the helper while stopping or restarting it;
           # the observed freezer state, not a later thaw command, is invariant.
           for _ in {1..100}; do
