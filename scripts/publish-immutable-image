@@ -2,40 +2,41 @@
 set -euo pipefail
 
 if (($# != 5)); then
-  echo "usage: publish-immutable-image ROLE OCI_ARCHIVE IMAGE IMMUTABLE_TAG DIGEST_FILE" >&2
+  echo "usage: publish-immutable-image ROLE IMAGE ACCEPTED_DIGEST IMMUTABLE_TAG DIGEST_FILE" >&2
   exit 64
 fi
 
 role=$1
-archive=$2
-image=$3
+image=$2
+expected=$3
 immutable_tag=$4
 accepted_digest_file=$5
 
 case "$role" in
-  api|worker|hermes) ;;
+  api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
+  worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
+  hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
   *) echo "unsupported immutable image role: $role" >&2; exit 64 ;;
 esac
-[[ -f "$archive" && ! -L "$archive" ]]
-[[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9._/-]*$ ]]
+[[ "$image" == "$expected_image" ]]
+[[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
 [[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
 [[ -d "$(dirname -- "$accepted_digest_file")" ]]
 [[ ! -L "$accepted_digest_file" ]]
 
-manifest=$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${role}.manifest.XXXXXX")
 push_digest=$(mktemp "${RUNNER_TEMP}/${role}.push-digest.XXXXXX")
 inspect_error=$(mktemp "${RUNNER_TEMP}/${role}.inspect-error.XXXXXX")
 accepted_digest_tmp=$(mktemp "${RUNNER_TEMP}/${role}.accepted-digest.XXXXXX")
 cleanup() {
-  rm -f -- "$manifest" "$push_digest" "$inspect_error" "$accepted_digest_tmp"
+  rm -f -- "$push_digest" "$inspect_error" "$accepted_digest_tmp"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-skopeo inspect --raw "oci-archive:$archive" > "$manifest"
-expected=$(skopeo manifest-digest "$manifest")
-[[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+source_digest=$(skopeo inspect --format '{{.Digest}}' \
+  "docker://$image@$expected")
+[[ "$source_digest" == "$expected" ]]
 
 if observed=$(skopeo inspect --format '{{.Digest}}' \
   "docker://$image:$immutable_tag" 2>"$inspect_error"); then
@@ -50,7 +51,7 @@ else
   fi
   skopeo copy --all --preserve-digests \
     --digestfile "$push_digest" \
-    "oci-archive:$archive" \
+    "docker://$image@$expected" \
     "docker://$image:$immutable_tag" >&2
   pushed=$(tr -d '\r\n' < "$push_digest")
   if [[ "$pushed" != "$expected" ]]; then

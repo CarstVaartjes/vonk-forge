@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (($# != 4)); then
-  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG" >&2
+if (($# < 4 || $# > 5)); then
+  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG [REVISION]" >&2
   exit 64
 fi
 
@@ -12,13 +12,24 @@ digest=$3
 immutable_tag=$4
 
 case "$identity" in
-  api|worker|hermes) ;;
+  api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
+  worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
+  hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
   *) echo "unsupported published image identity: $identity" >&2; exit 64 ;;
 esac
-[[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9._/-]*$ ]]
+[[ "$image" == "$expected_image" ]]
 [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-[[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
-revision=${immutable_tag#dev-sha-}
+if [[ "$immutable_tag" == - ]]; then
+  (($# == 5))
+  revision=$5
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+  reference="$image@$digest"
+else
+  (($# == 4))
+  [[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
+  revision=${immutable_tag#dev-sha-}
+  reference="$image:$immutable_tag"
+fi
 
 scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
 cleanup() {
@@ -29,7 +40,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 observed=$(skopeo inspect --format '{{.Digest}}' \
-  "docker://$image:$immutable_tag")
+  "docker://$reference")
 [[ "$observed" == "$digest" ]]
 
 manifest_file="$scratch/manifest.json"

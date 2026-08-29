@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (($# != 5)); then
-  echo "usage: accept-development-image-archive ROLE ARCHIVE COMMIT RUN_ID RECEIPT" >&2
+if (($# != 8)); then
+  echo "usage: accept-development-image-archive ROLE ARCHIVE COMMIT RUN_ID RUN_ATTEMPT IMAGE EXPECTED_DIGEST RECEIPT" >&2
   exit 64
 fi
 
@@ -10,16 +10,24 @@ role=$1
 archive=$2
 commit=$3
 run_id=$4
-receipt=$5
+run_attempt=$5
+image=$6
+expected_digest=$7
+receipt=$8
 
 case "$role" in
-  api|worker|hermes) ;;
+  api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
+  worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
+  hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
   *) echo "unsupported development image role: $role" >&2; exit 64 ;;
 esac
 [[ "$(basename -- "$archive")" == "vonk-forge-$role.oci.tar" ]]
 [[ -f "$archive" && ! -L "$archive" ]]
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
 [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+[[ "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+[[ "$image" == "$expected_image" ]]
+[[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
 [[ -d "$(dirname -- "$receipt")" && ! -L "$receipt" ]]
 command -v jq >/dev/null
 command -v skopeo >/dev/null
@@ -161,12 +169,15 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   ((found_provenance == 1))
 done < <(scripts/verify-multiarch-image-manifest "$platform_index")
 
-if [[ "$role" == "hermes" ]]; then
-  capsule="$(dirname -- "$receipt")/vonk-forge-hermes.publication-capsule.tar"
-  scripts/dev-image-publication-capsule create "$layout" "$capsule"
-  scripts/dev-image-acceptance-receipt create-role \
-    "$receipt" "$commit" "$run_id" "$role" "$archive" "$capsule"
-else
-  scripts/dev-image-acceptance-receipt create-role \
-    "$receipt" "$commit" "$run_id" "$role" "$archive"
-fi
+local_manifest="$scan_root/local-manifest.json"
+remote_manifest="$scan_root/remote-manifest.json"
+skopeo inspect --raw "oci-archive:$archive" > "$local_manifest"
+local_digest=$(skopeo manifest-digest "$local_manifest")
+[[ "$local_digest" == "$expected_digest" ]]
+skopeo inspect --raw "docker://$image@$expected_digest" > "$remote_manifest"
+remote_digest=$(skopeo manifest-digest "$remote_manifest")
+[[ "$remote_digest" == "$expected_digest" ]]
+
+scripts/dev-image-acceptance-receipt create-role \
+  "$receipt" "$commit" "$run_id" "$run_attempt" \
+  "$role" "$image" "$expected_digest"

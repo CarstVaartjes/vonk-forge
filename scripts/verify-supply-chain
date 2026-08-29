@@ -407,7 +407,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/container-release-metadata",
         "scripts/dev-image-acceptance-receipt",
         "scripts/dev-image-metadata",
-        "scripts/dev-image-publication-capsule",
         "scripts/publish-immutable-image",
         "scripts/promote-image-aliases",
         "scripts/verify-release-tag-authority",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and verify a checksum-bound development image acceptance receipt."""
+"""Create and verify digest-bound development image acceptance receipts."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -16,14 +15,20 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "vonk-forge.dev-image-acceptance.v2"
-ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v2"
+SCHEMA = "vonk-forge.dev-image-acceptance.v3"
+ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v3"
 ROLES = ("api", "worker", "hermes")
+IMAGES = {
+    "api": "ghcr.io/carstvaartjes/vonk-forge-api",
+    "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
+    "hermes": "ghcr.io/carstvaartjes/vonk-forge-hermes",
+}
 COMPOSE_FILES = ("docker-compose.dev.yml", "docker-compose.pinned.yml")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[1-9][0-9]*\Z")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+ROLE_KEYS = {"artifact", "image", "source", "manifest_digest"}
 
 
 class ReceiptError(ValueError):
@@ -53,48 +58,39 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _manifest_digest(archive: Path) -> str:
-    inspected = subprocess.run(
-        ["skopeo", "inspect", "--raw", f"oci-archive:{archive}"],
-        check=True,
-        capture_output=True,
-    ).stdout
-    digest = f"sha256:{hashlib.sha256(inspected).hexdigest()}"
-    if DIGEST.fullmatch(digest) is None:
-        raise ReceiptError("OCI manifest digest is invalid")
-    return digest
-
-
-def _capsule_identity(commit: str, run_id: str) -> tuple[str, str]:
-    return (
-        "vonk-forge-hermes.publication-capsule.tar",
-        f"development-image-hermes-capsule-{commit}-{run_id}",
-    )
-
-
-def _validate_capsule_entry(
-    value: object, commit: str, run_id: str, context: str
-) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    entry = _require_keys(value, {"file", "artifact", "sha256", "size"}, context)
-    expected_file, expected_artifact = _capsule_identity(commit, run_id)
+def _validate_identity(commit: str, run_id: str, run_attempt: str) -> None:
     if (
-        entry["file"] != expected_file
-        or entry["artifact"] != expected_artifact
-        or not isinstance(entry["size"], int)
-        or isinstance(entry["size"], bool)
-        or entry["size"] <= 0
-        or not isinstance(entry["sha256"], str)
-        or SHA256.fullmatch(entry["sha256"]) is None
+        COMMIT.fullmatch(commit) is None
+        or RUN_ID.fullmatch(run_id) is None
+        or RUN_ID.fullmatch(run_attempt) is None
+    ):
+        raise ReceiptError("acceptance identity is invalid")
+
+
+def _artifact(role: str, commit: str, run_id: str, run_attempt: str) -> str:
+    return f"development-role-receipt-{role}-{commit}-{run_id}-{run_attempt}"
+
+
+def _validate_role_entry(
+    value: object,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    role: str,
+    context: str,
+) -> dict[str, Any]:
+    entry = _require_keys(value, ROLE_KEYS, context)
+    image = IMAGES[role]
+    digest = entry["manifest_digest"]
+    if (
+        entry["artifact"] != _artifact(role, commit, run_id, run_attempt)
+        or entry["image"] != image
+        or not isinstance(digest, str)
+        or DIGEST.fullmatch(digest) is None
+        or entry["source"] != f"{image}@{digest}"
     ):
         raise ReceiptError(f"{context} is invalid")
     return entry
-
-
-def _validate_identity(commit: str, run_id: str) -> None:
-    if COMMIT.fullmatch(commit) is None or RUN_ID.fullmatch(run_id) is None:
-        raise ReceiptError("acceptance identity is invalid")
 
 
 def _load_json(path: Path, context: str) -> Any:
@@ -114,49 +110,59 @@ def _load_json(path: Path, context: str) -> Any:
         raise ReceiptError(f"{context} is not valid JSON") from error
 
 
-def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
+def _load_role_receipt(
+    path: Path, commit: str, run_id: str, run_attempt: str, role: str
+) -> dict[str, Any]:
+    document = _load_json(path, f"{role} acceptance receipt")
+    root = _require_keys(
+        document,
+        {
+            "schema",
+            "commit",
+            "run_id",
+            "run_attempt",
+            "role",
+            *ROLE_KEYS,
+        },
+        f"{role} acceptance receipt",
+    )
+    if (
+        root["schema"] != ROLE_SCHEMA
+        or root["commit"] != commit
+        or root["run_id"] != run_id
+        or root["run_attempt"] != run_attempt
+        or root["role"] != role
+    ):
+        raise ReceiptError(
+            f"{role} acceptance receipt identity does not match this run"
+        )
+    entry = {key: root[key] for key in ROLE_KEYS}
+    return _validate_role_entry(
+        entry, commit, run_id, run_attempt, role, f"{role} acceptance receipt"
+    )
+
+
+def _load_receipt(
+    path: Path, commit: str, run_id: str, run_attempt: str
+) -> dict[str, Any]:
     document = _load_json(path, "acceptance receipt")
     root = _require_keys(
-        document, {"schema", "commit", "run_id", "roles", "compose"}, "receipt"
+        document,
+        {"schema", "commit", "run_id", "run_attempt", "roles", "compose"},
+        "receipt",
     )
-    if root["schema"] != SCHEMA or root["commit"] != commit or root["run_id"] != run_id:
+    if (
+        root["schema"] != SCHEMA
+        or root["commit"] != commit
+        or root["run_id"] != run_id
+        or root["run_attempt"] != run_attempt
+    ):
         raise ReceiptError("acceptance receipt identity does not match this run")
     roles = _require_keys(root["roles"], set(ROLES), "receipt roles")
     for role in ROLES:
-        entry = _require_keys(
-            roles[role],
-            {
-                "archive",
-                "artifact",
-                "manifest_digest",
-                "publication_capsule",
-                "sha256",
-                "size",
-            },
-            f"receipt role {role}",
+        _validate_role_entry(
+            roles[role], commit, run_id, run_attempt, role, f"receipt role {role}"
         )
-        expected_archive = f"vonk-forge-{role}.oci.tar"
-        expected_artifact = f"development-image-{role}-{commit}-{run_id}"
-        if (
-            entry["archive"] != expected_archive
-            or entry["artifact"] != expected_artifact
-        ):
-            raise ReceiptError(f"receipt role {role} has an invalid artifact identity")
-        if (
-            not isinstance(entry["size"], int)
-            or isinstance(entry["size"], bool)
-            or entry["size"] <= 0
-            or not isinstance(entry["sha256"], str)
-            or SHA256.fullmatch(entry["sha256"]) is None
-            or not isinstance(entry["manifest_digest"], str)
-            or DIGEST.fullmatch(entry["manifest_digest"]) is None
-        ):
-            raise ReceiptError(f"receipt role {role} has invalid evidence")
-        capsule = _validate_capsule_entry(
-            entry["publication_capsule"], commit, run_id, f"receipt role {role} capsule"
-        )
-        if role != "hermes" and capsule is not None:
-            raise ReceiptError(f"receipt role {role} capsule identity is invalid")
     compose = _require_keys(root["compose"], set(COMPOSE_FILES), "receipt compose")
     for name in COMPOSE_FILES:
         entry = _require_keys(compose[name], {"sha256", "size"}, f"receipt {name}")
@@ -169,50 +175,6 @@ def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
         ):
             raise ReceiptError(f"receipt {name} has invalid evidence")
     return root
-
-
-def _load_role_receipt(
-    path: Path, commit: str, run_id: str, role: str
-) -> dict[str, Any]:
-    document = _load_json(path, f"{role} acceptance receipt")
-    entry = _require_keys(
-        document,
-        {
-            "schema",
-            "commit",
-            "run_id",
-            "role",
-            "archive",
-            "artifact",
-            "manifest_digest",
-            "publication_capsule",
-            "sha256",
-            "size",
-        },
-        f"{role} acceptance receipt",
-    )
-    if (
-        entry["schema"] != ROLE_SCHEMA
-        or entry["commit"] != commit
-        or entry["run_id"] != run_id
-        or entry["role"] != role
-        or entry["archive"] != f"vonk-forge-{role}.oci.tar"
-        or entry["artifact"] != f"development-image-{role}-{commit}-{run_id}"
-        or not isinstance(entry["size"], int)
-        or isinstance(entry["size"], bool)
-        or entry["size"] <= 0
-        or not isinstance(entry["sha256"], str)
-        or SHA256.fullmatch(entry["sha256"]) is None
-        or not isinstance(entry["manifest_digest"], str)
-        or DIGEST.fullmatch(entry["manifest_digest"]) is None
-    ):
-        raise ReceiptError(f"{role} acceptance receipt is invalid")
-    capsule = _validate_capsule_entry(
-        entry["publication_capsule"], commit, run_id, f"{role} acceptance capsule"
-    )
-    if (role == "hermes") != (capsule is not None):
-        raise ReceiptError(f"{role} acceptance capsule identity is invalid")
-    return entry
 
 
 def _file_evidence(path: Path) -> dict[str, Any]:
@@ -271,70 +233,46 @@ def create_role(
     output: Path,
     commit: str,
     run_id: str,
+    run_attempt: str,
     role: str,
-    archive: Path,
-    capsule: Path | None,
+    image: str,
+    digest: str,
 ) -> None:
-    _validate_identity(commit, run_id)
-    if role not in ROLES or archive.name != f"vonk-forge-{role}.oci.tar":
+    _validate_identity(commit, run_id, run_attempt)
+    if role not in ROLES or image != IMAGES[role] or DIGEST.fullmatch(digest) is None:
         raise ReceiptError("role acceptance identity is invalid")
-    evidence = _file_evidence(archive)
-    manifest_digest = _manifest_digest(archive)
-    capsule_evidence: dict[str, Any] | None = None
-    if role == "hermes":
-        if capsule is None:
-            raise ReceiptError("Hermes acceptance requires a publication capsule")
-        expected_file, artifact = _capsule_identity(commit, run_id)
-        if capsule.name != expected_file:
-            raise ReceiptError("Hermes publication capsule identity is invalid")
-        subprocess.run(
-            [
-                Path(__file__).with_name("dev-image-publication-capsule"),
-                "verify",
-                capsule,
-                manifest_digest,
-            ],
-            check=True,
-        )
-        capsule_evidence = {
-            "file": expected_file,
-            "artifact": artifact,
-            **_file_evidence(capsule),
-        }
-    elif capsule is not None:
-        raise ReceiptError("only Hermes may carry a publication capsule")
     _write_json(
         output,
         {
             "schema": ROLE_SCHEMA,
             "commit": commit,
             "run_id": run_id,
+            "run_attempt": run_attempt,
             "role": role,
-            "archive": archive.name,
-            "artifact": f"development-image-{role}-{commit}-{run_id}",
-            "manifest_digest": manifest_digest,
-            "publication_capsule": capsule_evidence,
-            **evidence,
+            "artifact": _artifact(role, commit, run_id, run_attempt),
+            "image": image,
+            "source": f"{image}@{digest}",
+            "manifest_digest": digest,
         },
     )
 
 
 def _load_role_receipts(
-    root: Path, commit: str, run_id: str
+    root: Path, commit: str, run_id: str, run_attempt: str
 ) -> dict[str, dict[str, Any]]:
     if not root.is_dir() or root.is_symlink():
         raise ReceiptError("role receipt root is invalid")
     return {
         role: _load_role_receipt(
-            root / f"{role}.role-receipt.json", commit, run_id, role
+            root / f"{role}.role-receipt.json", commit, run_id, run_attempt, role
         )
         for role in ROLES
     }
 
 
-def collect(role_root: Path, commit: str, run_id: str) -> None:
-    _validate_identity(commit, run_id)
-    roles = _load_role_receipts(role_root, commit, run_id)
+def collect(role_root: Path, commit: str, run_id: str, run_attempt: str) -> None:
+    _validate_identity(commit, run_id, run_attempt)
+    roles = _load_role_receipts(role_root, commit, run_id, run_attempt)
     for role in ROLES:
         print(f"{role}_digest={roles[role]['manifest_digest']}")
 
@@ -343,22 +281,14 @@ def aggregate(
     output: Path,
     commit: str,
     run_id: str,
+    run_attempt: str,
     role_root: Path,
     compose_root: Path,
 ) -> None:
-    _validate_identity(commit, run_id)
-    roles = _load_role_receipts(role_root, commit, run_id)
+    _validate_identity(commit, run_id, run_attempt)
+    roles = _load_role_receipts(role_root, commit, run_id, run_attempt)
     if not compose_root.is_dir() or compose_root.is_symlink():
         raise ReceiptError("Compose receipt root is invalid")
-    role_entries = {
-        role: {
-            key: value
-            for key, value in roles[role].items()
-            if key in {"archive", "artifact", "manifest_digest", "sha256", "size"}
-            or key == "publication_capsule"
-        }
-        for role in ROLES
-    }
     compose = {name: _file_evidence(compose_root / name) for name in COMPOSE_FILES}
     _write_json(
         output,
@@ -366,95 +296,28 @@ def aggregate(
             "schema": SCHEMA,
             "commit": commit,
             "run_id": run_id,
-            "roles": role_entries,
+            "run_attempt": run_attempt,
+            "roles": {
+                role: {key: roles[role][key] for key in ROLE_KEYS} for role in ROLES
+            },
             "compose": compose,
         },
     )
-
-
-def create(output: Path, commit: str, run_id: str, publication_root: Path) -> None:
-    _validate_identity(commit, run_id)
-    if not publication_root.is_dir() or publication_root.is_symlink():
-        raise ReceiptError("publication root is invalid")
-    if not output.parent.is_dir() or output.is_symlink():
-        raise ReceiptError("receipt output path is invalid")
-
-    roles: dict[str, Any] = {}
-    for role in ROLES:
-        archive_name = f"vonk-forge-{role}.oci.tar"
-        archive = publication_root / archive_name
-        evidence = _file_evidence(archive)
-        roles[role] = {
-            "archive": archive_name,
-            "artifact": f"development-image-{role}-{commit}-{run_id}",
-            "manifest_digest": _manifest_digest(archive),
-            "publication_capsule": None,
-            **evidence,
-        }
-    compose = {name: _file_evidence(publication_root / name) for name in COMPOSE_FILES}
-    document = {
-        "schema": SCHEMA,
-        "commit": commit,
-        "run_id": run_id,
-        "roles": roles,
-        "compose": compose,
-    }
-
-    _write_json(output, document)
 
 
 def verify(
     receipt_path: Path,
     commit: str,
     run_id: str,
+    run_attempt: str,
     publication_root: Path,
 ) -> None:
-    _validate_identity(commit, run_id)
+    _validate_identity(commit, run_id, run_attempt)
     if not publication_root.is_dir() or publication_root.is_symlink():
         raise ReceiptError("publication root is invalid")
-    receipt = _load_receipt(receipt_path, commit, run_id)
-    for role in ROLES:
-        archive = publication_root / receipt["roles"][role]["archive"]
-        expected = receipt["roles"][role]
-        archive_present = archive.exists() or archive.is_symlink()
-        if archive_present:
-            actual = _file_evidence(archive)
-            if (
-                actual["size"] != expected["size"]
-                or actual["sha256"] != expected["sha256"]
-            ):
-                raise ReceiptError(f"accepted {role} archive does not match its receipt")
-            if _manifest_digest(archive) != expected["manifest_digest"]:
-                raise ReceiptError(f"accepted {role} manifest does not match its receipt")
-        capsule_entry = expected["publication_capsule"]
-        capsule_present = False
-        if capsule_entry is not None:
-            capsule = publication_root / capsule_entry["file"]
-            capsule_present = capsule.exists() or capsule.is_symlink()
-            if capsule_present:
-                actual_capsule = _file_evidence(capsule)
-                if actual_capsule != {
-                    "sha256": capsule_entry["sha256"],
-                    "size": capsule_entry["size"],
-                }:
-                    raise ReceiptError(
-                        f"accepted {role} publication capsule does not match its receipt"
-                    )
-                subprocess.run(
-                    [
-                        Path(__file__).with_name("dev-image-publication-capsule"),
-                        "verify",
-                        capsule,
-                        expected["manifest_digest"],
-                    ],
-                    check=True,
-                )
-        if not archive_present and not capsule_present:
-            raise ReceiptError(f"accepted {role} publication content is missing")
+    receipt = _load_receipt(receipt_path, commit, run_id, run_attempt)
     for name in COMPOSE_FILES:
-        actual = _file_evidence(publication_root / name)
-        expected = receipt["compose"][name]
-        if actual != expected:
+        if _file_evidence(publication_root / name) != receipt["compose"][name]:
             raise ReceiptError(f"accepted {name} does not match its receipt")
 
 
@@ -463,39 +326,45 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if len(arguments) == 2 and arguments[0] == "validate-archive":
             validate_archive_members(Path(arguments[1]))
-        elif len(arguments) in {6, 7} and arguments[0] == "create-role":
+        elif len(arguments) == 8 and arguments[0] == "create-role":
             create_role(
                 Path(arguments[1]),
                 arguments[2],
                 arguments[3],
                 arguments[4],
-                Path(arguments[5]),
-                Path(arguments[6]) if len(arguments) == 7 else None,
+                arguments[5],
+                arguments[6],
+                arguments[7],
             )
-        elif len(arguments) == 4 and arguments[0] == "collect":
-            collect(Path(arguments[1]), arguments[2], arguments[3])
-        elif len(arguments) == 6 and arguments[0] == "aggregate":
+        elif len(arguments) == 5 and arguments[0] == "collect":
+            collect(Path(arguments[1]), arguments[2], arguments[3], arguments[4])
+        elif len(arguments) == 7 and arguments[0] == "aggregate":
             aggregate(
                 Path(arguments[1]),
                 arguments[2],
                 arguments[3],
-                Path(arguments[4]),
+                arguments[4],
+                Path(arguments[5]),
+                Path(arguments[6]),
+            )
+        elif len(arguments) == 6 and arguments[0] == "verify":
+            verify(
+                Path(arguments[1]),
+                arguments[2],
+                arguments[3],
+                arguments[4],
                 Path(arguments[5]),
             )
-        elif len(arguments) == 5 and arguments[0] == "create":
-            create(Path(arguments[1]), arguments[2], arguments[3], Path(arguments[4]))
-        elif len(arguments) == 5 and arguments[0] == "verify":
-            verify(Path(arguments[1]), arguments[2], arguments[3], Path(arguments[4]))
         else:
             raise ReceiptError(
                 "usage: dev-image-acceptance-receipt "
                 "validate-archive ARCHIVE | "
-                "create-role RECEIPT COMMIT RUN_ID ROLE ARCHIVE [CAPSULE] | "
-                "collect ROLE_ROOT COMMIT RUN_ID | "
-                "aggregate RECEIPT COMMIT RUN_ID ROLE_ROOT COMPOSE_ROOT | "
-                "verify RECEIPT COMMIT RUN_ID PUBLICATION_ROOT"
+                "create-role RECEIPT COMMIT RUN_ID RUN_ATTEMPT ROLE IMAGE DIGEST | "
+                "collect ROLE_ROOT COMMIT RUN_ID RUN_ATTEMPT | "
+                "aggregate RECEIPT COMMIT RUN_ID RUN_ATTEMPT ROLE_ROOT COMPOSE_ROOT | "
+                "verify RECEIPT COMMIT RUN_ID RUN_ATTEMPT PUBLICATION_ROOT"
             )
-    except (OSError, ReceiptError, subprocess.CalledProcessError) as error:
+    except (OSError, ReceiptError) as error:
         print(f"dev-image-acceptance-receipt: {error}", file=sys.stderr)
         return 1
     return 0
