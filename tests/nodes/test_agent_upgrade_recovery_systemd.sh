@@ -534,8 +534,16 @@ printf '%s\n' \
           sleep 1
           test "$(systemctl --system show --property=ActiveState --value \
             "$recovery_unit")" = activating
+          test "$(systemctl --system show --property=MainPID --value \
+            "$recovery_unit")" -gt 0
+          test "$(systemctl --system show --property=FreezerState --value \
+            "$helper_unit")" = frozen
+          test "$(sha256sum /var/lib/vonk-forge/package-upgrade/intent \
+            | cut -d' ' -f1)" = "$crash_intent_digest"
           assert_interrupted_baseline_state
-          cmp -s "$test_root/normalized-pending" \
+          # The surviving preinst that may normalize this gate is still frozen.
+          # Preserve the exact safe state captured before killing its dpkg parent.
+          cmp -s "$test_root/crash-point-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
           # Recovery may auto-thaw the helper while stopping or restarting it;
           # the observed freezer state, not a later thaw command, is invariant.
