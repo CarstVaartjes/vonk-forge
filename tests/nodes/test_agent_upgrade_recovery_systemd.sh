@@ -36,6 +36,8 @@ helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
 agent_unit=vonk-forge-agent.service
 recovery_unit=vonk-forge-package-upgrade-recover.service
+firewall_unit=vonk-forge-docker-firewall.service
+firewall_fixture=/run/systemd/system/$firewall_unit
 started=$test_root/start
 crash_observed=$test_root/crash-observed
 # The simulated old helper can write only its declared ReadWritePaths.
@@ -44,9 +46,11 @@ upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename "$test_ro
 dump_failure_diagnostics() {
   printf '%s\n' '--- agent upgrade recovery fixture diagnostics ---' >&2
   systemctl --system --no-pager --full status \
-    "$helper_unit" "$socket_unit" "$recovery_unit" "$agent_unit" >&2 || true
+    "$helper_unit" "$socket_unit" "$recovery_unit" "$agent_unit" \
+    "$firewall_unit" >&2 || true
   journalctl --system --no-pager -n 200 \
     -u "$helper_unit" -u "$socket_unit" -u "$recovery_unit" -u "$agent_unit" \
+    -u "$firewall_unit" \
     >&2 || true
   dpkg-query -W -f='${db:Status-Abbrev} ${Version}\n' vonk-forge-agent \
     >&2 || true
@@ -68,20 +72,29 @@ cleanup() {
   fi
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
   systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
-    "$socket_unit" >/dev/null 2>&1 || true
+    "$socket_unit" "$firewall_unit" >/dev/null 2>&1 || true
   systemctl --system reset-failed "$recovery_unit" "$agent_unit" \
-    "$helper_unit" "$socket_unit" >/dev/null 2>&1 || true
-  SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent >/dev/null 2>&1 || true
+    "$helper_unit" "$socket_unit" "$firewall_unit" >/dev/null 2>&1 || true
   rm -rf -- /var/lib/vonk-forge/package-upgrade
   rm -f -- /var/lib/vonk-forge/helper-upgrade.pending \
     /var/lib/vonk-forge/helper-upgrade.receipt
+  if dpkg-query --show vonk-forge-agent >/dev/null 2>&1; then
+    SYSTEMD_OFFLINE=1 dpkg --purge --force-remove-reinstreq \
+      vonk-forge-agent >/dev/null 2>&1 || cleanup_status=1
+  fi
+  if dpkg-query --show vonk-forge-agent >/dev/null 2>&1; then
+    cleanup_status=1
+  fi
+  rm -rf -- /var/lib/vonk-forge-agent
   rm -f -- "$upgrade_invocations"
   rm -f -- "$old_helper_unit" "$old_socket_unit"
+  rm -f -- "$firewall_fixture"
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   systemctl --system daemon-reload >/dev/null 2>&1 || true
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- "$test_root"
-  return "$cleanup_status"
+  trap - EXIT
+  exit "$cleanup_status"
 }
 cleanup_test_root() {
   rm -rf -- "$test_root"
@@ -96,6 +109,7 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
   || systemctl --system cat "$helper_unit" >/dev/null 2>&1 \
   || systemctl --system cat "$socket_unit" >/dev/null 2>&1 \
   || systemctl --system cat "$recovery_unit" >/dev/null 2>&1 \
+  || systemctl --system cat "$firewall_unit" >/dev/null 2>&1 \
   || [[ -e /var/lib/vonk-forge/package-upgrade \
     || -L /var/lib/vonk-forge/package-upgrade ]] \
   || [[ -e /var/lib/vonk-forge/helper-upgrade.pending \
@@ -107,11 +121,32 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
   || [[ -e /lib/systemd/system/vonk-forge-package-helper.socket.d \
     || -L /lib/systemd/system/vonk-forge-package-helper.socket.d ]] \
   || [[ -e /run/vonk-forge-package-candidates \
-    || -L /run/vonk-forge-package-candidates ]]; then
+    || -L /run/vonk-forge-package-candidates ]] \
+  || [[ -e "$firewall_fixture" || -L "$firewall_fixture" ]] \
+  || [[ -e /var/lib/vonk-forge-agent \
+    || -L /var/lib/vonk-forge-agent ]]; then
   printf '%s\n' 'agent upgrade recovery fixture would collide with host state' >&2
   exit 1
 fi
 trap cleanup EXIT
+
+# Setup normally owns this dependency. The package lifecycle fixture uses an
+# isolated active unit so it exercises helper recovery without modifying the
+# runner's firewall; firewall behavior has its own namespace acceptance test.
+cat > "$firewall_fixture" <<'UNIT'
+[Unit]
+Description=Vonk Forge package recovery firewall fixture
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=yes
+UNIT
+chmod 0644 "$firewall_fixture"
+systemctl --system daemon-reload
+systemctl --system start "$firewall_unit"
+test "$(systemctl --system show --property=ActiveState --value \
+  "$firewall_unit")" = active
 
 mkdir -p "$test_root/target-bin" "$test_root/baseline-bin" \
   "$test_root/target-dist" "$test_root/baseline-dist"
@@ -202,6 +237,7 @@ getent group vonk-agent >/dev/null 2>&1 || groupadd --system vonk-agent
 id -u vonk-agent >/dev/null 2>&1 \
   || useradd --system --gid vonk-agent --home-dir /var/lib/vonk-forge-agent \
     --shell /usr/sbin/nologin vonk-agent
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 case "$candidate_custody" in
@@ -458,11 +494,25 @@ if [[ "$crash_mode" == full-cgroup ]]; then
   assert_interrupted_baseline_state
 
   # A boot-time start request cannot launch the old agent while the durable
-  # intent is incomplete. Reloading and restarting the enabled socket models
+  # intent is incomplete. A real boot does not preserve the test-only cgroup
+  # freezer or failed-unit state, so release both explicitly before modelling
   # the static boot transaction without a controller retry.
+  for _ in {1..100}; do
+    systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+    helper_freezer_state=$(systemctl --system show \
+      --property=FreezerState --value "$helper_unit")
+    [[ "$helper_freezer_state" == running ]] && break
+    sleep 0.05
+  done
+  test "$helper_freezer_state" = running
   systemctl --system daemon-reload
-  systemctl --system reset-failed "$agent_unit" "$recovery_unit" \
+  systemctl --system reset-failed \
+    "$helper_unit" "$socket_unit" "$agent_unit" "$recovery_unit" \
     >/dev/null 2>&1 || true
+  test "$(systemctl --system show --property=ActiveState --value \
+    "$helper_unit")" = inactive
+  test "$(systemctl --system show --property=Result --value \
+    "$helper_unit")" = success
   systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
   test "$(systemctl --system show --property=ActiveState --value "$agent_unit")" \
     != active
