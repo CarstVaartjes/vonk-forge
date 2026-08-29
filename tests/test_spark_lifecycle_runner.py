@@ -404,6 +404,67 @@ def test_local_browser_controller_uses_only_the_loopback_publication(
     }
 
 
+def test_parallel_spark_acceptance_requires_an_explicit_local_tailnet_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = _module()
+
+    monkeypatch.delenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", raising=False)
+    with pytest.raises(lifecycle.LifecycleError, match="must use its local"):
+        lifecycle.require_local_tailnet_boundary()
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "true")
+    with pytest.raises(lifecycle.LifecycleError, match="must use its local"):
+        lifecycle.require_local_tailnet_boundary()
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "invalid")
+    with pytest.raises(lifecycle.LifecycleError, match="boundary is invalid"):
+        lifecycle.require_local_tailnet_boundary()
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "false")
+    lifecycle.require_local_tailnet_boundary()
+
+
+def test_parallel_spark_service_verification_cannot_route_through_a_peer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    run.tailnet_services = {
+        "control": "svc:vonk-forge-acceptance",
+        "hermes_api": "svc:hermes-api-acceptance",
+        "hermes_dashboard": "svc:hermes-dashboard-acceptance",
+    }
+    observed: dict[str, object] = {}
+
+    def verify(bundle, **arguments):
+        observed.update(bundle=bundle, **arguments)
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "false")
+    monkeypatch.setattr(lifecycle, "verify_tailscale_services", verify)
+
+    run._verify_local_tailscale_services("acceptance.example.test")
+
+    assert observed == {
+        "bundle": tmp_path,
+        "hermes": False,
+        "tailnet_suffix": "acceptance.example.test",
+        "control_service": "svc:vonk-forge-acceptance",
+        "hermes_api_service": "svc:hermes-api-acceptance",
+        "hermes_dashboard_service": "svc:hermes-dashboard-acceptance",
+        "service_addresses": None,
+        "compose_command": [
+            "docker",
+            "compose",
+            "--project-name",
+            "vonk-spark-42-arm64",
+        ],
+    }
+
+
 def test_local_browser_port_is_discovered_from_the_isolated_project(
     tmp_path: Path,
 ) -> None:

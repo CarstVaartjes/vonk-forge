@@ -115,13 +115,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert set(jobs["spark-acceptance"]["needs"]) == {
         "authority",
         "candidate",
-        "nas-lane-acceptance",
     }
-    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "1"
-    assert (
-        "needs['nas-lane-acceptance'].result == 'success'"
-        in jobs["spark-acceptance"]["if"]
-    )
+    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "2"
+    assert "nas-lane-acceptance" not in jobs["spark-acceptance"]["if"]
     expected_services = {
         "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
@@ -298,7 +294,7 @@ def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     assert wrong.returncode != 0
 
 
-def test_nas_lane_reports_are_bound_fail_closed_before_spark_acceptance() -> None:
+def test_nas_lane_reports_are_bound_fail_closed_beside_spark_acceptance() -> None:
     jobs = _workflow()["jobs"]
     lane_steps = _steps(jobs["nas-lane-acceptance"])
     upload = lane_steps["Upload exact NAS lane evidence"]
@@ -338,7 +334,6 @@ def test_nas_lane_reports_are_bound_fail_closed_before_spark_acceptance() -> Non
     assert jobs["spark-acceptance"]["needs"] == [
         "authority",
         "candidate",
-        "nas-lane-acceptance",
     ]
 
 
@@ -437,6 +432,10 @@ def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() ->
         "Run literal clean NAS and Tailscale configuration acceptance"
     ]
     assert native["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
+    spark = _steps(jobs["spark-acceptance"])[
+        "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
+    ]
+    assert spark["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
 
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:

@@ -55,6 +55,7 @@ from tests.acceptance.test_fresh_nas_install import (
     host_command_environment,
     is_immutable_image,
     nas_responses,
+    require_tailnet_client,
     tailscale_service_hostname,
     verify_tailscale_services,
 )
@@ -92,6 +93,16 @@ COMPOSE_IMAGE_ROLES = {
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
 ED25519_PKCS8_V2_PUBLIC_PREFIX = bytes.fromhex("812100")
 ED25519_PKCS8_V1_PREFIX = bytes.fromhex("302e020100")
+
+
+def require_local_tailnet_boundary() -> None:
+    """Reject a routed tailnet client while fixed acceptance Services overlap."""
+    try:
+        external_client = require_tailnet_client()
+    except AcceptanceError as error:
+        raise LifecycleError("Spark tailnet boundary is invalid") from error
+    if external_client:
+        raise LifecycleError("Spark acceptance must use its local tailnet boundary")
 
 
 def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
@@ -504,6 +515,7 @@ class LocalBrowserController:
 
 class SparkLifecycle:
     def __init__(self, arguments: argparse.Namespace, graph: dict[str, object]) -> None:
+        require_local_tailnet_boundary()
         self.arguments = arguments
         self.graph = graph
         architecture = arguments.platform.removeprefix("linux-")
@@ -898,6 +910,19 @@ class SparkLifecycle:
             ) from error
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         self._prepare_synthetic_firewall_environment()
+        self._verify_local_tailscale_services(tailnet_suffix)
+        boundary = LocalBrowserController(
+            hostname=self.control_hostname,
+            port=self._local_browser_port(),
+        )
+        self.browser = boundary
+        password = self._read_secret("admin-password")
+        self.control = boundary.login(password, timeout=30)
+        del password
+
+    def _verify_local_tailscale_services(self, tailnet_suffix: str) -> None:
+        assert self.bundle is not None
+        require_local_tailnet_boundary()
         verify_tailscale_services(
             self.bundle,
             hermes=False,
@@ -908,14 +933,6 @@ class SparkLifecycle:
             service_addresses=None,
             compose_command=self._compose(),
         )
-        boundary = LocalBrowserController(
-            hostname=self.control_hostname,
-            port=self._local_browser_port(),
-        )
-        self.browser = boundary
-        password = self._read_secret("admin-password")
-        self.control = boundary.login(password, timeout=30)
-        del password
 
     def _local_browser_port(self) -> int:
         assert self.bundle is not None

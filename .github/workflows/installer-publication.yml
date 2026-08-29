@@ -719,19 +719,17 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    # Spark acceptance performs routed client probes against the same three
-    # fixed Tailscale Services. Give each Spark runner exclusive ownership so
-    # one gate cannot satisfy another gate's HTTPS probes.
-    # Start Spark work as soon as both behavioral lanes have succeeded. The
-    # evidence binder runs beside this job and remains mandatory for signing.
-    needs: [authority, candidate, nas-lane-acceptance]
+    # Every concurrent acceptance shape advertises the same fixed Services as
+    # an independent HA backend, but none traverses the shared TailVIP. Spark
+    # proves its own local Serve/route ownership and pins browser traffic to its
+    # own loopback Caddy publication. The final evidence join remains mandatory.
+    needs: [authority, candidate]
     if: >-
       needs.authority.result == 'success' &&
-      needs.candidate.result == 'success' &&
-      needs['nas-lane-acceptance'].result == 'success'
+      needs.candidate.result == 'success'
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
           - platform: linux-amd64
@@ -793,6 +791,7 @@ jobs:
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
+          VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
