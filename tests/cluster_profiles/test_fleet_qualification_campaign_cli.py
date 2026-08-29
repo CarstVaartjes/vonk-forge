@@ -17,6 +17,7 @@ from cluster_profiles.qualification_locking import node_locks
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32
 PACKAGED_AUTHORITY_LOADER = campaign_cli._load_authority
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -282,6 +283,37 @@ def test_packaged_authority_binds_reviewed_02ae_catalog_closure() -> None:
         "vonk-forge/hunyuan3d-omni-pytorch-single",
         "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
     }.isdisjoint(authority.actionable_recipe_keys)
+
+
+def test_checked_in_02ae_physical_campaign_is_the_exact_reviewed_partition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
+    manifest = campaign_cli.load_manifest(
+        REPOSITORY_ROOT
+        / "config/qualification/nl-single-spark-02ae8bb5.json"
+    )
+
+    assert manifest.manifest_sha256 == (
+        "7cbf48df404bd1bd656579c0a8823189abdfb04703e09808f0549874ca7e1939"
+    )
+    assert manifest.cleanup == "stop"
+    assert manifest.jurisdiction == "NL"
+    assert [
+        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
+    ] == [
+        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
+        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 30),
+    ]
+    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
+    assert len(assigned) == len(set(assigned)) == 59
+    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
+    state_root = (
+        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-02ae8bb5"
+    ).resolve()
+    for lane in manifest.lanes:
+        assert lane.ledger.is_relative_to(state_root)
+        assert lane.plan_output.is_relative_to(state_root)
 
 
 def test_every_packaged_authority_is_explicitly_mapped() -> None:
