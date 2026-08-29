@@ -117,6 +117,43 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert "publish" not in jobs
 
 
+def test_publication_concurrency_only_serializes_pushes_for_the_same_source() -> None:
+    workflow = _workflow()
+    concurrency = workflow["concurrency"]
+    group = " ".join(concurrency["group"].split())
+
+    assert group == (
+        "vonk-forge-installer-${{ "
+        "(github.event_name == 'workflow_run' && "
+        "github.event.workflow_run.event == 'push' && "
+        "github.event.workflow_run.head_sha) || github.run_id }}"
+    )
+    assert concurrency["cancel-in-progress"] == "false"
+
+    def selected_identity(
+        event_name: str,
+        source_event: str,
+        source_sha: str,
+        publication_run_id: str,
+    ) -> str:
+        # Python's and/or has the same precedence and selected-value behavior
+        # as GitHub expressions' &&/|| for these string and boolean operands.
+        return (
+            event_name == "workflow_run"
+            and source_event == "push"
+            and source_sha
+        ) or publication_run_id
+
+    cases = (
+        ("workflow_run", "push", "a" * 40, "101", "a" * 40),
+        ("workflow_run", "workflow_dispatch", "a" * 40, "102", "102"),
+        ("workflow_run", "push", "", "103", "103"),
+        ("schedule", "", "", "104", "104"),
+    )
+    for event_name, source_event, source_sha, run_id, expected in cases:
+        assert selected_identity(event_name, source_event, source_sha, run_id) == expected
+
+
 def test_development_source_generation_runs_for_every_main_commit() -> None:
     for path in (DEV_IMAGES, AGENT_RELEASE, SETUPS):
         push = _workflow(path)["on"]["push"]

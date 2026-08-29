@@ -16,7 +16,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: vonk-forge-installer-${{ github.event.workflow_run.head_sha || github.run_id }}
+  group: >-
+    vonk-forge-installer-${{
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_sha) ||
+      github.run_id
+    }}
   cancel-in-progress: false
 
 jobs:
