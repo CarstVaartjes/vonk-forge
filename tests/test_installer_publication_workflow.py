@@ -113,13 +113,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert set(jobs["spark-acceptance"]["needs"]) == {
         "authority",
         "candidate",
-        "nas-lane-acceptance",
     }
-    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "1"
-    assert (
-        "needs['nas-lane-acceptance'].result == 'success'"
-        in jobs["spark-acceptance"]["if"]
-    )
+    assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "2"
+    assert "nas-lane-acceptance" not in jobs["spark-acceptance"]["if"]
     expected_services = {
         "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
@@ -133,14 +129,20 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     ]["env"]
     for name, service in expected_services.items():
         assert nas_environment[name] == service
-        assert spark_environment[name] == service
+        assert name not in spark_environment
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "${{ matrix.gateway }}"
     )
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "full"
-    assert spark_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
-        "vonk-spark-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
+    assert spark_environment["VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY"] == (
+        "loopback"
     )
+    assert not {
+        "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX",
+        "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+    } & set(spark_environment)
     assert set(jobs["acceptance"]["needs"]) == {
         "authority",
         "candidate",
@@ -302,7 +304,7 @@ def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     assert wrong.returncode != 0
 
 
-def test_nas_lane_reports_are_bound_fail_closed_before_spark_acceptance() -> None:
+def test_nas_lane_reports_are_bound_fail_closed_beside_spark_acceptance() -> None:
     jobs = _workflow()["jobs"]
     lane_steps = _steps(jobs["nas-lane-acceptance"])
     upload = lane_steps["Upload exact NAS lane evidence"]
@@ -342,7 +344,6 @@ def test_nas_lane_reports_are_bound_fail_closed_before_spark_acceptance() -> Non
     assert jobs["spark-acceptance"]["needs"] == [
         "authority",
         "candidate",
-        "nas-lane-acceptance",
     ]
 
 
@@ -409,6 +410,9 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
         {"platform": "linux-amd64", "runner": "ubuntu-24.04"},
         {"platform": "linux-arm64", "runner": "ubuntu-24.04-arm"},
     ]
+    assert (
+        len({entry["runner"] for entry in spark["strategy"]["matrix"]["include"]}) == 2
+    )
     report = _steps(spark)["Upload Spark behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"

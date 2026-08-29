@@ -718,19 +718,18 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    # Spark acceptance performs routed client probes against the same three
-    # fixed Tailscale Services. Give each Spark runner exclusive ownership so
-    # one gate cannot satisfy another gate's HTTPS probes.
-    # Start Spark work as soon as both behavioral lanes have succeeded. The
-    # evidence binder runs beside this job and remains mandatory for signing.
-    needs: [authority, candidate, nas-lane-acceptance]
+    # NAS acceptance exclusively owns the fixed Tailscale Services.
+    # Both Spark architectures use an explicit local Controller service set
+    # with no gateway, OAuth, or tailnet inputs, so their full package, pairing,
+    # CDI, job, and renewal lifecycles may run beside NAS and one another. The
+    # final acceptance signer still requires complete NAS and Spark evidence.
+    needs: [authority, candidate]
     if: >-
       needs.authority.result == 'success' &&
-      needs.candidate.result == 'success' &&
-      needs['nas-lane-acceptance'].result == 'success'
+      needs.candidate.result == 'success'
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
           - platform: linux-amd64
@@ -792,14 +791,8 @@ jobs:
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
+          VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
-          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
-          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: vonk-spark-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
         run: |

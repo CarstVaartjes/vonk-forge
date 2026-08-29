@@ -50,13 +50,11 @@ from tests.acceptance.runtime import (
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
     command_environment,
-    configure_tailnet_service_names,
     generate_bundle,
     host_command_environment,
     is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
-    verify_tailscale_services,
 )
 
 PLATFORMS = ("linux-amd64", "linux-arm64")
@@ -92,6 +90,56 @@ COMPOSE_IMAGE_ROLES = {
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
 ED25519_PKCS8_V2_PUBLIC_PREFIX = bytes.fromhex("812100")
 ED25519_PKCS8_V1_PREFIX = bytes.fromhex("302e020100")
+TAILSCALE_CONTROLLER_SERVICES = {
+    "tailscale-configurator",
+    "tailscale-gateway",
+}
+LOCAL_CONTROLLER_SERVICES = {
+    "caddy",
+    "control-api",
+    "control-worker",
+    "grafana",
+    "litellm",
+    "postgres",
+    "prometheus",
+    "registry",
+    "step-ca",
+}
+if LOCAL_CONTROLLER_SERVICES | TAILSCALE_CONTROLLER_SERVICES != DEFAULT_SERVICES:
+    raise RuntimeError("Spark Controller service allowlist needs review")
+LOCAL_CONTROL_SERVICE = "svc:vonk-forge-spark-local"
+LOCAL_HERMES_API_SERVICE = "svc:hermes-api-spark-local"
+LOCAL_HERMES_DASHBOARD_SERVICE = "svc:hermes-dashboard-spark-local"
+LOCAL_DNS_SUFFIX = "spark.acceptance.invalid"
+DISABLED_TAILSCALE_CREDENTIAL = "tailscale-disabled-for-spark-acceptance"
+FORBIDDEN_SPARK_TAILNET_INPUTS = (
+    "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX",
+    "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE",
+    "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME",
+    "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE",
+    "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE",
+    "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+    "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+)
+
+
+def _require_loopback_controller_boundary() -> None:
+    if os.environ.get("VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY") != "loopback":
+        raise LifecycleError("Spark controller boundary must be loopback")
+    present_tailnet_inputs = [
+        name for name in FORBIDDEN_SPARK_TAILNET_INPUTS if os.environ.get(name)
+    ]
+    if present_tailnet_inputs:
+        raise LifecycleError("Spark acceptance must not receive tailnet inputs")
+
+
+def _spark_project_identity(run_id: int, platform_name: str) -> str:
+    if run_id <= 0 or platform_name not in PLATFORMS:
+        raise LifecycleError("isolated Compose project identity is invalid")
+    project = f"vonk-spark-{run_id}-{platform_name.removeprefix('linux-')}"
+    if PROJECT.fullmatch(project) is None:
+        raise LifecycleError("isolated Compose project identity is invalid")
+    return project
 
 
 def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
@@ -506,10 +554,7 @@ class SparkLifecycle:
     def __init__(self, arguments: argparse.Namespace, graph: dict[str, object]) -> None:
         self.arguments = arguments
         self.graph = graph
-        architecture = arguments.platform.removeprefix("linux-")
-        self.project = f"vonk-spark-{arguments.run_id}-{architecture}"
-        if PROJECT.fullmatch(self.project) is None:
-            raise LifecycleError("isolated Compose project identity is invalid")
+        self.project = _spark_project_identity(arguments.run_id, arguments.platform)
         self.workspace = self._required_workspace()
         self.temporary_root: Path | None = None
         self.bundle: Path | None = None
@@ -521,21 +566,16 @@ class SparkLifecycle:
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.synthetic_fixture_sha256: str | None = None
+        _require_loopback_controller_boundary()
         self.tailnet_services = {
-            "control": self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE"
-            ),
-            "hermes_api": self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE"
-            ),
-            "hermes_dashboard": self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE"
-            ),
+            "control": LOCAL_CONTROL_SERVICE,
+            "hermes_api": LOCAL_HERMES_API_SERVICE,
+            "hermes_dashboard": LOCAL_HERMES_DASHBOARD_SERVICE,
         }
         try:
             self.control_hostname = tailscale_service_hostname(
                 self.tailnet_services["control"],
-                self._required_environment("VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"),
+                LOCAL_DNS_SUFFIX,
             )
         except AcceptanceError as error:
             raise LifecycleError(
@@ -822,18 +862,11 @@ class SparkLifecycle:
             tempfile.mkdtemp(prefix="vonk-spark-lifecycle-", dir=self.workspace)
         )
         child_environment = command_environment(self.temporary_root / "workstation")
-        tailnet_suffix = self._required_environment(
-            "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"
-        )
         responses = nas_responses(
             nas_ip="127.0.0.1",
-            tailnet_suffix=tailnet_suffix,
-            oauth_client_id=self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", secret=True
-            ),
-            oauth_client_secret=self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", secret=True
-            ),
+            tailnet_suffix=LOCAL_DNS_SUFFIX,
+            oauth_client_id=DISABLED_TAILSCALE_CREDENTIAL,
+            oauth_client_secret=DISABLED_TAILSCALE_CREDENTIAL,
             upstream_key=self._required_environment(
                 "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
             ),
@@ -855,13 +888,6 @@ class SparkLifecycle:
             child_environment=child_environment,
             responses=responses,
         )
-        configure_tailnet_service_names(
-            self.bundle,
-            gateway_hostname=self._required_environment(
-                "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"
-            ),
-            **self.tailnet_services,
-        )
         _configure_acceptance_renewal(
             self.bundle,
             lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
@@ -871,14 +897,7 @@ class SparkLifecycle:
         self._assert_compose_image_graph()
         try:
             self._run_command(
-                self._compose(
-                    "up",
-                    "-d",
-                    "--wait",
-                    "--wait-timeout",
-                    "360",
-                    "--remove-orphans",
-                ),
+                self._local_controller_up_command(),
                 cwd=self.bundle,
                 timeout=420,
             )
@@ -891,23 +910,13 @@ class SparkLifecycle:
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
         )
         try:
-            assert_compose_services_healthy(status.stdout, DEFAULT_SERVICES)
+            assert_compose_services_healthy(status.stdout, LOCAL_CONTROLLER_SERVICES)
         except AcceptanceError as error:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         self._prepare_synthetic_firewall_environment()
-        verify_tailscale_services(
-            self.bundle,
-            hermes=False,
-            tailnet_suffix=tailnet_suffix,
-            control_service=self.tailnet_services["control"],
-            hermes_api_service=self.tailnet_services["hermes_api"],
-            hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
-            service_addresses=None,
-            compose_command=self._compose(),
-        )
         boundary = LocalBrowserController(
             hostname=self.control_hostname,
             port=self._local_browser_port(),
@@ -916,6 +925,17 @@ class SparkLifecycle:
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _local_controller_up_command(self) -> list[str]:
+        return self._compose(
+            "up",
+            "-d",
+            "--wait",
+            "--wait-timeout",
+            "360",
+            "--remove-orphans",
+            *sorted(LOCAL_CONTROLLER_SERVICES),
+        )
 
     def _local_browser_port(self) -> int:
         assert self.bundle is not None

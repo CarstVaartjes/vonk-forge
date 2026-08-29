@@ -434,6 +434,71 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
     ]
 
 
+def test_parallel_spark_lanes_reject_every_tailnet_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = _module()
+    for name in lifecycle.FORBIDDEN_SPARK_TAILNET_INPUTS:
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.delenv("VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY", raising=False)
+    with pytest.raises(lifecycle.LifecycleError, match="must be loopback"):
+        lifecycle._require_loopback_controller_boundary()
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY", "tailnet")
+    with pytest.raises(lifecycle.LifecycleError, match="must be loopback"):
+        lifecycle._require_loopback_controller_boundary()
+
+    monkeypatch.setenv("VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY", "loopback")
+    monkeypatch.setenv(
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", "must-not-be-visible"
+    )
+    with pytest.raises(lifecycle.LifecycleError, match="must not receive"):
+        lifecycle._require_loopback_controller_boundary()
+
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET")
+    lifecycle._require_loopback_controller_boundary()
+
+
+def test_parallel_spark_controller_start_cannot_create_tailscale_services() -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.project = "vonk-spark-42-arm64"
+
+    assert lifecycle.LOCAL_CONTROLLER_SERVICES == lifecycle.DEFAULT_SERVICES - {
+        "tailscale-configurator",
+        "tailscale-gateway",
+    }
+    command = run._local_controller_up_command()
+    assert command == [
+        "docker",
+        "compose",
+        "--project-name",
+        "vonk-spark-42-arm64",
+        "up",
+        "-d",
+        "--wait",
+        "--wait-timeout",
+        "360",
+        "--remove-orphans",
+        *sorted(lifecycle.LOCAL_CONTROLLER_SERVICES),
+    ]
+    assert not lifecycle.TAILSCALE_CONTROLLER_SERVICES & set(command)
+
+
+def test_parallel_spark_architectures_have_distinct_compose_projects() -> None:
+    lifecycle = _module()
+
+    amd64 = lifecycle._spark_project_identity(42, "linux-amd64")
+    arm64 = lifecycle._spark_project_identity(42, "linux-arm64")
+
+    assert amd64 == "vonk-spark-42-amd64"
+    assert arm64 == "vonk-spark-42-arm64"
+    assert amd64 != arm64
+    with pytest.raises(lifecycle.LifecycleError, match="project identity"):
+        lifecycle._spark_project_identity(42, "linux-unknown")
+
+
 def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
