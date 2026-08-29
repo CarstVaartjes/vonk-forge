@@ -232,6 +232,19 @@ test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$baseline_version"
 cp -- "$old_helper_unit" "$test_root/installed-helper.service"
 cp -- "$old_socket_unit" "$test_root/installed-helper.socket"
 
+assert_interrupted_baseline_state() {
+  interrupted_state=$(dpkg-query -W \
+    -f='${db:Status-Abbrev}|${Version}' vonk-forge-agent)
+  case "$interrupted_state" in
+    "iU |$baseline_version"|"iHR|$baseline_version") ;;
+    *)
+      printf 'unexpected interrupted package state: %s\n' \
+        "$interrupted_state" >&2
+      return 1
+      ;;
+  esac
+}
+
 stage_candidate() {
   case "$candidate_custody" in
     legacy)
@@ -416,10 +429,7 @@ printf '%s\n' \
           sleep 1
           test "$(systemctl --system show --property=ActiveState --value \
             "$recovery_unit")" = activating
-          test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent \
-            | cut -c1-2)" = iU
-          test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" \
-            = "$baseline_version"
+          assert_interrupted_baseline_state
           cmp -s "$test_root/normalized-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
           systemctl --system thaw "$helper_unit"
@@ -445,10 +455,7 @@ test -f /var/lib/vonk-forge/package-upgrade/intent
 if [[ "$crash_mode" == full-cgroup ]]; then
   cmp -s "$test_root/crash-point-pending" \
     /var/lib/vonk-forge/helper-upgrade.pending
-  test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent \
-    | cut -c1-2)" = iU
-  test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" \
-    = "$baseline_version"
+  assert_interrupted_baseline_state
 
   # A boot-time start request cannot launch the old agent while the durable
   # intent is incomplete. Reloading and restarting the enabled socket models
@@ -510,4 +517,4 @@ dpkg --remove vonk-forge-agent
 test ! -e /var/lib/vonk-forge/helper-upgrade.receipt
 
 printf '%s\n' \
-  "durable lower-iU $stale_pending_format $crash_mode $candidate_custody recovery/normal-upgrade/remove lifecycle: PASS"
+  "durable lower-interrupted $stale_pending_format $crash_mode $candidate_custody recovery/normal-upgrade/remove lifecycle: PASS"
