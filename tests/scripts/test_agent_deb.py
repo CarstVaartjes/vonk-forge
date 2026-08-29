@@ -475,6 +475,11 @@ def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
     assert 'test "${dpkg_argv[1]}" = --install' in lifecycle
     assert 'test "${dpkg_argv[2]}" = --force-confold' in lifecycle
     assert 'test "${dpkg_argv[3]}" = "$candidate"' in lifecycle
+    assert (
+        'upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename '
+        '"$test_root")'
+    ) in lifecycle
+    assert 'rm -f -- "$upgrade_invocations"' in lifecycle
     assert 'test "$(wc -l < "$upgrade_invocations")" -eq 1' in lifecycle
 
 

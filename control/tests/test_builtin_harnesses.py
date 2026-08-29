@@ -1041,6 +1041,18 @@ def test_vllm_accepts_glm_reasoning_parser() -> None:
     assert "glm45" in projection.command
 
 
+def test_vllm_accepts_deepseek_r1_reasoning_parser() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "deepseek_r1"}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    parser = projection.command.index("--reasoning-parser")
+    assert projection.command[parser + 1] == "deepseek_r1"
+
+
 def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].extend(
