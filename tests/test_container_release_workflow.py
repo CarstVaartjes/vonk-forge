@@ -220,6 +220,30 @@ def test_development_image_validation_waits_for_all_parallel_archives() -> None:
     )
 
 
+def test_development_image_source_contracts_run_in_parallel_after_npm_install() -> None:
+    text = DEV_WORKFLOW.read_text()
+    validation = text[
+        text.index("  build-and-accept:") : text.index(
+            "  publish-development-images:"
+        )
+    ]
+
+    install = validation.index("- name: Install locked admin web dependencies")
+    parallel = validation.index("      - parallel:")
+    confirmation = validation.index("- name: Confirm parallel source contracts completed")
+    assert install < parallel < confirmation
+    for step in (
+        "Run focused Compose contracts",
+        "Test and build admin web",
+        "Run focused control authentication contracts",
+        "Scan public image source inputs",
+    ):
+        assert f"          - name: {step}" in validation[parallel:confirmation]
+    assert validation.count("npm ci --prefix control/web") == 1
+    assert validation.count("-p no:cacheprovider") == 2
+    assert "test -d control/web/dist" in validation[confirmation:]
+
+
 def test_development_image_publication_requires_both_platforms() -> None:
     verification = development_step_run(
         "Verify immutable manifests and attestations"
