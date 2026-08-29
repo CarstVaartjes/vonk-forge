@@ -443,29 +443,35 @@ jobs:
               ((found_provenance == 1))
             done < <(scripts/verify-multiarch-image-manifest "$platform_index")
           done
-      - name: Upload accepted publication inputs
+      - name: Create checksum-bound acceptance receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/dev-image-acceptance-receipt create \
+            "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
+
+      - name: Upload accepted receipt and Compose inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: accepted-development-images-${{ github.sha }}-${{ github.run_id }}
+          name: accepted-development-receipt-${{ github.sha }}-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 1
-          compression-level: 0
           path: |
-            ${{ runner.temp }}/accepted/vonk-forge-api.oci.tar
-            ${{ runner.temp }}/accepted/vonk-forge-hermes.oci.tar
-            ${{ runner.temp }}/accepted/vonk-forge-worker.oci.tar
+            ${{ runner.temp }}/accepted/acceptance-receipt.json
             ${{ runner.temp }}/accepted/docker-compose.pinned.yml
             ${{ runner.temp }}/accepted/docker-compose.dev.yml
 
   publish-development-images:
-    name: Publish accepted main images
-    needs: [build-and-accept]
+    name: Prefetch and publish accepted main images
+    needs: [build-oci-archives]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
       group: vonk-forge-development-image-publication
       cancel-in-progress: false
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
@@ -476,38 +482,112 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      - name: Install Skopeo from Ubuntu
+
+      - name: Verify exact main before prefetch
+        id: metadata
         shell: bash
         run: |
           set -euo pipefail
-          if command -v skopeo >/dev/null 2>&1; then
-            exit 0
-          fi
-          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-            exit 0
-          fi
-          for attempt in 1 2 3; do
-            timeout --foreground 120s sudo apt-get update \
-              -o Acquire::Retries=3 \
-              -o Acquire::http::Timeout=30 \
-              -o Acquire::https::Timeout=30 || true
-            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-              exit 0
-            fi
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          scripts/dev-image-metadata \
+            "$GITHUB_REF" "$GITHUB_SHA" \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
+            >> "$GITHUB_OUTPUT"
+
+      - parallel:
+          - name: Set up Docker Buildx
+            uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+          - name: Install Skopeo from Ubuntu
+            shell: bash
+            run: |
+              set -euo pipefail
+              if command -v skopeo >/dev/null 2>&1; then
+                exit 0
+              fi
+              if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+                exit 0
+              fi
+              for attempt in 1 2 3; do
+                timeout --foreground 120s sudo apt-get update \
+                  -o Acquire::Retries=3 \
+                  -o Acquire::http::Timeout=30 \
+                  -o Acquire::https::Timeout=30 || true
+                if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+                  exit 0
+                fi
+              done
+              echo "unable to install skopeo after bounded retries" >&2
+              exit 1
+
+          - name: Prefetch original immutable OCI archives
+            uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+            with:
+              pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}
+              merge-multiple: true
+              path: ${{ runner.temp }}/accepted
+
+          - name: Wait for checksum-bound acceptance receipt
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+            run: |
+              set -euo pipefail
+              receipt_name="accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID"
+              receipt_root="$RUNNER_TEMP/accepted-receipt"
+              install -d -m 0700 "$receipt_root"
+              for attempt in $(seq 1 60); do
+                if ! response=$(gh api \
+                  "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100"); then
+                  sleep 5
+                  continue
+                fi
+                count=$(jq --arg name "$receipt_name" \
+                  '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
+                  <<< "$response")
+                if [[ "$count" == 1 ]]; then
+                  if gh run download "$GITHUB_RUN_ID" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --name "$receipt_name" --dir "$receipt_root"; then
+                    exit 0
+                  fi
+                  rm -f -- \
+                    "$receipt_root/acceptance-receipt.json" \
+                    "$receipt_root/docker-compose.pinned.yml" \
+                    "$receipt_root/docker-compose.dev.yml"
+                  sleep 5
+                  continue
+                fi
+                [[ "$count" == 0 ]]
+                sleep 5
+              done
+              echo "accepted development image receipt was not published in time" >&2
+              exit 1
+
+      - name: Confirm prefetched and accepted inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for role in api worker hermes; do
+            test -f "$RUNNER_TEMP/accepted/vonk-forge-$role.oci.tar"
           done
-          echo "unable to install skopeo after bounded retries" >&2
-          exit 1
-      - name: Download accepted OCI archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: accepted-development-images-${{ github.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/accepted
-      - name: Recheck exact main before publication
+          test -f "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
+          test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml"
+          test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml"
+          command -v skopeo >/dev/null
+
+      - name: Verify receipt and recheck exact main before publication
         shell: bash
         run: |
           set -euo pipefail
+          cp "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml" \
+            "$RUNNER_TEMP/accepted/docker-compose.pinned.yml"
+          cp "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml" \
+            "$RUNNER_TEMP/accepted/docker-compose.dev.yml"
+          scripts/dev-image-acceptance-receipt verify \
+            "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           [[ "$GITHUB_SHA" == \
@@ -524,8 +604,8 @@ jobs:
           - name: Publish immutable tested API image
             shell: bash
             env:
-              IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMAGE: ${{ steps.metadata.outputs.api_image }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
               scripts/publish-immutable-image api \
                 "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
@@ -534,8 +614,8 @@ jobs:
           - name: Publish immutable tested worker image
             shell: bash
             env:
-              IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMAGE: ${{ steps.metadata.outputs.worker_image }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
               scripts/publish-immutable-image worker \
                 "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
@@ -545,7 +625,7 @@ jobs:
             shell: bash
             env:
               IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: |
               scripts/publish-immutable-image hermes \
                 "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
@@ -569,16 +649,16 @@ jobs:
             shell: bash
             env:
               DIGEST: ${{ steps.publish.outputs.api_digest }}
-              IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMAGE: ${{ steps.metadata.outputs.api_image }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image api "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
           - name: Verify immutable worker manifest and attestations
             shell: bash
             env:
               DIGEST: ${{ steps.publish.outputs.worker_digest }}
-              IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMAGE: ${{ steps.metadata.outputs.worker_image }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image worker "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
           - name: Verify immutable Hermes manifest and attestations
@@ -586,21 +666,21 @@ jobs:
             env:
               DIGEST: ${{ steps.publish.outputs.hermes_digest }}
               IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-              IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
       - parallel:
           - name: Sign accepted API image provenance
             uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
             with:
-              subject-name: ${{ needs.build-and-accept.outputs.api_image }}
+              subject-name: ${{ steps.metadata.outputs.api_image }}
               subject-digest: ${{ steps.publish.outputs.api_digest }}
               push-to-registry: true
 
           - name: Sign accepted worker image provenance
             uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
             with:
-              subject-name: ${{ needs.build-and-accept.outputs.worker_image }}
+              subject-name: ${{ steps.metadata.outputs.worker_image }}
               subject-digest: ${{ steps.publish.outputs.worker_digest }}
               push-to-registry: true
 
@@ -614,7 +694,7 @@ jobs:
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ needs.build-and-accept.outputs.artifact_name }}
+          name: ${{ steps.metadata.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 30
           path: |
@@ -636,10 +716,10 @@ jobs:
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-          DEV_ALIAS: ${{ needs.build-and-accept.outputs.dev_alias }}
+          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
+          DEV_ALIAS: ${{ steps.metadata.outputs.dev_alias }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
+          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
           git fetch --force --no-tags origin \

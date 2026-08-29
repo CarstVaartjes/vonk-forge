@@ -202,7 +202,9 @@ def test_development_image_digest_collection_rejects_missing_parallel_output(
     ]
 
 
-def test_development_images_build_supported_linux_architectures_with_targeted_cache() -> None:
+def test_development_images_build_supported_linux_architectures_with_targeted_cache() -> (
+    None
+):
     text = DEV_WORKFLOW.read_text()
     workflow_data = yaml.safe_load(text)
     images = {
@@ -271,21 +273,23 @@ def test_development_publication_rechecks_exact_main_at_both_boundaries() -> Non
     }
 
     acceptance_check = acceptance_steps["Verify exact main tip"]["run"]
-    publication_check = publication_steps["Recheck exact main before publication"]["run"]
+    prefetch_check = publication_steps["Verify exact main before prefetch"]["run"]
+    publication_check = publication_steps[
+        "Verify receipt and recheck exact main before publication"
+    ]["run"]
     exact_main = "refs/remotes/origin/main^{commit}"
     assert exact_main in acceptance_check
     assert "scripts/dev-image-metadata" in acceptance_check
     assert '"$GITHUB_REF" "$GITHUB_SHA"' in acceptance_check
+    assert exact_main in prefetch_check
+    assert "scripts/dev-image-metadata" in prefetch_check
     assert exact_main in publication_check
     assert '[[ "$GITHUB_SHA" ==' in publication_check
 
 
 def test_development_images_enable_arm64_emulation_before_building() -> None:
     text = DEV_WORKFLOW.read_text()
-    setup = (
-        "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 "
-        "# v4.2.0"
-    )
+    setup = "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0"
 
     assert setup in text
     assert text.index(setup) < text.index("docker/setup-buildx-action@")
@@ -293,21 +297,27 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
     qemu = text[text.index(setup) : text.index("- name: Build exact OCI archive")]
     assert (
         "image: docker.io/tonistiigi/binfmt@sha256:"
-        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
-        in qemu
+        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in qemu
     )
     assert "platforms: arm64" in qemu
-    matrix = text[text.index("  build-oci-archives:") : text.index("  build-and-accept:")]
+    matrix = text[
+        text.index("  build-oci-archives:") : text.index("  build-and-accept:")
+    ]
     assert "max-parallel: 3" in matrix
     assert matrix.count("          - role:") == 3
 
 
 def test_development_image_validation_waits_for_all_parallel_archives() -> None:
     text = DEV_WORKFLOW.read_text()
-    validation = text[text.index("  build-and-accept:") : text.index("  publish-development-images:")]
+    validation = text[
+        text.index("  build-and-accept:") : text.index("  publish-development-images:")
+    ]
 
     assert "needs: [build-oci-archives, verify-runtime-images]" in validation
-    assert "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}" in validation
+    assert (
+        "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}"
+        in validation
+    )
     assert "merge-multiple: true" in validation
     assert validation.index("Download exact OCI archives") < validation.index(
         "Scan complete local publication inputs"
@@ -319,18 +329,20 @@ def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> N
     runtime = workflow_data["jobs"]["verify-runtime-images"]
     acceptance = workflow_data["jobs"]["build-and-accept"]
     runtime_text = DEV_WORKFLOW.read_text()[
-        DEV_WORKFLOW.read_text().index("  verify-runtime-images:") :
-        DEV_WORKFLOW.read_text().index("  build-and-accept:")
+        DEV_WORKFLOW.read_text().index(
+            "  verify-runtime-images:"
+        ) : DEV_WORKFLOW.read_text().index("  build-and-accept:")
     ]
     acceptance_text = DEV_WORKFLOW.read_text()[
-        DEV_WORKFLOW.read_text().index("  build-and-accept:") :
-        DEV_WORKFLOW.read_text().index("  publish-development-images:")
+        DEV_WORKFLOW.read_text().index(
+            "  build-and-accept:"
+        ) : DEV_WORKFLOW.read_text().index("  publish-development-images:")
     ]
 
     assert "needs" not in runtime
     assert acceptance["needs"] == ["build-oci-archives", "verify-runtime-images"]
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in runtime_text
-    assert "test \"${#runtime_images[@]}\" = 7" in runtime_text
+    assert 'test "${#runtime_images[@]}" = 7' in runtime_text
     assert "sort -u" in runtime_text
     assert "@sha256:[0-9a-f]{64}" in runtime_text
     assert 'docker pull "$runtime_image"' in runtime_text
@@ -340,9 +352,7 @@ def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> N
 def test_development_image_source_contracts_run_in_parallel_after_npm_install() -> None:
     text = DEV_WORKFLOW.read_text()
     validation = text[
-        text.index("  build-and-accept:") : text.index(
-            "  publish-development-images:"
-        )
+        text.index("  build-and-accept:") : text.index("  publish-development-images:")
     ]
 
     install = validation.index("- name: Install locked admin web dependencies")
@@ -358,8 +368,7 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
     assert 'node-version: "24"' in validation[:install]
     assert "cache: npm" in validation[:install]
     assert (
-        "cache-dependency-path: control/web/package-lock.json"
-        in validation[:install]
+        "cache-dependency-path: control/web/package-lock.json" in validation[:install]
     )
     assert "tools/openapi-client/package-lock.json" not in validation
     assert "node_modules" not in validation
@@ -375,9 +384,10 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
     assert validation.count("npm ci --prefix control/web") == 1
     assert validation.count("-p no:cacheprovider") == 2
     assert "test -d control/web/dist" in validation[confirmation:]
-    assert 'test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"' in validation[
-        confirmation:
-    ]
+    assert (
+        'test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"'
+        in validation[confirmation:]
+    )
     render = validation.index(
         "- name: Render and validate disposable development Compose artifacts"
     )
@@ -396,11 +406,11 @@ def test_local_acceptance_validates_oci_content_without_daemon_import() -> None:
     assert '"${config_digest#sha256:}"' in scan
     assert '"${layer_digest#sha256:}"' in scan
     assert '"${statement_digest#sha256:}"' in scan
-    assert '.architecture == $architecture' in scan
+    assert ".architecture == $architecture" in scan
     assert '.rootfs.type == "layers"' in scan
     assert ".rootfs.diff_ids" in scan
     assert ".history[]" in scan
-    assert 'org.opencontainers.image.revision' in scan
+    assert "org.opencontainers.image.revision" in scan
     assert "scripts/verify-multiarch-image-manifest" in scan
     assert "https://spdx.dev/Document" in scan
     assert "https://slsa.dev/provenance/" in scan
@@ -416,43 +426,195 @@ def test_development_image_publication_requires_both_platforms() -> None:
     assert verification.count('"$image@$digest"') == 3
     assert 'done < "$platform_records"' in verification
     assert '--arg platform "linux/$architecture"' in verification
-    assert verification.count('.[$platform]') == 2
-    assert verification.count(
-        'keys | sort == ["linux/amd64", "linux/arm64"]'
-    ) == 2
+    assert verification.count(".[$platform]") == 2
+    assert verification.count('keys | sort == ["linux/amd64", "linux/arm64"]') == 2
 
 
 def test_development_publication_parallelizes_roles_inside_one_safe_job() -> None:
     text = DEV_WORKFLOW.read_text()
     publisher = text[text.index("  publish-development-images:") :]
-    exact_main = publisher.index("- name: Recheck exact main before publication")
-    publish_parallel = publisher.index("      - parallel:", exact_main)
+    prefetch_check = publisher.index("- name: Verify exact main before prefetch")
+    prefetch_parallel = publisher.index("      - parallel:", prefetch_check)
+    publication_check = publisher.index(
+        "- name: Verify receipt and recheck exact main before publication"
+    )
+    publish_parallel = publisher.index("      - parallel:", publication_check)
     collect = publisher.index("- name: Collect immutable tested image digests")
     verify_parallel = publisher.index("      - parallel:", collect)
     attest_parallel = publisher.index("      - parallel:", verify_parallel + 1)
     upload = publisher.index("- name: Upload Compose artifact")
     aliases = publisher.index("- name: Advance accepted development aliases")
 
-    assert exact_main < publish_parallel < collect < verify_parallel
+    assert prefetch_check < prefetch_parallel < publication_check
+    assert publication_check < publish_parallel < collect < verify_parallel
     assert verify_parallel < attest_parallel < upload < aliases
-    assert publisher.count("      - parallel:") == 3
+    assert publisher.count("      - parallel:") == 4
     for role in ("API", "worker", "Hermes"):
-        assert f"          - name: Publish immutable tested {role} image" in publisher[
-            publish_parallel:collect
-        ]
+        assert (
+            f"          - name: Publish immutable tested {role} image"
+            in publisher[publish_parallel:collect]
+        )
         assert (
             f"          - name: Verify immutable {role} manifest and attestations"
             in publisher[verify_parallel:attest_parallel]
         )
-        assert f"          - name: Sign accepted {role} image provenance" in publisher[
-            attest_parallel:upload
-        ]
+        assert (
+            f"          - name: Sign accepted {role} image provenance"
+            in publisher[attest_parallel:upload]
+        )
     assert "scripts/publish-immutable-image" in publisher[publish_parallel:collect]
-    assert "scripts/verify-published-image" in publisher[
-        verify_parallel:attest_parallel
-    ]
-    assert "cancel-in-progress: false" in publisher[:exact_main]
+    assert (
+        "scripts/verify-published-image" in publisher[verify_parallel:attest_parallel]
+    )
+    assert "cancel-in-progress: false" in publisher[:prefetch_check]
     assert publisher[aliases:].count("refs/remotes/origin/main^{commit}") == 1
+
+
+def test_development_publication_prefetches_originals_while_acceptance_runs() -> None:
+    text = DEV_WORKFLOW.read_text()
+    acceptance = text[
+        text.index("  build-and-accept:") : text.index("  publish-development-images:")
+    ]
+    publisher = text[text.index("  publish-development-images:") :]
+    workflow_data = development_workflow()
+    publish_job = workflow_data["jobs"]["publish-development-images"]
+
+    assert publish_job["needs"] == ["build-oci-archives"]
+    assert publish_job["permissions"] == {
+        "actions": "read",
+        "attestations": "write",
+        "contents": "read",
+        "id-token": "write",
+        "packages": "write",
+    }
+    assert "accepted-development-images-" not in text
+    assert "accepted-development-receipt-${{ github.sha }}-${{ github.run_id }}" in (
+        acceptance
+    )
+    accepted_upload = acceptance[
+        acceptance.index("- name: Upload accepted receipt and Compose inputs") :
+    ]
+    assert "vonk-forge-api.oci.tar" not in accepted_upload
+    assert "vonk-forge-worker.oci.tar" not in accepted_upload
+    assert "vonk-forge-hermes.oci.tar" not in accepted_upload
+    assert "acceptance-receipt.json" in accepted_upload
+
+    prefetch = publisher[
+        publisher.index("      - parallel:") : publisher.index(
+            "- name: Confirm prefetched and accepted inputs"
+        )
+    ]
+    assert "Prefetch original immutable OCI archives" in prefetch
+    assert "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}" in (
+        prefetch
+    )
+    assert "merge-multiple: true" in prefetch
+    assert "Wait for checksum-bound acceptance receipt" in prefetch
+    assert "gh run download" in prefetch
+    assert "accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID" in prefetch
+    receipt_check = publisher.index("scripts/dev-image-acceptance-receipt verify")
+    login = publisher.index("- name: Log in to GHCR")
+    publish = publisher.index("- name: Publish immutable tested API image")
+    assert receipt_check < login < publish
+
+
+def _write_receipt_fixture(root: Path) -> None:
+    for role in ("api", "worker", "hermes"):
+        (root / f"vonk-forge-{role}.oci.tar").write_bytes(
+            f"accepted-{role}-archive".encode()
+        )
+    (root / "docker-compose.dev.yml").write_text("services: {}\n")
+    (root / "docker-compose.pinned.yml").write_text("services: {}\n")
+
+
+def _receipt_command(
+    tmp_path: Path, mode: str, receipt: Path, publication_root: Path
+) -> subprocess.CompletedProcess[str]:
+    tools = tmp_path / "tools"
+    tools.mkdir(exist_ok=True)
+    write_executable(
+        tools / "skopeo",
+        """
+if [[ "$1:$2:$3" != "inspect:--raw:oci-archive:"* ]]; then
+  exit 64
+fi
+printf '{"mediaType":"application/vnd.oci.image.index.v1+json"}'
+""".strip(),
+    )
+    return subprocess.run(
+        [
+            ROOT / "scripts/dev-image-acceptance-receipt",
+            mode,
+            receipt,
+            "a" * 40,
+            "12345",
+            publication_root,
+        ],
+        cwd=ROOT,
+        env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
+def test_development_image_receipt_binds_original_archives_and_compose(
+    tmp_path: Path,
+) -> None:
+    publication_root = tmp_path / "accepted"
+    publication_root.mkdir()
+    _write_receipt_fixture(publication_root)
+    receipt = tmp_path / "receipt.json"
+
+    created = _receipt_command(tmp_path, "create", receipt, publication_root)
+    verified = _receipt_command(tmp_path, "verify", receipt, publication_root)
+
+    assert created.returncode == 0, created.stderr
+    assert verified.returncode == 0, verified.stderr
+    document = json.loads(receipt.read_text())
+    assert document["schema"] == "vonk-forge.dev-image-acceptance.v1"
+    assert set(document["roles"]) == {"api", "worker", "hermes"}
+    assert document["roles"]["api"]["artifact"] == (
+        f"development-image-api-{'a' * 40}-12345"
+    )
+    assert document["roles"]["api"]["archive"] == "vonk-forge-api.oci.tar"
+    assert document["roles"]["api"]["manifest_digest"].startswith("sha256:")
+    assert set(document["compose"]) == {
+        "docker-compose.dev.yml",
+        "docker-compose.pinned.yml",
+    }
+
+
+def test_development_image_receipt_rejects_changed_archive(tmp_path: Path) -> None:
+    publication_root = tmp_path / "accepted"
+    publication_root.mkdir()
+    _write_receipt_fixture(publication_root)
+    receipt = tmp_path / "receipt.json"
+    created = _receipt_command(tmp_path, "create", receipt, publication_root)
+    assert created.returncode == 0, created.stderr
+    (publication_root / "vonk-forge-hermes.oci.tar").write_bytes(b"substituted")
+
+    verified = _receipt_command(tmp_path, "verify", receipt, publication_root)
+
+    assert verified.returncode != 0
+    assert "accepted hermes archive does not match its receipt" in verified.stderr
+
+
+def test_development_image_receipt_rejects_changed_compose(tmp_path: Path) -> None:
+    publication_root = tmp_path / "accepted"
+    publication_root.mkdir()
+    _write_receipt_fixture(publication_root)
+    receipt = tmp_path / "receipt.json"
+    created = _receipt_command(tmp_path, "create", receipt, publication_root)
+    assert created.returncode == 0, created.stderr
+    (publication_root / "docker-compose.dev.yml").write_text("services: {bad: {}}\n")
+
+    verified = _receipt_command(tmp_path, "verify", receipt, publication_root)
+
+    assert verified.returncode != 0
+    assert "accepted docker-compose.dev.yml does not match its receipt" in (
+        verified.stderr
+    )
 
 
 def image_descriptor(architecture: str, marker: str) -> dict[str, object]:
@@ -582,7 +744,7 @@ def test_release_tag_is_ssh_signed_trusted_and_reachable_from_main() -> None:
         "Validate release metadata"
     )
     assert "tag_oid: ${{ steps.authority.outputs.tag_oid }}" in metadata
-    assert 'printf \'tag_oid=%s\\n\'' in verify
+    assert "printf 'tag_oid=%s\\n'" in verify
 
 
 def test_immutable_tag_authority_is_threaded_into_reusable_publishers() -> None:
@@ -633,12 +795,12 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
     assert alias.index("scripts/verify-release-tag-authority") < alias.index(
         "Log in to GHCR"
     )
-    assert 'org.opencontainers.image.revision' in alias
+    assert "org.opencontainers.image.revision" in alias
     assert "docker buildx imagetools inspect" in alias
     assert ".Provenance" in alias
     assert "gh attestation verify" in evidence
     assert (
-        '--signer-workflow '
+        "--signer-workflow "
         '"$GITHUB_REPOSITORY/.github/workflows/dev-images.yml"' in evidence
     )
     assert "--signer-workflow dev-images.yml" not in evidence
@@ -649,12 +811,16 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
     assert "scripts/promote-image-aliases" in alias
     promotion = alias.index("scripts/promote-image-aliases")
     assert alias.rfind("scripts/verify-release-tag-authority", 0, promotion) >= 0
-    postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
+    postconditions = (
+        ROOT / "scripts/verify-production-alias-postconditions"
+    ).read_text()
     assert "scripts/verify-production-alias-postconditions" in alias
     assert "scripts/verify-release-tag-authority" in postconditions
 
 
-def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> None:
+def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> (
+    None
+):
     publisher = job("publish-images")
     release = workflow_step("release-manifest", "Create public GitHub Release")
     aliases = workflow_step(
@@ -687,9 +853,11 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
         "Bind release digests to selected source revision and evidence",
     )
     assert "(.immutable == true)" in selection
-    postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
+    postconditions = (
+        ROOT / "scripts/verify-production-alias-postconditions"
+    ).read_text()
     assert "(.immutable == true)" in postconditions
-    assert "gh release verify \"$TARGET_TAG\"" in evidence
+    assert 'gh release verify "$TARGET_TAG"' in evidence
     assert evidence.count("gh release verify-asset") == 1
     for asset in (
         "vonk-forge-images.env",
@@ -707,7 +875,9 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
     assert "GH_TOKEN: ${{ github.token }}" in evidence
     assert alias.count("GH_TOKEN: ${{ github.token }}") == 1
     assert "persist-credentials: false" in alias
-    assert alias.index(authority) < alias.index(evidence) < alias.index("Log in to GHCR")
+    assert (
+        alias.index(authority) < alias.index(evidence) < alias.index("Log in to GHCR")
+    )
 
 
 def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
@@ -751,10 +921,7 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
     manifest = job("release-manifest")
 
     assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in metadata
-    assert (
-        "needs: [validate-release-images, release-metadata]"
-        in publisher
-    )
+    assert "needs: [validate-release-images, release-metadata]" in publisher
     assert (
         "needs: [release-metadata, publish-images, build-agent-package, "
         "native-amd64-agent-lifecycle]" in manifest
@@ -769,7 +936,7 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert "needs: [release-metadata]" in package
     assert "uses: ./.github/actions/agent-package-build" in package
     assert "scripts/agent-package-metadata" in metadata
-    assert "production \"$GITHUB_REF_TYPE\" \"$GITHUB_REF_NAME\"" in metadata
+    assert 'production "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME"' in metadata
     assert '"$GITHUB_SHA" 0' in metadata
     assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
     assert "channel: stable" in package
@@ -789,7 +956,9 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert "artifact-metadata: write" in package
     assert "attestations: write" in package
     assert "id-token: write" in package
-    assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in package
+    assert (
+        "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in package
+    )
     assert "secrets:" not in package
     for forbidden in (
         "scripts/build-agent-deb",
@@ -812,21 +981,29 @@ def test_public_release_requires_native_amd64_package_lifecycle() -> None:
     assert "podman shellcheck slirp4netns uidmap" in lifecycle
     assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
     assert 'dpkg -i "$package"' in lifecycle
-    assert '/usr/lib/vonk-forge/vonk-agent --version' in lifecycle
+    assert "/usr/lib/vonk-forge/vonk-agent --version" in lifecycle
     assert "dpkg --remove vonk-forge-agent" in lifecycle
-    assert "native-amd64-agent-lifecycle" in job("release-manifest").split(
-        "needs:", 1
-    )[1].splitlines()[0]
-    assert "native-amd64-agent-lifecycle" in job("publish-apt").split(
-        "needs:", 1
-    )[1].splitlines()[0]
+    assert (
+        "native-amd64-agent-lifecycle"
+        in job("release-manifest").split("needs:", 1)[1].splitlines()[0]
+    )
+    assert (
+        "native-amd64-agent-lifecycle"
+        in job("publish-apt").split("needs:", 1)[1].splitlines()[0]
+    )
 
 
 def test_tag_release_attaches_agent_package_to_public_release() -> None:
     release = workflow_step("release-manifest", "Create public GitHub Release")
 
-    assert "ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}" in release
-    assert "AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}" in release
+    assert (
+        "ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}"
+        in release
+    )
+    assert (
+        "AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}"
+        in release
+    )
     assert "VERSION: ${{ needs.build-agent-package.outputs.version }}" in release
     for asset in (
         '"release-output/agent-package/$ARM64_PACKAGE"',
@@ -850,8 +1027,12 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     assert "uses: ./.github/actions/agent-apt-publish" in apt
     assert "channel: stable" in apt
     assert "version: ${{ needs.build-agent-package.outputs.version }}" in apt
-    assert "arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}" in apt
-    assert "amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}" in apt
+    assert (
+        "arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}" in apt
+    )
+    assert (
+        "amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}" in apt
+    )
     assert (
         "artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}" in apt
     )
@@ -890,13 +1071,9 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
 
     assert (
         "needs: [lint, generated-clients, test, release-metadata, "
-        "build-agent-package, native-amd64-agent-lifecycle]"
-        in validator
+        "build-agent-package, native-amd64-agent-lifecycle]" in validator
     )
-    assert (
-        "needs: [validate-release-images, release-metadata]"
-        in publisher
-    )
+    assert "needs: [validate-release-images, release-metadata]" in publisher
     assert "packages: write" not in validator
     assert (
         "permissions:\n      attestations: write\n      contents: read\n"
@@ -929,7 +1106,9 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
     assert "group: vonk-forge-container-publication-${{" in publisher
     assert "needs.release-metadata.outputs.version" in publisher
     assert "cancel-in-progress: false" in publisher
-    assert publisher.index("concurrency:") < publisher.index("Promote accepted API image")
+    assert publisher.index("concurrency:") < publisher.index(
+        "Promote accepted API image"
+    )
     assert "group: vonk-forge-production-alias-reconciliation" in alias
     assert "cancel-in-progress: false" in alias
     assert "globally newest completed release" in alias
@@ -955,8 +1134,7 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     assert publisher.index(qemu) < publisher.index(buildx)
     assert (
         "image: docker.io/tonistiigi/binfmt@sha256:"
-        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
-        in publisher
+        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in publisher
     )
     assert publisher.count("platforms: linux/amd64,linux/arm64") == 1
     assert text.count("provenance: mode=max") == 1
@@ -1006,7 +1184,7 @@ def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
         promotion = workflow_step("publish-images", f"Promote accepted {role} image")
         assert "dev_source" in validation.lower()
         assert "skopeo inspect --format '{{.Digest}}'" in validation
-        assert 'org.opencontainers.image.revision' in validation
+        assert "org.opencontainers.image.revision" in validation
         assert "docker buildx imagetools inspect" in validation
         assert ".Provenance" in validation and ".SBOM" in validation
         assert "slsa.dev/provenance" in validation
@@ -1014,7 +1192,7 @@ def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
         assert "SPDXRef-DOCUMENT" in validation
         assert "gh attestation verify" in validation
         assert "--signer-workflow" in validation
-        assert "--source-digest \"$GITHUB_SHA\"" in validation
+        assert '--source-digest "$GITHUB_SHA"' in validation
         assert "--source-ref refs/heads/main" in validation
         assert "refusing to overwrite immutable" in validation
         assert "manifest unknown|name unknown|not found" in validation
@@ -1048,7 +1226,10 @@ def test_hermes_build_keeps_its_existing_release_tags() -> None:
     assert "if: steps.existing-hermes.outputs.exists" not in workflow_step(
         "publish-images", "Attest Hermes release provenance"
     )
-    assert "gh attestation verify" in (ROOT / "scripts/reconcile-hermes-release-image").read_text()
+    assert (
+        "gh attestation verify"
+        in (ROOT / "scripts/reconcile-hermes-release-image").read_text()
+    )
 
 
 def test_hermes_release_reuse_is_the_only_existing_version_path() -> None:
@@ -1079,7 +1260,7 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100" in alias
     assert "Select newest completed signed release" in alias
     assert "mapfile -t release_tags" in alias
-    assert "for candidate in \"${release_tags[@]}\"" in alias
+    assert 'for candidate in "${release_tags[@]}"' in alias
     assert "newer production tag is not complete" not in alias
     assert "browser_download_url" in alias
     assert "vonk-forge-images.env.sha256" in alias
