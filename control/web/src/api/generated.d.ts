@@ -1375,6 +1375,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentRepairManifestRequest */
+        AgentRepairManifestRequest: {
+            /** Authority Sha256 */
+            authority_sha256: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "agent-upgrade-repair";
+            /** Node Id */
+            node_id: string;
+            package: components["schemas"]["AgentUpgradePackageRequest"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** AgentSummary */
         AgentSummary: {
             /** Binary Digest */
@@ -1407,6 +1425,7 @@ export interface components {
             package?: components["schemas"]["AgentUpgradePackageRequest"] | null;
             /** Plan Digest */
             plan_digest: string;
+            repair_manifest?: components["schemas"]["AgentRepairManifestRequest"] | null;
             /**
              * Strategy
              * @default one-at-a-time
@@ -1467,6 +1486,7 @@ export interface components {
             /** Node Ids */
             node_ids?: string[] | null;
             package?: components["schemas"]["AgentUpgradePackageRequest"] | null;
+            repair_manifest?: components["schemas"]["AgentRepairManifestRequest"] | null;
             /**
              * Strategy
              * @default one-at-a-time

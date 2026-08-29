@@ -1,5 +1,27 @@
 import {AuthenticationRequired} from "../auth";
+import type {AgentRepairManifest, AgentUpgradePlan} from "./types";
 import {ApiClient} from "./client";
+
+const REPAIR_NODE = `spk_${"a".repeat(32)}`;
+const REPAIR_AUTHORITY = "1".repeat(64);
+const REPAIR_PACKAGE_SHA = "2".repeat(64);
+const REPAIR_MANIFEST: AgentRepairManifest = {
+  schema_version: 1,
+  kind: "agent-upgrade-repair",
+  node_id: REPAIR_NODE,
+  authority_sha256: REPAIR_AUTHORITY,
+  package: {
+    architecture: "linux-arm64",
+    package_bytes: 6_000_000,
+    package_sha256: REPAIR_PACKAGE_SHA,
+    package_signature: "8".repeat(128),
+    package_url: `https://install.vonkforge.ai/repair-capsules/${REPAIR_NODE}/${REPAIR_AUTHORITY}/${REPAIR_PACKAGE_SHA}/vonk-forge-agent.deb`,
+    package_version: "0.1.0~dev.382+gd1cef9c7d1ce",
+    schema_version: 1,
+    target_binary_digest: "a".repeat(64),
+    target_build_digest: `sha256:${"9".repeat(64)}`,
+  },
+};
 
 async function apiErrorMessage(detail: unknown): Promise<string> {
   vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail}), {
@@ -478,4 +500,45 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
   ]) {
     expect(name in api).toBe(false);
   }
+});
+
+it("previews and applies an exact repair manifest through browser CSRF auth", async () => {
+  document.cookie = "vonk_csrf=repair-csrf; path=/";
+  const captured: Request[] = [];
+  const packageDescriptor = REPAIR_MANIFEST.package;
+  const plan: AgentUpgradePlan = {
+    authority_revision: "c".repeat(64),
+    node_ids: [REPAIR_NODE],
+    package: packageDescriptor,
+    plan_digest: "d".repeat(64),
+    repair_manifest: REPAIR_MANIFEST,
+    strategy: "one-at-a-time",
+  };
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    captured.push(request);
+    return new Response(JSON.stringify(captured.length === 1 ? plan : {id: "repair-job", state: "queued"}), {
+      headers: {"Content-Type": "application/json"},
+      status: captured.length === 1 ? 200 : 202,
+    });
+  });
+  const api = new ApiClient();
+
+  expect(await api.previewAgentUpgrade(REPAIR_NODE ? [REPAIR_NODE] : undefined, "one-at-a-time", REPAIR_MANIFEST)).toEqual(plan);
+  await api.applyAgentUpgrade(plan);
+
+  expect(captured).toHaveLength(2);
+  expect(captured.every(request => request.headers.get("X-CSRF-Token") === "repair-csrf")).toBe(true);
+  expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
+  expect(await captured[0].json()).toEqual({
+    node_ids: [REPAIR_NODE],
+    repair_manifest: REPAIR_MANIFEST,
+    strategy: "one-at-a-time",
+  });
+  expect(await captured[1].json()).toEqual({
+    node_ids: [REPAIR_NODE],
+    plan_digest: plan.plan_digest,
+    repair_manifest: REPAIR_MANIFEST,
+    strategy: "one-at-a-time",
+  });
 });

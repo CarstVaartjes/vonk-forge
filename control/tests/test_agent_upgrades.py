@@ -41,6 +41,30 @@ PACKAGE = {
     "target_binary_digest": "a" * 64,
     "target_build_digest": "sha256:" + "b" * 64,
 }
+REPAIR_AUTHORITY_SHA256 = "1" * 64
+REPAIR_PACKAGE_SHA256 = "2" * 64
+REPAIR_PACKAGE = {
+    "architecture": "linux-arm64",
+    "package_bytes": 6_000_000,
+    "package_sha256": REPAIR_PACKAGE_SHA256,
+    "package_signature": "3" * 128,
+    "package_url": (
+        f"https://install.vonkforge.ai/repair-capsules/{NODE_A}/"
+        f"{REPAIR_AUTHORITY_SHA256}/{REPAIR_PACKAGE_SHA256}/"
+        "vonk-forge-agent.deb"
+    ),
+    "package_version": "0.1.0~dev.382+gd1cef9c7d1ce",
+    "schema_version": 1,
+    "target_binary_digest": "4" * 64,
+    "target_build_digest": "sha256:" + "5" * 64,
+}
+REPAIR_MANIFEST = {
+    "schema_version": 1,
+    "kind": "agent-upgrade-repair",
+    "node_id": NODE_A,
+    "authority_sha256": REPAIR_AUTHORITY_SHA256,
+    "package": REPAIR_PACKAGE,
+}
 OLD_IDENTITY = {
     "architecture": "linux-arm64",
     "binary_digest": "f" * 64,
@@ -64,6 +88,145 @@ class Clock:
 
     def advance(self, *, seconds: int) -> None:
         self.value += timedelta(seconds=seconds)
+
+
+def test_repair_plan_binds_manifest_but_dispatches_only_legacy_package_payload(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'repair.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+                architecture="linux-arm64",
+                semantic_version="0.1.0",
+                build_digest=OLD_IDENTITY["build_digest"],
+                binary_digest=OLD_IDENTITY["binary_digest"],
+                self_test_passed=True,
+                last_seen_at=now,
+            )
+        )
+    operations = AgentJobService(sessions, clock=lambda: now)
+    upgrades = AgentUpgradeService(
+        sessions,
+        operations,
+        clock=lambda: now,
+        current_revision=lambda: REVISION,
+    )
+
+    ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE)
+    plan = upgrades.preview(
+        [NODE_A],
+        REPAIR_PACKAGE,
+        repair_manifest=REPAIR_MANIFEST,
+    )
+    assert plan.plan_digest != ordinary.plan_digest
+    assert plan.repair_manifest == REPAIR_MANIFEST
+    job = upgrades.apply(
+        [NODE_A],
+        REPAIR_PACKAGE,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+        repair_manifest=REPAIR_MANIFEST,
+    )
+
+    assert job.payload["repair_manifest"] == REPAIR_MANIFEST
+    with sessions() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert operation is not None
+        assert operation.payload == REPAIR_PACKAGE
+        assert set(operation.payload) == set(PACKAGE)
+
+
+@pytest.mark.parametrize(
+    ("node_ids", "strategy"),
+    [
+        (None, "one-at-a-time"),
+        ([NODE_A, NODE_B], "one-at-a-time"),
+        ([NODE_A], "all-at-once"),
+    ],
+)
+def test_repair_plan_requires_one_explicit_bound_spark(
+    tmp_path, node_ids, strategy
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    engine = create_engine(
+        f"sqlite:///{tmp_path / f'repair-{strategy}-{len(node_ids or [])}.sqlite'}"
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    operations = AgentJobService(sessions, clock=lambda: now)
+    upgrades = AgentUpgradeService(
+        sessions,
+        operations,
+        clock=lambda: now,
+        current_revision=lambda: REVISION,
+    )
+    with pytest.raises(AgentUpgradeConflict, match="exactly its explicit Spark"):
+        upgrades.preview(
+            node_ids,
+            REPAIR_PACKAGE,
+            repair_manifest=REPAIR_MANIFEST,
+            strategy=strategy,
+        )
+
+
+def test_repair_manifest_requires_canonical_immutable_url_and_stales_on_change(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'repair-stale.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                capabilities=["agent.upgrade.v1"],
+                architecture="linux-arm64",
+                semantic_version="0.1.0",
+                build_digest=OLD_IDENTITY["build_digest"],
+                binary_digest=OLD_IDENTITY["binary_digest"],
+                self_test_passed=True,
+                last_seen_at=now,
+            )
+        )
+    operations = AgentJobService(sessions, clock=lambda: now)
+    upgrades = AgentUpgradeService(
+        sessions,
+        operations,
+        clock=lambda: now,
+        current_revision=lambda: REVISION,
+    )
+    mutable = json.loads(json.dumps(REPAIR_MANIFEST))
+    mutable["package"]["package_url"] = (
+        "https://install.vonkforge.ai/repair-capsules/latest/vonk-forge-agent.deb"
+    )
+    with pytest.raises(AgentUpgradeConflict, match="URL is not canonical"):
+        upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=mutable)
+
+    plan = upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=REPAIR_MANIFEST)
+    changed = json.loads(json.dumps(REPAIR_MANIFEST))
+    changed["package"]["package_signature"] = "6" * 128
+    changed_package = {**REPAIR_PACKAGE, "package_signature": "6" * 128}
+    with pytest.raises(AgentUpgradeConflict, match="preview is stale"):
+        upgrades.apply(
+            [NODE_A],
+            changed_package,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+            repair_manifest=changed,
+        )
 
 
 def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) -> None:
