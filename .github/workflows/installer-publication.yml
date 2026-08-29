@@ -458,12 +458,25 @@ jobs:
             ${{ runner.temp }}/installer-publication
             ${{ runner.temp }}/candidate-receipt.jsonl
 
-  nas-acceptance:
-    name: Exercise clean NAS candidate
+  nas-lane-acceptance:
+    name: Exercise clean NAS candidate (${{ matrix.lane }})
     needs: [authority, candidate]
     if: >-
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
+    strategy:
+      # Both lanes use the already approved fixed Service names, but neither
+      # claims an external client boundary. Each independently proves its own
+      # gateway's Serve map and Self.PrimaryRoutes, so another HA Service host
+      # cannot satisfy its local gate.
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - lane: native
+            gateway: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native
+          - lane: docker-29.4.3
+            gateway: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: installer-canary-${{ needs.authority.outputs.channel }}
@@ -506,6 +519,7 @@ jobs:
             "$fixture_dir/docker-compose-v2.24.6"
 
       - name: Run literal clean NAS and Tailscale configuration acceptance
+        if: matrix.lane == 'native'
         shell: bash
         env:
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
@@ -526,7 +540,7 @@ jobs:
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native
+          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
           VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
@@ -538,26 +552,17 @@ jobs:
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           uv run python tests/acceptance/test_fresh_nas_install.py
-          mkdir -p "$RUNNER_TEMP/nas-acceptance"
-          jq -S -c -n \
-            --arg channel "$VONK_ACCEPTANCE_CHANNEL" \
-            --argjson gates "$VONK_ACCEPTANCE_GATE_NAMES" \
-            --arg generation "$VONK_ACCEPTANCE_GENERATION" \
-            --argjson run_id "$GITHUB_RUN_ID" \
-            --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
-            --arg version "$VONK_ACCEPTANCE_VERSION" \
-          '{channel:$channel,gates:$gates,generation:$generation,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
-            > "$RUNNER_TEMP/nas-acceptance/report.json"
 
       - name: Start Docker 29.4.3 compatibility daemon
+        if: matrix.lane == 'docker-29.4.3'
         shell: bash
         env:
           VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
         run: |
           set -euo pipefail
           # This daemon shares the host network namespace so its inner stack is
-          # reachable on loopback. Keep it after the native tailnet gate because
-          # dockerd rebuilds netfilter rules while initializing.
+          # reachable on loopback. It owns a separate runner from the native
+          # acceptance lane because dockerd rebuilds netfilter rules.
           docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
           docker run --detach --privileged \
             --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
@@ -581,6 +586,7 @@ jobs:
           fi
 
       - name: Run Docker 29.4.3 NAS compatibility acceptance
+        if: matrix.lane == 'docker-29.4.3'
         shell: bash
         env:
           DOCKER_HOST: tcp://127.0.0.1:2375
@@ -598,7 +604,7 @@ jobs:
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind
+          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
           VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
@@ -611,13 +617,97 @@ jobs:
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           uv run python tests/acceptance/test_fresh_nas_install.py
 
+      - name: Write exact NAS lane evidence
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
+          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
+          VONK_ACCEPTANCE_LANE: ${{ matrix.lane }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$VONK_ACCEPTANCE_LANE" = native || \
+            test "$VONK_ACCEPTANCE_LANE" = docker-29.4.3
+          mkdir -p "$RUNNER_TEMP/nas-acceptance"
+          jq -S -c -n \
+            --arg channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --argjson gates "$VONK_ACCEPTANCE_GATE_NAMES" \
+            --arg generation "$VONK_ACCEPTANCE_GENERATION" \
+            --arg lane "$VONK_ACCEPTANCE_LANE" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --arg version "$VONK_ACCEPTANCE_VERSION" \
+          '{channel:$channel,gates:$gates,generation:$generation,lane:$lane,run_id:$run_id,schema_version:1,source_sha:$source_sha,status:"passed",version:$version}' \
+            > "$RUNNER_TEMP/nas-acceptance/report-$VONK_ACCEPTANCE_LANE.json"
+
       - name: Remove Docker 29.4.3 compatibility daemon
-        if: always()
+        if: always() && matrix.lane == 'docker-29.4.3'
         shell: bash
         env:
           VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
         run: |
           docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+
+      - name: Upload exact NAS lane evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-nas-lane-${{ needs.candidate.outputs.generation }}-${{ matrix.lane }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/nas-acceptance/report-${{ matrix.lane }}.json
+
+  nas-acceptance:
+    name: Bind complete NAS acceptance
+    needs: [authority, candidate, nas-lane-acceptance]
+    if: >-
+      always() &&
+      needs.authority.result == 'success' &&
+      needs.candidate.result == 'success' &&
+      needs['nas-lane-acceptance'].result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact NAS acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Download exact native NAS lane evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-nas-lane-${{ needs.candidate.outputs.generation }}-native
+          path: ${{ runner.temp }}/nas-lanes/native
+
+      - name: Download exact Docker NAS lane evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-nas-lane-${{ needs.candidate.outputs.generation }}-docker-29.4.3
+          path: ${{ runner.temp }}/nas-lanes/docker-29.4.3
+
+      - name: Bind both exact NAS lanes to one behavioral gate report
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nas-acceptance"
+          scripts/install-release-publication combine-nas-evidence \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --version "$VONK_ACCEPTANCE_VERSION" \
+            --source-sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --run-id "$GITHUB_RUN_ID" \
+            --lane-report "$RUNNER_TEMP/nas-lanes/native/report-native.json" \
+            --lane-report "$RUNNER_TEMP/nas-lanes/docker-29.4.3/report-docker-29.4.3.json" \
+            --output "$RUNNER_TEMP/nas-acceptance/report.json"
 
       - name: Upload NAS behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -629,14 +719,16 @@ jobs:
 
   spark-acceptance:
     name: Exercise clean Spark candidate (${{ matrix.platform }})
-    # All acceptance shapes intentionally use the same three fixed Tailscale
-    # Services. Give each runner exclusive ownership so one gate cannot become
-    # another gate's PrimaryRoute or satisfy its HTTPS probes.
-    needs: [authority, candidate, nas-acceptance]
+    # Spark acceptance performs routed client probes against the same three
+    # fixed Tailscale Services. Give each Spark runner exclusive ownership so
+    # one gate cannot satisfy another gate's HTTPS probes.
+    # Start Spark work as soon as both behavioral lanes have succeeded. The
+    # evidence binder runs beside this job and remains mandatory for signing.
+    needs: [authority, candidate, nas-lane-acceptance]
     if: >-
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success' &&
-      needs['nas-acceptance'].result == 'success'
+      needs['nas-lane-acceptance'].result == 'success'
     strategy:
       fail-fast: false
       max-parallel: 1

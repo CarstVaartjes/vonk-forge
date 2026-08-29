@@ -60,6 +60,15 @@ ACCEPTANCE_GATES = {
     "spark_pairing",
     "spark_renewal",
 }
+NAS_GATES = {
+    "compose_compatibility_lower",
+    "compose_compatibility_ugreen",
+    "compose_default",
+    "compose_hermes",
+    "nas_site_secret_preservation",
+    "nas_workstation",
+}
+NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
 
 
 class PublicationError(RuntimeError):
@@ -753,9 +762,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         baseline_release_signature = (
             _sign(arguments.signing_key, baseline_release_raw).encode("ascii") + b"\n"
         )
-        add_immutable(
-            f"{baseline_prefix}/release.sig", baseline_release_signature
-        )
+        add_immutable(f"{baseline_prefix}/release.sig", baseline_release_signature)
 
         nas_bootstrap = _render_bootstrap(
             temporary, "nas", base_url, nas, arguments.nas_payload, None
@@ -849,7 +856,10 @@ def accept(arguments: argparse.Namespace) -> None:
         or SOURCE_SHA.fullmatch(arguments.source_sha) is None
         or SHA256.fullmatch(arguments.generation) is None
         or arguments.run_id <= 0
-        or (arguments.channel == "stable" and SEMVER.fullmatch(arguments.version) is None)
+        or (
+            arguments.channel == "stable"
+            and SEMVER.fullmatch(arguments.version) is None
+        )
     ):
         raise PublicationError("acceptance identity is invalid")
     _signing_public_key(arguments.signing_key, arguments.signing_public_key)
@@ -906,13 +916,18 @@ def accept(arguments: argparse.Namespace) -> None:
             or report.get("generation") != arguments.generation
             or report.get("run_id") != arguments.run_id
         ):
-            raise PublicationError("behavioral gate report does not match the candidate")
+            raise PublicationError(
+                "behavioral gate report does not match the candidate"
+            )
         gates = report.get("gates")
         if (
             not isinstance(gates, list)
             or not gates
             or gates != sorted(gates)
-            or any(not isinstance(gate, str) or gate not in ACCEPTANCE_GATES for gate in gates)
+            or any(
+                not isinstance(gate, str) or gate not in ACCEPTANCE_GATES
+                for gate in gates
+            )
             or len(gates) != len(set(gates))
             or observed.intersection(gates)
         ):
@@ -939,7 +954,9 @@ def accept(arguments: argparse.Namespace) -> None:
                     expected_publication_graph=authority_graphs[platform],
                 )
             except SparkContractError as error:
-                raise PublicationError(f"Spark gate report is invalid: {error}") from error
+                raise PublicationError(
+                    f"Spark gate report is invalid: {error}"
+                ) from error
             observed_spark_platforms.add(platform)
         observed.update(gates)
     if observed != ACCEPTANCE_GATES or observed_spark_platforms != {
@@ -979,6 +996,88 @@ def accept(arguments: argparse.Namespace) -> None:
             arguments.output.unlink(missing_ok=True)
             raise
     print(f"sha256:{hashlib.sha256(receipt_raw).hexdigest()}")
+
+
+def combine_nas_evidence(arguments: argparse.Namespace) -> None:
+    if (
+        VERSION.fullmatch(arguments.version) is None
+        or SOURCE_SHA.fullmatch(arguments.source_sha) is None
+        or SHA256.fullmatch(arguments.generation) is None
+        or arguments.run_id <= 0
+        or len(arguments.lane_report) != len(NAS_ACCEPTANCE_LANES)
+        or (
+            arguments.channel == "stable"
+            and SEMVER.fullmatch(arguments.version) is None
+        )
+    ):
+        raise PublicationError("NAS acceptance identity is invalid")
+
+    lanes: set[str] = set()
+    required_fields = {
+        "channel",
+        "gates",
+        "generation",
+        "lane",
+        "run_id",
+        "schema_version",
+        "source_sha",
+        "status",
+        "version",
+    }
+    for path in arguments.lane_report:
+        report = _safe_json(path, "NAS acceptance lane report")
+        if (
+            set(report) != required_fields
+            or type(report.get("schema_version")) is not int
+            or report.get("schema_version") != 1
+        ):
+            raise PublicationError("NAS acceptance lane report is invalid")
+        lane = report.get("lane")
+        if (
+            report.get("channel") != arguments.channel
+            or report.get("generation") != arguments.generation
+            or type(report.get("run_id")) is not int
+            or report.get("run_id") != arguments.run_id
+            or report.get("source_sha") != arguments.source_sha
+            or report.get("status") != "passed"
+            or report.get("version") != arguments.version
+            or report.get("gates") != sorted(NAS_GATES)
+            or not isinstance(lane, str)
+            or lane not in NAS_ACCEPTANCE_LANES
+            or lane in lanes
+        ):
+            raise PublicationError(
+                "NAS acceptance lane report does not match the candidate"
+            )
+        lanes.add(lane)
+    if lanes != NAS_ACCEPTANCE_LANES:
+        raise PublicationError("NAS acceptance lanes are incomplete")
+
+    output = arguments.output
+    if (
+        output.exists()
+        or output.is_symlink()
+        or output.parent.is_symlink()
+        or not output.parent.is_dir()
+    ):
+        raise PublicationError("NAS acceptance output is unsafe")
+    report = {
+        "channel": arguments.channel,
+        "gates": sorted(NAS_GATES),
+        "generation": arguments.generation,
+        "run_id": arguments.run_id,
+        "schema_version": 1,
+        "source_sha": arguments.source_sha,
+        "status": "passed",
+        "version": arguments.version,
+    }
+    with tempfile.TemporaryDirectory(
+        prefix=".nas-acceptance-", dir=output.parent
+    ) as directory:
+        temporary = Path(directory) / "report.json"
+        _write(temporary, _canonical(report))
+        os.link(temporary, output)
+    print(f"sha256:{hashlib.sha256(_canonical(report)).hexdigest()}")
 
 
 def _load_plan(
@@ -1583,6 +1682,14 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--signing-public-key", type=Path, required=True)
     approval.add_argument("--output", type=Path, required=True)
     approval.add_argument("--signature-output", type=Path, required=True)
+    nas_evidence = commands.add_parser("combine-nas-evidence")
+    nas_evidence.add_argument("--channel", choices=("dev", "stable"), required=True)
+    nas_evidence.add_argument("--version", required=True)
+    nas_evidence.add_argument("--source-sha", required=True)
+    nas_evidence.add_argument("--generation", required=True)
+    nas_evidence.add_argument("--run-id", required=True, type=int)
+    nas_evidence.add_argument("--lane-report", action="append", default=[], type=Path)
+    nas_evidence.add_argument("--output", type=Path, required=True)
     candidate = commands.add_parser("publish-candidate")
     candidate.add_argument("--bundle", type=Path, required=True)
     candidate_destinations = candidate.add_mutually_exclusive_group(required=True)
@@ -1591,9 +1698,7 @@ def parser() -> argparse.ArgumentParser:
     promotion = commands.add_parser("promote")
     promotion.add_argument("--bundle", type=Path, required=True)
     promotion.add_argument("--accepted-evidence", type=Path, required=True)
-    promotion.add_argument(
-        "--accepted-evidence-signature", type=Path, required=True
-    )
+    promotion.add_argument("--accepted-evidence-signature", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key-sha256", required=True)
     promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
@@ -1618,6 +1723,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"generation={generation}")
         elif arguments.command == "accept":
             accept(arguments)
+        elif arguments.command == "combine-nas-evidence":
+            combine_nas_evidence(arguments)
         elif arguments.command == "publish-candidate":
             publish_candidate(arguments)
         elif arguments.command == "promote":

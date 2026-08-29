@@ -55,13 +55,9 @@ SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
 )
-TAILSCALE_SERVICE = re.compile(
-    r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
-)
+TAILSCALE_SERVICE = re.compile(r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 TAILSCALE_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
-PINNED_IMAGE = re.compile(
-    r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z"
-)
+PINNED_IMAGE = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 MUTABLE_IMAGE_TAG = re.compile(r":(?:latest|dev|main|edge)@sha256:")
 
 
@@ -911,7 +907,9 @@ def _tailnet_hostname_address(hostname: str) -> str | None:
             addresses.append(address)
     if not addresses:
         return None
-    return str(next((address for address in addresses if address.version == 4), addresses[0]))
+    return str(
+        next((address for address in addresses if address.version == 4), addresses[0])
+    )
 
 
 def wait_for_tailnet_services(
@@ -925,7 +923,10 @@ def wait_for_tailnet_services(
         or not bundle.is_dir()
         or len(set(expected.values())) != len(expected)
         or any(TAILSCALE_SERVICE.fullmatch(service) is None for service in expected)
-        or any(SAFE_DNS_SUFFIX.fullmatch(hostname) is None for hostname in expected.values())
+        or any(
+            SAFE_DNS_SUFFIX.fullmatch(hostname) is None
+            for hostname in expected.values()
+        )
     ):
         raise AcceptanceError("expected Tailscale Services are invalid")
     deadline = time.monotonic() + timeout
@@ -1061,6 +1062,79 @@ def _parse_tailnet_serve_json(raw: str, *, label: str) -> object:
         raise AcceptanceError(f"Tailscale Serve {label} is invalid JSON") from error
 
 
+def assert_tailnet_service_primary_routes(
+    document: object,
+    *,
+    expected_services: set[str],
+) -> None:
+    if (
+        not isinstance(document, dict)
+        or not expected_services
+        or any(
+            TAILSCALE_SERVICE.fullmatch(service) is None
+            for service in expected_services
+        )
+    ):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
+    self_status = document.get("Self")
+    if not isinstance(self_status, dict):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
+    cap_map = self_status.get("CapMap")
+    service_hosts = cap_map.get("service-host") if isinstance(cap_map, dict) else None
+    primary_routes = self_status.get("PrimaryRoutes")
+    if not isinstance(service_hosts, list) or not isinstance(primary_routes, list):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
+
+    mapped: dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]] = {}
+    mapped_addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    for entry in service_hosts:
+        if not isinstance(entry, dict):
+            raise AcceptanceError("Tailscale gateway route ownership is invalid")
+        for service, raw_addresses in entry.items():
+            if (
+                not isinstance(service, str)
+                or TAILSCALE_SERVICE.fullmatch(service) is None
+                or service in mapped
+                or not isinstance(raw_addresses, list)
+                or not raw_addresses
+                or any(not isinstance(address, str) for address in raw_addresses)
+                or len(raw_addresses) != len(set(raw_addresses))
+            ):
+                raise AcceptanceError("Tailscale gateway route ownership is invalid")
+            try:
+                addresses = {ipaddress.ip_address(address) for address in raw_addresses}
+            except ValueError as error:
+                raise AcceptanceError(
+                    "Tailscale gateway route ownership is invalid"
+                ) from error
+            if len(addresses) != len(raw_addresses) or mapped_addresses & addresses:
+                raise AcceptanceError("Tailscale gateway route ownership is invalid")
+            mapped[service] = addresses
+            mapped_addresses.update(addresses)
+
+    if not expected_services.issubset(mapped):
+        raise AcceptanceError("Tailscale gateway route ownership is incomplete")
+    if any(not isinstance(route, str) for route in primary_routes) or len(
+        primary_routes
+    ) != len(set(primary_routes)):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
+    try:
+        routes = {ipaddress.ip_network(route, strict=True) for route in primary_routes}
+    except ValueError as error:
+        raise AcceptanceError("Tailscale gateway route ownership is invalid") from error
+    if len(routes) != len(primary_routes):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
+    expected_routes = {
+        ipaddress.ip_network(
+            f"{address}/{128 if address.version == 6 else 32}", strict=True
+        )
+        for service in expected_services
+        for address in mapped[service]
+    }
+    if not expected_routes.issubset(routes):
+        raise AcceptanceError("Tailscale gateway route ownership is incomplete")
+
+
 def assert_tailnet_serve_status(
     raw: str,
     *,
@@ -1140,9 +1214,16 @@ def verify_tailscale_services(
         ],
         cwd=bundle,
     )
-    document = json.loads(status.stdout)
-    if document.get("BackendState") != "Running":
+    document = _parse_tailnet_serve_json(status.stdout, label="gateway status")
+    if not isinstance(document, dict) or document.get("BackendState") != "Running":
         raise AcceptanceError("Tailscale gateway is not running")
+    expected_services = {control_service}
+    if hermes:
+        expected_services.update({hermes_api_service, hermes_dashboard_service})
+    assert_tailnet_service_primary_routes(
+        document,
+        expected_services=expected_services,
+    )
     serve = run(
         [
             *compose,
@@ -1195,9 +1276,7 @@ def verify_tailscale_services(
         routes.append(
             (
                 hermes_dashboard_service,
-                tailscale_service_hostname(
-                    hermes_dashboard_service, tailnet_suffix
-                ),
+                tailscale_service_hostname(hermes_dashboard_service, tailnet_suffix),
                 "/",
             )
         )
@@ -1293,9 +1372,7 @@ def exercise_compose(
                     ),
                 }
             )
-        service_addresses = wait_for_tailnet_services(
-            bundle, expected_tailnet_services
-        )
+        service_addresses = wait_for_tailnet_services(bundle, expected_tailnet_services)
         wait_for_tailnet_https(
             bundle,
             service=control_service,
@@ -1349,9 +1426,7 @@ def main() -> None:
     if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
         raise AcceptanceError("acceptance tailnet DNS suffix is invalid")
     services = {
-        "control": required_environment(
-            "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE"
-        ),
+        "control": required_environment("VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE"),
         "hermes_api": required_environment(
             "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE"
         ),
