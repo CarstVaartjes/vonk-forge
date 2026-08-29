@@ -151,9 +151,7 @@ def test_generate_bundle_allows_the_installer_to_reuse_its_target(
         "responses": [],
     }
     first = acceptance.generate_bundle(target, **arguments)
-    second = acceptance.generate_bundle(
-        target, **arguments, require_all_prompts=False
-    )
+    second = acceptance.generate_bundle(target, **arguments, require_all_prompts=False)
 
     assert first == second == target / "vonk-forge"
 
@@ -236,9 +234,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     monkeypatch.setattr(
         acceptance, "_diagnostic_command", lambda _bundle, _command: next(outputs)
     )
-    monkeypatch.setattr(
-        acceptance, "reference_compose", lambda: ["docker", "compose"]
-    )
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
 
     diagnostics = acceptance.compose_startup_diagnostics(tmp_path)
 
@@ -247,9 +243,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     assert "postgres=running/healthy/exit-0" in diagnostics
     assert "tailscale-configurator=running/unhealthy/exit-1" in diagnostics
 
-    cause = acceptance._redact_diagnostics(
-        f"image pull failed while using {secret}"
-    )
+    cause = acceptance._redact_diagnostics(f"image pull failed while using {secret}")
     assert cause == "image pull failed while using <redacted>"
 
 
@@ -345,9 +339,7 @@ def _serve_status(*, hermes: bool) -> dict[str, object]:
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
                         "hermes-api.acceptance.example.test:443": {
-                            "Handlers": {
-                                "/": {"Proxy": "http://hermes-agent:8642"}
-                            }
+                            "Handlers": {"/": {"Proxy": "http://hermes-agent:8642"}}
                         }
                     },
                 },
@@ -355,15 +347,78 @@ def _serve_status(*, hermes: bool) -> dict[str, object]:
                     "TCP": {"443": {"HTTPS": True}},
                     "Web": {
                         "hermes-dashboard.acceptance.example.test:443": {
-                            "Handlers": {
-                                "/": {"Proxy": "http://hermes-agent:9119"}
-                            }
+                            "Handlers": {"/": {"Proxy": "http://hermes-agent:9119"}}
                         }
                     },
                 },
             }
         )
     return {"Services": services}
+
+
+def _tailscale_status(*, hermes: bool) -> dict[str, object]:
+    service_addresses = {"svc:vonk-forge": ["100.64.0.10"]}
+    if hermes:
+        service_addresses.update(
+            {
+                "svc:hermes-api": ["100.64.0.11"],
+                "svc:hermes-dashboard": ["100.64.0.12"],
+            }
+        )
+    return {
+        "BackendState": "Running",
+        "Self": {
+            "CapMap": {"service-host": [service_addresses]},
+            "PrimaryRoutes": [
+                f"{address}/32"
+                for addresses in service_addresses.values()
+                for address in addresses
+            ],
+        },
+    }
+
+
+def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> None:
+    acceptance = _acceptance_module()
+    expected = {"svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"}
+    valid = _tailscale_status(hermes=True)
+    acceptance.assert_tailnet_service_primary_routes(
+        valid,
+        expected_services=expected,
+    )
+
+    absent = {"BackendState": "Running"}
+    missing_mapping = json.loads(json.dumps(valid))
+    missing_mapping["Self"]["CapMap"].pop("service-host")
+    missing = json.loads(json.dumps(valid))
+    missing["Self"]["PrimaryRoutes"].remove("100.64.0.12/32")
+    mismatched = json.loads(json.dumps(valid))
+    mismatched["Self"]["PrimaryRoutes"][-1] = "100.64.0.99/32"
+    wrong_service = json.loads(json.dumps(valid))
+    service_hosts = wrong_service["Self"]["CapMap"]["service-host"][0]
+    service_hosts["svc:unrelated"] = service_hosts.pop("svc:hermes-dashboard")
+    other_host_only = json.loads(json.dumps(valid))
+    other_host_only["Peer"] = {
+        "other": {"PrimaryRoutes": other_host_only["Self"]["PrimaryRoutes"]}
+    }
+    other_host_only["Self"]["PrimaryRoutes"] = []
+    duplicate = json.loads(json.dumps(valid))
+    duplicate["Self"]["PrimaryRoutes"].append("100.64.0.10/32")
+
+    for status in (
+        absent,
+        missing_mapping,
+        missing,
+        mismatched,
+        wrong_service,
+        other_host_only,
+        duplicate,
+    ):
+        with pytest.raises(AcceptanceError, match="route ownership"):
+            acceptance.assert_tailnet_service_primary_routes(
+                status,
+                expected_services=expected,
+            )
 
 
 def _serve_configuration(*, hermes: bool) -> dict[str, object]:
@@ -447,7 +502,11 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
     extra_service = _serve_status(hermes=True)
     extra_service["Services"]["svc:unexpected"] = {  # type: ignore[index]
         "TCP": {"443": {"HTTPS": True}},
-        "Web": {"unexpected.acceptance.example.test:443": {"Handlers": {"/": {"Proxy": "http://unexpected:9999"}}}},
+        "Web": {
+            "unexpected.acceptance.example.test:443": {
+                "Handlers": {"/": {"Proxy": "http://unexpected:9999"}}
+            }
+        },
     }
     invalid.append(extra_service)
     missing_service = _serve_status(hermes=True)
@@ -496,7 +555,7 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     responses = iter(
         (
-            json.dumps({"BackendState": "Running"}),
+            json.dumps(_tailscale_status(hermes=True)),
             json.dumps(_serve_status(hermes=True)),
             json.dumps(_serve_configuration(hermes=True)),
         )
@@ -504,7 +563,9 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         compose_commands.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout=next(responses), stderr="")
+        return subprocess.CompletedProcess(
+            command, 0, stdout=next(responses), stderr=""
+        )
 
     def probe(command: list[str], **_kwargs: object) -> bytes:
         probe_commands.append(command)
@@ -536,7 +597,7 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     responses = iter(
         (
-            json.dumps({"BackendState": "Running"}),
+            json.dumps(_tailscale_status(hermes=True)),
             json.dumps(_serve_status(hermes=True)),
             json.dumps(_serve_configuration(hermes=True)),
         )
@@ -557,9 +618,7 @@ def test_wait_for_tailnet_services_polls_until_all_are_visible(
     tmp_path: Path, monkeypatch
 ) -> None:
     acceptance = _acceptance_module()
-    expected = {
-        "svc:vonk-forge-acceptance": "vonk-forge-acceptance.example.ts.net"
-    }
+    expected = {"svc:vonk-forge-acceptance": "vonk-forge-acceptance.example.ts.net"}
     outputs = iter(
         (
             socket.gaierror(),
@@ -622,11 +681,8 @@ def test_wait_for_tailnet_https_retries_with_service_hostname(
     assert len(calls) == 2
     assert all(
         command
-        == acceptance._tailnet_tunnel(
-            "vonk-forge-acceptance.example.ts.net", 443
-        )
-        and kwargs["server_hostname"]
-        == "vonk-forge-acceptance.example.ts.net"
+        == acceptance._tailnet_tunnel("vonk-forge-acceptance.example.ts.net", 443)
+        and kwargs["server_hostname"] == "vonk-forge-acceptance.example.ts.net"
         and kwargs["timeout"] <= 10
         for command, kwargs in calls
     )
@@ -674,9 +730,13 @@ def test_routed_service_checks_require_authentication_and_expected_data(
             assert path == "/v2/"
             return b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"
         if path == "/v1/models":
-            status = "200 OK" if headers.get("Authorization") == "Bearer litellm-secret" else "401 Unauthorized"
+            status = (
+                "200 OK"
+                if headers.get("Authorization") == "Bearer litellm-secret"
+                else "401 Unauthorized"
+            )
             assert int(status[:3]) in kwargs["accepted_statuses"]
-            return f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{\"data\":[]}}".encode()
+            return f'HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{"data":[]}}'.encode()
         if path == "/grafana/api/user":
             status = (
                 "200 OK"
@@ -684,10 +744,14 @@ def test_routed_service_checks_require_authentication_and_expected_data(
                 else "401 Unauthorized"
             )
             assert int(status[:3]) in kwargs["accepted_statuses"]
-            return f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{\"login\":\"admin\"}}".encode()
+            return f'HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{"login":"admin"}}'.encode()
         if path == "/grafana/api/datasources/uid/vonk-prometheus":
-            return b'HTTP/1.1 200 OK\r\n\r\n{"uid":"vonk-prometheus","type":"prometheus"}'
-        if path.startswith("/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"):
+            return (
+                b'HTTP/1.1 200 OK\r\n\r\n{"uid":"vonk-prometheus","type":"prometheus"}'
+            )
+        if path.startswith(
+            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
+        ):
             return b'HTTP/1.1 200 OK\r\n\r\n{"status":"success","data":{"resultType":"vector","result":[{"metric":{"job":"vonk-control"},"value":["1","1"]}]}}'
         if path == "/grafana/api/search?query=Vonk%20Forge":
             return b'HTTP/1.1 200 OK\r\n\r\n[{"uid":"vonk-fleet"},{"uid":"vonk-jobs"}]'
@@ -703,10 +767,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     )
 
     assert all(
-        command
-        == acceptance._tailnet_tunnel(
-            "vonk-forge.acceptance.example.test", 443
-        )
+        command == acceptance._tailnet_tunnel("vonk-forge.acceptance.example.test", 443)
         for command, kwargs in calls
         if kwargs["server_hostname"] != "registry.acceptance.example.test"
     )
@@ -720,7 +781,14 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         )
         for path in requests
     )
-    assert requests["/grafana/api/user"]["headers"]["Authorization"].startswith("Basic ")
-    registry = next(kwargs for _, kwargs in calls if kwargs["server_hostname"] == "registry.acceptance.example.test" and kwargs.get("client_certificate") is not None)
+    assert requests["/grafana/api/user"]["headers"]["Authorization"].startswith(
+        "Basic "
+    )
+    registry = next(
+        kwargs
+        for _, kwargs in calls
+        if kwargs["server_hostname"] == "registry.acceptance.example.test"
+        and kwargs.get("client_certificate") is not None
+    )
     assert registry["ca_file"] == secrets / "step-ca/root-certificate"
     assert registry["client_certificate"] == client_certificate

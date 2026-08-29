@@ -117,21 +117,22 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
 
     lifecycle._configure_acceptance_renewal(
         bundle,
-        lifetime_seconds=300,
+        lifetime_seconds=lifecycle.CERTIFICATE_LIFETIME_SECONDS,
         agent_source_address="172.31.42.1",
     )
 
+    assert lifecycle.CERTIFICATE_LIFETIME_SECONDS == 90
     ca = json.loads((bundle / "secrets/step-ca/ca.json").read_text())
     claims = ca["authority"]["provisioners"][0]["claims"]
     assert claims == {
-        "defaultTLSCertDuration": "300s",
+        "defaultTLSCertDuration": "90s",
         "disableRenewal": True,
         "disableSmallstepExtensions": True,
-        "maxTLSCertDuration": "300s",
-        "minTLSCertDuration": "300s",
+        "maxTLSCertDuration": "90s",
+        "minTLSCertDuration": "90s",
     }
     compose = (bundle / "docker-compose.yaml").read_text()
-    assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '300'" in compose
+    assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '90'" in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
     assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddy_path.read_text()

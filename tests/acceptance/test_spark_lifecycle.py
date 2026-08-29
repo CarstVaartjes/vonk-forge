@@ -71,7 +71,11 @@ SAFE_HTTPS_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-(?:amd64|arm64)\Z")
-CERTIFICATE_LIFETIME_SECONDS = 300
+# Exercise the production-supported lower bound.  The agent renews at two thirds
+# of a certificate lifetime and checks renewal on its 60-second inventory tick,
+# so 90 seconds preserves a real scheduled rotation while avoiding three idle
+# inventory intervals in every ARM64 publication gate.
+CERTIFICATE_LIFETIME_SECONDS = 90
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
 REGISTRY_HOST = "registry.spark.localhost"

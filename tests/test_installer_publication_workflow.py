@@ -77,22 +77,57 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert triggers["types"] == ["completed"]
     jobs = workflow["jobs"]
     assert set(jobs["candidate"]["needs"]) == {"authority"}
-    assert set(jobs["nas-acceptance"]["needs"]) == {"authority", "candidate"}
+    assert set(jobs["nas-lane-acceptance"]["needs"]) == {
+        "authority",
+        "candidate",
+    }
+    assert jobs["nas-lane-acceptance"]["strategy"] == {
+        "fail-fast": "false",
+        "max-parallel": "2",
+        "matrix": {
+            "include": [
+                {
+                    "lane": "native",
+                    "gateway": (
+                        "vonk-forge-ci-${{ github.run_id }}-"
+                        "${{ github.run_attempt }}-native"
+                    ),
+                },
+                {
+                    "lane": "docker-29.4.3",
+                    "gateway": (
+                        "vonk-forge-ci-${{ github.run_id }}-"
+                        "${{ github.run_attempt }}-dind"
+                    ),
+                },
+            ]
+        },
+    }
+    assert set(jobs["nas-acceptance"]["needs"]) == {
+        "authority",
+        "candidate",
+        "nas-lane-acceptance",
+    }
+    assert (
+        "needs['nas-lane-acceptance'].result == 'success'"
+        in jobs["nas-acceptance"]["if"]
+    )
     assert set(jobs["spark-acceptance"]["needs"]) == {
         "authority",
         "candidate",
-        "nas-acceptance",
+        "nas-lane-acceptance",
     }
     assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "1"
-    assert "needs['nas-acceptance'].result == 'success'" in jobs[
-        "spark-acceptance"
-    ]["if"]
+    assert (
+        "needs['nas-lane-acceptance'].result == 'success'"
+        in jobs["spark-acceptance"]["if"]
+    )
     expected_services = {
         "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
         "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
     }
-    nas_environment = _steps(jobs["nas-acceptance"])[
+    nas_environment = _steps(jobs["nas-lane-acceptance"])[
         "Run literal clean NAS and Tailscale configuration acceptance"
     ]["env"]
     spark_environment = _steps(jobs["spark-acceptance"])[
@@ -102,7 +137,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         assert nas_environment[name] == service
         assert spark_environment[name] == service
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
-        "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native"
+        "${{ matrix.gateway }}"
     )
     assert spark_environment["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
         "vonk-spark-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
@@ -117,6 +152,43 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert "publish" not in jobs
 
 
+def test_publication_concurrency_only_serializes_pushes_for_the_same_source() -> None:
+    workflow = _workflow()
+    concurrency = workflow["concurrency"]
+    group = " ".join(concurrency["group"].split())
+
+    assert group == (
+        "vonk-forge-installer-${{ "
+        "(github.event_name == 'workflow_run' && "
+        "github.event.workflow_run.event == 'push' && "
+        "github.event.workflow_run.head_sha) || github.run_id }}"
+    )
+    assert concurrency["cancel-in-progress"] == "false"
+
+    def selected_identity(
+        event_name: str,
+        source_event: str,
+        source_sha: str,
+        publication_run_id: str,
+    ) -> str:
+        # Python's and/or has the same precedence and selected-value behavior
+        # as GitHub expressions' &&/|| for these string and boolean operands.
+        return (
+            event_name == "workflow_run" and source_event == "push" and source_sha
+        ) or publication_run_id
+
+    cases = (
+        ("workflow_run", "push", "a" * 40, "101", "a" * 40),
+        ("workflow_run", "workflow_dispatch", "a" * 40, "102", "102"),
+        ("workflow_run", "push", "", "103", "103"),
+        ("schedule", "", "", "104", "104"),
+    )
+    for event_name, source_event, source_sha, run_id, expected in cases:
+        assert (
+            selected_identity(event_name, source_event, source_sha, run_id) == expected
+        )
+
+
 def test_development_source_generation_runs_for_every_main_commit() -> None:
     for path in (DEV_IMAGES, AGENT_RELEASE, SETUPS):
         push = _workflow(path)["on"]["push"]
@@ -129,10 +201,10 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     None
 ):
     jobs = _workflow()["jobs"]
-    nas = jobs["nas-acceptance"]
-    assert nas["permissions"] == {"contents": "read"}
-    assert "services" not in nas
-    steps = _steps(nas)
+    lanes = jobs["nas-lane-acceptance"]
+    assert lanes["permissions"] == {"contents": "read"}
+    assert "services" not in lanes
+    steps = _steps(lanes)
     fixture_step = steps["Download verified Compose parser fixtures"]
     assert fixture_step["shell"] == "bash"
     assert fixture_step["env"] == {
@@ -161,15 +233,17 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         "false"
     )
     assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME"] == (
-        "vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-dind"
+        "${{ matrix.gateway }}"
     )
     assert "DOCKER_HOST" not in native_step["env"]
     assert native_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
     assert native_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
     )
-    assert "nas-acceptance/report.json" not in compatibility_step["run"]
-    assert "nas-acceptance/report.json" in native_step["run"]
+    assert compatibility_step["if"] == "matrix.lane == 'docker-29.4.3'"
+    assert native_step["if"] == "matrix.lane == 'native'"
+    assert "nas-acceptance/report" not in compatibility_step["run"]
+    assert "nas-acceptance/report" not in native_step["run"]
     assert "for attempt in 1 2; do" not in native_step["run"]
     assert (
         native_step["run"].count(
@@ -177,16 +251,30 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         )
         == 1
     )
-    report = steps["Upload NAS behavioral gate report"]
+    lane_report = steps["Write exact NAS lane evidence"]
+    assert lane_report["env"]["VONK_ACCEPTANCE_LANE"] == "${{ matrix.lane }}"
+    assert "lane:$lane" in lane_report["run"]
+    report = _steps(jobs["nas-acceptance"])["Upload NAS behavioral gate report"]
     assert report["uses"].startswith("actions/upload-artifact@")
     assert report["with"]["if-no-files-found"] == "error"
     assert report["with"]["path"] == "${{ runner.temp }}/nas-acceptance/report.json"
+
+    aggregate = jobs["nas-acceptance"]
+    assert aggregate["permissions"] == {"contents": "read"}
+    aggregate_steps = _steps(aggregate)
+    combine = aggregate_steps[
+        "Bind both exact NAS lanes to one behavioral gate report"
+    ]["run"]
+    assert "scripts/install-release-publication combine-nas-evidence" in combine
+    assert combine.count("--lane-report") == 2
+    assert "report-native.json" in combine
+    assert "report-docker-29.4.3.json" in combine
 
 
 def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     tmp_path: Path,
 ) -> None:
-    nas = _workflow()["jobs"]["nas-acceptance"]
+    nas = _workflow()["jobs"]["nas-lane-acceptance"]
     steps = _steps(nas)
     start = steps["Start Docker 29.4.3 compatibility daemon"]
 
@@ -210,14 +298,58 @@ def test_nas_dind_fixture_starts_a_host_network_daemon_and_fails_wrong_version(
     assert wrong.returncode != 0
 
 
+def test_nas_lane_reports_are_bound_fail_closed_before_spark_acceptance() -> None:
+    jobs = _workflow()["jobs"]
+    lane_steps = _steps(jobs["nas-lane-acceptance"])
+    upload = lane_steps["Upload exact NAS lane evidence"]
+    assert upload["with"] == {
+        "name": (
+            "installer-nas-lane-${{ needs.candidate.outputs.generation }}-"
+            "${{ matrix.lane }}"
+        ),
+        "retention-days": "7",
+        "if-no-files-found": "error",
+        "path": ("${{ runner.temp }}/nas-acceptance/report-${{ matrix.lane }}.json"),
+    }
+
+    aggregate = jobs["nas-acceptance"]
+    assert "always()" in aggregate["if"]
+    aggregate_steps = _steps(aggregate)
+    assert (
+        aggregate_steps["Check out exact NAS acceptance authority"]["with"]["ref"]
+        == "${{ needs.authority.outputs.source_sha }}"
+    )
+    native = aggregate_steps["Download exact native NAS lane evidence"]["with"]
+    docker = aggregate_steps["Download exact Docker NAS lane evidence"]["with"]
+    assert native["name"].endswith("${{ needs.candidate.outputs.generation }}-native")
+    assert docker["name"].endswith(
+        "${{ needs.candidate.outputs.generation }}-docker-29.4.3"
+    )
+    combine = aggregate_steps["Bind both exact NAS lanes to one behavioral gate report"]
+    assert combine["env"] == {
+        "VONK_ACCEPTANCE_CHANNEL": "${{ needs.authority.outputs.channel }}",
+        "VONK_ACCEPTANCE_GENERATION": "${{ needs.candidate.outputs.generation }}",
+        "VONK_ACCEPTANCE_SOURCE_SHA": "${{ needs.authority.outputs.source_sha }}",
+        "VONK_ACCEPTANCE_VERSION": "${{ needs.authority.outputs.version }}",
+    }
+    for argument in ("--channel", "--version", "--source-sha", "--generation"):
+        assert argument in combine["run"]
+    assert '--run-id "$GITHUB_RUN_ID"' in combine["run"]
+    assert jobs["spark-acceptance"]["needs"] == [
+        "authority",
+        "candidate",
+        "nas-lane-acceptance",
+    ]
+
+
 def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     tmp_path: Path,
 ) -> None:
     jobs = _workflow()["jobs"]
-    nas_steps = jobs["nas-acceptance"]["steps"]
-    steps = _steps(jobs["nas-acceptance"])
+    nas_steps = jobs["nas-lane-acceptance"]["steps"]
+    steps = _steps(jobs["nas-lane-acceptance"])
     cleanup = steps["Remove Docker 29.4.3 compatibility daemon"]
-    assert cleanup["if"] == "always()"
+    assert cleanup["if"] == "always() && matrix.lane == 'docker-29.4.3'"
     result = _run_workflow_shell(cleanup, tmp_path, server_version="29.4.3")
     assert result.returncode == 0, result.stderr
     assert "|rm --force vonk-acceptance-dind" in result.docker_log  # type: ignore[attr-defined]
@@ -234,7 +366,7 @@ def test_nas_dind_fixture_is_always_removed_and_candidate_receipt_is_uploaded(
     assert (
         step_names.index("Run Docker 29.4.3 NAS compatibility acceptance")
         < (step_names.index("Remove Docker 29.4.3 compatibility daemon"))
-        < step_names.index("Upload NAS behavioral gate report")
+        < step_names.index("Upload exact NAS lane evidence")
     )
 
     candidate = _steps(jobs["candidate"])[
@@ -253,9 +385,7 @@ def test_promotion_uses_the_candidate_artifact_directory_root() -> None:
     assert download["with"]["path"] == "${{ runner.temp }}/installer-publication"
 
     publish = steps["Publish acceptance evidence and advance pointer last"]["run"]
-    bundle = (
-        '"$RUNNER_TEMP/installer-publication/installer-publication"'
-    )
+    bundle = '"$RUNNER_TEMP/installer-publication/installer-publication"'
     assert f"--bundle {bundle}" in publish
 
     receipt = steps["Upload promotion receipt"]
@@ -286,7 +416,9 @@ def test_spark_acceptance_enables_and_verifies_native_docker_cdi() -> None:
     cdi = steps["Enable Docker CDI for the synthetic Spark device"]["run"]
     names = list(steps)
 
-    assert names.index("Enable Docker CDI for the synthetic Spark device") < names.index(
+    assert names.index(
+        "Enable Docker CDI for the synthetic Spark device"
+    ) < names.index(
         "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
     )
     assert '.features = ((.features // {}) + {"cdi": true})' in cdi
@@ -298,10 +430,10 @@ def test_spark_acceptance_enables_and_verifies_native_docker_cdi() -> None:
 
 def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() -> None:
     jobs = _workflow()["jobs"]
-    for name in ("nas-acceptance", "spark-acceptance"):
+    for name in ("nas-lane-acceptance", "spark-acceptance"):
         assert "Join tailnet as isolated acceptance client" not in _steps(jobs[name])
         assert jobs[name]["permissions"] == {"contents": "read"}
-    native = _steps(jobs["nas-acceptance"])[
+    native = _steps(jobs["nas-lane-acceptance"])[
         "Run literal clean NAS and Tailscale configuration acceptance"
     ]
     assert native["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
@@ -319,9 +451,9 @@ def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> N
         ),
         "path": "${{ runner.temp }}/spark-publication",
     }
-    run = steps["Run packaged Spark fresh-install, pairing, job, and renewal acceptance"][
-        "run"
-    ]
+    run = steps[
+        "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
+    ]["run"]
     environment = steps[
         "Run packaged Spark fresh-install, pairing, job, and renewal acceptance"
     ]["env"]
@@ -492,14 +624,12 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
     }
     run = build_step["run"]
     step_names = [step["name"] for step in workflow["jobs"]["build-and-test"]["steps"]]
-    assert step_names.index("Verify pinned Rust compiler cache binary") < step_names.index(
-        "Test and build exact native setup programs"
-    )
+    assert step_names.index(
+        "Verify pinned Rust compiler cache binary"
+    ) < step_names.index("Test and build exact native setup programs")
     package_argument = 'package_args+=(--package "$binary")'
     release_test = 'cargo test --locked --release "${package_args[@]}"'
-    release_build = (
-        'cargo build --locked --release --package "$binary" --bin "$binary"'
-    )
+    release_build = 'cargo build --locked --release --package "$binary" --bin "$binary"'
     assert 'read -r -a binaries <<< "$BINARIES"' in run
     assert 'test "${#binaries[@]}" -ge 1' in run
     assert package_argument in run
@@ -507,7 +637,9 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
     assert release_build in run
     assert run.count("cargo test --locked --release") == 1
     assert 'cargo test --locked --release --package "$binary"' not in run
-    assert run.index(package_argument) < run.index(release_test) < run.index(release_build)
+    assert (
+        run.index(package_argument) < run.index(release_test) < run.index(release_build)
+    )
 
 
 def test_setup_build_tests_all_packages_together_before_exact_binary_builds(
@@ -524,23 +656,23 @@ def test_setup_build_tests_all_packages_together_before_exact_binary_builds(
     cargo.write_text(
         "#!/bin/bash\n"
         "set -euo pipefail\n"
-        "printf '%s\\n' \"$*\" >> \"$CARGO_LOG\"\n"
-        "if [[ \"$1\" == build ]]; then\n"
+        'printf \'%s\\n\' "$*" >> "$CARGO_LOG"\n'
+        'if [[ "$1" == build ]]; then\n'
         "  binary=\n"
         "  while (($#)); do\n"
-        "    if [[ \"$1\" == --bin ]]; then shift; binary=$1; fi\n"
+        '    if [[ "$1" == --bin ]]; then shift; binary=$1; fi\n'
         "    shift\n"
         "  done\n"
-        "  test -n \"$binary\"\n"
+        '  test -n "$binary"\n'
         "  mkdir -p target/release\n"
-        "  printf '%s\\n' \"$binary\" > \"target/release/$binary\"\n"
+        '  printf \'%s\\n\' "$binary" > "target/release/$binary"\n'
         "fi\n"
     )
     cargo.chmod(0o755)
     uname = commands / "uname"
     uname.write_text(
         "#!/bin/sh\n"
-        "case \"$1\" in\n"
+        'case "$1" in\n'
         "  -s) printf '%s\\n' Linux ;;\n"
         "  -m) printf '%s\\n' x86_64 ;;\n"
         "  *) exit 64 ;;\n"
@@ -550,8 +682,8 @@ def test_setup_build_tests_all_packages_together_before_exact_binary_builds(
     sha256sum = commands / "sha256sum"
     sha256sum.write_text(
         "#!/bin/sh\n"
-        "for path in \"$@\"; do\n"
-        "  test \"$path\" = -- && continue\n"
+        'for path in "$@"; do\n'
+        '  test "$path" = -- && continue\n'
         "  printf '%064d  %s\\n' 0 \"$path\"\n"
         "done\n"
     )

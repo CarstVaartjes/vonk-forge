@@ -37,6 +37,14 @@ ACCEPTANCE_GATES = {
     "spark_pairing",
     "spark_renewal",
 }
+NAS_GATES = {
+    "compose_compatibility_lower",
+    "compose_compatibility_ugreen",
+    "compose_default",
+    "compose_hermes",
+    "nas_site_secret_preservation",
+    "nas_workstation",
+}
 AMD64_SPARK_GATES = {"spark_amd64", "spark_pairing"}
 ARM64_SPARK_GATES = {"spark_arm64", "spark_job", "spark_renewal"}
 AMD64_PHASES = [
@@ -103,9 +111,7 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
                     "externalParameters": {"build_digest": "sha256:" + "c" * 64}
                 }
             },
-            "subject": [
-                {"digest": {"sha256": "d" * 64}, "name": "vonk-agent"}
-            ],
+            "subject": [{"digest": {"sha256": "d" * 64}, "name": "vonk-agent"}],
         },
     )
     return package
@@ -295,7 +301,9 @@ def _acceptance_receipt(
     return receipt, signature, public_key
 
 
-def _publish_candidate(publication: Path, destination: Path) -> subprocess.CompletedProcess[str]:
+def _publish_candidate(
+    publication: Path, destination: Path
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -322,9 +330,11 @@ def _fake_rclone_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
     executable.write_text(
         """#!/usr/bin/env python3
 import json
+import fcntl
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 command = sys.argv[1]
@@ -336,6 +346,45 @@ def object_path(value: str) -> Path:
     key = remote_path.split("/", 1)[1]
     return object_root / key
 
+def update_activity(delta: int) -> None:
+    activity_path = os.environ.get("FAKE_RCLONE_ACTIVITY")
+    if activity_path is None:
+        return
+    with Path(activity_path).open("a+", encoding="utf-8") as activity:
+        fcntl.flock(activity.fileno(), fcntl.LOCK_EX)
+        activity.seek(0)
+        raw = activity.read()
+        state = json.loads(raw) if raw else {"active": 0, "maximum": 0}
+        state["active"] += delta
+        state["maximum"] = max(state["maximum"], state["active"])
+        activity.seek(0)
+        activity.truncate()
+        json.dump(state, activity)
+        activity.flush()
+        fcntl.flock(activity.fileno(), fcntl.LOCK_UN)
+
+def wait_for_peer(kind: str, key: str) -> None:
+    barrier = os.environ.get("FAKE_RCLONE_PARALLEL_BARRIER")
+    if barrier is None:
+        return
+    selected = (
+        kind == "read" and "/releases/" in key and "/acceptance/" not in key
+    ) or (
+        kind == "acceptance" and "/acceptance/" in key
+    ) or (
+        kind == "endpoint" and key in {"nas", "spark"}
+    )
+    if not selected:
+        return
+    markers = Path(barrier) / kind
+    markers.mkdir(parents=True, exist_ok=True)
+    (markers / str(os.getpid())).touch()
+    deadline = time.monotonic() + 2
+    while len(list(markers.iterdir())) < 2:
+        if time.monotonic() >= deadline:
+            raise SystemExit(70)
+        time.sleep(0.01)
+
 if command == "lsjson":
     path = object_path(arguments[0])
     if not path.is_file():
@@ -346,16 +395,25 @@ if command == "lsjson":
     print(json.dumps({"IsDir": False, "Path": path.name, "Size": path.stat().st_size}))
 elif command == "cat":
     path = object_path(arguments[0])
+    wait_for_peer("read", str(path.relative_to(object_root)))
     # rclone cat succeeds with no output when its exact source object is absent.
     if path.is_file():
         sys.stdout.buffer.write(path.read_bytes())
 elif command == "copyto":
-    source = Path(arguments[-2])
-    destination = object_path(arguments[-1])
-    if "--immutable" in arguments and destination.exists():
-        raise SystemExit(9)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    update_activity(1)
+    try:
+        time.sleep(float(os.environ.get("FAKE_RCLONE_COPY_DELAY", "0")))
+        source = Path(arguments[-2])
+        destination = object_path(arguments[-1])
+        key = str(destination.relative_to(object_root))
+        wait_for_peer("acceptance", key)
+        wait_for_peer("endpoint", key)
+        if "--immutable" in arguments and destination.exists():
+            raise SystemExit(9)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    finally:
+        update_activity(-1)
 else:
     raise SystemExit(64)
 """,
@@ -388,14 +446,205 @@ def _gate_report(
     return path
 
 
-def _actual_publication_graph(
-    publication: Path, platform: str
-) -> dict[str, object]:
+def _nas_lane_report(
+    path: Path,
+    lane: str,
+    *,
+    channel: str = "stable",
+    generation: str = DIGEST,
+    run_id: int = 123456,
+    source_sha: str = SOURCE_SHA,
+    status: str = "passed",
+    version: str = "1.2.3",
+) -> Path:
+    _canonical(
+        path,
+        {
+            "channel": channel,
+            "gates": sorted(NAS_GATES),
+            "generation": generation,
+            "lane": lane,
+            "run_id": run_id,
+            "schema_version": 1,
+            "source_sha": source_sha,
+            "status": status,
+            "version": version,
+        },
+    )
+    return path
+
+
+def _combine_nas_command(
+    tmp_path: Path,
+    reports: list[Path],
+    *,
+    channel: str = "stable",
+    generation: str = DIGEST,
+    run_id: int = 123456,
+    source_sha: str = SOURCE_SHA,
+    version: str = "1.2.3",
+) -> list[str]:
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "combine-nas-evidence",
+        "--channel",
+        channel,
+        "--version",
+        version,
+        "--source-sha",
+        source_sha,
+        "--generation",
+        generation,
+        "--run-id",
+        str(run_id),
+        "--output",
+        str(tmp_path / "combined.json"),
+    ]
+    for report in reports:
+        command.extend(("--lane-report", str(report)))
+    return command
+
+
+def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
+    tmp_path: Path,
+) -> None:
+    reports = [
+        _nas_lane_report(tmp_path / "native.json", "native"),
+        _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3"),
+    ]
+
+    result = subprocess.run(
+        _combine_nas_command(tmp_path, reports),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("sha256:")
+    assert json.loads((tmp_path / "combined.json").read_text()) == {
+        "channel": "stable",
+        "gates": sorted(NAS_GATES),
+        "generation": DIGEST,
+        "run_id": 123456,
+        "schema_version": 1,
+        "source_sha": SOURCE_SHA,
+        "status": "passed",
+        "version": "1.2.3",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("channel", "dev"),
+        ("gates", sorted(NAS_GATES - {"nas_workstation"})),
+        ("generation", "c" * 64),
+        ("run_id", 123457),
+        ("source_sha", "d" * 40),
+        ("status", "failed"),
+        ("version", "1.2.4"),
+    ),
+)
+def test_nas_evidence_combiner_rejects_mismatched_lane_identity(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    native = _nas_lane_report(tmp_path / "native.json", "native")
+    docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
+    document = json.loads(docker.read_text())
+    document[field] = value
+    _canonical(docker, document)
+
+    result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "does not match the candidate" in result.stderr
+    assert not (tmp_path / "combined.json").exists()
+
+
+def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
+    tmp_path: Path,
+) -> None:
+    native = _nas_lane_report(tmp_path / "native.json", "native")
+    duplicate = _nas_lane_report(tmp_path / "duplicate.json", "native")
+    duplicate_result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, duplicate]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert duplicate_result.returncode == 2
+    assert not (tmp_path / "combined.json").exists()
+
+    docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
+    hostile_document = json.loads(docker.read_text())
+    hostile_document["lane"] = []
+    _canonical(docker, hostile_document)
+    hostile_result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert hostile_result.returncode == 2
+    assert "does not match the candidate" in hostile_result.stderr
+    assert not (tmp_path / "combined.json").exists()
+
+    docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
+    boolean_schema = json.loads(docker.read_text())
+    boolean_schema["schema_version"] = True
+    _canonical(docker, boolean_schema)
+    boolean_schema_result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert boolean_schema_result.returncode == 2
+    assert "lane report is invalid" in boolean_schema_result.stderr
+    assert not (tmp_path / "combined.json").exists()
+
+    docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
+    boolean_run_id = json.loads(docker.read_text())
+    boolean_run_id["run_id"] = True
+    _canonical(docker, boolean_run_id)
+    boolean_run_id_result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert boolean_run_id_result.returncode == 2
+    assert "does not match the candidate" in boolean_run_id_result.stderr
+    assert not (tmp_path / "combined.json").exists()
+
+    docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
+    unsafe = tmp_path / "unsafe.json"
+    unsafe.symlink_to(docker)
+    unsafe_result = subprocess.run(
+        _combine_nas_command(tmp_path, [native, unsafe]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert unsafe_result.returncode == 2
+    assert "unavailable or unsafe" in unsafe_result.stderr
+    assert not (tmp_path / "combined.json").exists()
+
+
+def _actual_publication_graph(publication: Path, platform: str) -> dict[str, object]:
     plan = json.loads((publication / "publication-plan.json").read_text())
     object_root = publication / "objects"
     release_root = (
-        object_root
-        / f"artifacts/{plan['channel']}/releases/{plan['generation']}"
+        object_root / f"artifacts/{plan['channel']}/releases/{plan['generation']}"
     )
     candidate = json.loads((release_root / "release.json").read_text())
     baseline = json.loads(
@@ -403,12 +652,8 @@ def _actual_publication_graph(
     )
     packages: dict[str, dict[str, str]] = {}
     for native_platform in SPARK_PLATFORMS:
-        candidate_record = candidate["artifacts"][
-            f"agent-package-{native_platform}"
-        ]
-        baseline_record = baseline["artifacts"][
-            f"agent-package-{native_platform}"
-        ]
+        candidate_record = candidate["artifacts"][f"agent-package-{native_platform}"]
+        baseline_record = baseline["artifacts"][f"agent-package-{native_platform}"]
         candidate_bytes = (object_root / candidate_record["path"]).read_bytes()
         baseline_bytes = (object_root / baseline_record["path"]).read_bytes()
         packages[native_platform] = {
@@ -722,9 +967,7 @@ def test_acceptance_authority_rejects_internally_consistent_invented_graph(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
-def _complete_gate_reports(
-    report_root: Path, publication: Path
-) -> list[Path]:
+def _complete_gate_reports(report_root: Path, publication: Path) -> list[Path]:
     report_root.mkdir()
     return [
         _gate_report(
@@ -867,9 +1110,7 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
     nas = _gate_report(
         report_root / "nas.json",
         publication,
-        ACCEPTANCE_GATES
-        - AMD64_SPARK_GATES
-        - ARM64_SPARK_GATES,
+        ACCEPTANCE_GATES - AMD64_SPARK_GATES - ARM64_SPARK_GATES,
     )
     amd64 = _spark_gate_report(
         report_root / "amd64.json",
@@ -892,19 +1133,19 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
     missing_proof = copy.deepcopy(complete)
     missing_proof["lifecycle"]["proof"].pop("canary")
     changed = copy.deepcopy(complete)
-    changed["lifecycle"]["proof"]["installation"]["identity"][
-        "package_sha256"
-    ] = "f" * 64
+    changed["lifecycle"]["proof"]["installation"]["identity"]["package_sha256"] = (
+        "f" * 64
+    )
     reused_pairing = copy.deepcopy(complete)
     reused_pairing["lifecycle"]["proof"]["pairing_grant_use_count"] = 2
     unchanged_serial = copy.deepcopy(complete)
-    unchanged_serial["lifecycle"]["proof"]["renewal"][
-        "certificate_serial_after"
-    ] = "0123456789abcdef"
+    unchanged_serial["lifecycle"]["proof"]["renewal"]["certificate_serial_after"] = (
+        "0123456789abcdef"
+    )
     accepted_old_serial = copy.deepcopy(complete)
-    accepted_old_serial["lifecycle"]["proof"]["renewal"][
-        "old_certificate_rejection"
-    ]["rejected"] = False
+    accepted_old_serial["lifecycle"]["proof"]["renewal"]["old_certificate_rejection"][
+        "rejected"
+    ] = False
     changed_node = copy.deepcopy(complete)
     changed_node["lifecycle"]["proof"]["node_id_after_renewal"] = (
         "spk_fedcba9876543210fedcba9876543210"
@@ -914,17 +1155,15 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
         "build_sha256"
     ] = "invalid"
     indirect_agent = copy.deepcopy(complete)
-    indirect_agent["lifecycle"]["proof"]["direct_agent_health"][
-        "transport"
-    ] = "controller-proxy"
+    indirect_agent["lifecycle"]["proof"]["direct_agent_health"]["transport"] = (
+        "controller-proxy"
+    )
     changed_graph = copy.deepcopy(complete)
     changed_graph["lifecycle"]["proof"]["publication_graph"]["packages"].pop(
         "linux-amd64"
     )
     false_cdi = copy.deepcopy(complete)
-    false_cdi["lifecycle"]["proof"]["synthetic_device"]["provenance"] = (
-        "physical-gpu"
-    )
+    false_cdi["lifecycle"]["proof"]["synthetic_device"]["provenance"] = "physical-gpu"
 
     for name, document in {
         "accepted-old-serial": accepted_old_serial,
@@ -965,9 +1204,7 @@ def test_acceptance_authority_rejects_previous_spark_job_architecture_ownership(
     nas = _gate_report(
         report_root / "nas.json",
         publication,
-        ACCEPTANCE_GATES
-        - AMD64_SPARK_GATES
-        - ARM64_SPARK_GATES,
+        ACCEPTANCE_GATES - AMD64_SPARK_GATES - ARM64_SPARK_GATES,
     )
     amd64 = _spark_gate_report(
         report_root / "amd64.json",
@@ -999,18 +1236,53 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     tmp_path: Path,
 ) -> None:
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    plan = json.loads((publication / "publication-plan.json").read_text())
     workflow = yaml.load(
         (ROOT / ".github/workflows/installer-publication.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     step = next(
         step
-        for step in workflow["jobs"]["nas-acceptance"]["steps"]
-        if step["name"] == "Run literal clean NAS and Tailscale configuration acceptance"
+        for step in workflow["jobs"]["nas-lane-acceptance"]["steps"]
+        if step["name"] == "Write exact NAS lane evidence"
     )
     nas_gates = set(json.loads(step["env"]["VONK_ACCEPTANCE_GATE_NAMES"]))
+    assert nas_gates == NAS_GATES
+    lane_reports = [
+        _nas_lane_report(
+            tmp_path / "native-lane.json",
+            "native",
+            channel=plan["channel"],
+            generation=plan["generation"],
+            source_sha=plan["source_sha"],
+            version=plan["version"],
+        ),
+        _nas_lane_report(
+            tmp_path / "docker-lane.json",
+            "docker-29.4.3",
+            channel=plan["channel"],
+            generation=plan["generation"],
+            source_sha=plan["source_sha"],
+            version=plan["version"],
+        ),
+    ]
+    combined = subprocess.run(
+        _combine_nas_command(
+            tmp_path,
+            lane_reports,
+            channel=plan["channel"],
+            generation=plan["generation"],
+            source_sha=plan["source_sha"],
+            version=plan["version"],
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert combined.returncode == 0, combined.stderr
     reports = [
-        _gate_report(tmp_path / "nas.json", publication, nas_gates),
+        tmp_path / "combined.json",
         _spark_gate_report(
             tmp_path / "amd64.json",
             publication,
@@ -1024,10 +1296,24 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
             "linux-arm64",
         ),
     ]
-    accepted = subprocess.run(_accept_command(publication, tmp_path / "accepted", reports), cwd=ROOT, text=True, capture_output=True, check=False)
+    accepted = subprocess.run(
+        _accept_command(publication, tmp_path / "accepted", reports),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     assert accepted.returncode == 0, accepted.stderr
-    drifted = _gate_report(tmp_path / "drifted.json", publication, nas_gates - {"nas_workstation"})
-    rejected = subprocess.run(_accept_command(publication, tmp_path / "rejected", [drifted, *reports[1:]]), cwd=ROOT, text=True, capture_output=True, check=False)
+    drifted = _gate_report(
+        tmp_path / "drifted.json", publication, nas_gates - {"nas_workstation"}
+    )
+    rejected = subprocess.run(
+        _accept_command(publication, tmp_path / "rejected", [drifted, *reports[1:]]),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     assert rejected.returncode == 2
     assert "incomplete" in rejected.stderr
 
@@ -1074,9 +1360,7 @@ def _publish_accepted(
 ) -> subprocess.CompletedProcess[str]:
     candidate = _publish_candidate(publication, destination)
     assert candidate.returncode == 0, candidate.stderr
-    receipt, signature, public_key = _acceptance_receipt(
-        acceptance_root, publication
-    )
+    receipt, signature, public_key = _acceptance_receipt(acceptance_root, publication)
     return _promote(publication, destination, receipt, signature, public_key)
 
 
@@ -1178,6 +1462,180 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
     assert (object_root / "artifacts/stable/current.manifest").is_file()
 
 
+def test_rclone_candidate_objects_publish_with_bounded_parallelism(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, _ = _fake_rclone_environment(tmp_path)
+    activity = tmp_path / "rclone-activity.json"
+    environment["FAKE_RCLONE_ACTIVITY"] = str(activity)
+    environment["FAKE_RCLONE_COPY_DELAY"] = "0.5"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(activity.read_text()) == {"active": 0, "maximum": 8}
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    immutable_keys = [
+        entry["key"] for entry in plan["objects"] if entry["phase"] == "immutable"
+    ]
+    receipt_keys = [json.loads(line)["key"] for line in result.stdout.splitlines()]
+    assert receipt_keys == immutable_keys
+
+    replay = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert replay.returncode == 0, replay.stderr
+    assert [json.loads(line)["key"] for line in replay.stdout.splitlines()] == (
+        immutable_keys
+    )
+
+
+def test_parallel_rclone_candidate_conflict_is_fail_closed_without_receipt(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    conflict = next(entry for entry in plan["objects"] if entry["phase"] == "immutable")
+    conflict_path = object_root / conflict["key"]
+    conflict_path.parent.mkdir(parents=True)
+    conflict_path.write_bytes(b"conflicting immutable object\n")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "refusing to overwrite immutable object" in result.stderr
+    assert result.stdout == ""
+    assert conflict_path.read_bytes() == b"conflicting immutable object\n"
+
+
+def test_rclone_promotion_parallelizes_reads_and_phase_groups_before_pointer(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    candidate = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert candidate.returncode == 0, candidate.stderr
+    receipt, signature, public_key = _acceptance_receipt(tmp_path, publication)
+    encoded_public_key = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    barrier = tmp_path / "parallel-barrier"
+    environment["FAKE_RCLONE_PARALLEL_BARRIER"] = str(barrier)
+
+    promoted = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "promote",
+            "--bundle",
+            str(publication),
+            "--accepted-evidence",
+            str(receipt),
+            "--accepted-evidence-signature",
+            str(signature),
+            "--acceptance-public-key",
+            str(public_key),
+            "--acceptance-public-key-sha256",
+            hashlib.sha256(encoded_public_key).hexdigest(),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert promoted.returncode == 0, promoted.stderr
+    assert all(
+        len(list((barrier / phase).iterdir())) >= 2
+        for phase in (
+            "read",
+            "acceptance",
+            "endpoint",
+        )
+    )
+    operations = [json.loads(line) for line in promoted.stdout.splitlines()]
+    assert [operation["phase"] for operation in operations[-3:]] == [
+        "endpoint",
+        "endpoint",
+        "pointer",
+    ]
+    pointer = object_root / "artifacts/stable/current.manifest"
+    assert pointer.is_file()
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    acceptance = (
+        object_root
+        / f"artifacts/stable/releases/{plan['generation']}/acceptance/receipt.json"
+    )
+    assert acceptance.read_bytes() == receipt.read_bytes()
+    assert (object_root / "nas").is_file()
+    assert (object_root / "spark").is_file()
+
+
 def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(
     tmp_path: Path,
 ) -> None:
@@ -1266,9 +1724,7 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
             ).read_text()
         )
         signature = publication / "objects" / setup_signature_key
-        signature_record = release["artifacts"][
-            f"spark-setup-signature-{platform}"
-        ]
+        signature_record = release["artifacts"][f"spark-setup-signature-{platform}"]
         assert signature_record == {
             "path": setup_signature_key,
             "sha256": hashlib.sha256(signature.read_bytes()).hexdigest(),
@@ -1315,9 +1771,7 @@ def test_assemble_binds_lower_dual_architecture_baseline_without_a_pointer(
         if entry["phase"] == "immutable"
     }
     baseline_releases = [
-        key
-        for key in immutable
-        if key.endswith("/acceptance-baseline/release.json")
+        key for key in immutable if key.endswith("/acceptance-baseline/release.json")
     ]
 
     assert len(baseline_releases) == 1
@@ -1507,9 +1961,7 @@ def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_end
     publication = _assemble(tmp_path, _inputs(tmp_path))
     destination = tmp_path / "public"
 
-    result = _publish_accepted(
-        publication, destination, tmp_path / "acceptance"
-    )
+    result = _publish_accepted(publication, destination, tmp_path / "acceptance")
 
     assert result.returncode == 0, result.stderr
     operations = [json.loads(line) for line in result.stdout.splitlines()]
@@ -1583,9 +2035,7 @@ def test_stable_publication_refuses_version_rollback_before_writing(
     newest_inputs = _inputs(tmp_path / "newest", version="1.2.4")
     newest = _assemble(tmp_path / "newest", newest_inputs)
     destination = tmp_path / "public"
-    first = _publish_accepted(
-        newest, destination, tmp_path / "newest-acceptance"
-    )
+    first = _publish_accepted(newest, destination, tmp_path / "newest-acceptance")
     assert first.returncode == 0, first.stderr
 
     older_inputs = _inputs(tmp_path / "older", version="1.2.3")
@@ -1611,9 +2061,7 @@ def test_refresh_extends_signed_manifest_after_verifying_all_release_objects(
     inputs = _inputs(tmp_path / "inputs")
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = _publish_accepted(
-        publication, destination, tmp_path / "acceptance"
-    )
+    published = _publish_accepted(publication, destination, tmp_path / "acceptance")
     assert published.returncode == 0, published.stderr
     manifest = destination / "artifacts/stable/current.manifest"
     before = manifest.read_text().splitlines()
@@ -1660,9 +2108,7 @@ def test_refresh_refuses_to_extend_manifest_with_missing_release_object(
     inputs = _inputs(tmp_path / "inputs")
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = _publish_accepted(
-        publication, destination, tmp_path / "acceptance"
-    )
+    published = _publish_accepted(publication, destination, tmp_path / "acceptance")
     assert published.returncode == 0, published.stderr
     manifest = destination / "artifacts/stable/current.manifest"
     before = manifest.read_bytes()
@@ -1712,9 +2158,7 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
         setup.chmod(0o755)
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
-    published = _publish_accepted(
-        publication, destination, tmp_path / "acceptance"
-    )
+    published = _publish_accepted(publication, destination, tmp_path / "acceptance")
     assert published.returncode == 0, published.stderr
     commands = tmp_path / "commands"
     commands.mkdir()
