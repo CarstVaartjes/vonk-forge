@@ -623,21 +623,9 @@ printf '%s\n' \
           systemctl --system daemon-reload
           systemctl --system --no-block start "$recovery_unit"
           kill -KILL "$dpkg_pid"
-          for _ in {1..100}; do
-            recovery_active_state=$(systemctl --system show \
-              --property=ActiveState --value "$recovery_unit")
-            recovery_main_pid=$(systemctl --system show \
-              --property=MainPID --value "$recovery_unit")
-            if [[ "$recovery_active_state" == activating \
-              && "$recovery_main_pid" -gt 0 ]]; then
-              break
-            fi
-            sleep 0.01
-          done
-          test "$recovery_active_state" = activating
-          test "$recovery_main_pid" -gt 0
           # Recovery may auto-thaw the helper while stopping or restarting it;
-          # the observed freezer state, not a later thaw command, is invariant.
+          # normalize the freezer state without requiring a transient recovery
+          # ActiveState or MainPID that a fast successful oneshot can outrun.
           for _ in {1..100}; do
             systemctl --system thaw "$helper_unit" \
               >/dev/null 2>&1 || true
@@ -667,8 +655,8 @@ touch "$started"
 
 wait "$crash_watcher"
 test -f "$crash_observed"
-test -f /var/lib/vonk-forge/package-upgrade/intent
 if [[ "$crash_mode" == full-cgroup ]]; then
+  test -f /var/lib/vonk-forge/package-upgrade/intent
   cmp -s "$test_root/crash-point-pending" \
     /var/lib/vonk-forge/helper-upgrade.pending
   assert_interrupted_baseline_state

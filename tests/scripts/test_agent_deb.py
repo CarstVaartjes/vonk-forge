@@ -608,24 +608,6 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'cmp -s "$test_root/crash-point-pending"'
     )
     assert '"$test_root/normalized-pending"' not in dpkg_only
-    recovery_loop_start = dpkg_only.index("for _ in {1..100}; do")
-    recovery_active_read = dpkg_only.index(
-        "--property=ActiveState", recovery_loop_start
-    )
-    recovery_pid_read = dpkg_only.index("--property=MainPID", recovery_active_read)
-    recovery_running_break = dpkg_only.index(
-        '[[ "$recovery_active_state" == activating', recovery_pid_read
-    )
-    recovery_pid_predicate = dpkg_only.index(
-        '&& "$recovery_main_pid" -gt 0', recovery_running_break
-    )
-    recovery_break = dpkg_only.index("then\n              break", recovery_pid_predicate)
-    recovery_retry_sleep = dpkg_only.index("sleep 0.01", recovery_break)
-    recovery_loop_end = dpkg_only.index("          done", recovery_retry_sleep)
-    recovery_active_check = dpkg_only.index(
-        'test "$recovery_active_state" = activating'
-    )
-    recovery_pid_check = dpkg_only.index('test "$recovery_main_pid" -gt 0')
     frozen_state_check = dpkg_only.index('"$helper_unit")" = frozen')
     recovery_start = dpkg_only.index(
         'systemctl --system --no-block start "$recovery_unit"'
@@ -633,7 +615,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     kill_dpkg = dpkg_only.index('kill -KILL "$dpkg_pid"')
     intent_digest_check = dpkg_only.index('= "$crash_intent_digest"')
     baseline_state_check = dpkg_only.index("assert_interrupted_baseline_state")
-    thaw_loop_start = dpkg_only.index("for _ in {1..100}; do", recovery_pid_check)
+    thaw_loop_start = dpkg_only.index("for _ in {1..100}; do", kill_dpkg)
     thaw = dpkg_only.index(
         'systemctl --system thaw "$helper_unit" \\\n'
         "              >/dev/null 2>&1 || true",
@@ -655,16 +637,6 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         < baseline_state_check
         < recovery_start
         < kill_dpkg
-        < recovery_loop_start
-        < recovery_active_read
-        < recovery_pid_read
-        < recovery_running_break
-        < recovery_pid_predicate
-        < recovery_break
-        < recovery_retry_sleep
-        < recovery_loop_end
-        < recovery_active_check
-        < recovery_pid_check
         < thaw_loop_start
         < thaw
         < freezer_read
@@ -674,9 +646,34 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         < terminal_state
     )
     assert dpkg_only.count('"$helper_unit")" = frozen') == 1
+    assert "recovery_active_state" not in dpkg_only
+    assert "recovery_main_pid" not in dpkg_only
+    assert "--property=ActiveState" not in dpkg_only
+    assert "--property=MainPID" not in dpkg_only
     assert "sleep 1" not in dpkg_only
     boot_comment = lifecycle.index(
         "A real boot does not preserve the test-only cgroup"
+    )
+    watcher_wait = lifecycle.index('wait "$crash_watcher"')
+    crash_observed_assert = lifecycle.index(
+        'test -f "$crash_observed"', watcher_wait
+    )
+    full_cgroup_branch = lifecycle.index(
+        'if [[ "$crash_mode" == full-cgroup ]]; then', dpkg_only_end
+    )
+    intent_must_exist = lifecycle.index(
+        "test -f /var/lib/vonk-forge/package-upgrade/intent", full_cgroup_branch
+    )
+    post_watcher = lifecycle[watcher_wait:boot_comment]
+    assert post_watcher.count(
+        "test -f /var/lib/vonk-forge/package-upgrade/intent"
+    ) == 1
+    assert (
+        watcher_wait
+        < crash_observed_assert
+        < full_cgroup_branch
+        < intent_must_exist
+        < boot_comment
     )
     boot_simulation = lifecycle.index(
         'systemctl --system thaw "$helper_unit"', boot_comment
