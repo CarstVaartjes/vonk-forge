@@ -17,9 +17,16 @@ export type AgentUpgradePackage = {
   package_signature: string; package_url: string; package_version: string;
   schema_version: 1; target_binary_digest: string; target_build_digest: string;
 };
+export type AgentRepairManifest = {
+  schema_version: 1;
+  kind: "agent-upgrade-repair";
+  node_id: string;
+  authority_sha256: string;
+  package: AgentUpgradePackage;
+};
 export type AgentUpgradePlan = {
   authority_revision: string; node_ids: string[]; package: AgentUpgradePackage;
-  plan_digest: string; strategy: AgentUpgradeStrategy;
+  plan_digest: string; repair_manifest?: AgentRepairManifest; strategy: AgentUpgradeStrategy;
 };
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];
@@ -238,6 +245,6 @@ export interface ControlApi extends LibraryApi {
   createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;
-  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, signal?: AbortSignal): Promise<AgentUpgradePlan>;
+  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan>;
   applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<{id: string; state: string}>;
 }

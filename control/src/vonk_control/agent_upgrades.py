@@ -22,6 +22,7 @@ _PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
+_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ONLINE_WINDOW = timedelta(seconds=150)
 # An ambiguous install result can leave durable apt/dpkg recovery in progress.
 # Both the sole automatic retry and every operator-triggered retry wait through
@@ -49,6 +50,7 @@ class AgentUpgradePlan:
     node_ids: tuple[str, ...]
     package: dict[str, object]
     plan_digest: str
+    repair_manifest: dict[str, object] | None
     strategy: str
 
 
@@ -146,11 +148,25 @@ class AgentUpgradeService:
         node_ids: Sequence[str] | None,
         package: Mapping[str, object],
         *,
+        repair_manifest: Mapping[str, object] | None = None,
         strategy: str = "one-at-a-time",
     ) -> AgentUpgradePlan:
         if strategy not in {"one-at-a-time", "all-at-once"}:
             raise AgentUpgradeConflict("agent upgrade rollout strategy is invalid")
         payload = self._package(package)
+        repair = (
+            None
+            if repair_manifest is None
+            else self._repair_manifest(repair_manifest, payload)
+        )
+        if repair is not None and (
+            node_ids is None
+            or tuple(node_ids) != (repair["node_id"],)
+            or strategy != "one-at-a-time"
+        ):
+            raise AgentUpgradeConflict(
+                "agent repair requires exactly its explicit Spark and one-at-a-time rollout"
+            )
         authority_revision = self._current_revision()
         now = self._clock()
         with self._sessions() as session:
@@ -200,6 +216,7 @@ class AgentUpgradeService:
             "authority_revision": authority_revision,
             "node_ids": list(targets),
             "package": payload,
+            **({"repair_manifest": repair} if repair is not None else {}),
             "strategy": strategy,
         }
         return AgentUpgradePlan(
@@ -207,6 +224,7 @@ class AgentUpgradeService:
             node_ids=targets,
             package=payload,
             plan_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
+            repair_manifest=repair,
             strategy=strategy,
         )
 
@@ -218,9 +236,15 @@ class AgentUpgradeService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        repair_manifest: Mapping[str, object] | None = None,
         strategy: str = "one-at-a-time",
     ) -> Job:
-        plan = self.preview(node_ids, package, strategy=strategy)
+        plan = self.preview(
+            node_ids,
+            package,
+            repair_manifest=repair_manifest,
+            strategy=strategy,
+        )
         if plan.plan_digest != plan_digest:
             raise AgentUpgradeConflict("agent upgrade preview is stale")
         now = self._clock()
@@ -235,6 +259,11 @@ class AgentUpgradeService:
             payload={
                 "node_order": list(plan.node_ids),
                 "package": plan.package,
+                **(
+                    {"repair_manifest": plan.repair_manifest}
+                    if plan.repair_manifest is not None
+                    else {}
+                ),
                 "strategy": plan.strategy,
             },
             current_attempt=0,
@@ -304,8 +333,12 @@ class AgentUpgradeService:
             package = parent.payload.get("package")
             order = parent.payload.get("node_order")
             strategy = parent.payload.get("strategy")
+            repair = parent.payload.get("repair_manifest")
+            expected_payload_keys = {"node_order", "package", "strategy"}
+            if repair is not None:
+                expected_payload_keys.add("repair_manifest")
             if (
-                set(parent.payload) != {"node_order", "package", "strategy"}
+                set(parent.payload) != expected_payload_keys
                 or not isinstance(package, dict)
                 or not isinstance(order, list)
                 or not order
@@ -317,14 +350,28 @@ class AgentUpgradeService:
                 raise ValueError("stored agent upgrade plan is invalid")
             try:
                 normalized_package = self._package(package)
+                normalized_repair = (
+                    None
+                    if repair is None
+                    else self._repair_manifest(repair, normalized_package)
+                )
             except AgentUpgradeConflict as error:
                 raise ValueError("stored agent upgrade plan is invalid") from error
+            if normalized_repair is not None and (
+                order != [normalized_repair["node_id"]] or strategy != "one-at-a-time"
+            ):
+                raise ValueError("stored agent upgrade plan is invalid")
             plan_digest = hashlib.sha256(
                 canonical_message(
                     {
                         "authority_revision": parent.authority_revision,
                         "node_ids": order,
                         "package": normalized_package,
+                        **(
+                            {"repair_manifest": normalized_repair}
+                            if normalized_repair is not None
+                            else {}
+                        ),
                         "strategy": strategy,
                     }
                 )
@@ -714,6 +761,45 @@ class AgentUpgradeService:
         ):
             raise AgentUpgradeConflict("agent upgrade package is invalid")
         return document
+
+    @classmethod
+    def _repair_manifest(
+        cls,
+        value: Mapping[str, object],
+        package: Mapping[str, object],
+    ) -> dict[str, object]:
+        document = dict(value)
+        if (
+            set(document)
+            != {
+                "authority_sha256",
+                "kind",
+                "node_id",
+                "package",
+                "schema_version",
+            }
+            or document.get("schema_version") != 1
+            or document.get("kind") != "agent-upgrade-repair"
+            or not isinstance(document.get("node_id"), str)
+            or _NODE_ID.fullmatch(str(document["node_id"])) is None
+            or not isinstance(document.get("authority_sha256"), str)
+            or _SHA256.fullmatch(str(document["authority_sha256"])) is None
+            or not isinstance(document.get("package"), Mapping)
+        ):
+            raise AgentUpgradeConflict("agent repair manifest is invalid")
+        manifest_package = cls._package(dict(document["package"]))
+        expected_url = (
+            "https://install.vonkforge.ai/repair-capsules/"
+            f"{document['node_id']}/{document['authority_sha256']}/"
+            f"{manifest_package['package_sha256']}/vonk-forge-agent.deb"
+        )
+        if manifest_package["package_url"] != expected_url:
+            raise AgentUpgradeConflict("agent repair package URL is not canonical")
+        if dict(package) != manifest_package:
+            raise AgentUpgradeConflict(
+                "agent repair manifest does not match its package descriptor"
+            )
+        return {**document, "package": manifest_package}
 
     @classmethod
     def _eligible(

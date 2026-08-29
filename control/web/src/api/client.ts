@@ -3,6 +3,7 @@ import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
   AuthSession,
+  AgentRepairManifest,
   AgentUpgradePlan,
   AgentUpgradeStrategy,
   AgentsResponse,
@@ -608,10 +609,14 @@ export class ApiClient implements ControlApi {
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 
-  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, signal?: AbortSignal): Promise<AgentUpgradePlan> {
+  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan> {
     return this.request("/api/v1/agents/upgrades/preview", {
       method: "POST",
-      body: JSON.stringify({node_ids: nodeIds, strategy}),
+      body: JSON.stringify({
+        node_ids: nodeIds,
+        ...(repairManifest ? {repair_manifest: repairManifest} : {}),
+        strategy,
+      }),
       signal,
     });
   }
@@ -621,7 +626,7 @@ export class ApiClient implements ControlApi {
       method: "POST",
       body: JSON.stringify({
         node_ids: plan.node_ids,
-        package: plan.package,
+        ...(plan.repair_manifest ? {repair_manifest: plan.repair_manifest} : {package: plan.package}),
         plan_digest: plan.plan_digest,
         strategy: plan.strategy,
       }),
