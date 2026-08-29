@@ -521,12 +521,16 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert baseline < start_old_helper < restore_new_unit < stage_candidate
 
     for historical_line in (
-        "BindReadOnlyPaths=-/run/docker.sock "
-        "-/run/vonk-forge-agent/runtime-requests "
-        "-/var/lib/vonk-forge-agent/image-imports",
-        "ReadWritePaths=-/var/lib/vonk-forge-agent/models "
-        "-/var/lib/vonk-forge-agent/runs "
-        "-/var/lib/vonk-forge-agent/run-metadata",
+        (
+            "BindReadOnlyPaths=-/run/docker.sock "
+            "-/run/vonk-forge-agent/runtime-requests "
+            "-/var/lib/vonk-forge-agent/image-imports"
+        ),
+        (
+            "ReadWritePaths=-/var/lib/vonk-forge-agent/models "
+            "-/var/lib/vonk-forge-agent/runs "
+            "-/var/lib/vonk-forge-agent/run-metadata"
+        ),
         "TimeoutStartSec=30s",
         "TimeoutStopSec=15s",
         "KillMode=mixed",
@@ -535,6 +539,16 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
 
     assert 'crash_pending_kind=stale' in lifecycle
     assert 'crash_pending_kind=normalized' in lifecycle
+    sync_gate = lifecycle.index("intent_sync_quiescent=0")
+    freeze = lifecycle.index('systemctl --system freeze "$helper_unit"', sync_gate)
+    assert sync_gate < freeze
+    sync_window = lifecycle[sync_gate:freeze]
+    assert "-f /var/lib/vonk-forge/package-upgrade/agent-blocked" in sync_window
+    assert "/sys/fs/cgroup$helper_control_group/cgroup.procs" in sync_window
+    assert "${intent_sync_argv[0]}" in sync_window
+    assert "/usr/bin/sync" in sync_window
+    assert "/var/lib/vonk-forge/package-upgrade" in sync_window
+    assert "intent_sync_quiescent < 5" in sync_window
     assert '"$test_root/crash-point-pending"' in lifecycle
     assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
     assert lifecycle.count("assert_interrupted_baseline_state") == 4
