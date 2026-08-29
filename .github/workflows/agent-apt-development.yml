@@ -1,0 +1,229 @@
+name: Agent APT development publication
+
+on:
+  workflow_run:
+    workflows: [Rust Vonk Forge agent development]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Exact successful agent development Actions run ID
+        required: true
+        type: string
+      upstream_run_number:
+        description: Exact successful agent development Actions run number
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  authority:
+    name: Bind exact accepted agent package run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      run_number: ${{ steps.run.outputs.run_number }}
+      source_sha: ${{ steps.run.outputs.source_sha }}
+      version: ${{ steps.accepted.outputs.version }}
+      arm64_package: ${{ steps.accepted.outputs.arm64_package }}
+      amd64_package: ${{ steps.accepted.outputs.amd64_package }}
+      artifact_name: ${{ steps.accepted.outputs.artifact_name }}
+      baseline_artifact_name: ${{ steps.accepted.outputs.baseline_artifact_name }}
+    steps:
+      - name: Resolve exact successful upstream agent run
+        id: run
+        shell: bash
+        env:
+          EVENT_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          EVENT_SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          EVENT_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.upstream_run_id }}
+          REQUESTED_RUN_NUMBER: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_number || inputs.upstream_run_number }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$REQUESTED_RUN_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          run_json="$RUNNER_TEMP/upstream-agent-run.json"
+          workflow_json="$RUNNER_TEMP/upstream-agent-workflow.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$REQUESTED_RUN_ID" \
+            > "$run_json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/agent-release.yml" \
+            > "$workflow_json"
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg run_id "$REQUESTED_RUN_ID" \
+            --arg run_number "$REQUESTED_RUN_NUMBER" \
+            --argjson workflow_id "$(jq .id "$workflow_json")" \
+            '(.id | tostring) == $run_id and
+             (.run_number | tostring) == $run_number and
+             .workflow_id == $workflow_id and
+             .name == "Rust Vonk Forge agent development" and
+             .path == ".github/workflows/agent-release.yml" and
+             (.event == "push" or .event == "workflow_dispatch") and
+             .head_branch == "main" and
+             .head_repository.full_name == $repository and
+             .repository.full_name == $repository and
+             .status == "completed" and .conclusion == "success" and
+             (.run_attempt | type) == "number" and .run_attempt >= 1 and
+             (.head_sha | test("^[0-9a-f]{40}$"))' \
+            "$run_json" >/dev/null
+          source_sha=$(jq -r .head_sha "$run_json")
+          run_attempt=$(jq -r .run_attempt "$run_json")
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            test "$EVENT_RUN_ID" = "$REQUESTED_RUN_ID"
+            test "$EVENT_RUN_NUMBER" = "$REQUESTED_RUN_NUMBER"
+            test "$EVENT_RUN_ATTEMPT" = "$run_attempt"
+            test "$EVENT_WORKFLOW_NAME" = "Rust Vonk Forge agent development"
+            case "$EVENT_SOURCE_EVENT" in push|workflow_dispatch) ;; *) exit 64 ;; esac
+            test "$EVENT_HEAD_BRANCH" = main
+            test "$EVENT_HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"
+            test "$EVENT_HEAD_SHA" = "$source_sha"
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          fi
+          printf '%s\n' \
+            "run_id=$REQUESTED_RUN_ID" \
+            "run_number=$REQUESTED_RUN_NUMBER" \
+            "source_sha=$source_sha" \
+            "run_attempt=$run_attempt" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact accepted main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.run.outputs.source_sha }}
+
+      - name: Verify exact gates and immutable package artifacts
+        id: accepted
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ATTEMPT: ${{ steps.run.outputs.run_attempt }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+          RUN_NUMBER: ${{ steps.run.outputs.run_number }}
+          SOURCE_SHA: ${{ steps.run.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$SOURCE_SHA" = \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+          metadata=$(scripts/agent-package-metadata \
+            development branch main "$SOURCE_SHA" "$RUN_NUMBER")
+          while IFS='=' read -r name value; do
+            case "$name" in
+              version|arm64_package|amd64_package|artifact_name|baseline_artifact_name)
+                printf '%s=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
+                printf -v "$name" '%s' "$value"
+                ;;
+            esac
+          done <<< "$metadata"
+          jobs="$RUNNER_TEMP/upstream-agent-jobs.json"
+          artifacts="$RUNNER_TEMP/upstream-agent-artifacts.json"
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[]' | jq -s . > "$jobs"
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[]' | jq -s . > "$artifacts"
+          test "$(jq 'length' "$jobs")" = 9
+          for required_job in \
+            'Derive development package metadata' \
+            'Compile ARM64 candidate package binaries' \
+            'Compile ARM64 baseline package binaries' \
+            'Compile AMD64 candidate package binaries' \
+            'Compile AMD64 baseline package binaries' \
+            'Build and sign AMD64 and ARM64; lifecycle-test ARM64' \
+            'Run Rust and package security gates' \
+            'Lifecycle-test accepted ARM64 package on ARM64' \
+            'Lifecycle-test accepted AMD64 package on AMD64'; do
+            jq -e \
+              --arg name "$required_job" \
+              --arg source_sha "$SOURCE_SHA" \
+              --argjson run_attempt "$RUN_ATTEMPT" \
+              '[.[] | select(.name == $name and .head_sha == $source_sha and
+                 .run_attempt == $run_attempt and .status == "completed" and
+                 .conclusion == "success")] | length == 1' \
+              "$jobs" >/dev/null
+          done
+          for expected_artifact in "$artifact_name" "$baseline_artifact_name"; do
+            jq -e \
+              --arg name "$expected_artifact" \
+              --arg run_id "$RUN_ID" \
+              --arg source_sha "$SOURCE_SHA" \
+              '[.[] | select(.name == $name and (.expired | not) and
+                 .size_in_bytes > 0 and
+                 (.workflow_run.id | tostring) == $run_id and
+                 .workflow_run.head_sha == $source_sha)] | length == 1' \
+              "$artifacts" >/dev/null
+          done
+
+  publish-apt:
+    name: Publish accepted AMD64 and ARM64 development packages to apt dev
+    needs: [authority]
+    if: needs.authority.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: apt-development
+    concurrency:
+      group: vonk-forge-agent-apt-dev
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact accepted apt publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.authority.outputs.source_sha }}
+      - name: Publish exact accepted AMD64 and ARM64 development packages
+        uses: ./.github/actions/agent-apt-publish
+        with:
+          channel: dev
+          version: ${{ needs.authority.outputs.version }}
+          arm64_package: ${{ needs.authority.outputs.arm64_package }}
+          amd64_package: ${{ needs.authority.outputs.amd64_package }}
+          artifact_name: ${{ needs.authority.outputs.artifact_name }}
+          artifact_run_id: ${{ needs.authority.outputs.run_id }}
+          artifact_token: ${{ github.token }}
+          environment: apt-development
+          source_sha: ${{ needs.authority.outputs.source_sha }}
+          tag_name: ''
+          tag_oid: ''
+          apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          apt_repository_gpg_fingerprint: ${{ vars.APT_REPOSITORY_GPG_FINGERPRINT }}
+          apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}
+          r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}

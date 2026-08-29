@@ -17,6 +17,14 @@ inputs:
   artifact_name:
     description: Immutable accepted package artifact name
     required: true
+  artifact_run_id:
+    description: Exact source workflow run ID for cross-run artifact download
+    required: false
+    default: ""
+  artifact_token:
+    description: Read-only Actions token for cross-run artifact download
+    required: false
+    default: ""
   environment:
     description: Literal protected environment selected by the caller job
     required: true
@@ -58,11 +66,22 @@ runs:
   using: composite
   steps:
 
-    - name: Download accepted package artifact
+    - name: Download accepted package artifact from current run
+      if: inputs.artifact_run_id == ''
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: ${{ inputs.artifact_name }}
         path: dist
+
+    - name: Download exact accepted package artifact from upstream run
+      if: inputs.artifact_run_id != ''
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: dist
+        repository: ${{ github.repository }}
+        run-id: ${{ inputs.artifact_run_id }}
+        github-token: ${{ inputs.artifact_token }}
 
     - name: Verify exact downloaded package
       id: package

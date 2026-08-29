@@ -354,6 +354,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     input_paths = (
         "pyproject.toml",
         ".github/workflows/ci.yml",
+        ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
         ".github/actions/agent-package-compile/action.yml",
