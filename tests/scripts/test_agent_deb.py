@@ -476,11 +476,35 @@ def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
     assert 'test "${dpkg_argv[2]}" = --force-confold' in lifecycle
     assert 'test "${dpkg_argv[3]}" = "$candidate"' in lifecycle
     assert (
+        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"
+        in lifecycle.splitlines()
+    )
+    assert (
         'upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename '
         '"$test_root")'
     ) in lifecycle
     assert 'rm -f -- "$upgrade_invocations"' in lifecycle
     assert 'test "$(wc -l < "$upgrade_invocations")" -eq 1' in lifecycle
+
+
+def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
+    lifecycle = RECOVERY_LIFECYCLE.read_text()
+
+    preflight = lifecycle.index("if dpkg-query -W vonk-forge-agent")
+    destructive_cleanup = lifecycle.index("trap cleanup EXIT HUP INT TERM")
+    assert lifecycle.index("trap cleanup_test_root EXIT HUP INT TERM") < preflight
+    assert preflight < destructive_cleanup
+    collision_check = lifecycle[preflight:destructive_cleanup]
+    assert 'systemctl --system cat "$agent_unit"' in collision_check
+    assert "-L /run/vonk-forge-package-candidates" in collision_check
+    for protected_path in (
+        "/var/lib/vonk-forge/package-upgrade",
+        "/var/lib/vonk-forge/helper-upgrade.pending",
+        "/var/lib/vonk-forge/helper-upgrade.receipt",
+        "vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+        "vonk-forge-package-helper.socket.d",
+    ):
+        assert protected_path in collision_check
 
 
 def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
