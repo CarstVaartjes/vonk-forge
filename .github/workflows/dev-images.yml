@@ -84,14 +84,54 @@ jobs:
           cache-from: ${{ matrix.cache_from }}
           cache-to: ${{ matrix.cache_to }}
 
-      - name: Upload exact OCI archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: development-image-${{ matrix.role }}-${{ github.sha }}-${{ github.run_id }}
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-          path: ${{ runner.temp }}/${{ matrix.archive }}
+      - name: Install Skopeo from Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v skopeo >/dev/null 2>&1; then
+            exit 0
+          fi
+          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            timeout --foreground 120s sudo apt-get update \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 || true
+            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+              exit 0
+            fi
+          done
+          echo "unable to install skopeo after bounded retries" >&2
+          exit 1
+
+      - name: Accept exact local OCI archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/accept-development-image-archive \
+            "${{ matrix.role }}" "$RUNNER_TEMP/${{ matrix.archive }}" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            "$RUNNER_TEMP/${{ matrix.role }}.role-receipt.json"
+
+      - parallel:
+          - name: Upload exact OCI archive
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-image-${{ matrix.role }}-${{ github.sha }}-${{ github.run_id }}
+              if-no-files-found: error
+              retention-days: 1
+              compression-level: 0
+              path: ${{ runner.temp }}/${{ matrix.archive }}
+
+          - name: Upload exact OCI acceptance evidence
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-${{ matrix.role }}-${{ github.sha }}-${{ github.run_id }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/${{ matrix.role }}.role-receipt.json
 
   verify-runtime-images:
     name: Verify pinned runtime images are pullable
@@ -209,69 +249,47 @@ jobs:
             shell: bash
             run: scripts/verify-public-image-inputs
 
-          - name: Download exact OCI archives
+          - name: Download exact OCI acceptance evidence
             uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
             with:
-              pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}
+              pattern: development-role-receipt-*-${{ github.sha }}-${{ github.run_id }}
               merge-multiple: true
-              path: ${{ runner.temp }}/accepted
-
-          - name: Install Skopeo from Ubuntu
-            shell: bash
-            run: |
-              set -euo pipefail
-              if command -v skopeo >/dev/null 2>&1; then
-                exit 0
-              fi
-              if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-                exit 0
-              fi
-              for attempt in 1 2 3; do
-                timeout --foreground 120s sudo apt-get update \
-                  -o Acquire::Retries=3 \
-                  -o Acquire::http::Timeout=30 \
-                  -o Acquire::https::Timeout=30 || true
-                if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
-                  exit 0
-                fi
-              done
-              echo "unable to install skopeo after bounded retries" >&2
-              exit 1
+              path: ${{ runner.temp }}/accepted-evidence
 
       - name: Confirm parallel source and image prerequisites completed
         shell: bash
         run: |
           set -euo pipefail
           test -d control/web/dist
-          test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"
-          command -v skopeo >/dev/null
+          for role in api worker hermes; do
+            test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"
+          done
 
-      - name: Render and validate disposable development Compose artifacts
+      - name: Validate accepted image evidence
+        id: images
         shell: bash
         run: |
           set -euo pipefail
+          scripts/dev-image-acceptance-receipt collect \
+            "$RUNNER_TEMP/accepted-evidence" "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Render and validate disposable development Compose artifacts
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+        run: |
+          set -euo pipefail
           publication_root="$RUNNER_TEMP/accepted"
-          api_manifest="$RUNNER_TEMP/vonk-forge-api.manifest.json"
-          worker_manifest="$RUNNER_TEMP/vonk-forge-worker.manifest.json"
-          hermes_manifest="$RUNNER_TEMP/vonk-forge-hermes.manifest.json"
-          skopeo inspect --raw \
-            "oci-archive:$publication_root/vonk-forge-api.oci.tar" \
-            > "$api_manifest"
-          skopeo inspect --raw \
-            "oci-archive:$publication_root/vonk-forge-worker.oci.tar" \
-            > "$worker_manifest"
-          skopeo inspect --raw \
-            "oci-archive:$publication_root/vonk-forge-hermes.oci.tar" \
-            > "$hermes_manifest"
-          api_digest=$(skopeo manifest-digest "$api_manifest")
-          worker_digest=$(skopeo manifest-digest "$worker_manifest")
-          hermes_digest=$(skopeo manifest-digest "$hermes_manifest")
-          hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest"
+          install -d -m 0700 "$publication_root"
+          hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST"
           scripts/render-dev-compose \
             --template deploy/compose/compose.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
-            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
-            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$API_DIGEST" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
             --hermes-image "$hermes_image" \
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
@@ -288,168 +306,14 @@ jobs:
             --env-file deploy/compose/tests/test.env \
             -f "$publication_root/docker-compose.dev.yml" config -q
 
-      - name: Scan complete local publication inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          publication_root="$RUNNER_TEMP/accepted"
-          scan_root=""
-          cleanup() {
-            original_status=$?
-            trap - EXIT INT TERM
-            cleanup_status=0
-            if [[ -n "$scan_root" ]]; then
-              if [[ "$scan_root" != "$RUNNER_TEMP"/dev-publication-scan.* ]]; then
-                echo "refusing unsafe publication scan cleanup" >&2
-                cleanup_status=1
-              elif ! rm -rf -- "$scan_root"; then
-                echo "publication scan cleanup failed" >&2
-                cleanup_status=1
-              fi
-            fi
-            if (( original_status != 0 )); then
-              exit "$original_status"
-            fi
-            exit "$cleanup_status"
-          }
-          trap cleanup EXIT
-          trap 'exit 130' INT
-          trap 'exit 143' TERM
-          scan_root=$(mktemp -d "$RUNNER_TEMP/dev-publication-scan.XXXXXX")
-          layout_root="$scan_root/layouts"
-          evidence_root="$scan_root/evidence"
-          canary_root="$scan_root/canaries"
-          install -d -m 0700 "$layout_root" "$evidence_root" "$canary_root"
-          printf '%s' 'task-6-publication-canary-api' > "$canary_root/api"
-          printf '%s' 'task-6-publication-canary-worker' > "$canary_root/worker"
-          chmod 0600 "$canary_root/api" "$canary_root/worker"
-          for role in api worker hermes; do
-            archive="$publication_root/vonk-forge-$role.oci.tar"
-            layout="$layout_root/$role"
-            install -d -m 0700 "$layout"
-            tar --extract --no-same-owner --file "$archive" --directory "$layout"
-            cp "$layout/index.json" "$evidence_root/$role.index.json"
-            index_queue=("$layout/index.json")
-            platform_index=""
-            declare -A visited_indexes=()
-            while ((${#index_queue[@]} > 0)); do
-              index_document=${index_queue[0]}
-              index_queue=("${index_queue[@]:1}")
-              if [[ -n "${visited_indexes[$index_document]+present}" ]]; then
-                continue
-              fi
-              visited_indexes[$index_document]=1
-              if jq -e '[.manifests[]?.platform.architecture]
-                | index("amd64") != null or index("arm64") != null' \
-                "$index_document" >/dev/null; then
-                [[ -z "$platform_index" ]]
-                platform_index=$index_document
-              fi
-              descriptor_lines=$(jq -c '.manifests[]?' "$index_document")
-              while IFS= read -r descriptor; do
-                [[ -n "$descriptor" ]] || continue
-                media_type=$(jq -r '.mediaType // empty' <<< "$descriptor")
-                descriptor_digest=$(jq -r '.digest // empty' <<< "$descriptor")
-                [[ "$descriptor_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-                descriptor_path="$layout/blobs/sha256/${descriptor_digest#sha256:}"
-                [[ -f "$descriptor_path" && ! -L "$descriptor_path" ]]
-                [[ "$(sha256sum "$descriptor_path" | cut -d ' ' -f 1)" == \
-                  "${descriptor_digest#sha256:}" ]]
-                case "$media_type" in
-                  application/vnd.oci.image.index.v1+json)
-                    index_queue+=("$descriptor_path")
-                    ;;
-                  application/vnd.oci.image.manifest.v1+json)
-                    :
-                    ;;
-                  *)
-                    echo "unexpected OCI descriptor media type" >&2
-                    exit 1
-                    ;;
-                esac
-              done <<< "$descriptor_lines"
-            done
-            [[ -n "$platform_index" ]]
-            evidence_count=0
-            while IFS=$'\t' read -r architecture runnable_digest \
-              attestation_digest; do
-              runnable_path="$layout/blobs/sha256/${runnable_digest#sha256:}"
-              config_digest=$(jq -er '.config.digest' "$runnable_path")
-              [[ "$config_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-              config_path="$layout/blobs/sha256/${config_digest#sha256:}"
-              [[ -f "$config_path" && ! -L "$config_path" ]]
-              [[ "$(sha256sum "$config_path" | cut -d ' ' -f 1)" == \
-                "${config_digest#sha256:}" ]]
-              layer_count=$(jq -er '.layers | length' "$runnable_path")
-              jq -e --arg architecture "$architecture" \
-                --arg revision "$GITHUB_SHA" \
-                --argjson layer_count "$layer_count" \
-                '.architecture == $architecture
-                and .os == "linux"
-                and .rootfs.type == "layers"
-                and (.rootfs.diff_ids | type == "array" and length == $layer_count)
-                and (.history | type == "array")
-                and ([.history[] | select((.empty_layer // false) == false)]
-                  | length == $layer_count)
-                and .config.Labels["org.opencontainers.image.revision"] == $revision' \
-                "$config_path" >/dev/null
-              cp "$config_path" \
-                "$evidence_root/$role.$architecture.config.json"
-              jq -c '.history[]' "$config_path" \
-                > "$evidence_root/$role.$architecture.history.jsonl"
-              while IFS= read -r layer_descriptor; do
-                layer_digest=$(jq -r '.digest // empty' <<< "$layer_descriptor")
-                [[ "$layer_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-                layer_path="$layout/blobs/sha256/${layer_digest#sha256:}"
-                [[ -f "$layer_path" && ! -L "$layer_path" ]]
-                [[ "$(sha256sum "$layer_path" | cut -d ' ' -f 1)" == \
-                  "${layer_digest#sha256:}" ]]
-              done < <(jq -c '.layers[]' "$runnable_path")
-              manifest_path="$layout/blobs/sha256/${attestation_digest#sha256:}"
-              cp "$manifest_path" \
-                "$evidence_root/$role.$architecture.attestation-manifest.json"
-              found_sbom=0
-              found_provenance=0
-              mapfile -t statement_descriptors < <(
-                jq -r '.layers[] | select(
-                  .mediaType == "application/vnd.in-toto+json"
-                ) | [(.annotations["in-toto.io/predicate-type"] // ""), .digest]
-                  | @tsv' "$manifest_path"
-              )
-              for statement_descriptor in "${statement_descriptors[@]}"; do
-                IFS=$'\t' read -r declared_predicate statement_digest \
-                  <<< "$statement_descriptor"
-                [[ "$statement_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-                statement_path="$layout/blobs/sha256/${statement_digest#sha256:}"
-                [[ -f "$statement_path" && ! -L "$statement_path" ]]
-                [[ "$(sha256sum "$statement_path" | cut -d ' ' -f 1)" == \
-                  "${statement_digest#sha256:}" ]]
-                actual_predicate=$(jq -r '.predicateType // empty' "$statement_path")
-                [[ "$actual_predicate" == "$declared_predicate" ]]
-                cp "$statement_path" \
-                  "$evidence_root/$role.$architecture.attestation-$evidence_count.json"
-                case "$actual_predicate" in
-                  https://spdx.dev/Document) found_sbom=1 ;;
-                  https://slsa.dev/provenance/*)
-                    jq -e --arg revision "$GITHUB_SHA" \
-                      '[.. | strings | select(. == $revision)] | length > 0' \
-                      "$statement_path" >/dev/null
-                    found_provenance=1
-                    ;;
-                esac
-                evidence_count=$((evidence_count + 1))
-              done
-              ((found_sbom == 1))
-              ((found_provenance == 1))
-            done < <(scripts/verify-multiarch-image-manifest "$platform_index")
-          done
       - name: Create checksum-bound acceptance receipt
         shell: bash
         run: |
           set -euo pipefail
-          scripts/dev-image-acceptance-receipt create \
+          scripts/dev-image-acceptance-receipt aggregate \
             "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$RUNNER_TEMP/accepted"
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            "$RUNNER_TEMP/accepted-evidence" "$RUNNER_TEMP/accepted"
 
       - name: Upload accepted receipt and Compose inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

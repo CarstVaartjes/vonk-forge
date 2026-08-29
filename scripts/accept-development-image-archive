@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 5)); then
+  echo "usage: accept-development-image-archive ROLE ARCHIVE COMMIT RUN_ID RECEIPT" >&2
+  exit 64
+fi
+
+role=$1
+archive=$2
+commit=$3
+run_id=$4
+receipt=$5
+
+case "$role" in
+  api|worker|hermes) ;;
+  *) echo "unsupported development image role: $role" >&2; exit 64 ;;
+esac
+[[ "$(basename -- "$archive")" == "vonk-forge-$role.oci.tar" ]]
+[[ -f "$archive" && ! -L "$archive" ]]
+[[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+[[ -d "$(dirname -- "$receipt")" && ! -L "$receipt" ]]
+command -v jq >/dev/null
+command -v skopeo >/dev/null
+
+scan_root=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/dev-image-$role.XXXXXX")
+cleanup() {
+  original_status=$?
+  trap - EXIT INT TERM
+  cleanup_status=0
+  if [[ "$scan_root" != "$RUNNER_TEMP"/dev-image-"$role".* ]]; then
+    echo "refusing unsafe development image cleanup" >&2
+    cleanup_status=1
+  elif ! rm -rf -- "$scan_root"; then
+    echo "development image cleanup failed" >&2
+    cleanup_status=1
+  fi
+  if ((original_status != 0)); then
+    exit "$original_status"
+  fi
+  exit "$cleanup_status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+scripts/dev-image-acceptance-receipt validate-archive "$archive"
+
+layout="$scan_root/layout"
+install -d -m 0700 "$layout"
+tar --extract --no-same-owner --no-same-permissions \
+  --file "$archive" --directory "$layout"
+[[ -f "$layout/index.json" && ! -L "$layout/index.json" ]]
+[[ -f "$layout/oci-layout" && ! -L "$layout/oci-layout" ]]
+jq -e '.imageLayoutVersion == "1.0.0" and keys == ["imageLayoutVersion"]' \
+  "$layout/oci-layout" >/dev/null
+
+index_queue=("$layout/index.json")
+platform_index=""
+declare -A visited_indexes=()
+while ((${#index_queue[@]} > 0)); do
+  index_document=${index_queue[0]}
+  index_queue=("${index_queue[@]:1}")
+  if [[ -n "${visited_indexes[$index_document]+present}" ]]; then
+    continue
+  fi
+  visited_indexes[$index_document]=1
+  if jq -e '[.manifests[]?.platform.architecture]
+    | index("amd64") != null or index("arm64") != null' \
+    "$index_document" >/dev/null; then
+    [[ -z "$platform_index" ]]
+    platform_index=$index_document
+  fi
+  descriptor_lines=$(jq -c '.manifests[]?' "$index_document")
+  while IFS= read -r descriptor; do
+    [[ -n "$descriptor" ]] || continue
+    media_type=$(jq -r '.mediaType // empty' <<< "$descriptor")
+    descriptor_digest=$(jq -r '.digest // empty' <<< "$descriptor")
+    [[ "$descriptor_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+    descriptor_path="$layout/blobs/sha256/${descriptor_digest#sha256:}"
+    [[ -f "$descriptor_path" && ! -L "$descriptor_path" ]]
+    [[ "$(sha256sum "$descriptor_path" | cut -d ' ' -f 1)" == \
+      "${descriptor_digest#sha256:}" ]]
+    case "$media_type" in
+      application/vnd.oci.image.index.v1+json)
+        index_queue+=("$descriptor_path")
+        ;;
+      application/vnd.oci.image.manifest.v1+json)
+        :
+        ;;
+      *)
+        echo "unexpected OCI descriptor media type" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "$descriptor_lines"
+done
+[[ -n "$platform_index" ]]
+
+while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
+  runnable_path="$layout/blobs/sha256/${runnable_digest#sha256:}"
+  config_digest=$(jq -er '.config.digest' "$runnable_path")
+  [[ "$config_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  config_path="$layout/blobs/sha256/${config_digest#sha256:}"
+  [[ -f "$config_path" && ! -L "$config_path" ]]
+  [[ "$(sha256sum "$config_path" | cut -d ' ' -f 1)" == \
+    "${config_digest#sha256:}" ]]
+  layer_count=$(jq -er '.layers | length' "$runnable_path")
+  jq -e --arg architecture "$architecture" \
+    --arg revision "$commit" \
+    --argjson layer_count "$layer_count" \
+    '.architecture == $architecture
+    and .os == "linux"
+    and .rootfs.type == "layers"
+    and (.rootfs.diff_ids | type == "array" and length == $layer_count)
+    and (.history | type == "array")
+    and ([.history[] | select((.empty_layer // false) == false)]
+      | length == $layer_count)
+    and .config.Labels["org.opencontainers.image.revision"] == $revision' \
+    "$config_path" >/dev/null
+  while IFS= read -r layer_descriptor; do
+    layer_digest=$(jq -r '.digest // empty' <<< "$layer_descriptor")
+    [[ "$layer_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+    layer_path="$layout/blobs/sha256/${layer_digest#sha256:}"
+    [[ -f "$layer_path" && ! -L "$layer_path" ]]
+    [[ "$(sha256sum "$layer_path" | cut -d ' ' -f 1)" == \
+      "${layer_digest#sha256:}" ]]
+  done < <(jq -c '.layers[]' "$runnable_path")
+
+  manifest_path="$layout/blobs/sha256/${attestation_digest#sha256:}"
+  found_sbom=0
+  found_provenance=0
+  mapfile -t statement_descriptors < <(
+    jq -r '.layers[] | select(
+      .mediaType == "application/vnd.in-toto+json"
+    ) | [(.annotations["in-toto.io/predicate-type"] // ""), .digest]
+      | @tsv' "$manifest_path"
+  )
+  for statement_descriptor in "${statement_descriptors[@]}"; do
+    IFS=$'\t' read -r declared_predicate statement_digest \
+      <<< "$statement_descriptor"
+    [[ "$statement_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+    statement_path="$layout/blobs/sha256/${statement_digest#sha256:}"
+    [[ -f "$statement_path" && ! -L "$statement_path" ]]
+    [[ "$(sha256sum "$statement_path" | cut -d ' ' -f 1)" == \
+      "${statement_digest#sha256:}" ]]
+    actual_predicate=$(jq -r '.predicateType // empty' "$statement_path")
+    [[ "$actual_predicate" == "$declared_predicate" ]]
+    case "$actual_predicate" in
+      https://spdx.dev/Document) found_sbom=1 ;;
+      https://slsa.dev/provenance/*)
+        jq -e --arg revision "$commit" \
+          '[.. | strings | select(. == $revision)] | length > 0' \
+          "$statement_path" >/dev/null
+        found_provenance=1
+        ;;
+    esac
+  done
+  ((found_sbom == 1))
+  ((found_provenance == 1))
+done < <(scripts/verify-multiarch-image-manifest "$platform_index")
+
+scripts/dev-image-acceptance-receipt create-role \
+  "$receipt" "$commit" "$run_id" "$role" "$archive"
