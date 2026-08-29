@@ -422,6 +422,28 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
     }
 
 
+def test_runtime_spec_projects_deepseek_r1_parser_into_agent_argv() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    document["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "deepseek_r1"}
+    )
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters=parameters,
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    command = spec["runtime"]["entrypoint"]
+    parser = command.index("--reasoning-parser")
+    assert command[parser + 1] == "deepseek_r1"
+
+
 def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
     document, resolved_entities = _distributed_sglang_runtime_inputs()
 

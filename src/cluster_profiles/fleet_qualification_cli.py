@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
-import stat
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 from .control_client import ControlClient, ControlClientError
@@ -24,6 +20,7 @@ from .fleet_qualification import (
     load_policy,
 )
 from .qualification_fixtures import FixtureError, FixtureRegistry
+from .qualification_locking import ledger_lock, node_locks
 
 
 def _arguments(argv: list[str] | None) -> argparse.Namespace:
@@ -96,38 +93,6 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-@contextmanager
-def _ledger_lock(path: Path) -> Iterator[None]:
-    lock_path = path.with_name(path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    no_follow = getattr(os, "O_NOFOLLOW", None)
-    if no_follow is None:
-        raise QualificationError("qualification lock cannot be opened safely")
-    descriptor = os.open(
-        lock_path,
-        os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | no_follow,
-        0o600,
-    )
-    try:
-        metadata = os.fstat(descriptor)
-        getuid = getattr(os, "getuid", None)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or (getuid is not None and metadata.st_uid != getuid())
-            or stat.S_IMODE(metadata.st_mode) & 0o077
-        ):
-            raise QualificationError("qualification lock is not private")
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise QualificationError(
-                f"another qualification runner owns {lock_path}"
-            ) from error
-        yield
-    finally:
-        os.close(descriptor)
-
-
 def run(argv: list[str] | None = None) -> dict[str, object]:
     args = _arguments(argv)
     options = RunnerOptions(
@@ -141,7 +106,7 @@ def run(argv: list[str] | None = None) -> dict[str, object]:
     policy = load_policy(args.policy)
     fixtures = FixtureRegistry.packaged(args.fixture_manifest)
     client = ControlClient.from_environment()
-    with _ledger_lock(args.ledger):
+    with node_locks(args.node_id), ledger_lock(args.ledger):
         ledger = EvidenceLedger(args.ledger)
         plan = build_plan(client, options, policy, fixtures)
         plan_digest = str(plan["plan_digest"])

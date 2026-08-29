@@ -44,40 +44,110 @@ is selected when the option is omitted.
 
 ### Parallel single-Spark lanes
 
-One runner remains sequential, but two explicitly disjoint single-Spark
-campaigns may run concurrently on separate Sparks. Pin each campaign with
-`--node-id`. A pinned campaign requires one or more explicit `--recipe`
-selections, and every selected recipe must declare exactly one Spark. The node
-allowlist is part of the immutable campaign digest; unknown node IDs, dual-Spark
-recipes, an eligible-placement replan outside the allowlist, or an apply-time
-selection outside it fail before mapping or build.
+One runner remains sequential within a lane, but the campaign coordinator runs
+two explicitly disjoint single-Spark lanes concurrently. Use the coordinator
+instead of maintaining two command lines by hand. Its manifest is the global
+partition, but it cannot declare its own completeness. It names a checked-in,
+reviewed qualification authority. Every recipe in that authority must occur in
+exactly one lane, and no other recipe is accepted. The two lane names, exact
+`spk_...` node IDs, ledgers, and plan outputs must all be distinct. Unknown
+fields and duplicate JSON keys fail closed.
 
-Use distinct recipe sets, exact controller node IDs, plan files, and ledgers.
-Obtain the `spk_...` identities with `vonkctl fleet list --json`, then export
-the two values used below:
+The current `nl-single-spark-02ae8bb5` authority is bound to jurisdiction `NL`,
+signed recipe-library commit `02ae8bb5065919e263183f59637f4d8954a7334a`, and
+catalog-index SHA-256
+`165be2692acafa1fe51345d83dbdd3b3d07ba308463a031a98e9bc563e0da5c5`.
+Its reviewed 70-recipe closure contains 59 actionable single-Spark recipes,
+five dual-Spark recipes, four recipes wider than the present fleet, and two NL
+legal blocks: Hunyuan3D-Omni and HunyuanOCR. The historical
+`nl-single-spark-e996f025` authority remains immutable for existing evidence;
+do not use it against the corrected catalog.
 
-```bash
-vonk-fleet-qualify \
-  --ledger evidence/spark-2297.jsonl \
-  --node-id "$SPARK_2297_NODE_ID" \
-  --recipe vonk-forge/example-a-single \
-  --recipe vonk-forge/example-b-single \
-  > plan-spark-2297.json
+A later catalog, recipe, or license update requires a new reviewed authority
+file and ID; do not edit an authority already named by evidence. The coordinator
+rejects catalog repository or commit drift before publishing plans or applying
+work.
 
-vonk-fleet-qualify \
-  --ledger evidence/spark-3542.jsonl \
-  --node-id "$SPARK_3542_NODE_ID" \
-  --recipe vonk-forge/example-c-single \
-  --recipe vonk-forge/example-d-single \
-  > plan-spark-3542.json
+Obtain the exact node identities with `vonkctl fleet list --json`, then create a
+manifest. Relative ledger and plan paths are resolved from the manifest's
+directory. The abbreviated JSONC below shows the shape; replace the comments
+with an explicitly reviewed partition of every key in the named authority:
+
+```jsonc
+{
+  "schema_version": 1,
+  "qualification_authority": "nl-single-spark-02ae8bb5",
+  "options": {
+    "jurisdiction": "NL",
+    "cleanup": "stop",
+    "operation_timeout_seconds": 86400,
+    "poll_interval_seconds": 5
+  },
+  "lanes": [
+    {
+      "name": "spark-2297",
+      "node_id": "spk_11111111111111111111111111111111",
+      "recipes": [
+        // Reviewed lane-one subset of the authority.
+      ],
+      "ledger": "evidence/spark-2297.jsonl",
+      "plan_output": "plans/spark-2297.json"
+    },
+    {
+      "name": "spark-3542",
+      "node_id": "spk_22222222222222222222222222222222",
+      "recipes": [
+        // Every remaining authority key, exactly once.
+      ],
+      "ledger": "evidence/spark-3542.jsonl",
+      "plan_output": "plans/spark-3542.json"
+    }
+  ]
+}
 ```
 
-Review both previews and apply each with the same recipe/node arguments, its
-own `--plan-digest`, and `--apply`. They can then run as separate processes.
-Never share a ledger or overlap node/recipe sets between lanes. Keep recipes
-sharing large artifact identities in the same lane to retain dedup benefits.
-Wait for both lanes to stop their runtimes before applying a separate unpinned
-dual-Spark campaign; retained installations do not need to be removed.
+Preview both lane plans in one operation:
+
+```bash
+vonk-fleet-qualify-campaign --manifest single-spark-campaign.json \
+  > campaign-preview.json
+```
+
+The coordinator writes both owner-only plan files and both hash-chained
+`plan.generated` records only after it has validated the complete partition and
+successfully generated both plans. Review the lane plan files, then copy the
+single `campaign_digest` from the preview:
+
+```bash
+vonk-fleet-qualify-campaign \
+  --manifest single-spark-campaign.json \
+  --campaign-digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --apply
+```
+
+Apply freshly regenerates both plans and checks the global digest before either
+lane can mutate the controller. The global digest binds the exact manifest and
+both underlying plan digests; each lane still passes its own exact plan digest
+to the existing qualification runner. After this all-or-nothing preflight, the
+two lane runners execute concurrently and independently record resumable
+controller operations in their own ledgers.
+
+Both the coordinator and a directly invoked node-pinned
+`vonk-fleet-qualify --node-id ...` hold the same per-node advisory lock for the
+whole process lifetime. The lock is independent of ledger and working
+directory, so a second local campaign for either Spark fails before controller
+planning or mutation. Locks default to the current operator's private
+`~/.local/state/vonk-forge/qualification-locks`; set
+`VONK_QUALIFICATION_LOCK_DIR` only when all invocations use the same private
+local directory. `VONK_QUALIFICATION_LOCK_DIR` and `XDG_STATE_HOME` must be
+absolute so changing working directory cannot silently select a different lock.
+Advisory locks coordinate processes on one operator host and user account; they
+do not replace controller-side capacity authority for campaigns launched from
+different hosts.
+
+Keep recipes sharing large artifact identities in the same lane to retain dedup
+benefits. Wait for both lanes to stop their runtimes before applying a separate
+unpinned dual-Spark campaign; retained installations do not need to be removed.
 
 ## Apply and resume
 

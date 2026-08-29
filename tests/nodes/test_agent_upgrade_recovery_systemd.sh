@@ -38,7 +38,8 @@ agent_unit=vonk-forge-agent.service
 recovery_unit=vonk-forge-package-upgrade-recover.service
 started=$test_root/start
 crash_observed=$test_root/crash-observed
-upgrade_invocations=$test_root/upgrade-invocations
+# The simulated old helper can write only its declared ReadWritePaths.
+upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename "$test_root")
 
 cleanup() {
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
@@ -50,6 +51,7 @@ cleanup() {
   rm -rf -- /var/lib/vonk-forge/package-upgrade
   rm -f -- /var/lib/vonk-forge/helper-upgrade.pending \
     /var/lib/vonk-forge/helper-upgrade.receipt
+  rm -f -- "$upgrade_invocations"
   rm -f -- "$old_helper_unit" "$old_socket_unit"
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   systemctl --system daemon-reload >/dev/null 2>&1 || true

@@ -125,6 +125,7 @@ _ARGUMENTS = {
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
         validate=one_of(
+            "deepseek_r1",
             "deepseek_v4",
             "gemma4",
             "glm45",
