@@ -564,6 +564,33 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert 'test "$helper_active_state" = failed' in post_kill
     assert 'test "$helper_freezer_state" = running' in post_kill
     assert "--property=Result" in post_kill
+    dpkg_only_start = lifecycle.index("        dpkg-only)", crash_snapshot)
+    dpkg_only_end = lifecycle.index("\n          ;;", dpkg_only_start)
+    dpkg_only = lifecycle[dpkg_only_start:dpkg_only_end]
+    loop_start = dpkg_only.index("for _ in {1..100}; do")
+    thaw = dpkg_only.index(
+        'systemctl --system thaw "$helper_unit" \\\n'
+        "              >/dev/null 2>&1 || true",
+        loop_start,
+    )
+    freezer_read = dpkg_only.index("--property=FreezerState")
+    running_break = dpkg_only.index(
+        '[[ "$helper_freezer_state" == running ]]', freezer_read
+    )
+    retry_sleep = dpkg_only.index("sleep 0.05", running_break)
+    loop_end = dpkg_only.index("          done", retry_sleep)
+    terminal_state = dpkg_only.index(
+        'test "$helper_freezer_state" = running', loop_end
+    )
+    assert (
+        loop_start
+        < thaw
+        < freezer_read
+        < running_break
+        < retry_sleep
+        < loop_end
+        < terminal_state
+    )
     boot_comment = lifecycle.index(
         "A real boot does not preserve the test-only cgroup"
     )

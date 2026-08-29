@@ -537,7 +537,19 @@ printf '%s\n' \
           assert_interrupted_baseline_state
           cmp -s "$test_root/normalized-pending" \
             /var/lib/vonk-forge/helper-upgrade.pending
-          systemctl --system thaw "$helper_unit"
+          # Recovery may auto-thaw the helper while stopping or restarting it;
+          # the observed freezer state, not a later thaw command, is invariant.
+          for _ in {1..100}; do
+            systemctl --system thaw "$helper_unit" \
+              >/dev/null 2>&1 || true
+            helper_freezer_state=$(systemctl --system show \
+              --property=FreezerState --value "$helper_unit")
+            if [[ "$helper_freezer_state" == running ]]; then
+              break
+            fi
+            sleep 0.05
+          done
+          test "$helper_freezer_state" = running
           ;;
         *)
           exit 64
