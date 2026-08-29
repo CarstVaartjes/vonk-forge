@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 5)); then
+  echo "usage: publish-immutable-image ROLE OCI_ARCHIVE IMAGE IMMUTABLE_TAG DIGEST_FILE" >&2
+  exit 64
+fi
+
+role=$1
+archive=$2
+image=$3
+immutable_tag=$4
+accepted_digest_file=$5
+
+case "$role" in
+  api|worker|hermes) ;;
+  *) echo "unsupported immutable image role: $role" >&2; exit 64 ;;
+esac
+[[ -f "$archive" && ! -L "$archive" ]]
+[[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9._/-]*$ ]]
+[[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
+[[ -d "$(dirname -- "$accepted_digest_file")" ]]
+[[ ! -L "$accepted_digest_file" ]]
+
+manifest=$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${role}.manifest.XXXXXX")
+push_digest=$(mktemp "${RUNNER_TEMP}/${role}.push-digest.XXXXXX")
+inspect_error=$(mktemp "${RUNNER_TEMP}/${role}.inspect-error.XXXXXX")
+accepted_digest_tmp=$(mktemp "${RUNNER_TEMP}/${role}.accepted-digest.XXXXXX")
+cleanup() {
+  rm -f -- "$manifest" "$push_digest" "$inspect_error" "$accepted_digest_tmp"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+skopeo inspect --raw "oci-archive:$archive" > "$manifest"
+expected=$(skopeo manifest-digest "$manifest")
+[[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+if observed=$(skopeo inspect --format '{{.Digest}}' \
+  "docker://$image:$immutable_tag" 2>"$inspect_error"); then
+  if [[ "$observed" != "$expected" ]]; then
+    echo "refusing to overwrite immutable $role image tag" >&2
+    exit 1
+  fi
+else
+  if ! grep -Eiq 'manifest unknown|name unknown|not found' "$inspect_error"; then
+    echo "immutable $role image lookup failed" >&2
+    exit 1
+  fi
+  skopeo copy --all --preserve-digests \
+    --digestfile "$push_digest" \
+    "oci-archive:$archive" \
+    "docker://$image:$immutable_tag" >&2
+  pushed=$(tr -d '\r\n' < "$push_digest")
+  if [[ "$pushed" != "$expected" ]]; then
+    echo "immutable $role image digest changed during publication" >&2
+    exit 1
+  fi
+fi
+
+printf '%s\n' "$expected" > "$accepted_digest_tmp"
+chmod 0600 "$accepted_digest_tmp"
+mv -f -- "$accepted_digest_tmp" "$accepted_digest_file"

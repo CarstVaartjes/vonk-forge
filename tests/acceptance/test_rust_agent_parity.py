@@ -46,10 +46,13 @@ def test_debian_package_is_the_only_agent_installer_authority() -> None:
 def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
     orchestrator = _source(".github/workflows/agent-release.yml")
     package_builder = _source(".github/actions/agent-package-build/action.yml")
+    package_security = _source(".github/actions/agent-package-security/action.yml")
 
     assert "uses: ./.github/actions/agent-package-build" in orchestrator
     assert "needs: [package-metadata, build-test-sign]" in orchestrator
     assert "uses: ./.github/actions/agent-apt-publish" in orchestrator
-    assert "cargo test --workspace --locked" in package_builder
-    assert "tests/acceptance/test_rust_agent_parity.py" in package_builder
-    assert "test_agent_deb.py" in package_builder
+    assert "uses: ./.github/actions/agent-package-security" in package_builder
+    assert "uses: ./.github/actions/agent-package-security" in orchestrator
+    assert "cargo test --workspace --locked" in package_security
+    assert "tests/acceptance/test_rust_agent_parity.py" in package_security
+    assert "test_agent_deb.py" in package_security

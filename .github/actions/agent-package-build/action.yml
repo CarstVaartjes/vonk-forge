@@ -53,6 +53,9 @@ inputs:
   release_private_key:
     description: Environment-scoped Ed25519 package signing private key
     required: true
+  security_gate_mode:
+    description: Run package security gates inline or require an external caller gate
+    required: true
 
 outputs:
   version:
@@ -91,6 +94,7 @@ runs:
   steps:
 
     - name: Install uv and Python
+      if: inputs.security_gate_mode == 'inline'
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: "0.12.1"
@@ -111,16 +115,17 @@ runs:
         BASELINE_VERSION: ${{ inputs.baseline_version }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
+        SECURITY_GATE_MODE: ${{ inputs.security_gate_mode }}
         NEXT_VERSION: ${{ inputs.next_version }}
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}" in
-          dev:agent-development)
+        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}:${SECURITY_GATE_MODE}" in
+          dev:agent-development:external)
             test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
             release=development
             ;;
-          stable:agent-release)
+          stable:agent-release:inline)
             test "$PUBLICATION_SEQUENCE" = 0
             release=production
             ;;
@@ -309,15 +314,13 @@ runs:
         done
 
     - name: Run Rust and packaging security gates
+      if: inputs.security_gate_mode == 'inline'
+      uses: ./.github/actions/agent-package-security
+
+    - name: Record package systemd security evidence
       shell: bash
       run: |
         set -euo pipefail
-        cargo fmt --all --check
-        cargo clippy --workspace --all-targets --locked -- -D warnings
-        cargo test --workspace --locked
-        uvx --from pytest==9.1.1 pytest -q \
-          tests/scripts/test_agent_deb.py \
-          tests/acceptance/test_rust_agent_parity.py
         scripts/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
 

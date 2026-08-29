@@ -97,7 +97,7 @@ def release_expressions() -> dict[str, str]:
     }
 
 
-def test_development_image_publication_keeps_copy_progress_out_of_outputs(
+def test_development_image_publication_records_only_the_verified_digest(
     tmp_path: Path,
 ) -> None:
     digest = f"sha256:{'a' * 64}"
@@ -141,25 +141,23 @@ esac
 """
     )
     skopeo.chmod(0o755)
-    output = tmp_path / "github-output"
-    accepted = tmp_path / "accepted"
-    accepted.mkdir()
+    archive = tmp_path / "api.oci.tar"
+    archive.write_bytes(b"exact archive")
+    output = tmp_path / "api.accepted-digest"
     result = subprocess.run(
         [
-            "bash",
-            "-c",
-            development_step_run("Publish immutable tested images"),
+            ROOT / "scripts/publish-immutable-image",
+            "api",
+            archive,
+            "ghcr.io/example/api",
+            "dev-sha-" + "b" * 40,
+            output,
         ],
         cwd=ROOT,
         env={
             **os.environ,
-            "API_IMAGE": "ghcr.io/example/api",
-            "GITHUB_OUTPUT": str(output),
-            "HERMES_IMAGE": "ghcr.io/example/hermes",
-            "IMMUTABLE_TAG": "dev-sha-" + "b" * 40,
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "RUNNER_TEMP": str(tmp_path),
-            "WORKER_IMAGE": "ghcr.io/example/worker",
         },
         capture_output=True,
         check=False,
@@ -167,10 +165,40 @@ esac
     )
 
     assert result.returncode == 0, result.stderr
+    assert output.read_text() == f"{digest}\n"
+    assert "Copying 2 images generated from 2 images in list" in result.stderr
+    assert result.stdout == ""
+
+
+def test_development_image_digest_collection_rejects_missing_parallel_output(
+    tmp_path: Path,
+) -> None:
+    digest = f"sha256:{'a' * 64}"
+    for identity in ("api", "worker"):
+        (tmp_path / f"{identity}.accepted-digest").write_text(f"{digest}\n")
+    output = tmp_path / "github-output"
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            development_step_run("Collect immutable tested image digests"),
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
     assert output.read_text().splitlines() == [
         f"api_digest={digest}",
         f"worker_digest={digest}",
-        f"hermes_digest={digest}",
     ]
 
 
@@ -215,6 +243,10 @@ def test_stale_development_builds_cancel_without_interrupting_publication() -> N
         "group": "vonk-forge-development-image-build-${{ matrix.role }}",
         "cancel-in-progress": "true",
     }
+    assert jobs["verify-runtime-images"]["concurrency"] == {
+        "group": "vonk-forge-development-runtime-images",
+        "cancel-in-progress": "true",
+    }
     assert jobs["build-and-accept"]["concurrency"] == {
         "group": "vonk-forge-development-image-acceptance",
         "cancel-in-progress": "true",
@@ -233,7 +265,9 @@ def test_development_publication_rechecks_exact_main_at_both_boundaries() -> Non
         if "name" in step
     }
     publication_steps = {
-        step["name"]: step for step in jobs["publish-development-images"]["steps"]
+        step["name"]: step
+        for step in jobs["publish-development-images"]["steps"]
+        if "name" in step
     }
 
     acceptance_check = acceptance_steps["Verify exact main tip"]["run"]
@@ -272,12 +306,35 @@ def test_development_image_validation_waits_for_all_parallel_archives() -> None:
     text = DEV_WORKFLOW.read_text()
     validation = text[text.index("  build-and-accept:") : text.index("  publish-development-images:")]
 
-    assert "needs: [build-oci-archives]" in validation
+    assert "needs: [build-oci-archives, verify-runtime-images]" in validation
     assert "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}" in validation
     assert "merge-multiple: true" in validation
     assert validation.index("Download exact OCI archives") < validation.index(
-        "Load tested images without pulling"
+        "Scan complete local publication inputs"
     )
+
+
+def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> None:
+    workflow_data = development_workflow()
+    runtime = workflow_data["jobs"]["verify-runtime-images"]
+    acceptance = workflow_data["jobs"]["build-and-accept"]
+    runtime_text = DEV_WORKFLOW.read_text()[
+        DEV_WORKFLOW.read_text().index("  verify-runtime-images:") :
+        DEV_WORKFLOW.read_text().index("  build-and-accept:")
+    ]
+    acceptance_text = DEV_WORKFLOW.read_text()[
+        DEV_WORKFLOW.read_text().index("  build-and-accept:") :
+        DEV_WORKFLOW.read_text().index("  publish-development-images:")
+    ]
+
+    assert "needs" not in runtime
+    assert acceptance["needs"] == ["build-oci-archives", "verify-runtime-images"]
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in runtime_text
+    assert "test \"${#runtime_images[@]}\" = 7" in runtime_text
+    assert "sort -u" in runtime_text
+    assert "@sha256:[0-9a-f]{64}" in runtime_text
+    assert 'docker pull "$runtime_image"' in runtime_text
+    assert "docker pull" not in acceptance_text
 
 
 def test_development_image_source_contracts_run_in_parallel_after_npm_install() -> None:
@@ -321,22 +378,37 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
     assert 'test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"' in validation[
         confirmation:
     ]
-    second_parallel = validation.index("      - parallel:", parallel + 1)
     render = validation.index(
         "- name: Render and validate disposable development Compose artifacts"
     )
-    assert confirmation < second_parallel < render
-    for step in (
-        "Load tested images without pulling",
-        "Preload pinned runtime dependencies",
-    ):
-        assert f"          - name: {step}" in validation[second_parallel:render]
+    assert confirmation < render
+    assert validation.count("      - parallel:") == 1
+    assert "docker-daemon:" not in validation
+    assert "docker history" not in validation
+    assert "docker image inspect" not in validation
+
+
+def test_local_acceptance_validates_oci_content_without_daemon_import() -> None:
+    scan = development_step_run("Scan complete local publication inputs")
+
+    assert "sha256sum" in scan
+    assert '"${descriptor_digest#sha256:}"' in scan
+    assert '"${config_digest#sha256:}"' in scan
+    assert '"${layer_digest#sha256:}"' in scan
+    assert '"${statement_digest#sha256:}"' in scan
+    assert '.architecture == $architecture' in scan
+    assert '.rootfs.type == "layers"' in scan
+    assert ".rootfs.diff_ids" in scan
+    assert ".history[]" in scan
+    assert 'org.opencontainers.image.revision' in scan
+    assert "scripts/verify-multiarch-image-manifest" in scan
+    assert "https://spdx.dev/Document" in scan
+    assert "https://slsa.dev/provenance/" in scan
+    assert "docker-daemon:" not in scan
 
 
 def test_development_image_publication_requires_both_platforms() -> None:
-    verification = development_step_run(
-        "Verify immutable manifests and attestations"
-    )
+    verification = (ROOT / "scripts/verify-published-image").read_text()
 
     assert "--format '{{ json .Manifest }}'" in verification
     assert "scripts/verify-multiarch-image-manifest" in verification
@@ -348,6 +420,39 @@ def test_development_image_publication_requires_both_platforms() -> None:
     assert verification.count(
         'keys | sort == ["linux/amd64", "linux/arm64"]'
     ) == 2
+
+
+def test_development_publication_parallelizes_roles_inside_one_safe_job() -> None:
+    text = DEV_WORKFLOW.read_text()
+    publisher = text[text.index("  publish-development-images:") :]
+    exact_main = publisher.index("- name: Recheck exact main before publication")
+    publish_parallel = publisher.index("      - parallel:", exact_main)
+    collect = publisher.index("- name: Collect immutable tested image digests")
+    verify_parallel = publisher.index("      - parallel:", collect)
+    attest_parallel = publisher.index("      - parallel:", verify_parallel + 1)
+    upload = publisher.index("- name: Upload Compose artifact")
+    aliases = publisher.index("- name: Advance accepted development aliases")
+
+    assert exact_main < publish_parallel < collect < verify_parallel
+    assert verify_parallel < attest_parallel < upload < aliases
+    assert publisher.count("      - parallel:") == 3
+    for role in ("API", "worker", "Hermes"):
+        assert f"          - name: Publish immutable tested {role} image" in publisher[
+            publish_parallel:collect
+        ]
+        assert (
+            f"          - name: Verify immutable {role} manifest and attestations"
+            in publisher[verify_parallel:attest_parallel]
+        )
+        assert f"          - name: Sign accepted {role} image provenance" in publisher[
+            attest_parallel:upload
+        ]
+    assert "scripts/publish-immutable-image" in publisher[publish_parallel:collect]
+    assert "scripts/verify-published-image" in publisher[
+        verify_parallel:attest_parallel
+    ]
+    assert "cancel-in-progress: false" in publisher[:exact_main]
+    assert publisher[aliases:].count("refs/remotes/origin/main^{commit}") == 1
 
 
 def image_descriptor(architecture: str, marker: str) -> dict[str, object]:

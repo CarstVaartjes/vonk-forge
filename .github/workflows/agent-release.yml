@@ -8,10 +8,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: vonk-forge-agent-development-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   package-metadata:
     name: Derive development package metadata
@@ -65,6 +61,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: agent-development
+    concurrency:
+      group: vonk-forge-agent-development-package
+      cancel-in-progress: true
     permissions:
       artifact-metadata: write
       attestations: write
@@ -106,6 +105,57 @@ jobs:
           tag_oid: ''
           expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
           release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+          security_gate_mode: external
+
+  security-gates:
+    name: Run Rust and package security gates
+    if: needs.package-metadata.result == 'success'
+    needs: [package-metadata]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    concurrency:
+      group: vonk-forge-agent-development-security
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact security source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Revalidate exact current main security source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$GITHUB_SHA" = \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          rustup set profile minimal
+          rustup toolchain install 1.97.1 --component clippy,rustfmt
+          rustup default 1.97.1
+      - name: Restore read-only Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Run unchanged agent package security gates
+        uses: ./.github/actions/agent-package-security
 
   native-amd64-lifecycle:
     name: Lifecycle-test accepted AMD64 package on AMD64
@@ -143,7 +193,7 @@ jobs:
 
   publish-apt:
     name: Publish accepted AMD64 and ARM64 development packages to apt dev
-    needs: [package-metadata, build-test-sign, native-amd64-lifecycle]
+    needs: [package-metadata, build-test-sign, security-gates, native-amd64-lifecycle]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: apt-development
