@@ -67,6 +67,7 @@ def test_pr_smoke_does_not_reintroduce_a_second_os_matrix() -> None:
 def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     rust_quality = "\n".join(_workflow_job_lines(workflow, "rust-quality"))
+    rust_tests = "\n".join(_workflow_job_lines(workflow, "rust-tests"))
     rust_platform = "\n".join(_workflow_job_lines(workflow, "rust-platform"))
     rust = "\n".join(_workflow_job_lines(workflow, "rust"))
     generated = "\n".join(_workflow_job_lines(workflow, "generated-clients"))
@@ -76,9 +77,22 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     browser = "\n".join(_workflow_job_lines(workflow, "web-browser-acceptance"))
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
-    assert "cargo test --workspace --locked" in rust_quality
+    assert "cargo test" not in rust_quality
     assert "Install uv and Python" not in rust_quality
     assert "setup-uv@" not in rust_quality
+    assert "name: Rust workspace tests (${{ matrix.shard.label }})" in rust_tests
+    assert "fail-fast: false" in rust_tests
+    assert "max-parallel: 2" in rust_tests
+    assert rust_tests.count("- id:") == 2
+    assert "RUST_TEST_SHARD: ${{ matrix.shard.id }}" in rust_tests
+    assert "cargo test --workspace --exclude vonk-nas-setup --locked" in rust_tests
+    assert "cargo test -p vonk-nas-setup --locked" in rust_tests
+    assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in (
+        rust_tests
+    )
+    assert 'shared-key: linux-amd64' in rust_tests
+    assert 'add-job-id-key: "false"' in rust_tests
+    assert 'save-if: "false"' in rust_tests
     assert "uv run --project agent_protocol --frozen pytest -q" in rust_platform
     assert "      - parallel:" in rust_platform
     assert rust_platform.index("Install Spark-compatible rootless Podman") < (
@@ -92,9 +106,11 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in (
         rust_quality
     )
+    assert "save-if:" not in rust_quality
     assert 'save-if: "false"' in rust_platform
-    assert "needs: [rust-quality, rust-platform]" in rust
+    assert "needs: [rust-quality, rust-tests, rust-platform]" in rust
     assert "needs.rust-quality.result" in rust
+    assert "needs.rust-tests.result" in rust
     assert "needs.rust-platform.result" in rust
     assert "tests/control/test_openapi_clients.py" in generated
     assert "npm ci --prefix tools/openapi-client" in generated
