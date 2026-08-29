@@ -68,7 +68,7 @@ jobs:
           output="$RUNNER_TEMP/setup/$PLATFORM"
           install -d -m 0755 "$output"
           for binary in $BINARIES; do
-            cargo test --locked --package "$binary"
+            cargo test --locked --release --package "$binary"
             cargo build --locked --release --package "$binary" --bin "$binary"
             install -m 0555 "target/release/$binary" "$output/$binary"
           done
