@@ -433,6 +433,15 @@ def test_setup_build_matrix_is_complete_and_native() -> None:
         ("darwin-arm64", "macos-15", "vonk-nas-setup"),
     }
     assert all("target" not in entry for entry in matrix)
+    steps = _steps(workflow["jobs"]["build-and-test"])
+    cache = steps["Restore Rust dependency cache"]
+    assert cache["uses"] == (
+        "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+    )
+    assert cache["with"] == {
+        "shared-key": "${{ matrix.platform }}",
+        "add-job-id-key": "false",
+    }
 
 
 def test_setup_checksums_are_portable_and_exclude_the_manifest_itself() -> None:

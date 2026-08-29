@@ -272,6 +272,10 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
     ) == EXPECTED_ACTION_OUTPUTS
     assert "secrets." not in text
     assert "vars." not in text
+    cache = package_step("Restore Rust dependency cache")
+    assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in cache
+    assert "shared-key: linux-arm64" in cache
+    assert 'add-job-id-key: "false"' in cache
 
 
 def test_reusable_agent_package_build_validates_authority_before_key_use() -> None:

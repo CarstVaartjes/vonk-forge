@@ -23,11 +23,11 @@ def _named_workflow_steps(job_name: str) -> list[dict[str, str]]:
 
     steps: list[dict[str, str]] = []
     for line in job_lines:
-        name = re.fullmatch(r"      - name: (.+)", line)
+        name = re.fullmatch(r"\s+- name: (.+)", line)
         if name is not None:
             steps.append({"name": name.group(1)})
             continue
-        run = re.fullmatch(r"        run: (.+)", line)
+        run = re.fullmatch(r"\s+run: (.+)", line)
         if run is not None and steps:
             steps[-1]["run"] = run.group(1)
     return steps
@@ -35,23 +35,19 @@ def _named_workflow_steps(job_name: str) -> list[dict[str, str]]:
 
 def test_pr_smoke_runs_locked_web_and_focused_contracts() -> None:
     steps = _named_workflow_steps("test")
-    web_step = {
-        "name": "Install locked admin web dependencies",
-        "run": "npm ci --prefix control/web",
-    }
     repository_step = "Run focused repository contracts"
     control_step = "Run focused control cleanup contracts"
 
-    assert web_step in steps
     step_names = [step["name"] for step in steps]
     assert repository_step in step_names
     assert control_step in step_names
-    assert step_names.index(web_step["name"]) < step_names.index(control_step)
+    assert "Install locked admin web dependencies" not in step_names
 
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     test_job_lines = _workflow_job_lines(workflow, "test")
     assert "    runs-on: ubuntu-latest" in test_job_lines
     assert "    strategy:" not in test_job_lines
+    assert "      - parallel:" in test_job_lines
     assert "macos-latest" not in test_job_lines
 
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
@@ -67,21 +63,34 @@ def test_pr_smoke_does_not_reintroduce_a_second_os_matrix() -> None:
 
 def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    rust_quality = "\n".join(_workflow_job_lines(workflow, "rust-quality"))
+    rust_platform = "\n".join(_workflow_job_lines(workflow, "rust-platform"))
     rust = "\n".join(_workflow_job_lines(workflow, "rust"))
+    generated = "\n".join(_workflow_job_lines(workflow, "generated-clients"))
     repository = "\n".join(_workflow_job_lines(workflow, "repository-suite"))
     control = "\n".join(_workflow_job_lines(workflow, "control-suite"))
     web = "\n".join(_workflow_job_lines(workflow, "web-suite"))
     browser = "\n".join(_workflow_job_lines(workflow, "web-browser-acceptance"))
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
-    assert "cargo test --workspace --locked" in rust
-    assert "uv run --project agent_protocol --frozen pytest -q" in rust
+    assert "cargo test --workspace --locked" in rust_quality
+    assert "uv run --project agent_protocol --frozen pytest -q" in rust_platform
+    assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in (
+        rust_quality
+    )
+    assert 'save-if: "false"' in rust_platform
+    assert "needs: [rust-quality, rust-platform]" in rust
+    assert "needs.rust-quality.result" in rust
+    assert "needs.rust-platform.result" in rust
+    assert "tests/control/test_openapi_clients.py" in generated
+    assert "npm ci --prefix tools/openapi-client" in generated
     assert "name: Complete repository suite (${{ matrix.shard.label }})" in repository
     assert "fail-fast: false" in repository
-    assert repository.count("index:") == 4
-    assert "SHARD_TOTAL: 4" in repository
+    assert repository.count("index:") == 6
+    assert "SHARD_TOTAL: 6" in repository
     assert "pytest --collect-only -q" in repository
-    assert "awk '/^tests\\/.*::/'" in repository
+    assert "test_openapi_clients\\.py::/" in repository
+    assert "npm ci --prefix" not in repository
     assert "position % SHARD_TOTAL == SHARD_INDEX" in repository
     assert 'shard_tests+=("${repository_tests[$position]}")' in repository
     assert '"${shard_tests[@]}"' in repository
@@ -89,8 +98,8 @@ def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -
     assert "--python 3.12" in repository
     assert "name: Complete control suite (${{ matrix.shard.label }})" in control
     assert "fail-fast: false" in control
-    assert control.count("index:") == 4
-    assert "SHARD_TOTAL: 4" in control
+    assert control.count("index:") == 6
+    assert "SHARD_TOTAL: 6" in control
     assert "pytest --collect-only -q control/tests" in control
     assert "awk '/^tests\\/.*::/'" in control
     assert "position % SHARD_TOTAL == SHARD_INDEX" in control

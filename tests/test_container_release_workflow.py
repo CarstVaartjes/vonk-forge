@@ -169,63 +169,21 @@ esac
     ]
 
 
-def test_development_images_build_supported_linux_architectures(
-    tmp_path: Path,
-) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    docker_log = tmp_path / "docker.log"
-    write_executable(
-        fake_bin / "docker",
-        'printf "%s\\n" "$*" >> "$DOCKER_LOG"',
-    )
-
-    matrix = (
-        ("api", "vonk-forge-api.oci.tar", ".", "control/Dockerfile", "api"),
-        (
-            "worker",
-            "vonk-forge-worker.oci.tar",
-            ".",
-            "control/Dockerfile",
-            "worker",
-        ),
-        (
-            "hermes",
-            "vonk-forge-hermes.oci.tar",
-            "deploy/compose/hermes-agent",
-            "deploy/compose/hermes-agent/Dockerfile",
-            "managed",
-        ),
-    )
-    for role, archive, context, dockerfile, target in matrix:
-        result = subprocess.run(
-            ["bash", "-c", development_step_run("Build exact OCI archive")],
-            cwd=ROOT,
-            env={
-                **os.environ,
-                "ARCHIVE": archive,
-                "CONTEXT": context,
-                "DOCKERFILE": dockerfile,
-                "DOCKER_LOG": str(docker_log),
-                "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
-                "GITHUB_SERVER_URL": "https://github.com",
-                "GITHUB_SHA": "a" * 40,
-                "PATH": f"{fake_bin}:{os.environ['PATH']}",
-                "ROLE": role,
-                "RUNNER_TEMP": str(tmp_path),
-                "TARGET": target,
-            },
-            capture_output=True,
-            check=False,
-            text=True,
+def test_development_images_build_supported_linux_architectures_with_cache() -> None:
+    text = DEV_WORKFLOW.read_text()
+    build = text[
+        text.index("      - name: Build exact OCI archive") : text.index(
+            "      - name: Upload exact OCI archive"
         )
-        assert result.returncode == 0, result.stderr
+    ]
 
-    builds = docker_log.read_text().splitlines()
-    assert len(builds) == 3
-    assert all(line.startswith("buildx build ") for line in builds)
-    assert all("--platform linux/amd64,linux/arm64" in line for line in builds)
-    assert all("--output type=oci,dest=" in line for line in builds)
+    assert "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a" in build
+    assert "platforms: linux/amd64,linux/arm64" in build
+    assert "outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.archive }}" in build
+    assert "sbom: true" in build
+    assert "provenance: mode=max" in build
+    assert "cache-from: type=gha,scope=vonk-forge-${{ matrix.role }}" in build
+    assert "cache-to: type=gha,mode=max,scope=vonk-forge-${{ matrix.role }}" in build
 
 
 def test_development_images_enable_arm64_emulation_before_building() -> None:
