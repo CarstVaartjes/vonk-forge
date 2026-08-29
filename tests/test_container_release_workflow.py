@@ -1,7 +1,10 @@
+import hashlib
+import io
 import json
 import os
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -307,7 +310,7 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
     assert matrix.count("          - role:") == 3
 
 
-def test_development_image_validation_waits_for_all_parallel_archives() -> None:
+def test_development_image_acceptance_consumes_only_small_role_receipts() -> None:
     text = DEV_WORKFLOW.read_text()
     validation = text[
         text.index("  build-and-accept:") : text.index("  publish-development-images:")
@@ -315,13 +318,16 @@ def test_development_image_validation_waits_for_all_parallel_archives() -> None:
 
     assert "needs: [build-oci-archives, verify-runtime-images]" in validation
     assert (
-        "pattern: development-image-*-${{ github.sha }}-${{ github.run_id }}"
+        "pattern: development-role-receipt-*-${{ github.sha }}-${{ github.run_id }}"
         in validation
     )
     assert "merge-multiple: true" in validation
-    assert validation.index("Download exact OCI archives") < validation.index(
-        "Scan complete local publication inputs"
-    )
+    assert validation.index(
+        "Download exact OCI acceptance evidence"
+    ) < validation.index("Validate accepted image evidence")
+    assert "vonk-forge-api.oci.tar" not in validation
+    assert "tar --extract" not in validation
+    assert "skopeo inspect" not in validation
 
 
 def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> None:
@@ -377,16 +383,15 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
         "Test and build admin web",
         "Run focused control authentication contracts",
         "Scan public image source inputs",
-        "Download exact OCI archives",
-        "Install Skopeo from Ubuntu",
+        "Download exact OCI acceptance evidence",
     ):
         assert f"          - name: {step}" in validation[parallel:confirmation]
     assert validation.count("npm ci --prefix control/web") == 1
     assert validation.count("-p no:cacheprovider") == 2
     assert "test -d control/web/dist" in validation[confirmation:]
     assert (
-        'test -f "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar"'
-        in validation[confirmation:]
+        'test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"'
+        in (validation[confirmation:])
     )
     render = validation.index(
         "- name: Render and validate disposable development Compose artifacts"
@@ -398,9 +403,24 @@ def test_development_image_source_contracts_run_in_parallel_after_npm_install() 
     assert "docker image inspect" not in validation
 
 
-def test_local_acceptance_validates_oci_content_without_daemon_import() -> None:
-    scan = development_step_run("Scan complete local publication inputs")
+def test_build_jobs_accept_local_oci_content_before_artifact_upload() -> None:
+    text = DEV_WORKFLOW.read_text()
+    build = text[
+        text.index("  build-oci-archives:") : text.index("  verify-runtime-images:")
+    ]
+    scan = (ROOT / "scripts/accept-development-image-archive").read_text()
 
+    assert "permissions:\n      contents: read" in build
+    assert build.index("- name: Accept exact local OCI archive") < build.index(
+        "- name: Upload exact OCI archive"
+    )
+    assert "scripts/accept-development-image-archive" in build
+    assert "development-role-receipt-${{ matrix.role }}" in build
+    assert "dev-image-acceptance-receipt validate-archive" in scan
+    receipt_tool = (ROOT / "scripts/dev-image-acceptance-receipt").read_text()
+    assert "tarfile.open" in receipt_tool
+    assert "member.isfile()" in receipt_tool
+    assert "unsafe OCI archive member" in receipt_tool
     assert "sha256sum" in scan
     assert '"${descriptor_digest#sha256:}"' in scan
     assert '"${config_digest#sha256:}"' in scan
@@ -527,9 +547,7 @@ def _write_receipt_fixture(root: Path) -> None:
     (root / "docker-compose.pinned.yml").write_text("services: {}\n")
 
 
-def _receipt_command(
-    tmp_path: Path, mode: str, receipt: Path, publication_root: Path
-) -> subprocess.CompletedProcess[str]:
+def _receipt_environment(tmp_path: Path) -> dict[str, str]:
     tools = tmp_path / "tools"
     tools.mkdir(exist_ok=True)
     write_executable(
@@ -541,6 +559,12 @@ fi
 printf '{"mediaType":"application/vnd.oci.image.index.v1+json"}'
 """.strip(),
     )
+    return {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"}
+
+
+def _receipt_command(
+    tmp_path: Path, mode: str, receipt: Path, publication_root: Path
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             ROOT / "scripts/dev-image-acceptance-receipt",
@@ -551,11 +575,100 @@ printf '{"mediaType":"application/vnd.oci.image.index.v1+json"}'
             publication_root,
         ],
         cwd=ROOT,
-        env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"},
+        env=_receipt_environment(tmp_path),
         capture_output=True,
         check=False,
         text=True,
     )
+
+
+def test_role_receipts_aggregate_without_retransferring_archives(
+    tmp_path: Path,
+) -> None:
+    publication_root = tmp_path / "accepted"
+    publication_root.mkdir()
+    _write_receipt_fixture(publication_root)
+    role_root = tmp_path / "roles"
+    role_root.mkdir()
+    environment = _receipt_environment(tmp_path)
+    tool = ROOT / "scripts/dev-image-acceptance-receipt"
+    commit = "a" * 40
+    run_id = "12345"
+    for role in ("api", "worker", "hermes"):
+        result = subprocess.run(
+            [
+                tool,
+                "create-role",
+                role_root / f"{role}.role-receipt.json",
+                commit,
+                run_id,
+                role,
+                publication_root / f"vonk-forge-{role}.oci.tar",
+            ],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+    collected = subprocess.run(
+        [tool, "collect", role_root, commit, run_id],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    receipt = publication_root / "acceptance-receipt.json"
+    aggregated = subprocess.run(
+        [tool, "aggregate", receipt, commit, run_id, role_root, publication_root],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    verified = _receipt_command(tmp_path, "verify", receipt, publication_root)
+
+    assert collected.returncode == 0, collected.stderr
+    manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
+    expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
+    assert collected.stdout.splitlines() == [
+        f"api_digest={expected_digest}",
+        f"worker_digest={expected_digest}",
+        f"hermes_digest={expected_digest}",
+    ]
+    assert aggregated.returncode == 0, aggregated.stderr
+    assert verified.returncode == 0, verified.stderr
+
+
+def test_development_image_archive_validation_rejects_links(tmp_path: Path) -> None:
+    archive = tmp_path / "unsafe.oci.tar"
+    with tarfile.open(archive, "w") as stream:
+        for name, body in (
+            ("index.json", b"{}"),
+            ("oci-layout", b'{"imageLayoutVersion":"1.0.0"}'),
+        ):
+            member = tarfile.TarInfo(name)
+            member.size = len(body)
+            stream.addfile(member, io.BytesIO(body))
+        link = tarfile.TarInfo("blobs")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside"
+        stream.addfile(link)
+
+    result = subprocess.run(
+        [ROOT / "scripts/dev-image-acceptance-receipt", "validate-archive", archive],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "OCI archive directory member is invalid" in result.stderr
 
 
 def test_development_image_receipt_binds_original_archives_and_compose(

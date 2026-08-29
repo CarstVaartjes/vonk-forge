@@ -81,6 +81,7 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/materialize-agent-tools",
         "scripts/build-agent-package-evidence",
         "scripts/container-release-metadata",
+        "scripts/accept-development-image-archive",
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",

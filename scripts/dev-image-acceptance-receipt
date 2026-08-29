@@ -10,12 +10,14 @@ import re
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "vonk-forge.dev-image-acceptance.v1"
+ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v1"
 ROLES = ("api", "worker", "hermes")
 COMPOSE_FILES = ("docker-compose.dev.yml", "docker-compose.pinned.yml")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -68,7 +70,7 @@ def _validate_identity(commit: str, run_id: str) -> None:
         raise ReceiptError("acceptance identity is invalid")
 
 
-def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
+def _load_json(path: Path, context: str) -> Any:
     _regular_file(path)
 
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -80,9 +82,13 @@ def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
         return result
 
     try:
-        document = json.loads(path.read_text(), object_pairs_hook=reject_duplicates)
+        return json.loads(path.read_text(), object_pairs_hook=reject_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ReceiptError("acceptance receipt is not valid JSON") from error
+        raise ReceiptError(f"{context} is not valid JSON") from error
+
+
+def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
+    document = _load_json(path, "acceptance receipt")
     root = _require_keys(
         document, {"schema", "commit", "run_id", "roles", "compose"}, "receipt"
     )
@@ -126,9 +132,172 @@ def _load_receipt(path: Path, commit: str, run_id: str) -> dict[str, Any]:
     return root
 
 
+def _load_role_receipt(
+    path: Path, commit: str, run_id: str, role: str
+) -> dict[str, Any]:
+    document = _load_json(path, f"{role} acceptance receipt")
+    entry = _require_keys(
+        document,
+        {
+            "schema",
+            "commit",
+            "run_id",
+            "role",
+            "archive",
+            "artifact",
+            "manifest_digest",
+            "sha256",
+            "size",
+        },
+        f"{role} acceptance receipt",
+    )
+    if (
+        entry["schema"] != ROLE_SCHEMA
+        or entry["commit"] != commit
+        or entry["run_id"] != run_id
+        or entry["role"] != role
+        or entry["archive"] != f"vonk-forge-{role}.oci.tar"
+        or entry["artifact"] != f"development-image-{role}-{commit}-{run_id}"
+        or not isinstance(entry["size"], int)
+        or isinstance(entry["size"], bool)
+        or entry["size"] <= 0
+        or not isinstance(entry["sha256"], str)
+        or SHA256.fullmatch(entry["sha256"]) is None
+        or not isinstance(entry["manifest_digest"], str)
+        or DIGEST.fullmatch(entry["manifest_digest"]) is None
+    ):
+        raise ReceiptError(f"{role} acceptance receipt is invalid")
+    return entry
+
+
 def _file_evidence(path: Path) -> dict[str, Any]:
     _regular_file(path)
     return {"sha256": _sha256(path), "size": path.stat().st_size}
+
+
+def validate_archive_members(archive: Path) -> None:
+    _regular_file(archive)
+    seen: set[str] = set()
+    required = {"index.json", "oci-layout"}
+    allowed_directories = {"blobs", "blobs/sha256"}
+    try:
+        with tarfile.open(archive, mode="r:*") as stream:
+            for member in stream.getmembers():
+                name = member.name.removeprefix("./").rstrip("/")
+                if not name or name in seen:
+                    raise ReceiptError("OCI archive has an invalid or duplicate member")
+                seen.add(name)
+                if name in allowed_directories:
+                    if not member.isdir():
+                        raise ReceiptError("OCI archive directory member is invalid")
+                elif name in required:
+                    if not member.isfile() or member.size <= 0:
+                        raise ReceiptError("OCI archive metadata member is invalid")
+                elif name.startswith("blobs/sha256/"):
+                    digest = name.removeprefix("blobs/sha256/")
+                    if SHA256.fullmatch(digest) is None or not member.isfile():
+                        raise ReceiptError("OCI archive blob member is invalid")
+                else:
+                    raise ReceiptError(f"unsafe OCI archive member: {member.name}")
+    except tarfile.TarError as error:
+        raise ReceiptError("OCI archive cannot be read") from error
+    if not required.issubset(seen):
+        raise ReceiptError("OCI archive metadata is incomplete")
+
+
+def _write_json(output: Path, document: dict[str, Any]) -> None:
+    if not output.parent.is_dir() or output.is_symlink():
+        raise ReceiptError("receipt output path is invalid")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.", dir=output.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(document, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def create_role(
+    output: Path,
+    commit: str,
+    run_id: str,
+    role: str,
+    archive: Path,
+) -> None:
+    _validate_identity(commit, run_id)
+    if role not in ROLES or archive.name != f"vonk-forge-{role}.oci.tar":
+        raise ReceiptError("role acceptance identity is invalid")
+    evidence = _file_evidence(archive)
+    _write_json(
+        output,
+        {
+            "schema": ROLE_SCHEMA,
+            "commit": commit,
+            "run_id": run_id,
+            "role": role,
+            "archive": archive.name,
+            "artifact": f"development-image-{role}-{commit}-{run_id}",
+            "manifest_digest": _manifest_digest(archive),
+            **evidence,
+        },
+    )
+
+
+def _load_role_receipts(
+    root: Path, commit: str, run_id: str
+) -> dict[str, dict[str, Any]]:
+    if not root.is_dir() or root.is_symlink():
+        raise ReceiptError("role receipt root is invalid")
+    return {
+        role: _load_role_receipt(
+            root / f"{role}.role-receipt.json", commit, run_id, role
+        )
+        for role in ROLES
+    }
+
+
+def collect(role_root: Path, commit: str, run_id: str) -> None:
+    _validate_identity(commit, run_id)
+    roles = _load_role_receipts(role_root, commit, run_id)
+    for role in ROLES:
+        print(f"{role}_digest={roles[role]['manifest_digest']}")
+
+
+def aggregate(
+    output: Path,
+    commit: str,
+    run_id: str,
+    role_root: Path,
+    compose_root: Path,
+) -> None:
+    _validate_identity(commit, run_id)
+    roles = _load_role_receipts(role_root, commit, run_id)
+    if not compose_root.is_dir() or compose_root.is_symlink():
+        raise ReceiptError("Compose receipt root is invalid")
+    role_entries = {
+        role: {
+            key: value
+            for key, value in roles[role].items()
+            if key in {"archive", "artifact", "manifest_digest", "sha256", "size"}
+        }
+        for role in ROLES
+    }
+    compose = {name: _file_evidence(compose_root / name) for name in COMPOSE_FILES}
+    _write_json(
+        output,
+        {
+            "schema": SCHEMA,
+            "commit": commit,
+            "run_id": run_id,
+            "roles": role_entries,
+            "compose": compose,
+        },
+    )
 
 
 def create(output: Path, commit: str, run_id: str, publication_root: Path) -> None:
@@ -158,18 +327,7 @@ def create(output: Path, commit: str, run_id: str, publication_root: Path) -> No
         "compose": compose,
     }
 
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{output.name}.", dir=output.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w") as stream:
-            json.dump(document, stream, indent=2, sort_keys=True)
-            stream.write("\n")
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, output)
-    finally:
-        temporary.unlink(missing_ok=True)
+    _write_json(output, document)
 
 
 def verify(
@@ -200,14 +358,38 @@ def verify(
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
-        if len(arguments) == 5 and arguments[0] == "create":
+        if len(arguments) == 2 and arguments[0] == "validate-archive":
+            validate_archive_members(Path(arguments[1]))
+        elif len(arguments) == 6 and arguments[0] == "create-role":
+            create_role(
+                Path(arguments[1]),
+                arguments[2],
+                arguments[3],
+                arguments[4],
+                Path(arguments[5]),
+            )
+        elif len(arguments) == 4 and arguments[0] == "collect":
+            collect(Path(arguments[1]), arguments[2], arguments[3])
+        elif len(arguments) == 6 and arguments[0] == "aggregate":
+            aggregate(
+                Path(arguments[1]),
+                arguments[2],
+                arguments[3],
+                Path(arguments[4]),
+                Path(arguments[5]),
+            )
+        elif len(arguments) == 5 and arguments[0] == "create":
             create(Path(arguments[1]), arguments[2], arguments[3], Path(arguments[4]))
         elif len(arguments) == 5 and arguments[0] == "verify":
             verify(Path(arguments[1]), arguments[2], arguments[3], Path(arguments[4]))
         else:
             raise ReceiptError(
                 "usage: dev-image-acceptance-receipt "
-                "(create|verify) RECEIPT COMMIT RUN_ID PUBLICATION_ROOT"
+                "validate-archive ARCHIVE | "
+                "create-role RECEIPT COMMIT RUN_ID ROLE ARCHIVE | "
+                "collect ROLE_ROOT COMMIT RUN_ID | "
+                "aggregate RECEIPT COMMIT RUN_ID ROLE_ROOT COMPOSE_ROOT | "
+                "verify RECEIPT COMMIT RUN_ID PUBLICATION_ROOT"
             )
     except (OSError, ReceiptError, subprocess.CalledProcessError) as error:
         print(f"dev-image-acceptance-receipt: {error}", file=sys.stderr)
