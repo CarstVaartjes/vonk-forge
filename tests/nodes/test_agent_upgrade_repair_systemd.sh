@@ -754,7 +754,9 @@ test "$agent_gid" -gt 1
 agent_groups=$(awk '/^Groups:/ {
   if (NF < 2) exit 1
   groups=$2
-  for (index=3; index <= NF; index++) groups=groups "," $index
+  for (group_index=3; group_index <= NF; group_index++) {
+    groups=groups "," $group_index
+  }
   print groups
 }' "/proc/$old_agent_pid/status")
 test "$agent_groups" = "$agent_gid"
