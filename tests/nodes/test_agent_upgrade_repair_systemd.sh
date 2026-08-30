@@ -810,7 +810,7 @@ for negative_case in "${negative_cases[@]}"; do
   IFS='|' read -r negative_label negative_index negative_value \
     <<< "$negative_case"
   negative_args=("${probe_args[@]}")
-  negative_args[$negative_index]=$negative_value
+  negative_args[negative_index]=$negative_value
   negative_nonce=$(openssl rand -hex 32)
   negative_args[2]=$negative_nonce
   run_zero_cap_agent_transient \
