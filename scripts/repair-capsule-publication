@@ -1,0 +1,779 @@
+#!/usr/bin/env python3
+"""Assemble and publish one node-bound immutable agent repair capsule."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Protocol
+
+ROOT = Path(__file__).resolve().parents[1]
+VERIFIER = ROOT / "scripts/verify-agent-deb"
+PUBLIC_ORIGIN = "https://install.vonkforge.ai"
+MAX_PACKAGE_BYTES = 1024**3
+MAX_MANIFEST_BYTES = 256 * 1024
+MAX_PLAN_BYTES = 256 * 1024
+RCLONE_METADATA_TIMEOUT = 30
+RCLONE_TRANSFER_TIMEOUT = 300
+NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
+SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
+BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+REPAIR_VERSION = re.compile(
+    r"(?P<source>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{12})"
+    r"\+repair\.spk(?P<node>[0-9a-f]{32})\.(?:[1-9][0-9]*)\Z"
+)
+VERIFIER_KEYS = {
+    "architecture",
+    "binary_source_revision",
+    "ok",
+    "package",
+    "package_bytes",
+    "package_signature",
+    "packaging_source_revision",
+    "repair_authority_sha256",
+    "repair_node_id",
+    "release_key_sha256",
+    "sha256",
+    "target_binary_digest",
+    "target_build_digest",
+    "version",
+}
+FORBIDDEN_KEY_PARTS = frozenset(
+    {"apt", "artifacts", "channel", "current", "dev", "latest", "stable"}
+)
+
+
+class PublicationError(RuntimeError):
+    """The requested capsule cannot be assembled or published safely."""
+
+
+def _canonical(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _digest(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _safe_bytes(path: Path, label: str, maximum: int) -> bytes:
+    try:
+        before = path.stat(follow_symlinks=False)
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise PublicationError(f"{label} is unavailable or unsafe") from error
+    try:
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or after.st_nlink != 1
+            or not 0 < after.st_size <= maximum
+            or after.st_mode & 0o022
+        ):
+            raise PublicationError(f"{label} is unavailable or unsafe")
+        content = bytearray()
+        while len(content) < after.st_size:
+            chunk = os.read(descriptor, min(1024 * 1024, after.st_size - len(content)))
+            if not chunk:
+                raise PublicationError(f"{label} changed while read")
+            content.extend(chunk)
+        final = os.fstat(descriptor)
+        if (
+            final.st_dev != after.st_dev
+            or final.st_ino != after.st_ino
+            or final.st_size != after.st_size
+            or final.st_mtime_ns != after.st_mtime_ns
+        ):
+            raise PublicationError(f"{label} changed while read")
+        return bytes(content)
+    finally:
+        os.close(descriptor)
+
+
+def _parse_canonical(raw: bytes, label: str) -> dict[str, Any]:
+    try:
+        document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicationError(f"{label} is invalid") from error
+    if not isinstance(document, dict) or raw != _canonical(document):
+        raise PublicationError(f"{label} must be canonical JSON")
+    return document
+
+
+def _invoke_verifier(
+    deb: Path,
+    node_id: str,
+    authority_sha256: str,
+    release_key_sha256: str,
+    binary_source_revision: str,
+    packaging_source_revision: str,
+) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            str(VERIFIER),
+            "--json",
+            "--repair",
+            "--expected-node-id",
+            node_id,
+            "--expected-repair-authority-sha256",
+            authority_sha256,
+            "--expected-release-key-sha256",
+            release_key_sha256,
+            "--expected-binary-source-revision",
+            binary_source_revision,
+            "--expected-packaging-source-revision",
+            packaging_source_revision,
+            str(deb),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    try:
+        verified = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise PublicationError("repair package verifier did not return JSON") from error
+    if result.returncode != 0:
+        detail = verified.get("error") if isinstance(verified, dict) else None
+        raise PublicationError(
+            f"repair package verification failed: {detail or 'rejected'}"
+        )
+    if not isinstance(verified, dict) or set(verified) != VERIFIER_KEYS:
+        raise PublicationError("repair package verifier output is incomplete")
+    return verified
+
+
+def _validate_verifier_output(
+    verified: dict[str, Any],
+    node_id: str,
+    authority_sha256: str,
+    release_key_sha256: str,
+    binary_source_revision: str,
+    packaging_source_revision: str,
+    raw: bytes,
+) -> None:
+    version = verified.get("version")
+    version_match = (
+        REPAIR_VERSION.fullmatch(version) if isinstance(version, str) else None
+    )
+    binary_source = verified.get("binary_source_revision")
+    packaging_source = verified.get("packaging_source_revision")
+    if (
+        verified.get("ok") is not True
+        or verified.get("package") != "vonk-forge-agent"
+        or verified.get("architecture") != "arm64"
+        or verified.get("repair_node_id") != node_id
+        or verified.get("repair_authority_sha256") != authority_sha256
+        or verified.get("release_key_sha256") != release_key_sha256
+        or version_match is None
+        or f"spk_{version_match.group('node')}" != node_id
+        or not isinstance(binary_source, str)
+        or SOURCE_SHA.fullmatch(binary_source) is None
+        or binary_source != binary_source_revision
+        or not isinstance(packaging_source, str)
+        or SOURCE_SHA.fullmatch(packaging_source) is None
+        or packaging_source != packaging_source_revision
+        or binary_source == packaging_source
+        or not binary_source.startswith(
+            version_match.group("source").rsplit("+g", 1)[1]
+        )
+        or verified.get("package_bytes") != len(raw)
+        or verified.get("sha256") != _digest(raw)
+        or not isinstance(verified.get("package_signature"), str)
+        or SIGNATURE.fullmatch(verified["package_signature"]) is None
+        or not isinstance(verified.get("target_binary_digest"), str)
+        or SHA256.fullmatch(verified["target_binary_digest"]) is None
+        or not isinstance(verified.get("target_build_digest"), str)
+        or BUILD_DIGEST.fullmatch(verified["target_build_digest"]) is None
+    ):
+        raise PublicationError("repair package verifier output is inconsistent")
+
+
+def _prefix(node_id: str, authority_sha256: str, package_sha256: str) -> str:
+    return f"repair-capsules/{node_id}/{authority_sha256}/{package_sha256}"
+
+
+def _manifest(verified: dict[str, Any]) -> dict[str, Any]:
+    node_id = verified["repair_node_id"]
+    authority = verified["repair_authority_sha256"]
+    package_sha256 = verified["sha256"]
+    prefix = _prefix(node_id, authority, package_sha256)
+    return {
+        "authority_sha256": authority,
+        "kind": "agent-upgrade-repair",
+        "node_id": node_id,
+        "package": {
+            "architecture": "linux-arm64",
+            "package_bytes": verified["package_bytes"],
+            "package_sha256": package_sha256,
+            "package_signature": verified["package_signature"],
+            "package_url": f"{PUBLIC_ORIGIN}/{prefix}/vonk-forge-agent.deb",
+            "package_version": verified["version"],
+            "schema_version": 1,
+            "target_binary_digest": verified["target_binary_digest"],
+            "target_build_digest": verified["target_build_digest"],
+        },
+        "schema_version": 1,
+    }
+
+
+def _object(kind: str, key: str, raw: bytes) -> dict[str, Any]:
+    return {"key": key, "kind": kind, "sha256": _digest(raw), "size": len(raw)}
+
+
+def assemble(arguments: argparse.Namespace) -> None:
+    node_id = arguments.expected_node_id
+    authority = arguments.expected_authority_sha256
+    release_key = arguments.expected_release_key_sha256
+    binary_source = arguments.expected_binary_source_revision
+    packaging_source = arguments.expected_packaging_source_revision
+    if (
+        NODE_ID.fullmatch(node_id) is None
+        or SHA256.fullmatch(authority) is None
+        or SHA256.fullmatch(release_key) is None
+        or SOURCE_SHA.fullmatch(binary_source) is None
+        or SOURCE_SHA.fullmatch(packaging_source) is None
+        or binary_source == packaging_source
+    ):
+        raise PublicationError("repair capsule identity is invalid")
+    raw = _safe_bytes(arguments.deb, "repair package", MAX_PACKAGE_BYTES)
+    verified = _invoke_verifier(
+        arguments.deb.absolute(),
+        node_id,
+        authority,
+        release_key,
+        binary_source,
+        packaging_source,
+    )
+    _validate_verifier_output(
+        verified,
+        node_id,
+        authority,
+        release_key,
+        binary_source,
+        packaging_source,
+        raw,
+    )
+    manifest = _manifest(verified)
+    manifest_raw = _canonical(manifest)
+    prefix = _prefix(node_id, authority, verified["sha256"])
+    package_key = f"{prefix}/vonk-forge-agent.deb"
+    manifest_key = f"{prefix}/manifest.json"
+    plan = {
+        "authority_sha256": authority,
+        "binary_source_revision": verified["binary_source_revision"],
+        "kind": "agent-repair-capsule-publication",
+        "node_id": node_id,
+        "objects": [
+            _object("package", package_key, raw),
+            _object("manifest", manifest_key, manifest_raw),
+        ],
+        "package_sha256": verified["sha256"],
+        "packaging_source_revision": verified["packaging_source_revision"],
+        "release_key_sha256": release_key,
+        "schema_version": 1,
+    }
+    output = arguments.output.absolute()
+    if output.exists() or output.is_symlink():
+        raise PublicationError("publication output already exists")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=".repair-capsule-", dir=output.parent))
+    try:
+        object_root = temporary / "objects"
+        for key, content in ((package_key, raw), (manifest_key, manifest_raw)):
+            destination = object_root / key
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+            destination.chmod(0o644)
+        plan_path = temporary / "publication-plan.json"
+        plan_path.write_bytes(_canonical(plan))
+        plan_path.chmod(0o644)
+        temporary.rename(output)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    print(_canonical({"bundle": str(output), "manifest": manifest}).decode().strip())
+
+
+def _validate_key(key: object, expected_prefix: str, expected_name: str) -> str:
+    expected = f"{expected_prefix}/{expected_name}"
+    if not isinstance(key, str) or key != expected:
+        raise PublicationError("repair publication object key is invalid")
+    parts = key.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise PublicationError("repair publication object key is invalid")
+    if any(part.lower() in FORBIDDEN_KEY_PARTS for part in parts):
+        raise PublicationError("repair publication path creates a forbidden pointer")
+    return key
+
+
+def _validate_bundle(
+    bundle: Path,
+    expected_release_key_sha256: str,
+    expected_binary_source_revision: str,
+    expected_packaging_source_revision: str,
+) -> tuple[dict[str, Any], list[tuple[dict[str, Any], bytes]]]:
+    plan = _parse_canonical(
+        _safe_bytes(
+            bundle / "publication-plan.json", "publication plan", MAX_PLAN_BYTES
+        ),
+        "publication plan",
+    )
+    if set(plan) != {
+        "authority_sha256",
+        "binary_source_revision",
+        "kind",
+        "node_id",
+        "objects",
+        "package_sha256",
+        "packaging_source_revision",
+        "release_key_sha256",
+        "schema_version",
+    }:
+        raise PublicationError("publication plan is invalid")
+    node_id = plan.get("node_id")
+    authority = plan.get("authority_sha256")
+    package_sha256 = plan.get("package_sha256")
+    binary_source = plan.get("binary_source_revision")
+    packaging_source = plan.get("packaging_source_revision")
+    release_key = plan.get("release_key_sha256")
+    if (
+        plan.get("schema_version") != 1
+        or plan.get("kind") != "agent-repair-capsule-publication"
+        or not isinstance(node_id, str)
+        or NODE_ID.fullmatch(node_id) is None
+        or not isinstance(authority, str)
+        or SHA256.fullmatch(authority) is None
+        or not isinstance(package_sha256, str)
+        or SHA256.fullmatch(package_sha256) is None
+        or not isinstance(binary_source, str)
+        or SOURCE_SHA.fullmatch(binary_source) is None
+        or not isinstance(packaging_source, str)
+        or SOURCE_SHA.fullmatch(packaging_source) is None
+        or binary_source == packaging_source
+        or not isinstance(release_key, str)
+        or SHA256.fullmatch(release_key) is None
+        or release_key != expected_release_key_sha256
+        or binary_source != expected_binary_source_revision
+        or packaging_source != expected_packaging_source_revision
+    ):
+        raise PublicationError("publication plan identity is invalid")
+    prefix = _prefix(node_id, authority, package_sha256)
+    objects = plan.get("objects")
+    if not isinstance(objects, list) or len(objects) != 2:
+        raise PublicationError("publication plan must contain exactly two objects")
+    expected = (("package", "vonk-forge-agent.deb"), ("manifest", "manifest.json"))
+    validated: list[tuple[dict[str, Any], bytes]] = []
+    for entry, (kind, name) in zip(objects, expected, strict=True):
+        if not isinstance(entry, dict) or set(entry) != {
+            "key",
+            "kind",
+            "sha256",
+            "size",
+        }:
+            raise PublicationError("publication object is invalid")
+        key = _validate_key(entry.get("key"), prefix, name)
+        maximum = MAX_PACKAGE_BYTES if kind == "package" else MAX_MANIFEST_BYTES
+        raw = _safe_bytes(
+            bundle / "objects" / key, f"publication object {key}", maximum
+        )
+        if (
+            entry.get("kind") != kind
+            or entry.get("sha256") != _digest(raw)
+            or entry.get("size") != len(raw)
+        ):
+            raise PublicationError("publication object does not match its plan")
+        validated.append((entry, raw))
+    package_entry, package_raw = validated[0]
+    manifest_entry, manifest_raw = validated[1]
+    if package_entry["sha256"] != package_sha256:
+        raise PublicationError("publication package identity is invalid")
+    manifest = _parse_canonical(manifest_raw, "repair manifest")
+    if manifest != _manifest_from_plan_and_descriptor(plan, manifest):
+        raise PublicationError("repair manifest is inconsistent")
+    with tempfile.TemporaryDirectory(prefix="repair-capsule-verify-") as directory:
+        deb = Path(directory) / "vonk-forge-agent.deb"
+        deb.write_bytes(package_raw)
+        deb.with_suffix(".deb.sha256").write_text(
+            f"{package_sha256} {deb.name}\n", encoding="ascii"
+        )
+        deb.with_suffix(".deb.host.sig").write_text(
+            f"{manifest['package']['package_signature']}\n", encoding="ascii"
+        )
+        verified = _invoke_verifier(
+            deb,
+            node_id,
+            authority,
+            expected_release_key_sha256,
+            expected_binary_source_revision,
+            expected_packaging_source_revision,
+        )
+    _validate_verifier_output(
+        verified,
+        node_id,
+        authority,
+        expected_release_key_sha256,
+        expected_binary_source_revision,
+        expected_packaging_source_revision,
+        package_raw,
+    )
+    if _manifest(verified) != manifest:
+        raise PublicationError("repair manifest does not match verified package")
+    if (
+        verified["binary_source_revision"] != binary_source
+        or verified["packaging_source_revision"] != packaging_source
+        or manifest_entry["sha256"] != _digest(manifest_raw)
+    ):
+        raise PublicationError("repair publication provenance is inconsistent")
+    return plan, validated
+
+
+def _manifest_from_plan_and_descriptor(
+    plan: dict[str, Any], manifest: dict[str, Any]
+) -> dict[str, Any]:
+    if set(manifest) != {
+        "authority_sha256",
+        "kind",
+        "node_id",
+        "package",
+        "schema_version",
+    }:
+        raise PublicationError("repair manifest shape is invalid")
+    package = manifest.get("package")
+    if not isinstance(package, dict) or set(package) != {
+        "architecture",
+        "package_bytes",
+        "package_sha256",
+        "package_signature",
+        "package_url",
+        "package_version",
+        "schema_version",
+        "target_binary_digest",
+        "target_build_digest",
+    }:
+        raise PublicationError("repair package descriptor shape is invalid")
+    prefix = _prefix(plan["node_id"], plan["authority_sha256"], plan["package_sha256"])
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("kind") != "agent-upgrade-repair"
+        or manifest.get("node_id") != plan["node_id"]
+        or manifest.get("authority_sha256") != plan["authority_sha256"]
+        or package.get("schema_version") != 1
+        or package.get("architecture") != "linux-arm64"
+        or package.get("package_sha256") != plan["package_sha256"]
+        or package.get("package_url")
+        != f"{PUBLIC_ORIGIN}/{prefix}/vonk-forge-agent.deb"
+    ):
+        raise PublicationError("repair package descriptor identity is invalid")
+    return manifest
+
+
+class Store(Protocol):
+    def list(self, prefix: str) -> set[str]: ...
+    def read(self, key: str, maximum: int) -> bytes | None: ...
+    def write(self, key: str, raw: bytes) -> None: ...
+
+
+class FilesystemStore:
+    def __init__(self, root: Path):
+        absolute = root.absolute()
+        if any(candidate.is_symlink() for candidate in (absolute, *absolute.parents)):
+            raise PublicationError("filesystem destination is unsafe")
+        absolute.mkdir(parents=True, exist_ok=True)
+        self.root = absolute
+
+    def _path(self, key: str) -> Path:
+        path = self.root
+        for part in key.split("/"):
+            path = path / part
+            if path.exists() and path.is_symlink():
+                raise PublicationError("filesystem destination contains a symlink")
+        return path
+
+    def list(self, prefix: str) -> set[str]:
+        root = self._path(prefix)
+        if not root.exists():
+            return set()
+        if not root.is_dir():
+            raise PublicationError("filesystem destination prefix is unsafe")
+        return {
+            path.relative_to(self.root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file() or path.is_symlink()
+        }
+
+    def read(self, key: str, maximum: int) -> bytes | None:
+        path = self._path(key)
+        if not path.exists():
+            return None
+        return _safe_bytes(path, f"published object {key}", maximum)
+
+    def write(self, key: str, raw: bytes) -> None:
+        destination = self._path(key)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, name = tempfile.mkstemp(
+            prefix=".repair-publish-", dir=destination.parent
+        )
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, 0o644)
+            try:
+                os.link(temporary, destination, follow_symlinks=False)
+            except FileExistsError as error:
+                raise PublicationError(
+                    "refusing to overwrite immutable repair object"
+                ) from error
+            directory = os.open(
+                destination.parent, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+class RcloneStore:
+    def __init__(self, remote: str):
+        self.remote = remote.rstrip("/")
+        if not self.remote or any(character in self.remote for character in "\r\n\0"):
+            raise PublicationError("R2 remote is invalid")
+        self.listed_keys: set[str] | None = None
+
+    def _target(self, key: str) -> str:
+        return f"{self.remote}/{key}"
+
+    def list(self, prefix: str) -> set[str]:
+        result = subprocess.run(
+            ["rclone", "lsf", self._target(prefix), "--recursive", "--files-only"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=RCLONE_METADATA_TIMEOUT,
+        )
+        if result.returncode != 0:
+            raise PublicationError("R2 repair prefix lookup failed")
+        self.listed_keys = {
+            f"{prefix}/{line}" for line in result.stdout.splitlines() if line
+        }
+        return set(self.listed_keys)
+
+    def read(self, key: str, maximum: int) -> bytes | None:
+        if self.listed_keys is None:
+            raise PublicationError("R2 repair prefix was not preflighted")
+        if key not in self.listed_keys:
+            return None
+        stat_result = subprocess.run(
+            ["rclone", "lsjson", self._target(key), "--stat"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=RCLONE_METADATA_TIMEOUT,
+        )
+        if stat_result.returncode != 0:
+            raise PublicationError("listed R2 repair object metadata lookup failed")
+        try:
+            metadata = json.loads(stat_result.stdout)
+        except json.JSONDecodeError as error:
+            raise PublicationError("R2 object metadata is invalid") from error
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("IsDir") is not False
+            or not isinstance(metadata.get("Size"), int)
+            or not 0 < metadata["Size"] <= maximum
+        ):
+            raise PublicationError("R2 object metadata is invalid")
+        result = subprocess.run(
+            ["rclone", "cat", self._target(key)],
+            capture_output=True,
+            check=False,
+            timeout=RCLONE_TRANSFER_TIMEOUT,
+        )
+        if result.returncode != 0 or len(result.stdout) != metadata["Size"]:
+            raise PublicationError("R2 object read failed")
+        return result.stdout
+
+    def write(self, key: str, raw: bytes) -> None:
+        with tempfile.NamedTemporaryFile(
+            prefix="repair-object-", delete=False
+        ) as stream:
+            source = Path(stream.name)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            result = subprocess.run(
+                ["rclone", "copyto", "--immutable", str(source), self._target(key)],
+                check=False,
+                timeout=RCLONE_TRANSFER_TIMEOUT,
+            )
+            if result.returncode != 0:
+                raise PublicationError(f"R2 upload failed for {key}")
+            if self.listed_keys is None:
+                raise PublicationError("R2 repair prefix was not preflighted")
+            self.listed_keys.add(key)
+        finally:
+            source.unlink(missing_ok=True)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+def _public_bytes(key: str, maximum: int) -> bytes:
+    url = f"{PUBLIC_ORIGIN}/{key}"
+    request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+    opener = urllib.request.build_opener(_NoRedirect())
+    last_error: Exception | None = None
+    for attempt in range(5):
+        try:
+            with opener.open(request, timeout=20) as response:
+                if response.status != 200 or response.geturl() != url:
+                    raise PublicationError("public repair object response is invalid")
+                raw = response.read(maximum + 1)
+                if not 0 < len(raw) <= maximum:
+                    raise PublicationError("public repair object size is invalid")
+                return raw
+        except (OSError, urllib.error.URLError, PublicationError) as error:
+            last_error = error
+            if attempt != 4:
+                time.sleep(2)
+    raise PublicationError("public repair object verification failed") from last_error
+
+
+def publish(arguments: argparse.Namespace) -> None:
+    bundle = arguments.bundle.absolute()
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise PublicationError("publication bundle is unsafe")
+    release_key = arguments.expected_release_key_sha256
+    binary_source = arguments.expected_binary_source_revision
+    packaging_source = arguments.expected_packaging_source_revision
+    if (
+        SHA256.fullmatch(release_key) is None
+        or SOURCE_SHA.fullmatch(binary_source) is None
+        or SOURCE_SHA.fullmatch(packaging_source) is None
+        or binary_source == packaging_source
+    ):
+        raise PublicationError("external repair publication authority is invalid")
+    plan, objects = _validate_bundle(
+        bundle,
+        release_key,
+        binary_source,
+        packaging_source,
+    )
+    prefix = _prefix(plan["node_id"], plan["authority_sha256"], plan["package_sha256"])
+    store: Store = (
+        FilesystemStore(arguments.filesystem.absolute())
+        if arguments.filesystem is not None
+        else RcloneStore(arguments.rclone_remote)
+    )
+    allowed = {entry["key"] for entry, _ in objects}
+    observed_keys = store.list(prefix)
+    if not observed_keys.issubset(allowed):
+        raise PublicationError("repair prefix contains an unknown object")
+    existing: dict[str, bytes] = {}
+    for entry, raw in objects:
+        observed = store.read(
+            entry["key"],
+            MAX_PACKAGE_BYTES if entry["kind"] == "package" else MAX_MANIFEST_BYTES,
+        )
+        if observed is not None:
+            if observed != raw:
+                raise PublicationError(
+                    f"refusing to overwrite immutable repair object {entry['key']}"
+                )
+            existing[entry["kind"]] = observed
+    if "manifest" in existing and "package" not in existing:
+        raise PublicationError("repair manifest exists without its package")
+    for entry, raw in objects:
+        if entry["kind"] not in existing:
+            store.write(entry["key"], raw)
+        maximum = (
+            MAX_PACKAGE_BYTES if entry["kind"] == "package" else MAX_MANIFEST_BYTES
+        )
+        if store.read(entry["key"], maximum) != raw:
+            raise PublicationError(
+                f"published repair object verification failed: {entry['key']}"
+            )
+        print(
+            _canonical({"key": entry["key"], "replayed": entry["kind"] in existing})
+            .decode()
+            .strip()
+        )
+    if arguments.rclone_remote is not None:
+        for entry, raw in objects:
+            maximum = (
+                MAX_PACKAGE_BYTES if entry["kind"] == "package" else MAX_MANIFEST_BYTES
+            )
+            if _public_bytes(entry["key"], maximum) != raw:
+                raise PublicationError(f"public repair object differs: {entry['key']}")
+
+
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(prog="repair-capsule-publication")
+    commands = root.add_subparsers(dest="command", required=True)
+    build = commands.add_parser("assemble")
+    build.add_argument("--deb", type=Path, required=True)
+    build.add_argument("--expected-node-id", required=True)
+    build.add_argument("--expected-authority-sha256", required=True)
+    build.add_argument("--expected-release-key-sha256", required=True)
+    build.add_argument("--expected-binary-source-revision", required=True)
+    build.add_argument("--expected-packaging-source-revision", required=True)
+    build.add_argument("--output", type=Path, required=True)
+    publication = commands.add_parser("publish")
+    publication.add_argument("--bundle", type=Path, required=True)
+    publication.add_argument("--expected-release-key-sha256", required=True)
+    publication.add_argument("--expected-binary-source-revision", required=True)
+    publication.add_argument("--expected-packaging-source-revision", required=True)
+    destinations = publication.add_mutually_exclusive_group(required=True)
+    destinations.add_argument("--filesystem", type=Path)
+    destinations.add_argument("--rclone-remote")
+    return root
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = parser().parse_args(argv)
+    try:
+        if arguments.command == "assemble":
+            assemble(arguments)
+        else:
+            publish(arguments)
+    except (OSError, PublicationError, subprocess.TimeoutExpired) as error:
+        print(f"repair-capsule-publication: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -43,15 +43,44 @@ PACKAGE_VERSION = re.compile(
 DEVELOPMENT_VERSION = re.compile(
     rf"{SEMVER}~dev\.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
 )
-ACCEPTANCE_BASELINE_VERSION = re.compile(
-    rf"{SEMVER}~acceptance\.1\+g[0-9a-f]{{12}}\Z"
+REPAIR_VERSION = re.compile(
+    rf"(?P<source>{SEMVER}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})"
+    rf"\+repair\.spk(?P<node>[0-9a-f]{{32}})\."
+    rf"(?P<sequence>[1-9][0-9]*)\Z"
 )
+ACCEPTANCE_BASELINE_VERSION = re.compile(rf"{SEMVER}~acceptance\.1\+g[0-9a-f]{{12}}\Z")
 BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00agent\x00"
 PACKAGE_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
 ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+REPAIR_AUTHORITY_FIELDS = (
+    "schema_version",
+    "node_id",
+    "installed_version",
+    "installed_agent_sha256",
+    "installed_helper_sha256",
+    "installed_agent_unit_sha256",
+    "installed_helper_unit_sha256",
+    "installed_helper_socket_sha256",
+    "source_target_version",
+    "source_architecture",
+    "source_package_sha256",
+    "source_agent_sha256",
+    "source_helper_sha256",
+    "source_runner_sha256",
+    "source_unit_sha256",
+    "source_agent_gate_sha256",
+    "source_socket_dropin_sha256",
+    "source_blocker_sha256",
+    "source_pending_sha256",
+    "repair_probe_sha256",
+    "setpriv_sha256",
+    "util_linux_version",
+)
+REPAIR_DISPATCH_MARKER = b"# VONK_REPAIR_DISPATCH_V1\n"
+REPAIR_POSTINST_MARKER = b"# VONK_REPAIR_POSTINST_V1\n"
 
 
 class BuildError(RuntimeError):
@@ -94,6 +123,66 @@ def run(
         detail = completed.stderr.decode("utf-8", errors="replace").strip()
         raise BuildError(f"command failed: {Path(argv[0]).name}: {detail}")
     return completed.stdout
+
+
+def source_at_revision(revision: str, relative: str) -> bytes:
+    if (
+        re.fullmatch(r"[0-9a-f]{40}", revision) is None
+        or re.fullmatch(r"[A-Za-z0-9_./-]+", relative) is None
+    ):
+        raise BuildError("repair source reference is invalid")
+    raw = run(
+        [
+            "/usr/bin/git",
+            "-c",
+            f"safe.directory={ROOT}",
+            "show",
+            f"{revision}:{relative}",
+        ]
+    )
+    if not raw:
+        raise BuildError("repair source file is empty")
+    return raw
+
+
+def repair_standard_runner(
+    binary_source_revision: str, authority: dict[str, str]
+) -> bytes:
+    source_recovery_unit = source_at_revision(
+        binary_source_revision,
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service",
+    )
+    source_agent_gate = source_at_revision(
+        binary_source_revision,
+        "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+    )
+    runner = (
+        source_at_revision(binary_source_revision, "packaging/debian/preinst")
+        .replace(b"@VERSION@", authority["source_target_version"].encode())
+        .replace(b"@ARCHITECTURE@", authority["source_architecture"].encode())
+        .replace(b"@AGENT_SHA256@", authority["source_agent_sha256"].encode())
+        .replace(b"@HELPER_SHA256@", authority["source_helper_sha256"].encode())
+        .replace(
+            b"@RECOVERY_UNIT_SHA256@",
+            hashlib.sha256(source_recovery_unit).hexdigest().encode(),
+        )
+        .replace(b"@RECOVERY_UNIT_BASE64@", base64.b64encode(source_recovery_unit))
+        .replace(
+            b"@AGENT_GATE_SHA256@",
+            hashlib.sha256(source_agent_gate).hexdigest().encode(),
+        )
+        .replace(b"@AGENT_GATE_BASE64@", base64.b64encode(source_agent_gate))
+    )
+    if (
+        hashlib.sha256(source_recovery_unit).hexdigest()
+        != authority["source_unit_sha256"]
+        or hashlib.sha256(source_agent_gate).hexdigest()
+        != authority["source_agent_gate_sha256"]
+        or hashlib.sha256(runner).hexdigest() != authority["source_runner_sha256"]
+        or re.search(rb"@[A-Z0-9_]+@", runner) is not None
+    ):
+        raise BuildError("repair source runner does not match authority")
+    return runner
 
 
 def cargo_semantic_version() -> str:
@@ -206,6 +295,69 @@ def read_release_data(path: Path, maximum_bytes: int) -> bytes:
         )
     if before != after or len(raw) != metadata.st_size:
         raise BuildError(f"release data changed while read: {path}")
+    return raw
+
+
+def read_repair_authority(
+    path: Path | None,
+    *,
+    architecture: str,
+    target_version: str,
+) -> bytes | None:
+    if path is None:
+        return None
+    raw = read_release_data(path, 16 * 1024)
+    try:
+        text = raw.decode("ascii")
+        lines = text.splitlines(keepends=True)
+        names = tuple(line.split("=", 1)[0] for line in text.splitlines())
+        document = dict(line[:-1].split("=", 1) for line in lines)
+    except (UnicodeDecodeError, ValueError) as error:
+        raise BuildError("repair authority is invalid") from error
+    digest_fields = {
+        field for field in REPAIR_AUTHORITY_FIELDS if field.endswith("_sha256")
+    }
+    if (
+        not raw.endswith(b"\n")
+        or len(lines) != len(REPAIR_AUTHORITY_FIELDS)
+        or names != REPAIR_AUTHORITY_FIELDS
+        or len(document) != len(REPAIR_AUTHORITY_FIELDS)
+        or document.get("schema_version") != "1"
+        or re.fullmatch(r"spk_[0-9a-f]{32}", document.get("node_id", "")) is None
+        or PACKAGE_VERSION.fullmatch(document.get("installed_version", "")) is None
+        or PACKAGE_VERSION.fullmatch(document.get("source_target_version", "")) is None
+        or document.get("source_architecture")
+        != str(ARCHITECTURES[architecture]["debian"])
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", document.get(field, "")) is None
+            for field in digest_fields
+        )
+        or re.fullmatch(
+            r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", "")
+        )
+        is None
+    ):
+        raise BuildError("repair authority is invalid")
+    for older, newer, message in (
+        (
+            document["installed_version"],
+            document["source_target_version"],
+            "repair authority source target must be newer than installed version",
+        ),
+        (
+            document["source_target_version"],
+            target_version,
+            "repair capsule target must be newer than source target",
+        ),
+    ):
+        if (
+            subprocess.run(
+                ["/usr/bin/dpkg", "--compare-versions", older, "lt", newer],
+                check=False,
+            ).returncode
+            != 0
+        ):
+            raise BuildError(message)
     return raw
 
 
@@ -333,6 +485,7 @@ def evidence(
     architecture: str,
     build_digest: str,
     binaries: dict[str, bytes],
+    repair: dict[str, str] | None = None,
 ) -> dict[str, bytes]:
     components = [
         {
@@ -340,6 +493,34 @@ def evidence(
             "sha256": hashlib.sha256(raw).hexdigest(),
             "type": "application",
             "version": ORAS_VERSION if name == "oras" else version,
+            **(
+                {
+                    "properties": [
+                        {
+                            "name": (
+                                "vonk:packagingSourceRevision"
+                                if name
+                                in {
+                                    "vonk-forge-docker-firewall",
+                                    "vonk-forge-package-upgrade-recover",
+                                }
+                                else "vonk:binarySourceRevision"
+                            ),
+                            "value": (
+                                repair["packaging_source_revision"]
+                                if name
+                                in {
+                                    "vonk-forge-docker-firewall",
+                                    "vonk-forge-package-upgrade-recover",
+                                }
+                                else repair["binary_source_revision"]
+                            ),
+                        }
+                    ]
+                }
+                if repair is not None
+                else {}
+            ),
         }
         for name, raw in sorted(binaries.items())
     ]
@@ -360,6 +541,20 @@ def evidence(
     repository = os.environ.get(
         "VONK_SOURCE_REPOSITORY", "https://github.com/CarstVaartjes/vonk-forge"
     )
+    cyclone_metadata_component: dict[str, object] = {
+        "name": PACKAGE,
+        "type": "application",
+        "version": version,
+    }
+    if repair is not None:
+        cyclone_metadata_component["properties"] = [
+            {"name": "vonk:repairAuthoritySha256", "value": repair["authority_sha256"]},
+            {"name": "vonk:repairNodeId", "value": repair["node_id"]},
+            {
+                "name": "vonk:repairPackagingSourceRevision",
+                "value": repair["packaging_source_revision"],
+            },
+        ]
     cyclone = {
         "bomFormat": "CycloneDX",
         "components": [
@@ -368,6 +563,7 @@ def evidence(
                 "name": item["name"],
                 "type": item["type"],
                 "version": item["version"],
+                **({"properties": item["properties"]} if "properties" in item else {}),
             }
             for item in components
         ]
@@ -387,7 +583,7 @@ def evidence(
             for item in crates
         ],
         "metadata": {
-            "component": {"name": PACKAGE, "type": "application", "version": version},
+            "component": cyclone_metadata_component,
             "timestamp": created,
         },
         "serialNumber": f"urn:uuid:00000000-0000-4000-8000-{hashlib.sha256(version.encode()).hexdigest()[:12]}",
@@ -409,6 +605,38 @@ def evidence(
                 "name": item["name"],
                 "primaryPackagePurpose": "APPLICATION",
                 "versionInfo": item["version"],
+                **(
+                    {
+                        "externalRefs": [
+                            {
+                                "referenceCategory": "OTHER",
+                                "referenceLocator": (
+                                    f"{repository}@"
+                                    + (
+                                        repair["packaging_source_revision"]
+                                        if item["name"]
+                                        in {
+                                            "vonk-forge-docker-firewall",
+                                            "vonk-forge-package-upgrade-recover",
+                                        }
+                                        else repair["binary_source_revision"]
+                                    )
+                                ),
+                                "referenceType": (
+                                    "vonk-repair-packaging-source"
+                                    if item["name"]
+                                    in {
+                                        "vonk-forge-docker-firewall",
+                                        "vonk-forge-package-upgrade-recover",
+                                    }
+                                    else "vonk-target-binary-source"
+                                ),
+                            }
+                        ]
+                    }
+                    if repair is not None
+                    else {}
+                ),
             }
             for item in components
         ]
@@ -433,23 +661,52 @@ def evidence(
         ],
         "spdxVersion": "SPDX-2.3",
     }
+    if repair is not None:
+        spdx["documentComment"] = (
+            "Vonk repair "
+            f"authority_sha256={repair['authority_sha256']} "
+            f"node_id={repair['node_id']} "
+            f"binary_source_revision={repair['binary_source_revision']} "
+            f"packaging_source_revision={repair['packaging_source_revision']}"
+        )
+    resolved_dependencies = [
+        {
+            "digest": {"gitCommit": revision},
+            "uri": repository,
+        }
+    ]
+    external_parameters: dict[str, object] = {
+        "architecture": architecture,
+        "build_digest": build_digest,
+        "source_date_epoch": epoch,
+        "version": version,
+    }
+    if repair is not None:
+        external_parameters["repair"] = {
+            "authority_sha256": repair["authority_sha256"],
+            "binary_source_revision": repair["binary_source_revision"],
+            "node_id": repair["node_id"],
+            "packaging_source_revision": repair["packaging_source_revision"],
+        }
+        resolved_dependencies = [
+            {
+                "digest": {"gitCommit": repair["packaging_source_revision"]},
+                "relationship": "repair-package-source",
+                "uri": repository,
+            },
+            {
+                "digest": {"gitCommit": repair["binary_source_revision"]},
+                "relationship": "target-binary-source",
+                "uri": repository,
+            },
+        ]
     provenance = {
         "_type": "https://in-toto.io/Statement/v1",
         "predicate": {
             "buildDefinition": {
                 "buildType": "https://vonkforge.ai/build-types/rust-deb/v2",
-                "externalParameters": {
-                    "architecture": architecture,
-                    "build_digest": build_digest,
-                    "source_date_epoch": epoch,
-                    "version": version,
-                },
-                "resolvedDependencies": [
-                    {
-                        "digest": {"gitCommit": revision},
-                        "uri": repository,
-                    }
-                ],
+                "externalParameters": external_parameters,
+                "resolvedDependencies": resolved_dependencies,
             },
             "runDetails": {"builder": {"id": repository}},
         },
@@ -503,9 +760,14 @@ def build(
     architecture: str,
     build_digest: str,
     acceptance_baseline: bool = False,
+    repair_authority: Path | None = None,
+    repair_probe_binary: Path | None = None,
 ) -> Path:
-    if not valid_package_version(version) and not (
-        acceptance_baseline and ACCEPTANCE_BASELINE_VERSION.fullmatch(version)
+    repair_version = REPAIR_VERSION.fullmatch(version)
+    if (
+        not valid_package_version(version)
+        and repair_version is None
+        and not (acceptance_baseline and ACCEPTANCE_BASELINE_VERSION.fullmatch(version))
     ):
         raise BuildError("version is not canonical package version")
     cargo_version = cargo_semantic_version()
@@ -557,6 +819,69 @@ def build(
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     debian_architecture = str(spec["debian"])
+    repair_authority_raw = read_repair_authority(
+        repair_authority,
+        architecture=architecture,
+        target_version=version,
+    )
+    if (repair_authority_raw is None) != (repair_probe_binary is None):
+        raise BuildError("repair probe binary is required exactly for repair capsules")
+    repair_probe = (
+        read_release_binary(
+            repair_probe_binary,
+            machine=int(spec["machine"]),
+            build_digest=None,
+            semantic_version=None,
+        )
+        if repair_probe_binary is not None
+        else None
+    )
+    repair_evidence: dict[str, str] | None = None
+    if repair_version is not None:
+        if repair_authority_raw is None:
+            raise BuildError("node-bound repair version requires repair authority")
+        repair_document = dict(
+            line.split("=", 1)
+            for line in repair_authority_raw.decode("ascii").splitlines()
+        )
+        if (
+            repair_version.group("source") != repair_document["source_target_version"]
+            or f"spk_{repair_version.group('node')}" != repair_document["node_id"]
+            or repair_probe is None
+            or hashlib.sha256(repair_probe).hexdigest()
+            != repair_document["repair_probe_sha256"]
+        ):
+            raise BuildError("repair version does not bind repair authority")
+        if (
+            binary_digest != repair_document["source_agent_sha256"]
+            or helper_digest != repair_document["source_helper_sha256"]
+        ):
+            raise BuildError("repair capsule must reuse exact source target binaries")
+        binary_source_revision = os.environ.get(
+            "VONK_REPAIR_BINARY_SOURCE_REVISION", ""
+        )
+        packaging_source_revision = os.environ.get("VONK_SOURCE_REVISION", "")
+        source_revision_match = re.search(
+            r"\+g([0-9a-f]{12})\Z", repair_version.group("source")
+        )
+        if (
+            re.fullmatch(r"[0-9a-f]{40}", binary_source_revision) is None
+            or re.fullmatch(r"[0-9a-f]{40}", packaging_source_revision) is None
+            or source_revision_match is None
+            or not binary_source_revision.startswith(source_revision_match.group(1))
+            or packaging_source_revision == binary_source_revision
+        ):
+            raise BuildError("repair source revisions are invalid or ambiguous")
+        repair_evidence = {
+            "authority_sha256": hashlib.sha256(repair_authority_raw).hexdigest(),
+            "binary_source_revision": binary_source_revision,
+            "node_id": repair_document["node_id"],
+            "packaging_source_revision": packaging_source_revision,
+        }
+    elif repair_authority_raw is not None:
+        raise BuildError("repair authority requires node-bound repair version")
+    if acceptance_baseline and repair_authority_raw is not None:
+        raise BuildError("acceptance baseline cannot be a repair capsule")
     package_name = f"{PACKAGE}_{version}_{debian_architecture}.deb"
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-") as temporary:
@@ -631,12 +956,96 @@ def build(
             .replace(b"@AGENT_GATE_SHA256@", agent_gate_digest.encode())
             .replace(b"@AGENT_GATE_BASE64@", agent_gate_base64)
         )
+        standard_runner = preinst
+        repair_preinst = None
+        repair_postinst = None
+        if repair_authority_raw is not None:
+            standard_runner = repair_standard_runner(
+                binary_source_revision, repair_document
+            )
+            target_agent_unit = source("packaging/systemd/vonk-forge-agent.service")
+            target_helper_unit = source(
+                "packaging/systemd/vonk-forge-package-helper.service"
+            )
+            target_helper_socket = source(
+                "packaging/systemd/vonk-forge-package-helper.socket"
+            )
+            repair_preinst = (
+                source("packaging/debian/preinst-repair")
+                .replace(b"@VERSION@", version.encode())
+                .replace(b"@ARCHITECTURE@", debian_architecture.encode())
+                .replace(b"@AGENT_SHA256@", binary_digest.encode())
+                .replace(b"@HELPER_SHA256@", helper_digest.encode())
+                .replace(
+                    b"@REPAIR_AUTHORITY_SHA256@",
+                    hashlib.sha256(repair_authority_raw).hexdigest().encode(),
+                )
+                .replace(
+                    b"@REPAIR_AUTHORITY_BASE64@",
+                    base64.b64encode(repair_authority_raw),
+                )
+                .replace(
+                    b"@STANDARD_RUNNER_SHA256@",
+                    hashlib.sha256(standard_runner).hexdigest().encode(),
+                )
+                .replace(b"@STANDARD_RUNNER_BASE64@", base64.b64encode(standard_runner))
+                .replace(
+                    b"@TARGET_AGENT_UNIT_SHA256@",
+                    hashlib.sha256(target_agent_unit).hexdigest().encode(),
+                )
+                .replace(
+                    b"@TARGET_HELPER_UNIT_SHA256@",
+                    hashlib.sha256(target_helper_unit).hexdigest().encode(),
+                )
+                .replace(
+                    b"@TARGET_HELPER_SOCKET_SHA256@",
+                    hashlib.sha256(target_helper_socket).hexdigest().encode(),
+                )
+                .replace(
+                    b"@REPAIR_PROBE_SHA256@",
+                    hashlib.sha256(repair_probe).hexdigest().encode(),
+                )
+            )
+            if (
+                REPAIR_DISPATCH_MARKER not in repair_preinst
+                or re.search(rb"@[A-Z0-9_]+@", repair_preinst) is not None
+            ):
+                raise BuildError("repair capsule dispatcher is incomplete")
+            # A distinct higher repair version cannot use the standard postinst:
+            # it must explicitly validate the preserved source intent and repair
+            # nonce. Keep repair packaging impossible until that fail-closed
+            # postinst exists.
+            repair_postinst_source = source("packaging/debian/postinst-repair")
+            repair_postinst = repair_postinst_source.replace(
+                b"@VERSION@", version.encode()
+            ).replace(
+                b"@REPAIR_AUTHORITY_SHA256@",
+                hashlib.sha256(repair_authority_raw).hexdigest().encode(),
+            )
+            if (
+                REPAIR_POSTINST_MARKER not in repair_postinst
+                or re.search(rb"@[A-Z0-9_]+@", repair_postinst) is not None
+            ):
+                raise BuildError("repair capsule postinst is incomplete")
         install_file(
             stage,
             "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
-            preinst,
+            repair_preinst if repair_preinst is not None else preinst,
             0o555,
         )
+        if repair_preinst is not None:
+            install_file(
+                stage,
+                "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard",
+                standard_runner,
+                0o555,
+            )
+            install_file(
+                stage,
+                "usr/share/doc/vonk-forge-agent/repair-authority",
+                repair_authority_raw,
+                0o644,
+            )
         for name in (
             "vonk-forge-agent.service",
             "vonk-forge-docker-firewall.service",
@@ -657,16 +1066,23 @@ def build(
             agent_gate,
             0o644,
         )
+        evidence_binaries = {
+            **binaries,
+            "vonk-forge-docker-firewall": firewall_helper,
+            "vonk-forge-package-upgrade-recover": preinst,
+        }
+        if repair_preinst is not None:
+            evidence_binaries["vonk-forge-package-upgrade-recover"] = repair_preinst
+            evidence_binaries["vonk-forge-package-upgrade-recover.standard"] = (
+                standard_runner
+            )
         documents = evidence(
             version,
             epoch,
             architecture,
             build_digest,
-            {
-                **binaries,
-                "vonk-forge-docker-firewall": firewall_helper,
-                "vonk-forge-package-upgrade-recover": preinst,
-            },
+            evidence_binaries,
+            repair_evidence,
         )
         for name, raw in documents.items():
             install_file(stage, f"usr/share/doc/{PACKAGE}/{name}", raw, 0o644)
@@ -684,11 +1100,23 @@ def build(
             install_file(
                 stage, f"DEBIAN/{name}", source(f"packaging/debian/{name}"), 0o755
             )
-        postinst = source("packaging/debian/postinst").replace(
+        postinst = repair_postinst or source("packaging/debian/postinst").replace(
             b"@VERSION@", version.encode()
         )
         install_file(stage, "DEBIAN/postinst", postinst, 0o755)
-        install_file(stage, "DEBIAN/preinst", preinst, 0o755)
+        if repair_probe is not None:
+            install_file(
+                stage,
+                "DEBIAN/vonk-repair-helper.probe",
+                repair_probe,
+                0o755,
+            )
+        install_file(
+            stage,
+            "DEBIAN/preinst",
+            repair_preinst if repair_preinst is not None else preinst,
+            0o755,
+        )
         checksum_lines = []
         for path in sorted(item for item in stage.rglob("*") if item.is_file()):
             relative = path.relative_to(stage).as_posix()
@@ -739,6 +1167,8 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--binaries-dir", type=Path)
     parser.add_argument("--acceptance-baseline", action="store_true")
+    parser.add_argument("--repair-authority", type=Path)
+    parser.add_argument("--repair-probe-binary", type=Path)
     parser.add_argument(
         "--source-date-epoch",
         type=int,
@@ -755,6 +1185,8 @@ def main() -> int:
             arguments.architecture,
             arguments.build_digest,
             arguments.acceptance_baseline,
+            arguments.repair_authority,
+            arguments.repair_probe_binary,
         )
     except (BuildError, OSError, ValueError) as error:
         print(f"build-agent-deb: {error}", file=sys.stderr)

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import io
 import json
 import re
 import stat
@@ -15,6 +17,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
 MAX_DEB_BYTES = 512 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
@@ -28,6 +31,11 @@ REQUIRED_EXECUTABLE = {
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
     "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
 }
+REPAIR_STANDARD_RUNNER = (
+    "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard"
+)
+REPAIR_AUTHORITY = "usr/share/doc/vonk-forge-agent/repair-authority"
+REPAIR_PAYLOAD_ADDITIONS = {REPAIR_STANDARD_RUNNER, REPAIR_AUTHORITY}
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
     "etc/vonk-forge-agent/containers-storage.conf",
@@ -47,6 +55,7 @@ REQUIRED_PAYLOAD = {
     "usr/share/keyrings/vonk-forge-release.pub",
 }
 REQUIRED_CONTROL = {"control", "conffiles", "md5sums", "postinst", "preinst", "prerm"}
+REPAIR_PROBE_CONTROL = "vonk-repair-helper.probe"
 FORBIDDEN_MAINTAINER = re.compile(
     rb"(?:\bcurl\b|\bwget\b|\bgit\s+(?:clone|pull|fetch)\b|https?://|\bapt(?:-get)?\b)",
     re.IGNORECASE,
@@ -61,8 +70,59 @@ PACKAGE_VERSION = re.compile(
     rf"{SEMVER_TEXT}~acceptance\.1\+g[0-9a-f]{{12}}|"
     rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
+REPAIR_PACKAGE_VERSION = re.compile(
+    rf"(?P<source>{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})"
+    rf"\+repair\.spk(?P<node>[0-9a-f]{{32}})\.(?:[1-9][0-9]*)\Z"
+)
 ARCHITECTURES = {"arm64": 183, "amd64": 62}
 PACKAGE_SIGNATURE_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
+REPAIR_DISPATCH_MARKER = b"# VONK_REPAIR_DISPATCH_V1\n"
+REPAIR_POSTINST_MARKER = b"# VONK_REPAIR_POSTINST_V1\n"
+UNRESOLVED_PLACEHOLDER = re.compile(rb"@[A-Z0-9_]+@")
+REPAIR_AUTHORITY_FIELDS = (
+    "schema_version",
+    "node_id",
+    "installed_version",
+    "installed_agent_sha256",
+    "installed_helper_sha256",
+    "installed_agent_unit_sha256",
+    "installed_helper_unit_sha256",
+    "installed_helper_socket_sha256",
+    "source_target_version",
+    "source_architecture",
+    "source_package_sha256",
+    "source_agent_sha256",
+    "source_helper_sha256",
+    "source_runner_sha256",
+    "source_unit_sha256",
+    "source_agent_gate_sha256",
+    "source_socket_dropin_sha256",
+    "source_blocker_sha256",
+    "source_pending_sha256",
+    "repair_probe_sha256",
+    "setpriv_sha256",
+    "util_linux_version",
+)
+NORMAL_SYSTEMD_PAYLOAD = {
+    "lib/systemd/system/vonk-forge-agent.service": (
+        "packaging/systemd/vonk-forge-agent.service"
+    ),
+    "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf": (
+        "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf"
+    ),
+    "lib/systemd/system/vonk-forge-docker-firewall.service": (
+        "packaging/systemd/vonk-forge-docker-firewall.service"
+    ),
+    "lib/systemd/system/vonk-forge-package-helper.service": (
+        "packaging/systemd/vonk-forge-package-helper.service"
+    ),
+    "lib/systemd/system/vonk-forge-package-helper.socket": (
+        "packaging/systemd/vonk-forge-package-helper.socket"
+    ),
+    "lib/systemd/system/vonk-forge-package-upgrade-recover.service": (
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service"
+    ),
+}
 
 
 class VerificationError(RuntimeError):
@@ -87,7 +147,45 @@ def command(argv: list[str], *, input_bytes: bytes | None = None) -> bytes:
     return completed.stdout
 
 
-def verify(deb: Path) -> dict[str, object]:
+def verify(
+    deb: Path,
+    *,
+    repair: bool = False,
+    expected_node_id: str | None = None,
+    expected_repair_authority_sha256: str | None = None,
+    expected_release_key_sha256: str | None = None,
+    expected_binary_source_revision: str | None = None,
+    expected_packaging_source_revision: str | None = None,
+) -> dict[str, object]:
+    if repair:
+        if (
+            expected_node_id is None
+            or re.fullmatch(r"spk_[0-9a-f]{32}", expected_node_id) is None
+            or expected_repair_authority_sha256 is None
+            or re.fullmatch(r"[0-9a-f]{64}", expected_repair_authority_sha256) is None
+            or expected_release_key_sha256 is None
+            or re.fullmatch(r"[0-9a-f]{64}", expected_release_key_sha256) is None
+            or expected_binary_source_revision is None
+            or re.fullmatch(r"[0-9a-f]{40}", expected_binary_source_revision) is None
+            or expected_packaging_source_revision is None
+            or re.fullmatch(r"[0-9a-f]{40}", expected_packaging_source_revision) is None
+            or expected_binary_source_revision == expected_packaging_source_revision
+        ):
+            raise VerificationError(
+                "repair verification requires exact node, authority, release-key, "
+                "and source identities"
+            )
+    elif any(
+        value is not None
+        for value in (
+            expected_node_id,
+            expected_repair_authority_sha256,
+            expected_release_key_sha256,
+            expected_binary_source_revision,
+            expected_packaging_source_revision,
+        )
+    ):
+        raise VerificationError("repair expectations require explicit repair mode")
     deb = deb.absolute()
     metadata = deb.lstat()
     if (
@@ -108,7 +206,16 @@ def verify(deb: Path) -> dict[str, object]:
         raise VerificationError("package identity is invalid")
     if fields["Architecture"] not in ARCHITECTURES:
         raise VerificationError("package architecture is unsupported")
-    if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
+    if repair:
+        repair_version = REPAIR_PACKAGE_VERSION.fullmatch(fields["Version"])
+        if (
+            repair_version is None
+            or f"spk_{repair_version.group('node')}" != expected_node_id
+        ):
+            raise VerificationError(
+                "repair package version is not canonical and node-bound"
+            )
+    elif PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
     for dependency in ("acl", "iproute2", "iptables", "podman", "uidmap"):
         if (
@@ -129,12 +236,47 @@ def verify(deb: Path) -> dict[str, object]:
         command(["/usr/bin/dpkg-deb", "--extract", str(deb), str(payload)])
         command(["/usr/bin/dpkg-deb", "--control", str(deb), str(control)])
         members = _members(deb)
-        _verify_members(members)
-        _verify_control(control)
-        _verify_payload(payload, control, fields["Architecture"])
-        _verify_agent_signature(payload)
-        _verify_package_signature(payload, deb, package_sha256)
-        _verify_evidence(payload, fields["Version"], fields["Architecture"])
+        control_members = _control_members(deb)
+        _verify_members(members, repair=repair)
+        _verify_control(
+            control,
+            archive_members=control_members,
+            repair=repair,
+            expected_packaging_source_revision=(
+                expected_packaging_source_revision if repair else None
+            ),
+            architecture=fields["Architecture"],
+            version=fields["Version"],
+        )
+        repair_authority = _verify_payload(
+            payload,
+            control,
+            fields["Architecture"],
+            fields["Version"],
+            repair=repair,
+            expected_node_id=expected_node_id,
+            expected_repair_authority_sha256=expected_repair_authority_sha256,
+            expected_binary_source_revision=expected_binary_source_revision,
+            expected_packaging_source_revision=expected_packaging_source_revision,
+        )
+        public_key = _release_public_key(
+            payload,
+            expected_release_key_sha256 if repair else None,
+        )
+        _verify_agent_signature(payload, public_key)
+        package_signature = _verify_package_signature(public_key, deb, package_sha256)
+        evidence = _verify_evidence(
+            payload,
+            fields["Version"],
+            fields["Architecture"],
+            repair_authority=repair_authority,
+            expected_node_id=expected_node_id,
+            expected_repair_authority_sha256=expected_repair_authority_sha256,
+        )
+        target_binary_digest = hashlib.sha256(
+            (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
+        ).hexdigest()
+        release_key_sha256 = hashlib.sha256(public_key).hexdigest()
 
     checksum_path = deb.with_suffix(deb.suffix + ".sha256")
     try:
@@ -151,12 +293,37 @@ def verify(deb: Path) -> dict[str, object]:
     expected = checksum_path.read_text(encoding="ascii").strip().split()
     if expected != [package_sha256, deb.name]:
         raise VerificationError("release SHA-256 sidecar is invalid")
-    return {
+    result: dict[str, object] = {
         "architecture": fields["Architecture"],
         "package": PACKAGE,
         "sha256": package_sha256,
         "version": fields["Version"],
     }
+    if repair:
+        result.update(
+            {
+                "binary_source_revision": evidence["binary_source_revision"],
+                "package_bytes": metadata.st_size,
+                "package_signature": package_signature,
+                "packaging_source_revision": evidence["packaging_source_revision"],
+                "repair_authority_sha256": expected_repair_authority_sha256,
+                "repair_node_id": expected_node_id,
+                "release_key_sha256": release_key_sha256,
+                "target_binary_digest": target_binary_digest,
+                "target_build_digest": evidence["build_digest"],
+            }
+        )
+        if repair_authority is None:
+            raise VerificationError("repair authority was not verified")
+        if (
+            evidence["binary_source_revision"] != expected_binary_source_revision
+            or evidence["packaging_source_revision"]
+            != expected_packaging_source_revision
+        ):
+            raise VerificationError(
+                "repair package provenance does not match external source authority"
+            )
+    return result
 
 
 def _members(deb: Path) -> dict[str, tarfile.TarInfo]:
@@ -184,34 +351,127 @@ def _members(deb: Path) -> dict[str, tarfile.TarInfo]:
         return result
 
 
-def _verify_members(members: dict[str, tarfile.TarInfo]) -> None:
+def _verify_members(
+    members: dict[str, tarfile.TarInfo], *, repair: bool = False
+) -> None:
     files = {name for name, member in members.items() if member.isfile()}
-    missing = REQUIRED_PAYLOAD - files
+    required_payload = REQUIRED_PAYLOAD | (
+        REPAIR_PAYLOAD_ADDITIONS if repair else set()
+    )
+    required_executable = REQUIRED_EXECUTABLE | (
+        {REPAIR_STANDARD_RUNNER} if repair else set()
+    )
+    missing = required_payload - files
     if missing:
         raise VerificationError(f"package payload is incomplete: {sorted(missing)}")
-    if files != REQUIRED_PAYLOAD:
+    if files != required_payload:
         raise VerificationError("package contains an undeclared payload file")
     for name, member in members.items():
         if member.uid != 0 or member.gid != 0:
             raise VerificationError(f"package member ownership is unsafe: {name}")
         if member.isdir() and stat.S_IMODE(member.mode) != 0o755:
             raise VerificationError(f"package directory mode is unsafe: {name}")
-    for name in REQUIRED_PAYLOAD:
+    for name in required_payload:
         member = members[name]
         if not member.isfile():
             raise VerificationError(f"package member type is unsafe: {name}")
-    for name in REQUIRED_EXECUTABLE:
+    for name in required_executable:
         if stat.S_IMODE(members[name].mode) != 0o555:
             raise VerificationError(f"binary mode is unsafe: {name}")
-    for name in REQUIRED_PAYLOAD - REQUIRED_EXECUTABLE:
+    for name in required_payload - required_executable:
         if stat.S_IMODE(members[name].mode) != 0o644:
             raise VerificationError(f"data mode is unsafe: {name}")
 
 
-def _verify_control(control: Path) -> None:
-    names = {path.name for path in control.iterdir() if path.is_file()}
+def _control_members(deb: Path) -> dict[str, tarfile.TarInfo]:
+    raw = command(["/usr/bin/dpkg-deb", "--ctrl-tarfile", str(deb)])
+    result: dict[str, tarfile.TarInfo] = {}
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as archive:
+        for member in archive:
+            name = member.name
+            while name.startswith("./"):
+                name = name[2:]
+            if name in {"", "."}:
+                if not member.isdir():
+                    raise VerificationError("Debian control archive root is unsafe")
+                continue
+            if (
+                name.startswith("/")
+                or "\\" in name
+                or "/" in name
+                or name in result
+                or member.size > MAX_MEMBER_BYTES
+                or member.issym()
+                or member.islnk()
+                or not member.isfile()
+            ):
+                raise VerificationError("Debian control archive member is unsafe")
+            result[name] = member
+    return result
+
+
+def _verify_control(
+    control: Path,
+    *,
+    archive_members: dict[str, tarfile.TarInfo] | None = None,
+    repair: bool = False,
+    expected_packaging_source_revision: str | None = None,
+    architecture: str | None = None,
+    version: str | None = None,
+) -> None:
+    entries = {path.name: path for path in control.iterdir()}
+    names = set(entries)
     if not REQUIRED_CONTROL.issubset(names):
         raise VerificationError("Debian control archive is incomplete")
+    if repair:
+        expected_names = REQUIRED_CONTROL | {REPAIR_PROBE_CONTROL}
+        if (
+            names != expected_names
+            or archive_members is None
+            or set(archive_members) != expected_names
+            or any(
+                member.uid != 0
+                or member.gid != 0
+                or stat.S_IMODE(member.mode)
+                != (
+                    0o755
+                    if name
+                    in {"preinst", "postinst", "prerm", REPAIR_PROBE_CONTROL}
+                    else 0o644
+                )
+                for name, member in archive_members.items()
+            )
+            or expected_packaging_source_revision is None
+            or architecture is None
+            or version is None
+            or any(
+                not stat.S_ISREG(path.lstat().st_mode) or path.lstat().st_nlink != 1
+                for path in entries.values()
+            )
+        ):
+            raise VerificationError("repair Debian control archive is not exact")
+        expected_control = _render_source(
+            _git_source(
+                expected_packaging_source_revision,
+                "packaging/debian/control",
+            ),
+            f"{expected_packaging_source_revision}:packaging/debian/control",
+            (
+                (b"@VERSION@", version.encode("ascii")),
+                (b"@ARCHITECTURE@", architecture.encode("ascii")),
+            ),
+        )
+        if (control / "control").read_bytes() != expected_control:
+            raise VerificationError("repair Debian control metadata is not exact")
+        probe = (control / REPAIR_PROBE_CONTROL).read_bytes()
+        if (
+            len(probe) < 64
+            or probe[:4] != b"\x7fELF"
+            or probe[4] != 2
+            or probe[5] != 1
+            or struct.unpack_from("<H", probe, 18)[0] != ARCHITECTURES[architecture]
+        ):
+            raise VerificationError("repair helper probe is not the expected ELF")
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
     if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
         raise VerificationError("package conffile set is invalid")
@@ -220,68 +480,114 @@ def _verify_control(control: Path) -> None:
         mode = stat.S_IMODE((control / name).stat().st_mode)
         if mode != 0o755 or FORBIDDEN_MAINTAINER.search(raw):
             raise VerificationError(f"maintainer script is unsafe: {name}")
+    preinst_raw = (control / "preinst").read_bytes()
+    postinst_raw = (control / "postinst").read_bytes()
+    if repair:
+        if (
+            REPAIR_DISPATCH_MARKER not in preinst_raw
+            or REPAIR_POSTINST_MARKER not in postinst_raw
+        ):
+            raise VerificationError("repair maintainer scripts are incomplete")
+        if any(
+            UNRESOLVED_PLACEHOLDER.search((control / name).read_bytes())
+            for name in ("preinst", "postinst", "prerm")
+        ):
+            raise VerificationError("repair package contains an unresolved placeholder")
+        expected_prerm = _git_source(
+            expected_packaging_source_revision,
+            "packaging/debian/prerm",
+        )
+        if (control / "prerm").read_bytes() != expected_prerm:
+            raise VerificationError("repair prerm bytes are not exact")
+    elif (
+        REPAIR_DISPATCH_MARKER in preinst_raw or REPAIR_POSTINST_MARKER in postinst_raw
+    ):
+        raise VerificationError("ordinary package contains repair behavior")
     postinst = (control / "postinst").read_text(encoding="utf-8")
+    if repair:
+        for required in (
+            "VONK_REPAIR_POSTINST_V1",
+            "VONK_FORGE_PACKAGE_REPAIR_NONCE",
+        ):
+            if required not in postinst:
+                raise VerificationError("repair postinst lifecycle is incomplete")
+    else:
+        for required in (
+            "adduser",
+            "usermod --add-subuids",
+            "usermod --add-subgids",
+            "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
+            "openssl rand -hex 32",
+            "install -o root -g vonk-agent -m 0640",
+            "deb-systemd-helper enable vonk-forge-agent.service",
+            "daemon-reload",
+            "schedule_permanent_helper_restart",
+            "activate_permanent_helper_unit",
+            "helper-upgrade.pending",
+            "helper-upgrade.receipt",
+            "agent_sha256=$expected_agent_digest",
+            "boot_id=$boot_id",
+            "schema_version=1",
+            "activated_at=$activated_at",
+            '"/proc/$new_helper_pid/exe"',
+            "helper_sha256=$expected_helper_digest",
+            "installed_helper_digest",
+            "confirmed_helper_digest",
+            "/usr/bin/sync -f /var/lib/vonk-forge",
+            "vonk-forge-agent.service >/dev/null",
+            "vonk-forge-package-helper-upgrade-finish.service",
+            "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
+            "RuntimeMaxSec=240s",
+            "/proc/$wait_pid/stat",
+            "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
+        ):
+            if required not in postinst:
+                raise VerificationError("postinst lifecycle is incomplete")
+        if any(
+            forbidden in postinst
+            for forbidden in (
+                "supervisor",
+                "/var/lib/vonk-forge/slots",
+                "verify-readiness",
+                "readiness.json",
+                "--property MainPID",
+                " is-active ",
+                "self-test",
+                "/run/vonk-forge-agent",
+            )
+        ):
+            raise VerificationError("postinst contains obsolete agent lifecycle state")
+        _verify_standard_preinst((control / "preinst").read_text(encoding="utf-8"))
+    if "/usr/bin/python" in postinst or "python3" in postinst:
+        raise VerificationError("postinst has an undeclared interpreter dependency")
+    prerm = (control / "prerm").read_text(encoding="utf-8")
     for required in (
-        "adduser",
-        "usermod --add-subuids",
-        "usermod --add-subgids",
-        "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
-        "openssl rand -hex 32",
-        "install -o root -g vonk-agent -m 0640",
-        "deb-systemd-helper enable vonk-forge-agent.service",
-        "daemon-reload",
-        "schedule_permanent_helper_restart",
-        "activate_permanent_helper_unit",
         "helper-upgrade.pending",
         "helper-upgrade.receipt",
-        "agent_sha256=$expected_agent_digest",
-        "boot_id=$boot_id",
-        "schema_version=1",
-        "activated_at=$activated_at",
-        '"/proc/$new_helper_pid/exe"',
-        "helper_sha256=$expected_helper_digest",
-        "installed_helper_digest",
-        "confirmed_helper_digest",
+        "safe_pending",
+        "safe_receipt",
         "/usr/bin/sync -f /var/lib/vonk-forge",
-        "vonk-forge-agent.service >/dev/null",
-        "vonk-forge-package-helper-upgrade-finish.service",
-        "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
-        "RuntimeMaxSec=240s",
-        "/proc/$wait_pid/stat",
-        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
     ):
-        if required not in postinst:
-            raise VerificationError("postinst lifecycle is incomplete")
-    if any(
-        forbidden in postinst
-        for forbidden in (
-            "supervisor",
-            "/var/lib/vonk-forge/slots",
-            "verify-readiness",
-            "readiness.json",
-            "--property MainPID",
-            " is-active ",
-            "self-test",
-            "/run/vonk-forge-agent",
-        )
-    ):
-        raise VerificationError("postinst contains obsolete agent lifecycle state")
-    preinst = (control / "preinst").read_text(encoding="utf-8")
+        if required not in prerm:
+            raise VerificationError("prerm helper evidence cleanup is incomplete")
+
+
+def _verify_standard_preinst(preinst: str) -> None:
     for required in (
         "dpkg --compare-versions",
         "refusing downgrade",
         "inside_package_helper",
         "helper_namespace_has_package_paths",
-        'keyrings=/usr/share/keyrings',
-        'package_doc=/usr/share/doc/vonk-forge-agent',
-        '.vonk-package-write.XXXXXX',
-        'package_action=1',
+        "keyrings=/usr/share/keyrings",
+        "package_doc=/usr/share/doc/vonk-forge-agent",
+        ".vonk-package-write.XXXXXX",
+        "package_action=1",
         "arm_controller_recovery",
         "state_dir=$state_parent/package-upgrade",
         "package_sha256=$package_digest",
         "recovery_nonce=$recovery_nonce",
         "vonk-forge-package-upgrade-recover.service",
-        'VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce',
+        "VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce",
         '/usr/bin/dpkg --force-confold --configure "$package_name"',
         '/usr/bin/dpkg --install --force-confold "$cached_package"',
         '"/proc/$service_pid/exe"',
@@ -297,21 +603,20 @@ def _verify_control(control: Path) -> None:
         raise VerificationError("preinst recovery is not package-scoped and offline")
     if "helper_unit_has_package_paths" in preinst or "helper_unit_path=" in preinst:
         raise VerificationError("preinst trusts stale on-disk helper configuration")
-    if "/usr/bin/python" in postinst or "python3" in postinst:
-        raise VerificationError("postinst has an undeclared interpreter dependency")
-    prerm = (control / "prerm").read_text(encoding="utf-8")
-    for required in (
-        "helper-upgrade.pending",
-        "helper-upgrade.receipt",
-        "safe_pending",
-        "safe_receipt",
-        "/usr/bin/sync -f /var/lib/vonk-forge",
-    ):
-        if required not in prerm:
-            raise VerificationError("prerm helper evidence cleanup is incomplete")
 
 
-def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
+def _verify_payload(
+    payload: Path,
+    control: Path,
+    architecture: str,
+    version: str,
+    *,
+    repair: bool = False,
+    expected_node_id: str | None = None,
+    expected_repair_authority_sha256: str | None = None,
+    expected_binary_source_revision: str | None = None,
+    expected_packaging_source_revision: str | None = None,
+) -> dict[str, str] | None:
     if (
         payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
     ).read_bytes() != (control / "preinst").read_bytes():
@@ -386,14 +691,15 @@ def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
     if "SocketGroup=vonk-agent" not in units["vonk-forge-package-helper.socket"]:
         raise VerificationError("helper socket group is invalid")
     agent_gate = (
-        payload
-        / "lib/systemd/system/vonk-forge-agent.service.d/"
+        payload / "lib/systemd/system/vonk-forge-agent.service.d/"
         "20-package-upgrade-recovery.conf"
     ).read_text(encoding="utf-8")
     if agent_gate.splitlines() != [
         "[Service]",
-        "ExecCondition=+/usr/lib/vonk-forge/"
-        "vonk-forge-package-upgrade-recover allow-agent-start",
+        (
+            "ExecCondition=+/usr/lib/vonk-forge/"
+            "vonk-forge-package-upgrade-recover allow-agent-start"
+        ),
     ]:
         raise VerificationError("durable recovery agent-start gate is invalid")
     recovery = units["vonk-forge-package-upgrade-recover.service"]
@@ -466,15 +772,499 @@ def _verify_payload(payload: Path, control: Path, architecture: str) -> None:
     }
     if expected_md5 != actual_files:
         raise VerificationError("payload checksums do not match")
+    if repair:
+        if (
+            expected_node_id is None
+            or expected_repair_authority_sha256 is None
+            or expected_binary_source_revision is None
+            or expected_packaging_source_revision is None
+        ):
+            raise VerificationError("repair expectations are incomplete")
+        return _verify_repair_payload(
+            payload,
+            control,
+            architecture,
+            version,
+            expected_node_id,
+            expected_repair_authority_sha256,
+            expected_binary_source_revision,
+            expected_packaging_source_revision,
+        )
+    return None
 
 
-def _verify_agent_signature(payload: Path) -> None:
-    public_key = bytes.fromhex(
+def _single_quoted_assignment(raw: bytes, name: str) -> bytes:
+    matches = re.findall(
+        rb"^" + re.escape(name.encode("ascii")) + rb"='([^'\n]*)'$",
+        raw,
+        re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise VerificationError(f"repair capsule assignment is invalid: {name}")
+    return matches[0]
+
+
+def _embedded_blob(raw: bytes, name: str) -> bytes:
+    encoded = _single_quoted_assignment(raw, f"{name}_base64")
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except ValueError as error:
+        raise VerificationError(f"repair capsule embedded {name} is invalid") from error
+
+
+def _verify_digest_assignment(raw: bytes, name: str, contents: bytes) -> None:
+    expected = _single_quoted_assignment(raw, name).decode("ascii")
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", expected) is None
+        or expected != hashlib.sha256(contents).hexdigest()
+    ):
+        raise VerificationError(f"repair capsule {name} is invalid")
+
+
+def _render_packaging_source(
+    relative: str, replacements: tuple[tuple[bytes, bytes], ...]
+) -> bytes:
+    return _render_source((ROOT / relative).read_bytes(), relative, replacements)
+
+
+def _render_source(
+    source: bytes,
+    label: str,
+    replacements: tuple[tuple[bytes, bytes], ...],
+) -> bytes:
+    for placeholder, value in replacements:
+        if source.count(placeholder) != 1:
+            raise VerificationError(
+                f"repair packaging template placeholder is invalid: {label}"
+            )
+        source = source.replace(placeholder, value)
+    if UNRESOLVED_PLACEHOLDER.search(source) is not None:
+        raise VerificationError(f"repair packaging template is incomplete: {label}")
+    return source
+
+
+def _git_source(revision: str, relative: str) -> bytes:
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise VerificationError("repair binary source revision is invalid")
+    return command(
+        [
+            "/usr/bin/git",
+            "-c",
+            f"safe.directory={ROOT}",
+            "--no-replace-objects",
+            "-C",
+            str(ROOT),
+            "show",
+            f"{revision}:{relative}",
+        ]
+    )
+
+
+def _verify_exact_repair_scripts(
+    payload: Path,
+    control: Path,
+    *,
+    architecture: str,
+    version: str,
+    authority_raw: bytes,
+    authority: dict[str, str],
+    expected_binary_source_revision: str,
+    expected_packaging_source_revision: str,
+) -> bytes:
+    agent = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
+    helper = (payload / "usr/lib/vonk-forge/vonk-agent-helper").read_bytes()
+    repair_probe = (control / REPAIR_PROBE_CONTROL).read_bytes()
+    if (
+        hashlib.sha256(repair_probe).hexdigest()
+        != authority["repair_probe_sha256"]
+    ):
+        raise VerificationError("repair helper probe does not match authority")
+    target_agent_unit = (
+        payload / "lib/systemd/system/vonk-forge-agent.service"
+    ).read_bytes()
+    target_helper_unit = (
+        payload / "lib/systemd/system/vonk-forge-package-helper.service"
+    ).read_bytes()
+    target_helper_socket = (
+        payload / "lib/systemd/system/vonk-forge-package-helper.socket"
+    ).read_bytes()
+    source_unit = _git_source(
+        expected_binary_source_revision,
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service",
+    )
+    source_agent_gate = _git_source(
+        expected_binary_source_revision,
+        "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+    )
+    if (
+        hashlib.sha256(source_unit).hexdigest() != authority["source_unit_sha256"]
+        or hashlib.sha256(source_agent_gate).hexdigest()
+        != authority["source_agent_gate_sha256"]
+    ):
+        raise VerificationError(
+            "repair authority source systemd bytes do not match binary source"
+        )
+    standard_runner = _render_source(
+        _git_source(
+            expected_binary_source_revision,
+            "packaging/debian/preinst",
+        ),
+        f"{expected_binary_source_revision}:packaging/debian/preinst",
+        (
+            (b"@VERSION@", authority["source_target_version"].encode("ascii")),
+            (b"@ARCHITECTURE@", authority["source_architecture"].encode("ascii")),
+            (b"@AGENT_SHA256@", authority["source_agent_sha256"].encode("ascii")),
+            (
+                b"@HELPER_SHA256@",
+                authority["source_helper_sha256"].encode("ascii"),
+            ),
+            (
+                b"@RECOVERY_UNIT_SHA256@",
+                authority["source_unit_sha256"].encode("ascii"),
+            ),
+            (b"@RECOVERY_UNIT_BASE64@", base64.b64encode(source_unit)),
+            (
+                b"@AGENT_GATE_SHA256@",
+                authority["source_agent_gate_sha256"].encode("ascii"),
+            ),
+            (b"@AGENT_GATE_BASE64@", base64.b64encode(source_agent_gate)),
+        ),
+    )
+    if hashlib.sha256(standard_runner).hexdigest() != authority["source_runner_sha256"]:
+        raise VerificationError(
+            "repair authority source runner does not match binary source"
+        )
+    authority_sha256 = hashlib.sha256(authority_raw).hexdigest().encode("ascii")
+    repair_preinst = _render_source(
+        _git_source(
+            expected_packaging_source_revision,
+            "packaging/debian/preinst-repair",
+        ),
+        f"{expected_packaging_source_revision}:packaging/debian/preinst-repair",
+        (
+            (b"@VERSION@", version.encode("ascii")),
+            (b"@ARCHITECTURE@", architecture.encode("ascii")),
+            (b"@AGENT_SHA256@", hashlib.sha256(agent).hexdigest().encode("ascii")),
+            (
+                b"@HELPER_SHA256@",
+                hashlib.sha256(helper).hexdigest().encode("ascii"),
+            ),
+            (b"@REPAIR_AUTHORITY_SHA256@", authority_sha256),
+            (b"@REPAIR_AUTHORITY_BASE64@", base64.b64encode(authority_raw)),
+            (
+                b"@REPAIR_PROBE_SHA256@",
+                hashlib.sha256(repair_probe).hexdigest().encode("ascii"),
+            ),
+            (
+                b"@STANDARD_RUNNER_SHA256@",
+                hashlib.sha256(standard_runner).hexdigest().encode("ascii"),
+            ),
+            (b"@STANDARD_RUNNER_BASE64@", base64.b64encode(standard_runner)),
+            (
+                b"@TARGET_AGENT_UNIT_SHA256@",
+                hashlib.sha256(target_agent_unit).hexdigest().encode("ascii"),
+            ),
+            (
+                b"@TARGET_HELPER_UNIT_SHA256@",
+                hashlib.sha256(target_helper_unit).hexdigest().encode("ascii"),
+            ),
+            (
+                b"@TARGET_HELPER_SOCKET_SHA256@",
+                hashlib.sha256(target_helper_socket).hexdigest().encode("ascii"),
+            ),
+        ),
+    )
+    repair_postinst = _render_source(
+        _git_source(
+            expected_packaging_source_revision,
+            "packaging/debian/postinst-repair",
+        ),
+        f"{expected_packaging_source_revision}:packaging/debian/postinst-repair",
+        (
+            (b"@VERSION@", version.encode("ascii")),
+            (b"@REPAIR_AUTHORITY_SHA256@", authority_sha256),
+        ),
+    )
+    if (
+        (payload / REPAIR_STANDARD_RUNNER).read_bytes() != standard_runner
+        or (control / "preinst").read_bytes() != repair_preinst
+        or (
+            payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
+        ).read_bytes()
+        != repair_preinst
+        or (control / "postinst").read_bytes() != repair_postinst
+    ):
+        raise VerificationError("repair maintainer script bytes are not canonical")
+    return standard_runner
+
+
+def _verify_normal_systemd_payload(
+    payload: Path, expected_packaging_source_revision: str
+) -> None:
+    for relative, source_relative in NORMAL_SYSTEMD_PAYLOAD.items():
+        expected = _git_source(expected_packaging_source_revision, source_relative)
+        if (payload / relative).read_bytes() != expected:
+            raise VerificationError(
+                f"repair capsule changes ordinary systemd payload: {relative}"
+            )
+
+
+def _read_repair_authority(
+    raw: bytes,
+    *,
+    architecture: str,
+    version: str,
+    expected_node_id: str,
+    expected_sha256: str,
+) -> dict[str, str]:
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise VerificationError("repair authority SHA-256 does not match expectation")
+    try:
+        text = raw.decode("ascii")
+        lines = text.splitlines(keepends=True)
+        names = tuple(line[:-1].split("=", 1)[0] for line in lines)
+        document = dict(line[:-1].split("=", 1) for line in lines)
+    except (UnicodeDecodeError, ValueError) as error:
+        raise VerificationError("repair authority is invalid") from error
+    digest_fields = {
+        field for field in REPAIR_AUTHORITY_FIELDS if field.endswith("_sha256")
+    }
+    repair_version = REPAIR_PACKAGE_VERSION.fullmatch(version)
+    if (
+        not raw.endswith(b"\n")
+        or b"\r" in raw
+        or len(lines) != len(REPAIR_AUTHORITY_FIELDS)
+        or any(not line.endswith("\n") for line in lines)
+        or names != REPAIR_AUTHORITY_FIELDS
+        or len(document) != len(REPAIR_AUTHORITY_FIELDS)
+        or document.get("schema_version") != "1"
+        or document.get("node_id") != expected_node_id
+        or PACKAGE_VERSION.fullmatch(document.get("installed_version", "")) is None
+        or PACKAGE_VERSION.fullmatch(document.get("source_target_version", "")) is None
+        or document.get("source_architecture") != architecture
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", document.get(field, "")) is None
+            for field in digest_fields
+        )
+        or re.fullmatch(
+            r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", "")
+        )
+        is None
+        or repair_version is None
+        or repair_version.group("source") != document.get("source_target_version")
+    ):
+        raise VerificationError("repair authority is not canonical")
+    command(
+        [
+            "/usr/bin/dpkg",
+            "--compare-versions",
+            document["installed_version"],
+            "lt",
+            document["source_target_version"],
+        ]
+    )
+    command(
+        [
+            "/usr/bin/dpkg",
+            "--compare-versions",
+            document["source_target_version"],
+            "lt",
+            version,
+        ]
+    )
+    return document
+
+
+def _verify_repair_binary_authority(payload: Path, authority: dict[str, str]) -> None:
+    for name, field in (
+        ("vonk-agent", "source_agent_sha256"),
+        ("vonk-agent-helper", "source_helper_sha256"),
+    ):
+        observed = hashlib.sha256(
+            (payload / f"usr/lib/vonk-forge/{name}").read_bytes()
+        ).hexdigest()
+        if observed != authority[field]:
+            raise VerificationError(
+                "repair payload binaries do not match source authority"
+            )
+
+
+def _verify_repair_firewall_source(
+    payload: Path, expected_packaging_source_revision: str
+) -> None:
+    expected = _git_source(
+        expected_packaging_source_revision,
+        "packaging/bin/vonk-forge-docker-firewall",
+    )
+    observed = (payload / "usr/lib/vonk-forge/vonk-forge-docker-firewall").read_bytes()
+    if observed != expected:
+        raise VerificationError(
+            "repair Docker firewall does not match packaging source"
+        )
+
+
+def _verify_repair_payload(
+    payload: Path,
+    control: Path,
+    architecture: str,
+    version: str,
+    expected_node_id: str,
+    expected_authority_sha256: str,
+    expected_binary_source_revision: str,
+    expected_packaging_source_revision: str,
+) -> dict[str, str]:
+    repair_runner = (control / "preinst").read_bytes()
+    repair_probe = (control / REPAIR_PROBE_CONTROL).read_bytes()
+    installed_runner = (
+        payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
+    ).read_bytes()
+    standard_runner = (payload / REPAIR_STANDARD_RUNNER).read_bytes()
+    authority_raw = (payload / REPAIR_AUTHORITY).read_bytes()
+    postinst = (control / "postinst").read_bytes()
+    if (
+        repair_runner != installed_runner
+        or repair_runner.count(REPAIR_DISPATCH_MARKER) != 1
+        or postinst.count(REPAIR_POSTINST_MARKER) != 1
+        or REPAIR_DISPATCH_MARKER in standard_runner
+        or REPAIR_POSTINST_MARKER in standard_runner
+        or any(
+            UNRESOLVED_PLACEHOLDER.search(raw) is not None
+            for raw in (
+                repair_runner,
+                installed_runner,
+                standard_runner,
+                authority_raw,
+                postinst,
+            )
+        )
+    ):
+        raise VerificationError("repair capsule runner identity is invalid")
+    authority = _read_repair_authority(
+        authority_raw,
+        architecture=architecture,
+        version=version,
+        expected_node_id=expected_node_id,
+        expected_sha256=expected_authority_sha256,
+    )
+    _verify_repair_binary_authority(payload, authority)
+    _verify_repair_firewall_source(payload, expected_packaging_source_revision)
+    standard_runner = _verify_exact_repair_scripts(
+        payload,
+        control,
+        architecture=architecture,
+        version=version,
+        authority_raw=authority_raw,
+        authority=authority,
+        expected_binary_source_revision=expected_binary_source_revision,
+        expected_packaging_source_revision=expected_packaging_source_revision,
+    )
+    if _embedded_blob(repair_runner, "authority") != authority_raw:
+        raise VerificationError("repair capsule embeds a different authority")
+    _verify_digest_assignment(repair_runner, "authority_sha256", authority_raw)
+    _verify_digest_assignment(repair_runner, "repair_probe_sha256", repair_probe)
+    if _embedded_blob(repair_runner, "standard_runner") != standard_runner:
+        raise VerificationError("repair capsule embeds a different standard runner")
+    _verify_digest_assignment(repair_runner, "standard_runner_sha256", standard_runner)
+    _verify_standard_preinst(standard_runner.decode("utf-8"))
+    for name, expected in (
+        ("target_version", version),
+        ("target_architecture", architecture),
+        (
+            "target_agent_sha256",
+            hashlib.sha256(
+                (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
+            ).hexdigest(),
+        ),
+        (
+            "target_helper_sha256",
+            hashlib.sha256(
+                (payload / "usr/lib/vonk-forge/vonk-agent-helper").read_bytes()
+            ).hexdigest(),
+        ),
+    ):
+        if _single_quoted_assignment(repair_runner, name).decode("ascii") != expected:
+            raise VerificationError(f"repair capsule {name} does not match payload")
+    for name, relative in (
+        ("target_agent_unit_sha256", "lib/systemd/system/vonk-forge-agent.service"),
+        (
+            "target_helper_unit_sha256",
+            "lib/systemd/system/vonk-forge-package-helper.service",
+        ),
+        (
+            "target_helper_socket_sha256",
+            "lib/systemd/system/vonk-forge-package-helper.socket",
+        ),
+    ):
+        _verify_digest_assignment(
+            repair_runner, name, (payload / relative).read_bytes()
+        )
+    _verify_normal_systemd_payload(payload, expected_packaging_source_revision)
+    for name, relative in (
+        (
+            "recovery_unit",
+            "lib/systemd/system/vonk-forge-package-upgrade-recover.service",
+        ),
+        (
+            "agent_gate",
+            (
+                "lib/systemd/system/vonk-forge-agent.service.d/"
+                "20-package-upgrade-recovery.conf"
+            ),
+        ),
+    ):
+        expected = _git_source(
+            expected_binary_source_revision,
+            {
+                "recovery_unit": (
+                    "packaging/systemd/vonk-forge-package-upgrade-recover.service"
+                ),
+                "agent_gate": (
+                    "packaging/systemd/vonk-forge-agent.service.d/"
+                    "20-package-upgrade-recovery.conf"
+                ),
+            }[name],
+        )
+        if _embedded_blob(standard_runner, name) != expected:
+            raise VerificationError(
+                f"embedded standard {name} differs from binary source"
+            )
+        _verify_digest_assignment(standard_runner, f"{name}_sha256", expected)
+    if (
+        _single_quoted_assignment(postinst, "package_version").decode("ascii")
+        != version
+        or _single_quoted_assignment(postinst, "authority_sha256").decode("ascii")
+        != expected_authority_sha256
+    ):
+        raise VerificationError("repair postinst is not bound to capsule authority")
+    return authority
+
+
+def _release_public_key(payload: Path, expected_sha256: str | None) -> bytes:
+    try:
+        public_key = bytes.fromhex(
+            (payload / "usr/share/keyrings/vonk-forge-release.pub")
+            .read_text(encoding="ascii")
+            .strip()
+        )
+    except ValueError as error:
+        raise VerificationError("release public key is invalid") from error
+    if len(public_key) != 32:
+        raise VerificationError("release public key is invalid")
+    if (
+        expected_sha256 is not None
+        and hashlib.sha256(public_key).hexdigest() != expected_sha256
+    ):
+        raise VerificationError("release public key does not match external authority")
+    return public_key
+
+
+def _verify_agent_signature(payload: Path, public_key: bytes) -> None:
+    embedded = bytes.fromhex(
         (payload / "usr/share/keyrings/vonk-forge-release.pub")
         .read_text(encoding="ascii")
         .strip()
     )
-    if len(public_key) != 32:
+    if embedded != public_key:
         raise VerificationError("release public key is invalid")
     prefix = bytes.fromhex("302a300506032b6570032100")
     with tempfile.TemporaryDirectory(prefix="vonk-manifest-key-") as temporary:
@@ -514,7 +1304,7 @@ def _verify_agent_signature(payload: Path) -> None:
         )
 
 
-def _verify_package_signature(payload: Path, deb: Path, digest: str) -> None:
+def _verify_package_signature(public_key: bytes, deb: Path, digest: str) -> str:
     signature_path = deb.with_suffix(deb.suffix + ".host.sig")
     try:
         metadata = signature_path.lstat()
@@ -530,11 +1320,6 @@ def _verify_package_signature(payload: Path, deb: Path, digest: str) -> None:
     signature_text = signature_path.read_text(encoding="ascii").strip()
     if re.fullmatch(r"[0-9a-f]{128}", signature_text) is None:
         raise VerificationError("release host signature is invalid")
-    public_key = bytes.fromhex(
-        (payload / "usr/share/keyrings/vonk-forge-release.pub")
-        .read_text(encoding="ascii")
-        .strip()
-    )
     prefix = bytes.fromhex("302a300506032b6570032100")
     with tempfile.TemporaryDirectory(prefix="vonk-package-key-") as temporary:
         root = Path(temporary)
@@ -561,9 +1346,18 @@ def _verify_package_signature(payload: Path, deb: Path, digest: str) -> None:
                 str(detached_path),
             ]
         )
+    return signature_text
 
 
-def _verify_evidence(payload: Path, version: str, architecture: str) -> None:
+def _verify_evidence(
+    payload: Path,
+    version: str,
+    architecture: str,
+    *,
+    repair_authority: dict[str, str] | None = None,
+    expected_node_id: str | None = None,
+    expected_repair_authority_sha256: str | None = None,
+) -> dict[str, str]:
     documents = {
         name: json.loads(
             (payload / f"usr/share/doc/vonk-forge-agent/{name}").read_text(
@@ -576,9 +1370,12 @@ def _verify_evidence(payload: Path, version: str, architecture: str) -> None:
         raise VerificationError("CycloneDX SBOM is invalid")
     if documents["sbom.spdx.json"].get("spdxVersion") != "SPDX-2.3":
         raise VerificationError("SPDX SBOM is invalid")
+    evidence_executables = REQUIRED_EXECUTABLE | (
+        {REPAIR_STANDARD_RUNNER} if repair_authority is not None else set()
+    )
     expected = {
         Path(name).name: hashlib.sha256((payload / name).read_bytes()).hexdigest()
-        for name in REQUIRED_EXECUTABLE
+        for name in evidence_executables
     }
     cyclone_components = documents["sbom.cdx.json"].get("components")
     if not isinstance(cyclone_components, list):
@@ -643,20 +1440,204 @@ def _verify_evidence(payload: Path, version: str, architecture: str) -> None:
         or re.fullmatch(r"sha256:[0-9a-f]{64}", build_digest) is None
         or f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode() not in agent_raw
         or semantic_version is None
-        or f"VONK_AGENT_SEMANTIC_VERSION={semantic_version}".encode()
-        not in agent_raw
+        or f"VONK_AGENT_SEMANTIC_VERSION={semantic_version}".encode() not in agent_raw
         or build_digest == f"sha256:{expected['vonk-agent']}"
     ):
         raise VerificationError("package provenance is invalid")
+    if repair_authority is not None:
+        if expected_node_id is None or expected_repair_authority_sha256 is None:
+            raise VerificationError("repair provenance expectations are incomplete")
+        repair_sources = _verify_repair_evidence(
+            documents,
+            version=version,
+            expected=expected,
+            expected_node_id=expected_node_id,
+            expected_authority_sha256=expected_repair_authority_sha256,
+        )
+    else:
+        repair_sources = {}
+    return {"build_digest": build_digest, **repair_sources}
+
+
+def _verify_repair_evidence(
+    documents: dict[str, object],
+    *,
+    version: str,
+    expected: dict[str, str],
+    expected_node_id: str,
+    expected_authority_sha256: str,
+) -> dict[str, str]:
+    provenance = documents["provenance.json"]
+    cyclone = documents["sbom.cdx.json"]
+    spdx = documents["sbom.spdx.json"]
+    if not all(isinstance(item, dict) for item in (provenance, cyclone, spdx)):
+        raise VerificationError("repair provenance documents are invalid")
+    build_definition = (
+        provenance.get("predicate", {}).get("buildDefinition", {})
+        if isinstance(provenance.get("predicate"), dict)
+        else {}
+    )
+    external = (
+        build_definition.get("externalParameters", {})
+        if isinstance(build_definition, dict)
+        else {}
+    )
+    repair = external.get("repair") if isinstance(external, dict) else None
+    if not isinstance(repair, dict) or set(repair) != {
+        "authority_sha256",
+        "binary_source_revision",
+        "node_id",
+        "packaging_source_revision",
+    }:
+        raise VerificationError("repair provenance parameters are invalid")
+    binary_revision = repair.get("binary_source_revision")
+    packaging_revision = repair.get("packaging_source_revision")
+    repair_version = REPAIR_PACKAGE_VERSION.fullmatch(version)
+    if (
+        repair.get("authority_sha256") != expected_authority_sha256
+        or repair.get("node_id") != expected_node_id
+        or not isinstance(binary_revision, str)
+        or re.fullmatch(r"[0-9a-f]{40}", binary_revision) is None
+        or not isinstance(packaging_revision, str)
+        or re.fullmatch(r"[0-9a-f]{40}", packaging_revision) is None
+        or binary_revision == packaging_revision
+        or repair_version is None
+        or not binary_revision.startswith(
+            repair_version.group("source").rsplit("+g", 1)[1]
+        )
+    ):
+        raise VerificationError("repair source provenance is invalid")
+    run_details = provenance.get("predicate", {}).get("runDetails", {})
+    repository = (
+        run_details.get("builder", {}).get("id")
+        if isinstance(run_details, dict)
+        and isinstance(run_details.get("builder"), dict)
+        else None
+    )
+    if (
+        not isinstance(repository, str)
+        or not repository
+        or build_definition.get("resolvedDependencies")
+        != [
+            {
+                "digest": {"gitCommit": packaging_revision},
+                "relationship": "repair-package-source",
+                "uri": repository,
+            },
+            {
+                "digest": {"gitCommit": binary_revision},
+                "relationship": "target-binary-source",
+                "uri": repository,
+            },
+        ]
+    ):
+        raise VerificationError("repair resolved dependencies are invalid")
+    cyclone_components = cyclone.get("components")
+    spdx_packages = spdx.get("packages")
+    if not isinstance(cyclone_components, list) or not isinstance(spdx_packages, list):
+        raise VerificationError("repair SBOM components are invalid")
+    cyclone_apps = [
+        item
+        for item in cyclone_components
+        if isinstance(item, dict) and item.get("type") == "application"
+    ]
+    spdx_apps = [
+        item
+        for item in spdx_packages
+        if isinstance(item, dict) and item.get("primaryPackagePurpose") == "APPLICATION"
+    ]
+    if (
+        len(cyclone_apps) != len(expected)
+        or len(spdx_apps) != len(expected)
+        or {item.get("name") for item in cyclone_apps} != set(expected)
+        or {item.get("name") for item in spdx_apps} != set(expected)
+    ):
+        raise VerificationError("repair SBOM application set is invalid")
+    packaging_names = {
+        "vonk-forge-docker-firewall",
+        "vonk-forge-package-upgrade-recover",
+    }
+    for item in cyclone_apps:
+        name = item["name"]
+        property_name = (
+            "vonk:packagingSourceRevision"
+            if name in packaging_names
+            else "vonk:binarySourceRevision"
+        )
+        revision = packaging_revision if name in packaging_names else binary_revision
+        if item.get("properties") != [{"name": property_name, "value": revision}]:
+            raise VerificationError("repair CycloneDX source binding is invalid")
+    for item in spdx_apps:
+        name = item["name"]
+        revision = packaging_revision if name in packaging_names else binary_revision
+        reference_type = (
+            "vonk-repair-packaging-source"
+            if name in packaging_names
+            else "vonk-target-binary-source"
+        )
+        if item.get("externalRefs") != [
+            {
+                "referenceCategory": "OTHER",
+                "referenceLocator": f"{repository}@{revision}",
+                "referenceType": reference_type,
+            }
+        ]:
+            raise VerificationError("repair SPDX source binding is invalid")
+    metadata = cyclone.get("metadata")
+    metadata_component = (
+        metadata.get("component", {}) if isinstance(metadata, dict) else {}
+    )
+    if metadata_component.get("properties") != [
+        {
+            "name": "vonk:repairAuthoritySha256",
+            "value": expected_authority_sha256,
+        },
+        {"name": "vonk:repairNodeId", "value": expected_node_id},
+        {
+            "name": "vonk:repairPackagingSourceRevision",
+            "value": packaging_revision,
+        },
+    ]:
+        raise VerificationError("repair CycloneDX metadata binding is invalid")
+    if spdx.get("documentComment") != (
+        "Vonk repair "
+        f"authority_sha256={expected_authority_sha256} "
+        f"node_id={expected_node_id} "
+        f"binary_source_revision={binary_revision} "
+        f"packaging_source_revision={packaging_revision}"
+    ):
+        raise VerificationError("repair SPDX document binding is invalid")
+    return {
+        "binary_source_revision": binary_revision,
+        "packaging_source_revision": packaging_revision,
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("deb", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--repair", action="store_true")
+    parser.add_argument("--expected-node-id")
+    parser.add_argument("--expected-repair-authority-sha256")
+    parser.add_argument("--expected-release-key-sha256")
+    parser.add_argument("--expected-binary-source-revision")
+    parser.add_argument("--expected-packaging-source-revision")
     arguments = parser.parse_args()
     try:
-        result = verify(arguments.deb)
+        result = verify(
+            arguments.deb,
+            repair=arguments.repair,
+            expected_node_id=arguments.expected_node_id,
+            expected_repair_authority_sha256=(
+                arguments.expected_repair_authority_sha256
+            ),
+            expected_release_key_sha256=arguments.expected_release_key_sha256,
+            expected_binary_source_revision=(arguments.expected_binary_source_revision),
+            expected_packaging_source_revision=(
+                arguments.expected_packaging_source_revision
+            ),
+        )
     except (OSError, UnicodeError, ValueError, VerificationError) as error:
         if arguments.json:
             print(json.dumps({"error": str(error), "ok": False}, sort_keys=True))
