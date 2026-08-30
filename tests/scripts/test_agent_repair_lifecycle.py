@@ -211,6 +211,8 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert "normalized synthetic dpkg cleanup state is not exact" in harness
     assert "--install --force-confold --force-downgrade" in harness
     assert '!= "ii |arm64|$installed_version"' in harness
+    assert 'force_dpkg_version "$installed_version"' in harness
+    assert "for status_file in /var/lib/dpkg/status /var/lib/dpkg/status-old" in harness
     assert "synthetic_dpkg_fault_applied=true" in harness
     assert "cleanup-normalize.log" in harness
     assert "cleanup-dpkg.log" in harness

@@ -237,6 +237,9 @@ cleanup() {
       status=1
     fi
     cleanup_normalize_log=$test_root/cleanup-normalize.log
+    if [[ "$fault" = newer ]]; then
+      force_dpkg_version "$installed_version" || status=1
+    fi
     if ! SYSTEMD_OFFLINE=1 dpkg --install --force-confold --force-downgrade \
       "$old_package" >"$cleanup_normalize_log" 2>&1; then
       printf 'failed to normalize synthetic dpkg cleanup state for %s\n' \
@@ -1169,6 +1172,27 @@ force_dpkg_status() {
   chmod 0644 "$temporary"
   sync -f "$temporary"
   mv -f -- "$temporary" "$status_file"
+  sync -f /var/lib/dpkg
+}
+
+force_dpkg_version() {
+  replacement=$1
+  for status_file in /var/lib/dpkg/status /var/lib/dpkg/status-old; do
+    temporary=$test_root/dpkg-${status_file##*/}
+    awk -v replacement="$replacement" '
+      BEGIN { RS=""; ORS="\n\n"; found=0 }
+      $0 ~ /(^|\n)Package: vonk-forge-agent(\n|$)/ {
+        if (sub(/Version: [^\n]+/, "Version: " replacement) != 1) exit 1
+        found += 1
+      }
+      { print }
+      END { if (found != 1) exit 1 }
+    ' "$status_file" > "$temporary"
+    chown root:root "$temporary"
+    chmod 0644 "$temporary"
+    sync -f "$temporary"
+    mv -f -- "$temporary" "$status_file"
+  done
   sync -f /var/lib/dpkg
 }
 
