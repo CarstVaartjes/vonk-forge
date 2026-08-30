@@ -205,6 +205,17 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'rm -f -- "$source_gate"' in harness
     assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
     assert 'test "$restart_status" -eq 0' in harness
+    assert "--property=DropInPaths" in harness
+    assert "--property=ExecCondition" in harness
+    assert (
+        'test "$wrong_cgroup_before" = "0::/system.slice/$agent_unit"' in harness
+    )
+    assert 'test "$wrong_owner_before" = "$agent_uid:$agent_gid"' in harness
+    assert 'test "$wrong_groups_before" = "$agent_groups"' in harness
+    assert (
+        'test "$(readlink "/proc/$wrong_pid/exe")" = "$destination (deleted)"'
+        in harness
+    )
     assert "snapshot_source_authority_state()" in harness
     assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness
     assert '"$test_root/before-source-authority" \'ii \'' in harness

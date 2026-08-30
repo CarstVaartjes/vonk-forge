@@ -1020,7 +1020,8 @@ snapshot_state() {
     for unit in "$agent_unit" "$helper_unit" "$recovery_unit"; do
       systemctl --system show --property=LoadState --property=ActiveState \
         --property=SubState --property=MainPID --property=InvocationID \
-        --property=ControlGroup "$unit" | sed "s|^|unit=$unit |"
+        --property=ControlGroup --property=DropInPaths \
+        --property=ExecCondition "$unit" | sed "s|^|unit=$unit |"
       pid="$(systemctl --system show --property=MainPID --value "$unit")"
       if [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && -r "/proc/$pid/stat" ]]; then
         printf 'pid=%s start=%s exe=%s sha=%s cgroup=%s\n' \
@@ -1225,27 +1226,91 @@ run_wrong_binary_but_restore_installed() {
   atomic_replace "$wrong_binary" "$destination" 0555
   if [[ "$unit" = "$agent_unit" ]]; then
     gate_backup=$test_root/running-agent-source-gate
-    cp -- "$source_gate" "$gate_backup"
+    test -f "$source_gate"
+    test ! -L "$source_gate"
+    test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    test "$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")" = "$source_gate"
+    gate_condition="$(systemctl --system show \
+      --property=ExecCondition --value "$agent_unit")"
+    [[ "$gate_condition" = *"$source_runner"* ]]
+    [[ "$gate_condition" = *"allow-agent-start"* ]]
+    install -o root -g root -m 0644 "$source_gate" "$gate_backup"
+    test "$(sha256sum "$gate_backup" | cut -d' ' -f1)" = "$source_gate_sha"
     rm -f -- "$source_gate"
     systemctl --system daemon-reload
+    test -z "$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")"
+    test -z "$(systemctl --system show --property=ExecCondition --value \
+      "$agent_unit")"
   fi
   set +e
   systemctl --system restart "$unit"
   restart_status=$?
+  if [[ "$unit" = "$agent_unit" ]]; then
+    wrong_pid_before="$(systemctl --system show --property=MainPID --value \
+      "$unit")"
+    wrong_invocation_before="$(systemctl --system show \
+      --property=InvocationID --value "$unit")"
+    wrong_start_before="$(awk '{print $22}' \
+      "/proc/$wrong_pid_before/stat" 2>/dev/null)"
+    wrong_cgroup_before="$(cat "/proc/$wrong_pid_before/cgroup" 2>/dev/null)"
+    wrong_exe_before="$(readlink "/proc/$wrong_pid_before/exe" 2>/dev/null)"
+    wrong_sha_before="$(sha256sum "/proc/$wrong_pid_before/exe" \
+      2>/dev/null | cut -d' ' -f1)"
+    wrong_owner_before="$(stat -c %u:%g "/proc/$wrong_pid_before" 2>/dev/null)"
+    wrong_groups_before="$(awk '/^Groups:/ {
+      $1=""; sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print
+    }' "/proc/$wrong_pid_before/status" 2>/dev/null)"
+  fi
   set -e
   if [[ -n "$gate_backup" ]]; then
     atomic_replace "$gate_backup" "$source_gate" 0644
     systemctl --system daemon-reload
     cmp -s "$gate_backup" "$source_gate"
+    test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    test "$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")" = "$source_gate"
+    gate_condition="$(systemctl --system show \
+      --property=ExecCondition --value "$agent_unit")"
+    [[ "$gate_condition" = *"$source_runner"* ]]
+    [[ "$gate_condition" = *"allow-agent-start"* ]]
   fi
   test "$restart_status" -eq 0
   wrong_pid="$(systemctl --system show --property=MainPID --value "$unit")"
   test "$wrong_pid" -gt 1
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   test "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)" = "$wrong_sha"
+  if [[ "$unit" = "$agent_unit" ]]; then
+    test "$wrong_pid" = "$wrong_pid_before"
+    test "$wrong_start_before" = \
+      "$(awk '{print $22}' "/proc/$wrong_pid/stat")"
+    test "$wrong_invocation_before" = \
+      "$(systemctl --system show --property=InvocationID --value "$unit")"
+    [[ "$wrong_invocation_before" =~ ^[0-9a-f]{32}$ ]]
+    test "$wrong_cgroup_before" = "0::/system.slice/$agent_unit"
+    test "$wrong_cgroup_before" = "$(cat "/proc/$wrong_pid/cgroup")"
+    test "$wrong_owner_before" = "$agent_uid:$agent_gid"
+    test "$wrong_groups_before" = "$agent_groups"
+    test "$wrong_exe_before" = "$destination"
+    test "$wrong_sha_before" = "$wrong_sha"
+    test "$(systemctl --system show --property=ActiveState --value "$unit")" \
+      = active
+    test "$(systemctl --system show --property=SubState --value "$unit")" \
+      = running
+  fi
   atomic_replace "$expected_installed" "$destination" 0555
-  test "$(sha256sum "$destination" | cut -d' ' -f1)" \
-    != "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)"
+  test -f "$destination"
+  test ! -L "$destination"
+  test "$(stat -c %u:%g:%a:%h "$destination")" = 0:0:555:1
+  test "$(sha256sum "$destination" | cut -d' ' -f1)" = \
+    "$(sha256sum "$expected_installed" | cut -d' ' -f1)"
+  test "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)" = "$wrong_sha"
+  if [[ "$unit" = "$agent_unit" ]]; then
+    test "$(readlink "/proc/$wrong_pid/exe")" = "$destination (deleted)"
+  fi
 }
 
 move_main_process_to_wrong_cgroup() {
