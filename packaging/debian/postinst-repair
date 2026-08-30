@@ -31,6 +31,11 @@ safe_root_file() {
         && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$file")" = "0:0:$mode:1" ]
 }
 
+canonical_line_file() {
+    [ "$(/usr/bin/wc -l < "$1")" -eq "$2" ] \
+        && [ "$(/usr/bin/tail -c 1 "$1" | /usr/bin/wc -l)" -eq 1 ]
+}
+
 valid_digest() {
     case "$1" in *[!0-9a-f]*|'') return 1 ;; esac
     [ "${#1}" -eq 64 ]
@@ -49,9 +54,9 @@ recursive_binding() {
         && safe_root_file "$repair_candidate" 600 \
         && safe_root_file "$repair_authority" 644 \
         || return 1
-    [ "$(/usr/bin/wc -l < "$source_intent")" -eq 14 ] \
-        && [ "$(/usr/bin/wc -l < "$repair_intent")" -eq 17 ] \
-        && [ "$(/usr/bin/wc -l < "$repair_phase")" -eq 3 ] \
+    canonical_line_file "$source_intent" 14 \
+        && canonical_line_file "$repair_intent" 17 \
+        && canonical_line_file "$repair_phase" 3 \
         || return 1
     source_snapshot=$(/usr/bin/sha256sum "$source_intent" \
         | /usr/bin/cut -d' ' -f1) || return 1
@@ -108,7 +113,7 @@ recursive_binding() {
     trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
     /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
         || return 1
-    [ "$(/usr/bin/wc -l < "$command_file")" -eq 4 ] \
+    canonical_line_file "$command_file" 4 \
         && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
         && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
         && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \

@@ -66,10 +66,10 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 def _assert_frozen_runtime_and_old_runner() -> None:
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "02219433e3f9e93787e634aaa3cd08be96a8e30a2cd98dc2be0afbeb380875ef"
+            "046feb4448695d945dee13f3751674cbcf5824a4de4efadf026306a4122a9c60"
         ),
         ROOT / "packaging/debian/postinst-repair": (
-            "551a80895f536f30d041ab8019db1df0fbadd2503cb1715f81299a850f5c28ba"
+            "37cdae6cac4c447dce347b58874b7c0800346303362a86519c54bca4efdc88b1"
         ),
         ROOT / "scripts/build-agent-deb": (
             "1d87e67ee919149a77cdb246d6462b7542acaa37f07805b38e78637bcf6498d3"

@@ -2566,6 +2566,41 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "VONK_FORGE_PACKAGE_REPAIR_NONCE" in postinst
 
 
+@pytest.mark.parametrize(
+    "script_path",
+    (
+        ROOT / "packaging/debian/preinst-repair",
+        ROOT / "packaging/debian/postinst-repair",
+    ),
+)
+def test_repair_canonical_line_files_reject_unterminated_trailing_bytes(
+    tmp_path: Path, script_path: Path
+) -> None:
+    script = script_path.read_text()
+    helper = script[
+        script.index("canonical_line_file() {") : script.index(
+            "\n}\n", script.index("canonical_line_file() {")
+        )
+        + 3
+    ]
+    document = tmp_path / "document"
+    document.write_text("first\nsecond\n", encoding="utf-8")
+
+    exact = subprocess.run(
+        ["/bin/sh", "-c", f"{helper}\ncanonical_line_file \"$1\" 2", "sh", document],
+        check=False,
+    )
+    with document.open("ab") as output:
+        output.write(b"x")
+    trailing = subprocess.run(
+        ["/bin/sh", "-c", f"{helper}\ncanonical_line_file \"$1\" 2", "sh", document],
+        check=False,
+    )
+
+    assert exact.returncode == 0
+    assert trailing.returncode != 0
+
+
 def test_repair_blob_staging_preserves_mode_and_repairs_exact_legacy_residue() -> None:
     runner = (ROOT / "packaging/debian/preinst-repair").read_text()
     stage = runner[runner.index("stage_blob() {") : runner.index("load_authority() {")]

@@ -124,6 +124,11 @@ safe_root_file() {
         && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$file")" = "0:0:$mode:1" ]
 }
 
+canonical_line_file() {
+    [ "$(/usr/bin/wc -l < "$1")" -eq "$2" ] \
+        && [ "$(/usr/bin/tail -c 1 "$1" | /usr/bin/wc -l)" -eq 1 ]
+}
+
 ensure_root_directory() {
     directory=$1
     mode=$2
@@ -823,7 +828,7 @@ read_candidate_from_dpkg() {
     trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
     /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
         || return 1
-    [ "$(/usr/bin/wc -l < "$command_file")" -eq 4 ] \
+    canonical_line_file "$command_file" 4 \
         && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
         && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
         && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \
@@ -878,7 +883,7 @@ read_candidate_from_dpkg() {
 read_source_intent() {
     safe_root_directory "$source_state" 700 \
         && safe_root_file "$source_intent" 600 \
-        && [ "$(/usr/bin/wc -l < "$source_intent")" -eq 14 ] \
+        && canonical_line_file "$source_intent" 14 \
         && /usr/bin/sed -n '1p' "$source_intent" | grep -Fxq 'schema_version=1' \
         && /usr/bin/sed -n '2p' "$source_intent" | grep -Fxq "package=$package_name" \
         || return 1
@@ -989,7 +994,7 @@ source_request_is_stale() {
 
 read_repair_intent() {
     safe_root_file "$repair_intent" 600 \
-        && [ "$(/usr/bin/wc -l < "$repair_intent")" -eq 17 ] \
+        && canonical_line_file "$repair_intent" 17 \
         && /usr/bin/sed -n '1p' "$repair_intent" | grep -Fxq 'schema_version=1' \
         || return 1
     repair_intent_authority=$(/usr/bin/sed -n '2s/^authority_sha256=//p' "$repair_intent")
@@ -1056,7 +1061,7 @@ repair_candidate_safe() {
 
 repair_blocker_safe() {
     safe_root_file "$repair_blocker" 600 \
-        && [ "$(/usr/bin/wc -l < "$repair_blocker")" -eq 5 ] \
+        && canonical_line_file "$repair_blocker" 5 \
         && /usr/bin/sed -n '1p' "$repair_blocker" | grep -Fxq 'schema_version=1' \
         && /usr/bin/sed -n '2p' "$repair_blocker" \
             | grep -Fxq "repair_nonce=$repair_nonce" \
@@ -1076,7 +1081,7 @@ repair_authority_safe() {
 
 read_phase() {
     safe_root_file "$repair_phase" 600 \
-        && [ "$(/usr/bin/wc -l < "$repair_phase")" -eq 3 ] \
+        && canonical_line_file "$repair_phase" 3 \
         && /usr/bin/sed -n '1p' "$repair_phase" | grep -Fxq 'schema_version=1' \
         || return 1
     phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
@@ -1341,7 +1346,7 @@ recursive_dpkg_binding() {
     trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
     /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
         || return 1
-    [ "$(/usr/bin/wc -l < "$command_file")" -eq 4 ] \
+    canonical_line_file "$command_file" 4 \
         && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
         && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
         && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \
@@ -1402,7 +1407,7 @@ helper_start_time=$helper_start
 
 helper_receipt_contract_safe() {
     safe_root_file "$repair_helper_receipt" 600 \
-        && [ "$(/usr/bin/wc -l < "$repair_helper_receipt")" -eq 10 ] \
+        && canonical_line_file "$repair_helper_receipt" 10 \
         && /usr/bin/sed -n '1p' "$repair_helper_receipt" | grep -Fxq 'schema_version=1' \
         && /usr/bin/sed -n '2p' "$repair_helper_receipt" | grep -Fxq "authority_sha256=$authority_sha256" \
         && /usr/bin/sed -n '3p' "$repair_helper_receipt" | grep -Fxq "repair_nonce=$repair_nonce" \
@@ -1491,7 +1496,7 @@ repair_nonce=$repair_nonce
 
 final_receipt_safe() {
     safe_root_file "$repair_receipt" 600 \
-        && [ "$(/usr/bin/wc -l < "$repair_receipt")" -eq 16 ] \
+        && canonical_line_file "$repair_receipt" 16 \
         && /usr/bin/sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=1' \
         && /usr/bin/sed -n '2p' "$repair_receipt" | grep -Fxq "authority_sha256=$authority_sha256" \
         && /usr/bin/sed -n '3p' "$repair_receipt" | grep -Fxq "node_id=$authority_node_id" \
