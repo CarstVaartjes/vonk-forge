@@ -50,6 +50,10 @@ export function useFleetStream(api: ControlApi) {
     dispatch({type: "retry"});
     setGeneration(value => value + 1);
   }, []);
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const snapshot = await api.visualFleet(signal);
+    dispatch({type: "requested-snapshot", snapshot});
+  }, [api]);
   const updateNodeProfile = useCallback((nodeId: string, displayName: string) => {
     dispatch({type: "node-profile-updated", nodeId, displayName});
   }, []);
@@ -241,5 +245,5 @@ export function useFleetStream(api: ControlApi) {
     };
   }, [api, generation]);
 
-  return {...state, now, retry, updateNodeProfile};
+  return {...state, now, refresh, retry, updateNodeProfile};
 }

@@ -427,6 +427,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </section>}
 
       <div className="fleet-command-actions">
+        <a className="button" href="/library">Install model</a>
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>
@@ -517,6 +518,8 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
           node={selectedNode}
           now={fleet.now}
           onClose={closeDetail}
+          onLifecycleRefresh={fleet.refresh}
+          onBusyChange={onBusyChange}
           onReenroll={event => {
             onboardingTrigger.current = event.currentTarget;
             setOnboardingMode("re-enroll");

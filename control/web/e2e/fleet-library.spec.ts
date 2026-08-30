@@ -291,7 +291,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", {name: "Manage models on this Spark"}).click();
+  await page.getByRole("link", {name: "Install model or recipe"}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
   await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
@@ -338,12 +338,17 @@ test("Fleet discovery searches friendly names and combines actionable health fil
   await expectNoSeriousAccessibilityViolations(page);
 });
 
-test("Node history chooses honest rollups on desktop and mobile", async ({page}) => {
+test("Node history and lifecycle controls work on desktop and mobile", async ({page}, testInfo) => {
   for (const width of [1280, 360]) {
     await page.setViewportSize({width, height: width === 360 ? 800 : 900});
     await page.goto("/fleet");
     await page.getByRole("button", {name: "View Aurora details"}).click();
     await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
+    const detail = page.getByRole("complementary", {name: "Aurora details"});
+    await expect(detail.getByRole("link", {name: "Install model or recipe"})).toBeVisible();
+    await expect(detail.getByRole("button", {name: "Stop Aurora solo on this Spark"})).toBeVisible();
+    await expect(detail.getByText("Stop all 2 active runs before removing this recipe from all 2 Sparks.")).toBeVisible();
+    await testInfo.attach(`fleet-spark-lifecycle-${width}.png`, {body: await detail.screenshot(), contentType: "image/png"});
 
     await page.getByRole("button", {name: "7 days"}).click();
     await expect(page.getByRole("button", {name: "7 days"})).toHaveAttribute("aria-pressed", "true");
