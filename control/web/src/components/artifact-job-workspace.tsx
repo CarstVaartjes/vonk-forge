@@ -33,7 +33,7 @@ type RecipeInputSlot = {
   max_file_bytes: number;
   max_total_bytes: number;
 };
-type RecipeInput = {path: "/inputs"; required: boolean; media_types: string[]; max_bytes: number; slots?: RecipeInputSlot[]};
+type RecipeInput = {path: "/inputs"; required: boolean; media_types: string[]; max_bytes: number; min_files: number; max_files: number; slots?: RecipeInputSlot[]};
 type RecipeOutputSlot = RecipeInputSlot;
 type RecipeOutput = {path: "/outputs"; allowed_media_types: string[]; max_total_bytes: number | null; slots?: RecipeOutputSlot[]};
 type JobRecipeDocument = VisualRecipeDocument & {
@@ -160,7 +160,9 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
 
 export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryApi; detail: LibraryRecipeDetail; onBusyChange?(busy: boolean): void}) {
   const document = detail.visual_recipe as JobRecipeDocument | null;
-  const jobInterface = document?.interfaces.find(item => item.adapter !== "openai") as (JobRecipeDocument["interfaces"][number] & {adapter: ArtifactJobInterface}) | undefined;
+  const jobInterfaces = useMemo(() => (document?.interfaces.filter(item => item.adapter !== "openai") ?? []) as Array<JobRecipeDocument["interfaces"][number] & {adapter: ArtifactJobInterface}>, [document]);
+  const [interfaceIndex, setInterfaceIndex] = useState(0);
+  const jobInterface = jobInterfaces[interfaceIndex];
   const activeRun = detail.operational_state.runs.find(run => run.state === "running");
   const parameters = useMemo(() => document?.parameters ?? [], [document]);
   const input = jobInterface?.input ?? null;
@@ -173,10 +175,10 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       description: "Inputs accepted by this recipe revision.",
       media_types: input.media_types,
       extensions: [],
-      min_files: input.required ? 1 : 0,
-      max_files: 32,
+      min_files: input.min_files,
+      max_files: input.max_files,
       max_file_bytes: Math.min(input.max_bytes, CONTROLLER_FILE_LIMIT),
-      max_total_bytes: Math.min(input.max_bytes * 32, CONTROLLER_TOTAL_LIMIT),
+      max_total_bytes: Math.min(input.max_bytes * input.max_files, CONTROLLER_TOTAL_LIMIT),
     }];
   }, [input]);
   const textSlot = inputSlots.find(slot => slot.media_types.includes("text/plain"));
@@ -203,9 +205,15 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   const submissionController = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
+    if (interfaceIndex >= jobInterfaces.length) setInterfaceIndex(0);
+  }, [interfaceIndex, jobInterfaces.length]);
+  useEffect(() => {
     setValues(parameterDefaults(parameters));
     setPrompt(promptParameter?.default == null ? "" : String(promptParameter.default));
-  }, [parameters, promptParameter]);
+    setFilesBySlot({});
+    setSubmitError("");
+    setRetryNotice("");
+  }, [jobInterface, parameters, promptParameter]);
   const loadCapabilities = useCallback(async (signal?: AbortSignal) => {
     setCapabilitiesLoading(true);
     try {
@@ -412,7 +420,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     {!activeRun && <div className="artifact-job-empty"><strong>No running recipe</strong><p>Install and load this recipe before submitting an artifact job. The form remains visible so you can inspect its exact contract.</p></div>}
     <div className="artifact-job-layout">
       <form className="artifact-job-form" onSubmit={event => { event.preventDefault(); void submit(); }} noValidate>
-        {(textSlot || promptParameter) && <label htmlFor="artifact-job-prompt"><span>{textSlot?.label ?? humanizeIdentifier(promptParameter!.name)}{textSlot && textSlot.min_files > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot?.label ?? humanizeIdentifier(promptParameter!.name)} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot ? <>{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</> : <>{promptParameter!.description} Sent as the declared <code>{promptParameter!.name}</code> job parameter · {formatBytes(promptBytes)}</>}</small></label>}
+        {jobInterfaces.length > 1 && <label htmlFor="artifact-job-interface"><span>Job interface</span><select id="artifact-job-interface" aria-label="Job interface" value={interfaceIndex} onChange={event => setInterfaceIndex(Number(event.target.value))}>{jobInterfaces.map((item, index) => <option value={index} key={`${item.adapter}:${item.path ?? ""}:${index}`}>{humanizeIdentifier(item.adapter)} · {item.input?.slots?.length ?? 0} bounded slot{item.input?.slots?.length === 1 ? "" : "s"}</option>)}</select><small>Each declared interface keeps its own exact input and output boundary. Changing interface clears local, unsubmitted inputs.</small></label>}
+        {(textSlot || promptParameter) && <label htmlFor="artifact-job-prompt"><span>{textSlot?.label ?? humanizeIdentifier(promptParameter!.name)}{textSlot && textSlot.min_files > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot?.label ?? humanizeIdentifier(promptParameter!.name)} aria-required={textSlot?.min_files ? "true" : undefined} aria-invalid={inputErrors.some(error => error.startsWith(`${textSlot?.label}:`)) || undefined} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot ? <>{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</> : <>{promptParameter!.description} Sent as the declared <code>{promptParameter!.name}</code> job parameter · {formatBytes(promptBytes)}</>}</small></label>}
         {!textSlot && !promptParameter && <div className="artifact-job-contract-notice"><strong>No prompt control declared</strong><p>This recipe revision does not authorize a prompt file or parameter. Add its required source files below, or update the recipe contract before expecting text-guided output.</p></div>}
         {parameters.some(parameter => parameter.name !== promptParameter?.name) && <fieldset className="artifact-job-parameters"><legend>Recipe parameters</legend>{parameters.filter(parameter => parameter.name !== promptParameter?.name).map(parameter => {
           const value = values[parameter.name] ?? parameter.default;
@@ -428,7 +437,10 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
           const fileMedia = slot.media_types.filter(mediaType => mediaType !== "text/plain");
           if (fileMedia.length === 0) return null;
           const id = `artifact-job-files-${slot.id}`;
-          return <label htmlFor={id} key={slot.id}><span>{slot.label}{slot.min_files > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={slot.max_files > 1} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small>{slot.description} {fileMedia.join(" · ")} · {slot.min_files}–{slot.max_files} files · {formatBytes(Math.min(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} each · {formatBytes(Math.min(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} total</small></label>;
+          const fieldErrors = inputErrors.filter(error => error.startsWith(`${slot.label}:`));
+          const helpId = `${id}-help`;
+          const errorId = `${id}-error`;
+          return <label htmlFor={id} key={slot.id}><span>{slot.label}{slot.min_files > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={slot.max_files > 1} required={slot.min_files > 0 && slot.id !== textSlot?.id} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} aria-invalid={fieldErrors.length > 0 || undefined} aria-describedby={`${helpId}${fieldErrors.length ? ` ${errorId}` : ""}`} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small id={helpId}>{slot.description} {fileMedia.join(" · ")} · {slot.min_files}–{slot.max_files} files · {formatBytes(Math.min(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} each · {formatBytes(Math.min(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} total</small>{fieldErrors.length > 0 && <small className="artifact-job-field-error" id={errorId}>{fieldErrors.join(" ")}</small>}</label>;
         })}
         {selectedFiles.length > 0 && <ul className="artifact-input-list" aria-label="Selected input files">{selectedFiles.map(({slot, file}) => <li key={`${slot.id}:${file.name}:${file.lastModified}`}><span>{file.name}</span><small>{slot.label} · {file.type || "Unknown media type"} · {formatBytes(file.size)}</small></li>)}</ul>}
         <label htmlFor="artifact-job-timeout"><span>Maximum run time</span><input id="artifact-job-timeout" type="number" min={1} max={maximumTimeout} value={timeoutSeconds} aria-label="Maximum run time" onChange={event => setTimeoutSeconds(Number(event.target.value))}/><small>Seconds · the controller stops this job after at most {maximumTimeout.toLocaleString()} seconds.</small></label>

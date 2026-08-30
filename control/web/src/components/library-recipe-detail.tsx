@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
+import type {LibraryRecipeDetail, LibrarySnapshot, PublicRecipe} from "../api/types";
 import type {LibraryApi, LibraryOperation} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {StatusPill} from "./status-pill";
@@ -13,6 +13,7 @@ import {LibraryProfileComposer} from "./library-profile-composer";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
+import {LibraryRecipeFit} from "./library-recipe-fit";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import "./library-recipe-detail.css";
 
@@ -77,8 +78,9 @@ function useNarrowViewport(query: string): boolean {
   return matches;
 }
 
-export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
+export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
   api: LibraryApi;
+  catalogRecipe?: PublicRecipe;
   detail: LibraryRecipeDetail;
   onBusyChange?(busy: boolean): void;
   onRefresh(signal: AbortSignal): Promise<void>;
@@ -150,6 +152,7 @@ export function LibraryRecipeAuthority({api, detail, onBusyChange, onRefresh, po
         <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
       </div>
     </header>
+    <LibraryRecipeFit catalogRecipe={catalogRecipe} detail={detail}/>
     <section className={`recipe-next-action${activeRun ? " is-running" : placementRecommendation ? "" : " is-blocked"}`} aria-label="Recommended next action">
       <div>
         <p className="fleet-kicker">Recommended next step</p>
