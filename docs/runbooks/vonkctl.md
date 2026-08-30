@@ -108,6 +108,17 @@ vonkctl library map preview --recipe-revision-id REVISION_ID --node-id SPARK_ID 
 vonkctl library map apply --recipe-revision-id REVISION_ID --node-id SPARK_ID \
   --placement-digest DIGEST --apply
 
+vonkctl library build preview --recipe-revision-id REVISION_ID \
+  --builder-node-id SPARK_ID --json
+vonkctl library build apply --recipe-revision-id REVISION_ID \
+  --builder-node-id SPARK_ID --build-input-sha256 DIGEST --apply
+
+vonkctl library distribute preview --recipe-build-id BUILD_ID \
+  --mapping-id MAPPING_ID --mapping-generation GENERATION --json
+vonkctl library distribute apply --recipe-build-id BUILD_ID \
+  --mapping-id MAPPING_ID --mapping-generation GENERATION \
+  --plan-digest DIGEST --apply
+
 vonkctl library install preview --mapping-id MAPPING_ID --recipe-build-id BUILD_ID --json
 vonkctl library install apply --mapping-id MAPPING_ID --recipe-build-id BUILD_ID \
   --plan-digest DIGEST --apply
@@ -124,8 +135,10 @@ vonkctl library uninstall apply INSTALLATION_ID --plan-digest DIGEST --apply
 
 Apply commands generate an idempotency UUID automatically. Supply
 `--request-key UUID` when a caller needs to retain and reuse it after an
-uncertain outcome. Use `library operation show`, `library operation retry`, and
-`library run` to follow progress and recovery.
+uncertain outcome. The build apply command consumes `build_input_sha256` from
+its preview; distribution apply consumes `plan_digest` from its preview and
+must reuse the previewed mapping generation. Use `library operation show`,
+`library operation retry`, and `library run` to follow progress and recovery.
 
 ## Artifact-producing recipe jobs
 

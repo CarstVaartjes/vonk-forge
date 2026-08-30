@@ -350,6 +350,130 @@ def test_library_apply_is_plan_only_until_apply_flag_is_explicit() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("argv", "path", "body"),
+    [
+        (
+            (
+                "library",
+                "build",
+                "apply",
+                "--recipe-revision-id",
+                "revision-1",
+                "--builder-node-id",
+                "spk_builder",
+                "--build-input-sha256",
+                "a" * 64,
+            ),
+            "/api/v1/recipes/builds",
+            {
+                "recipe_revision_id": "revision-1",
+                "builder_node_id": "spk_builder",
+                "build_input_sha256": "a" * 64,
+                "request_key": "request-1",
+            },
+        ),
+        (
+            (
+                "library",
+                "distribute",
+                "apply",
+                "--recipe-build-id",
+                "build-1",
+                "--mapping-id",
+                "mapping-1",
+                "--mapping-generation",
+                "3",
+                "--plan-digest",
+                "b" * 64,
+            ),
+            "/api/v1/recipes/image-distributions",
+            {
+                "recipe_build_id": "build-1",
+                "mapping_id": "mapping-1",
+                "mapping_generation": 3,
+                "plan_digest": "b" * 64,
+                "request_key": "request-1",
+            },
+        ),
+    ],
+)
+def test_recipe_build_and_distribution_apply_are_plan_only_until_confirmed(
+    argv: tuple[str, ...], path: str, body: dict[str, object]
+) -> None:
+    client = _Client()
+
+    result, plan = _invoke(client, "--json", *argv)
+
+    assert result == 0
+    assert plan == {
+        "mode": "plan",
+        "apply": False,
+        "method": "POST",
+        "path": path,
+        "body": body,
+    }
+    assert client.calls == []
+
+    result, response = _invoke(client, "--json", *argv, "--apply")
+
+    assert result == 0
+    assert response == {"ok": True}
+    assert client.calls == [("POST", path, body, None)]
+
+
+@pytest.mark.parametrize(
+    ("argv", "path", "body"),
+    [
+        (
+            (
+                "library",
+                "build",
+                "preview",
+                "--recipe-revision-id",
+                "revision-1",
+                "--builder-node-id",
+                "spk_builder",
+            ),
+            "/api/v1/recipes/build-plans/preview",
+            {
+                "recipe_revision_id": "revision-1",
+                "builder_node_id": "spk_builder",
+            },
+        ),
+        (
+            (
+                "library",
+                "distribute",
+                "preview",
+                "--recipe-build-id",
+                "build-1",
+                "--mapping-id",
+                "mapping-1",
+                "--mapping-generation",
+                "3",
+            ),
+            "/api/v1/recipes/image-distribution-plans/preview",
+            {
+                "recipe_build_id": "build-1",
+                "mapping_id": "mapping-1",
+                "mapping_generation": 3,
+            },
+        ),
+    ],
+)
+def test_recipe_build_and_distribution_previews_use_exact_api_inputs(
+    argv: tuple[str, ...], path: str, body: dict[str, object]
+) -> None:
+    client = _Client({("POST", path): {"preview": True}})
+
+    result, response = _invoke(client, "--json", *argv)
+
+    assert result == 0
+    assert response == {"preview": True}
+    assert client.calls == [("POST", path, body, None)]
+
+
 def test_activity_and_library_pagination_are_forwarded_to_the_api() -> None:
     client = _Client()
 
@@ -891,6 +1015,68 @@ def test_json_file_inputs_reject_duplicate_keys(tmp_path) -> None:
             ),
             "POST",
             "/api/v1/recipes/mappings",
+        ),
+        (
+            (
+                "library",
+                "build",
+                "preview",
+                "--recipe-revision-id",
+                "revision",
+                "--builder-node-id",
+                "node",
+            ),
+            "POST",
+            "/api/v1/recipes/build-plans/preview",
+        ),
+        (
+            (
+                "library",
+                "build",
+                "apply",
+                "--recipe-revision-id",
+                "revision",
+                "--builder-node-id",
+                "node",
+                "--build-input-sha256",
+                "digest",
+                "--apply",
+            ),
+            "POST",
+            "/api/v1/recipes/builds",
+        ),
+        (
+            (
+                "library",
+                "distribute",
+                "preview",
+                "--recipe-build-id",
+                "build",
+                "--mapping-id",
+                "mapping",
+                "--mapping-generation",
+                "3",
+            ),
+            "POST",
+            "/api/v1/recipes/image-distribution-plans/preview",
+        ),
+        (
+            (
+                "library",
+                "distribute",
+                "apply",
+                "--recipe-build-id",
+                "build",
+                "--mapping-id",
+                "mapping",
+                "--mapping-generation",
+                "3",
+                "--plan-digest",
+                "digest",
+                "--apply",
+            ),
+            "POST",
+            "/api/v1/recipes/image-distributions",
         ),
         (
             (
