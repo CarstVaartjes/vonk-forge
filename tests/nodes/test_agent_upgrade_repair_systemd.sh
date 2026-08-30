@@ -1248,8 +1248,12 @@ if [[ "$crash_phase" = pre-runner-rename \
           snapshot_prepared_objects "$test_root/prepared-before"
           if [[ "$crash_phase" = pre-runner-rename ]]; then
             snapshot_source_authority_state "$test_root/pre-runner-authority"
-            cmp -s "$test_root/before-source-authority" \
-              "$test_root/pre-runner-authority"
+            if ! cmp -s "$test_root/before-source-authority" \
+              "$test_root/pre-runner-authority"; then
+              diff -u "$test_root/before-source-authority" \
+                "$test_root/pre-runner-authority" >&2 || true
+              exit 1
+            fi
           fi
           systemctl --system kill --kill-whom=all --signal=SIGKILL "$helper_unit"
           touch "$test_root/crash-observed"
