@@ -339,6 +339,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   expect(screen.getByText("Controller retry not before")).toBeVisible();
   expect(screen.getByText("Updates automatically while this operation is active.")).toBeVisible();
   expect(screen.queryByRole("button", {name: "Queue retry after inspection"})).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", {name: "Refresh details"})).toBeEnabled());
   expect(intervalCallback).toBeDefined();
   await act(async () => intervalCallback?.());
   await waitFor(() => expect(loadJob).toHaveBeenCalledTimes(2));
