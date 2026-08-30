@@ -222,7 +222,7 @@ cleanup() {
   rm -f -- "$standard_runner"
   case "$fault" in
     dpkg-iU) fixture_dpkg_status='iU '; fixture_dpkg_version=$installed_version ;;
-    dpkg-iF) fixture_dpkg_status='iF '; fixture_dpkg_version=$installed_version ;;
+    dpkg-iF) fixture_dpkg_status='ii '; fixture_dpkg_version=$installed_version ;;
     dpkg-iHR) fixture_dpkg_status=iHR; fixture_dpkg_version=$installed_version ;;
     absent) fixture_dpkg_status='rc '; fixture_dpkg_version=$installed_version ;;
     newer) fixture_dpkg_status='ii '; fixture_dpkg_version=$ordinary_version ;;
@@ -1066,6 +1066,16 @@ snapshot_state() {
   } > "$destination"
 }
 
+assert_only_expected_dpkg_transition() {
+  expected_before=$1
+  expected_after=$2
+  grep -Fxq "dpkg=$expected_before" "$test_root/before"
+  grep -Fxq "dpkg=$expected_after" "$test_root/after"
+  sed '/^dpkg=/d' "$test_root/before" > "$test_root/before-without-dpkg"
+  sed '/^dpkg=/d' "$test_root/after" > "$test_root/after-without-dpkg"
+  cmp -s "$test_root/before-without-dpkg" "$test_root/after-without-dpkg"
+}
+
 snapshot_source_authority_state() {
   authority_destination=$1
   authority_dpkg_status=$2
@@ -1349,7 +1359,16 @@ if [[ "$fault" != none ]]; then
   test -s "$result"
   test "$(awk '{print $1}' "$result")" -ne 0
   snapshot_state "$test_root/after"
-  cmp -s "$test_root/before" "$test_root/after"
+  if [[ "$fault" = dpkg-iF ]]; then
+    # dpkg reconciles a forced half-configured status back to the exact
+    # previously installed package after the candidate preinst refuses it.
+    # Bind that one package-manager transition while retaining the strict
+    # no-mutation oracle for every runtime and installed payload object.
+    assert_only_expected_dpkg_transition \
+      "iF |arm64|$installed_version" "ii |arm64|$installed_version"
+  else
+    cmp -s "$test_root/before" "$test_root/after"
+  fi
   test "$(systemctl --system show --property=MainPID --value "$agent_unit")" \
     = "$fixture_agent_pid"
   test "$(systemctl --system show --property=MainPID --value "$helper_unit")" \
