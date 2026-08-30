@@ -1029,6 +1029,15 @@ snapshot_state() {
   } > "$destination"
 }
 
+snapshot_source_authority_state() {
+  destination=$1
+  full_snapshot=${destination}.full
+  snapshot_state "$full_snapshot"
+  grep -Fv -e "path=$standard_runner " \
+    -e "path=${standard_runner}.new " "$full_snapshot" > "$destination"
+  rm -f -- "$full_snapshot"
+}
+
 snapshot_prepared_objects() {
   destination=$1
   {
@@ -1204,6 +1213,7 @@ fi
 fixture_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 fixture_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
 snapshot_state "$test_root/before"
+snapshot_source_authority_state "$test_root/before-source-authority"
 
 crash_watcher=
 if [[ "$crash_phase" = pre-runner-rename \
@@ -1236,8 +1246,9 @@ if [[ "$crash_phase" = pre-runner-rename \
             -name '.repair-build.*' | wc -l)" -eq 1
           snapshot_prepared_objects "$test_root/prepared-before"
           if [[ "$crash_phase" = pre-runner-rename ]]; then
-            snapshot_state "$test_root/pre-runner-authority"
-            cmp -s "$test_root/before" "$test_root/pre-runner-authority"
+            snapshot_source_authority_state "$test_root/pre-runner-authority"
+            cmp -s "$test_root/before-source-authority" \
+              "$test_root/pre-runner-authority"
           fi
           systemctl --system kill --kill-whom=all --signal=SIGKILL "$helper_unit"
           touch "$test_root/crash-observed"
