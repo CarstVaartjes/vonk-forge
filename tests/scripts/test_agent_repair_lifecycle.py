@@ -101,12 +101,17 @@ def test_repair_native_harness_has_a_byte_and_pid_no_mutation_oracle() -> None:
     harness = HARNESS.read_text()
 
     assert "snapshot_state()" in harness
-    assert "assert_only_expected_dpkg_transition()" in harness
+    assert "assert_exact_dpkg_transition()" in harness
     assert 'snapshot_state "$test_root/before"' in harness
     assert 'snapshot_state "$test_root/after"' in harness
     assert 'cmp -s "$test_root/before" "$test_root/after"' in harness
     assert 'sed \'/^dpkg=/d\' "$test_root/before"' in harness
     assert '"iF |arm64|$installed_version" "ii |arm64|$installed_version"' in harness
+    assert '"iHR|arm64|$installed_version" "iH |arm64|$installed_version"' in harness
+    assert '"rc |arm64|$installed_version" "ic |arm64|$installed_version"' in harness
+    assert 'cmp -s "$test_root/before-dpkg-status" /var/lib/dpkg/status-old' in harness
+    assert 'cmp -s "$test_root/expected-dpkg-status" /var/lib/dpkg/status' in harness
+    assert "find /var/lib/dpkg/updates -mindepth 1 -maxdepth 1" in harness
     for evidence in (
         "${db:Status-Abbrev}",
         "MainPID",

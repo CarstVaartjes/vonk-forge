@@ -223,8 +223,8 @@ cleanup() {
   case "$fault" in
     dpkg-iU) fixture_dpkg_status='iU '; fixture_dpkg_version=$installed_version ;;
     dpkg-iF) fixture_dpkg_status='ii '; fixture_dpkg_version=$installed_version ;;
-    dpkg-iHR) fixture_dpkg_status=iHR; fixture_dpkg_version=$installed_version ;;
-    absent) fixture_dpkg_status='rc '; fixture_dpkg_version=$installed_version ;;
+    dpkg-iHR) fixture_dpkg_status='iH '; fixture_dpkg_version=$installed_version ;;
+    absent) fixture_dpkg_status='ic '; fixture_dpkg_version=$installed_version ;;
     newer) fixture_dpkg_status='ii '; fixture_dpkg_version=$ordinary_version ;;
     *) fixture_dpkg_status=; fixture_dpkg_version= ;;
   esac
@@ -1066,11 +1066,31 @@ snapshot_state() {
   } > "$destination"
 }
 
-assert_only_expected_dpkg_transition() {
+assert_exact_dpkg_transition() {
   expected_before=$1
   expected_after=$2
   grep -Fxq "dpkg=$expected_before" "$test_root/before"
   grep -Fxq "dpkg=$expected_after" "$test_root/after"
+  test -z "$(find /var/lib/dpkg/updates -mindepth 1 -maxdepth 1 \
+    -print -quit)"
+  cmp -s "$test_root/before-dpkg-status" /var/lib/dpkg/status-old
+  expected_abbrev=${expected_after%%|*}
+  case "$expected_abbrev" in
+    'iU ') expected_status='install ok unpacked' ;;
+    'ii ') expected_status='install ok installed' ;;
+    'iH ') expected_status='install ok half-installed' ;;
+    'ic ') expected_status='install ok config-files' ;;
+    *) printf 'unsupported expected dpkg status: %s\n' \
+      "$expected_abbrev" >&2; return 1 ;;
+  esac
+  awk -v replacement="$expected_status" '
+    BEGIN { RS=""; ORS="\n\n" }
+    $0 ~ /(^|\n)Package: vonk-forge-agent(\n|$)/ {
+      sub(/Status: [^\n]+/, "Status: " replacement)
+    }
+    { print }
+  ' "$test_root/before-dpkg-status" > "$test_root/expected-dpkg-status"
+  cmp -s "$test_root/expected-dpkg-status" /var/lib/dpkg/status
   sed '/^dpkg=/d' "$test_root/before" > "$test_root/before-without-dpkg"
   sed '/^dpkg=/d' "$test_root/after" > "$test_root/after-without-dpkg"
   cmp -s "$test_root/before-without-dpkg" "$test_root/after-without-dpkg"
@@ -1258,6 +1278,9 @@ esac
 case "$fault" in
   dpkg-iU|dpkg-iF|dpkg-iHR|absent|newer)
     synthetic_dpkg_fault_applied=true
+    test -z "$(find /var/lib/dpkg/updates -mindepth 1 -maxdepth 1 \
+      -print -quit)"
+    cp -- /var/lib/dpkg/status "$test_root/before-dpkg-status"
     ;;
 esac
 
@@ -1359,16 +1382,19 @@ if [[ "$fault" != none ]]; then
   test -s "$result"
   test "$(awk '{print $1}' "$result")" -ne 0
   snapshot_state "$test_root/after"
-  if [[ "$fault" = dpkg-iF ]]; then
-    # dpkg reconciles a forced half-configured status back to the exact
-    # previously installed package after the candidate preinst refuses it.
-    # Bind that one package-manager transition while retaining the strict
-    # no-mutation oracle for every runtime and installed payload object.
-    assert_only_expected_dpkg_transition \
-      "iF |arm64|$installed_version" "ii |arm64|$installed_version"
-  else
-    cmp -s "$test_root/before" "$test_root/after"
-  fi
+  case "$fault" in
+    dpkg-iU) assert_exact_dpkg_transition \
+      "iU |arm64|$installed_version" "iU |arm64|$installed_version" ;;
+    dpkg-iF) assert_exact_dpkg_transition \
+      "iF |arm64|$installed_version" "ii |arm64|$installed_version" ;;
+    dpkg-iHR) assert_exact_dpkg_transition \
+      "iHR|arm64|$installed_version" "iH |arm64|$installed_version" ;;
+    absent) assert_exact_dpkg_transition \
+      "rc |arm64|$installed_version" "ic |arm64|$installed_version" ;;
+    newer) assert_exact_dpkg_transition \
+      "ii |arm64|$ordinary_version" "ii |arm64|$ordinary_version" ;;
+    *) cmp -s "$test_root/before" "$test_root/after" ;;
+  esac
   test "$(systemctl --system show --property=MainPID --value "$agent_unit")" \
     = "$fixture_agent_pid"
   test "$(systemctl --system show --property=MainPID --value "$helper_unit")" \
