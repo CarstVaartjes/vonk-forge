@@ -23,6 +23,7 @@ mod linux {
     const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
     const HELPER_CGROUP: &str = "/system.slice/vonk-forge-package-helper.service";
     const CAP_SYS_PTRACE: &str = "0000000000080000";
+    const AGENT_INHERITABLE_CAPS: &str = "0000000000200000";
     const AGENT_BOUNDING_CAPS: &str = "00000000002000c2";
     const ZERO_CAPS: &str = "0000000000000000";
 
@@ -348,10 +349,11 @@ mod linux {
                 return Err(format!("unexpected target {field}"));
             }
         }
-        for field in ["CapInh:", "CapBnd:"] {
-            if status_value(&status, field)? != AGENT_BOUNDING_CAPS {
-                return Err(format!("unexpected target {field}"));
-            }
+        if status_value(&status, "CapInh:")? != AGENT_INHERITABLE_CAPS {
+            return Err("unexpected target CapInh:".to_string());
+        }
+        if status_value(&status, "CapBnd:")? != AGENT_BOUNDING_CAPS {
+            return Err("unexpected target CapBnd:".to_string());
         }
         Ok(())
     }

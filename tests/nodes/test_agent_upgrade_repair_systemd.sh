@@ -770,7 +770,7 @@ agent_invocation=$(systemctl --system show --property=InvocationID --value \
 [[ "$agent_invocation" =~ ^[0-9a-f]{32}$ ]]
 grep -E '^(Groups|CapInh|CapPrm|CapEff|CapBnd|CapAmb):' \
   "/proc/$old_agent_pid/status" | sed 's/^/agent-runtime /'
-grep -Fxq $'CapInh:\t00000000002000c2' "/proc/$old_agent_pid/status"
+grep -Fxq $'CapInh:\t0000000000200000' "/proc/$old_agent_pid/status"
 grep -Fxq $'CapPrm:\t0000000000000000' "/proc/$old_agent_pid/status"
 grep -Fxq $'CapEff:\t0000000000000000' "/proc/$old_agent_pid/status"
 grep -Fxq $'CapBnd:\t00000000002000c2' "/proc/$old_agent_pid/status"
