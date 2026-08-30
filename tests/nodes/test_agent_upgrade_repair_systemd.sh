@@ -1400,6 +1400,10 @@ test "$(awk '{print $22}' "/proc/$target_helper_pid/stat")" \
   = "$final_helper_start"
 test "$(stat -c %u "/proc/$target_agent_pid")" = "$(id -u vonk-agent)"
 test "$(stat -c %u "/proc/$target_helper_pid")" = 0
+test "$(awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$target_agent_pid/status")" = "$agent_uid:$agent_uid:$agent_uid:$agent_uid"
+test "$(awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$target_agent_pid/status")" = "$agent_gid:$agent_gid:$agent_gid:$agent_gid"
+test "$(awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$target_helper_pid/status")" = 0:0:0:0
+test "$(awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$target_helper_pid/status")" = 0:0:0:0
 test "$(sha256sum "/proc/$target_agent_pid/exe" | cut -d' ' -f1)" = "$source_agent_sha"
 test "$(sha256sum "/proc/$target_helper_pid/exe" | cut -d' ' -f1)" = "$source_helper_sha"
 test "$(systemctl --system show --property=ControlGroup --value "$agent_unit")" \

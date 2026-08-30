@@ -2581,6 +2581,24 @@ def test_repair_blob_staging_preserves_mode_and_repairs_exact_legacy_residue() -
     assert "&& ! standard_runner_is_exact_legacy_residue" in delegate
 
 
+def test_repair_runtime_binds_every_running_unit_to_uid_and_gid() -> None:
+    runner = (ROOT / "packaging/debian/preinst-repair").read_text()
+    normalized = re.sub(r"\s+", " ", runner.replace("\\\n", " "))
+
+    helper_proof = (
+        'prove_running_unit "$helper_unit" "$helper_binary" '
+        '"$target_helper_sha256" 0 0'
+    )
+    agent_proof = (
+        'prove_running_unit "$agent_unit" "$agent_binary" '
+        '"$target_agent_sha256" "$agent_uid" "$agent_gid"'
+    )
+    assert normalized.count(helper_proof) == 6
+    assert normalized.count(agent_proof) == 5
+    assert '"$target_helper_sha256" 0)' not in runner
+    assert '"$target_agent_sha256" "$agent_uid")' not in runner
+
+
 def test_repair_manager_probe_uses_the_exact_transient_sandbox_contract() -> None:
     runner = (ROOT / "packaging/debian/preinst-repair").read_text()
     start = runner.index("probe_output=$(/usr/bin/systemd-run")

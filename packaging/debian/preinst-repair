@@ -1383,7 +1383,7 @@ target_payload_installed() {
 
 write_helper_receipt() {
     helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
-        "$target_helper_sha256" 0) || return 1
+        "$target_helper_sha256" 0 0) || return 1
     helper_pid=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')
     helper_start=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')
     receipt_boot=$(current_boot_id) || return 1
@@ -1437,7 +1437,7 @@ helper_receipt_and_live_safe() {
     bound_helper_pid=$receipt_helper_pid
     bound_helper_start=$receipt_helper_start
     helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
-        "$target_helper_sha256" 0) || return 1
+        "$target_helper_sha256" 0 0) || return 1
     [ "$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')" \
         = "$bound_helper_pid" ] \
         && [ "$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')" \
@@ -1459,12 +1459,13 @@ refresh_target_helper_after_boot() {
 
 write_final_receipt() {
     agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+    agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
     agent_identity=$(prove_running_unit "$agent_unit" "$agent_binary" \
-        "$target_agent_sha256" "$agent_uid") || return 1
+        "$target_agent_sha256" "$agent_uid" "$agent_gid") || return 1
     agent_pid=$(printf '%s\n' "$agent_identity" | /usr/bin/sed -n '1p')
     agent_start=$(printf '%s\n' "$agent_identity" | /usr/bin/sed -n '2p')
     helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
-        "$target_helper_sha256" 0) || return 1
+        "$target_helper_sha256" 0 0) || return 1
     helper_pid=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')
     helper_start=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')
     receipt_boot=$(current_boot_id) || return 1
@@ -1930,25 +1931,27 @@ finalize_from_receipt() {
     final_state_shape_safe \
         || unsafe_state 'repair finalization state is missing or conflicting'
     agent_uid=$(/usr/bin/id -u vonk-agent) || unsafe_state 'agent uid'
+    agent_gid=$(/usr/bin/id -g vonk-agent) || unsafe_state 'agent gid'
     if ! prove_running_unit "$helper_unit" "$helper_binary" \
-        "$target_helper_sha256" 0 >/dev/null; then
+        "$target_helper_sha256" 0 0 >/dev/null; then
         /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
             || temporary_failure 'helper restart during finalization failed'
     fi
     prove_running_unit "$helper_unit" "$helper_binary" "$target_helper_sha256" \
-        0 >/dev/null || temporary_failure 'helper changed during finalization'
+        0 0 >/dev/null || temporary_failure 'helper changed during finalization'
     write_helper_receipt \
         || temporary_failure 'helper receipt refresh during finalization failed'
     helper_receipt_and_live_safe \
         || unsafe_state 'helper receipt refresh during finalization'
     if ! prove_running_unit "$agent_unit" "$agent_binary" \
-        "$target_agent_sha256" "$agent_uid" >/dev/null; then
+        "$target_agent_sha256" "$agent_uid" "$agent_gid" >/dev/null; then
         /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
             || temporary_failure 'agent restart during finalization failed'
         /bin/sleep 1
     fi
     prove_running_unit "$agent_unit" "$agent_binary" "$target_agent_sha256" \
-        "$agent_uid" >/dev/null || temporary_failure 'agent changed during finalization'
+        "$agent_uid" "$agent_gid" >/dev/null \
+        || temporary_failure 'agent changed during finalization'
     write_final_receipt \
         || temporary_failure 'final receipt refresh during finalization failed'
     final_receipt_safe \
@@ -2067,16 +2070,18 @@ recover_repair() {
     remove_exact_file "$source_blocker" "$authority_source_blocker_sha256" 600 \
         || unsafe_state 'source blocker retirement'
     agent_uid=$(/usr/bin/id -u vonk-agent) || unsafe_state 'agent uid'
+    agent_gid=$(/usr/bin/id -g vonk-agent) || unsafe_state 'agent gid'
     if ! prove_running_unit "$agent_unit" "$agent_binary" \
-        "$target_agent_sha256" "$agent_uid" >/dev/null; then
+        "$target_agent_sha256" "$agent_uid" "$agent_gid" >/dev/null; then
         /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
             || temporary_failure 'target agent restart failed'
         /bin/sleep 1
     fi
     prove_running_unit "$agent_unit" "$agent_binary" "$target_agent_sha256" \
-        "$agent_uid" >/dev/null || temporary_failure 'target agent proof failed'
+        "$agent_uid" "$agent_gid" >/dev/null \
+        || temporary_failure 'target agent proof failed'
     prove_running_unit "$helper_unit" "$helper_binary" "$target_helper_sha256" \
-        0 >/dev/null || temporary_failure 'target helper changed after unblock'
+        0 0 >/dev/null || temporary_failure 'target helper changed after unblock'
     write_phase agent-proven || temporary_failure 'agent phase commit failed'
     write_final_receipt || temporary_failure 'final repair receipt failed'
     final_receipt_safe || unsafe_state 'final repair receipt identity'
