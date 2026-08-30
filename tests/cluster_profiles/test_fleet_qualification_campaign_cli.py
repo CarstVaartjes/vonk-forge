@@ -285,13 +285,82 @@ def test_packaged_authority_binds_reviewed_02ae_catalog_closure() -> None:
     }.isdisjoint(authority.actionable_recipe_keys)
 
 
+def test_packaged_authority_binds_current_745a_catalog_closure() -> None:
+    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-745a42b5")
+
+    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
+    assert authority.commit == "745a42b5daa3ac8010483421c45235e32e866672"
+    assert (
+        authority.catalog_index_sha256
+        == "e864b644e374c76f594bcc4a394348844d4e5aa8d7dc78142f7d596b1fc2b55e"
+    )
+    assert authority.catalog_recipe_count == 76
+    assert authority.jurisdiction == "NL"
+    assert [
+        len(authority.actionable_recipe_keys),
+        len(authority.capacity_blocked_recipe_keys),
+        len(authority.legal_blocked_recipe_keys),
+        len(authority.dual_spark_recipe_keys),
+        len(authority.unsupported_topology_recipe_keys),
+    ] == [49, 8, 9, 6, 4]
+    categories = (
+        authority.actionable_recipe_keys,
+        authority.capacity_blocked_recipe_keys,
+        authority.legal_blocked_recipe_keys,
+        authority.dual_spark_recipe_keys,
+        authority.unsupported_topology_recipe_keys,
+    )
+    classified = [recipe for category in categories for recipe in category]
+    assert len(classified) == len(set(classified)) == 76
+    assert {
+        "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
+        "vonk-forge/minimax-h3-diffusers-single",
+        "vonk-forge/minimax-h3-fl2va-diffusers-single",
+    }.issubset(authority.legal_blocked_recipe_keys)
+    assert {
+        "vonk-forge/gemma-4-26b-a4b-vllm028-single",
+        "vonk-forge/lfm2-5-vl-3b-vllm028-single",
+    }.issubset(authority.actionable_recipe_keys)
+
+
+def test_checked_in_745a_physical_campaign_is_the_exact_reviewed_partition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
+    manifest = campaign_cli.load_manifest(
+        REPOSITORY_ROOT / "config/qualification/nl-single-spark-745a42b5.json"
+    )
+
+    assert manifest.manifest_sha256 == (
+        "c13b5881fc561aae64f305abb7cef21d193b75b4cedbfc58e4511b3f6f2dc386"
+    )
+    assert manifest.cleanup == "stop"
+    assert manifest.jurisdiction == "NL"
+    assert [
+        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
+    ] == [
+        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 25),
+        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 24),
+    ]
+    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
+    assert len(assigned) == len(set(assigned)) == 49
+    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
+    assert set(assigned).isdisjoint(manifest.authority.legal_blocked_recipe_keys)
+    assert set(assigned).isdisjoint(manifest.authority.capacity_blocked_recipe_keys)
+    state_root = (
+        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-745a42b5"
+    ).resolve()
+    for lane in manifest.lanes:
+        assert lane.ledger.is_relative_to(state_root)
+        assert lane.plan_output.is_relative_to(state_root)
+
+
 def test_checked_in_02ae_physical_campaign_is_the_exact_reviewed_partition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
     manifest = campaign_cli.load_manifest(
-        REPOSITORY_ROOT
-        / "config/qualification/nl-single-spark-02ae8bb5.json"
+        REPOSITORY_ROOT / "config/qualification/nl-single-spark-02ae8bb5.json"
     )
 
     assert manifest.manifest_sha256 == (
@@ -327,7 +396,7 @@ def test_02ae_physical_runbook_matches_capacity_and_residency_contract() -> None
     assert "`automatic_eviction` remains false" in runbook
     assert ".payload.complete" not in runbook
     assert runbook.count(".payload.installation_inventory_complete") >= 2
-    assert '($records | last | .payload.blocked) == 0' in runbook
+    assert "($records | last | .payload.blocked) == 0" in runbook
     assert "unique | length) == 59" in runbook
 
 

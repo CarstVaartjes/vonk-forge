@@ -9,6 +9,7 @@ import subprocess
 import sys
 import wave
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -85,18 +86,51 @@ def test_packaged_generic_fixtures_are_digest_and_format_valid() -> None:
         "generic-image-png",
         "generic-mesh-glb",
         "generic-prompt-text",
+        "hunyuanocr-upper-bound-config-v1",
+        "ltx25-fp8-model-offload-request",
+        "ltx25-fp8-sequential-offload-request",
+        "minimax-first-keyframe-request",
+        "minimax-first-last-keyframes-request",
+        "minimax-keyframe-first-png",
+        "minimax-keyframe-last-png",
+        "moss-frame-a-png",
+        "moss-frame-b-png",
+        "moss-session-two-frames-v1",
         "moss-session-v1",
         "service-digit7-png",
         "skintokens-rigged-figure",
+        "wan-dancer-controls-v1",
         "wan-dancer-music-1s",
     }
     assert all(
         hashlib.sha256(value.content).hexdigest() == value.sha256
         for value in registry.fixtures.values()
     )
-    assert len(registry.recipes) == 38
+    assert len(registry.recipes) == 42
     assert len(registry.special) == 0
-    assert len(registry.service_recipes) == 27
+    assert len(registry.service_recipes) == 30
+    assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 56
+    qwen_cases = registry.recipes[
+        "vonk-forge/qwen-image-edit-2511-comfyui-single"
+    ].all_cases
+    assert [case.case_id for case in qwen_cases] == ["default", "two-references"]
+    assert [slot for slot, _fixture in qwen_cases[1].inputs].count("image") == 2
+    minimax_cases = registry.recipes[
+        "vonk-forge/minimax-h3-fl2va-diffusers-single"
+    ].all_cases
+    assert [case.case_id for case in minimax_cases] == [
+        "default",
+        "first-keyframe",
+        "first-last-keyframes",
+    ]
+    ltx_cases = registry.recipes[
+        "vonk-forge/ltx-2-5-22b-distilled-bf16-diffusers-single"
+    ].all_cases
+    assert [case.case_id for case in ltx_cases] == [
+        "default",
+        "fp8-model-offload",
+        "fp8-sequential-offload",
+    ]
     assert all(fixture.provenance is not None for fixture in registry.fixtures.values())
     with wave.open(
         io.BytesIO(registry.fixtures["wan-dancer-music-1s"].content)
@@ -273,7 +307,7 @@ def _ocr_zip(*, characters_delta: int = 0, extra_name: str | None = None) -> byt
         ],
         "inference": "vllm-dflash",
         "model": "tencent/HunyuanOCR",
-        "model_revision": "449e7d471a8a1ef5bd5d652e4881183d7252cbc7",
+        "model_revision": "47644ecc4fc854efa4f505155158831f36773ee4",
         "runtime_source_revision": "c55965d3da1e6f41987abec8068f2e70851318bc",
         "sampling": {
             "repetition_penalty": 1.08,
@@ -349,8 +383,38 @@ def test_packaged_recipe_bindings_match_the_campaign_matrix_exactly() -> None:
         set(registry.recipes) | set(registry.special) | set(registry.service_recipes)
     )
 
-    assert len(catalog_keys) == 69
+    assert len(catalog_keys) == 76
     assert fixture_keys == catalog_keys - unsupported_topologies
+
+
+def test_current_vllm028_and_variant_bindings_are_exact() -> None:
+    registry = FixtureRegistry.packaged()
+
+    gemma = registry.service_recipes["vonk-forge/gemma-4-26b-a4b-vllm028-single"]
+    lfm = registry.service_recipes["vonk-forge/lfm2-5-vl-3b-vllm028-single"]
+    glm = registry.service_recipes["vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual"]
+    assert (gemma.content_sha256, gemma.alias) == (
+        "078047fc8139b5ed42da608e6d131df791b45ee74b2eedccea45c50f22d39469",
+        "gemma-4-26b-a4b-it-vllm028",
+    )
+    assert (lfm.content_sha256, lfm.alias) == (
+        "26d475b2b589cf655d461729de3bc16944e6ca9e8a1e605347946258a032b2b7",
+        "lfm2-5-vl-3b-vllm028",
+    )
+    assert (glm.content_sha256, glm.alias) == (
+        "43d54e87682fb898beddd4fcca8b8da7829ad9130e82409f9d6a8600dff44357",
+        "glm-5.3-flash-exl3",
+    )
+
+    expected_artifacts = {
+        "vonk-forge/minimax-h3-fl2va-diffusers-single": "405bfbcf878ee3eb8f6c8e627652541074901be2433306ace7d73fd63fbc0f55",
+        "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "1706afd5a3322729a3e1bf817447601928b12bdfa97ed1187d672283ee2f058c",
+        "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": "51ab53220c7a8710a6d420bac595e797b6259b7282163c991a6aaae610eb6fdb",
+        "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": "2d3bbe3b5d52de3d889ca0abd692ed874c109e4dbf9ea3d4c86770e3b41a8e77",
+    }
+    assert {
+        key: registry.recipes[key].content_sha256 for key in expected_artifacts
+    } == expected_artifacts
 
 
 def test_registry_fails_closed_for_missing_changed_and_special_fixtures() -> None:
@@ -432,8 +496,10 @@ def test_output_assertions_reject_mime_mismatch() -> None:
 class _ArtifactClient(_DownloadClient):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
-        self.status_reads = 0
+        self.status_reads: dict[str, int] = {}
         self.uploaded: list[str] = []
+        self.request_ids: list[str] = []
+        self.created = 0
 
     def request(
         self,
@@ -449,24 +515,27 @@ class _ArtifactClient(_DownloadClient):
             return {"schema_version": 1, "transport": {}, "storage": {}}
         if path.endswith("/artifact-jobs"):
             assert extra_headers == {"X-Request-ID": extra_headers["X-Request-ID"]}
-            return {"id": "job-1", "state": "draft"}
-        if path == "/api/v1/artifact-jobs/job-1" and method == "GET":
-            self.status_reads += 1
-            if self.status_reads == 1:
-                return {"id": "job-1", "state": "draft"}
+            self.request_ids.append(extra_headers["X-Request-ID"])
+            self.created += 1
+            return {"id": f"job-{self.created}", "state": "draft"}
+        if re.fullmatch(r"/api/v1/artifact-jobs/job-\d+", path) and method == "GET":
+            job_id = path.rsplit("/", 1)[-1]
+            self.status_reads[job_id] = self.status_reads.get(job_id, 0) + 1
+            if self.status_reads[job_id] == 1:
+                return {"id": job_id, "state": "draft"}
             return {
-                "id": "job-1",
+                "id": job_id,
                 "state": "succeeded",
                 "contract_sha256": "d" * 64,
                 "input_manifest_sha256": "e" * 64,
             }
         if path.endswith("/finalize"):
-            return {"id": "job-1", "state": "ready"}
+            return {"id": path.split("/")[-2], "state": "ready"}
         if path.endswith("/submit"):
-            return {"id": "job-1", "state": "queued"}
+            return {"id": path.split("/")[-2], "state": "queued"}
         if path.endswith("/result"):
             return {
-                "id": "job-1",
+                "id": path.split("/")[-2],
                 "output_manifest_sha256": "f" * 64,
                 "output_files": [
                     {
@@ -493,7 +562,7 @@ class _ArtifactClient(_DownloadClient):
         assert source.stat().st_size == expected_size
         assert media_type == "text/plain"
         self.uploaded.append(path)
-        return {"id": "job-1", "state": "draft"}
+        return {"id": path.split("/")[-3], "state": "draft"}
 
 
 def test_artifact_adapter_runs_and_ledgers_durable_controller_lifecycle(
@@ -532,3 +601,64 @@ def test_artifact_adapter_runs_and_ledgers_durable_controller_lifecycle(
         "artifact-job.submitted",
         "artifact-job.completed",
     }
+
+
+def test_artifact_adapter_runs_each_digest_bound_case_with_distinct_evidence(
+    tmp_path: Path,
+) -> None:
+    base_registry = _registry()
+    primary = base_registry.recipes["vonk-forge/image"]
+    supplemental = replace(primary, case_id="alternate")
+    recipe = replace(primary, supplemental_cases=(supplemental,))
+    registry = FixtureRegistry(
+        base_registry.fixtures,
+        {recipe.key: recipe},
+        {},
+        manifest_sha256="b" * 64,
+    )
+    adapter = ArtifactJobSmokeAdapter(registry)
+    preview = adapter.preview(
+        {"visual_recipe": {"interfaces": [{"adapter": "image-job"}]}},
+        recipe_key=recipe.key,
+        recipe_content_sha256=recipe.content_sha256,
+    )
+    client = _ArtifactClient()
+    ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
+
+    result = adapter.run(
+        client,
+        "run-1",
+        preview,
+        ledger=ledger,
+        plan_digest="f" * 64,
+        recipe_key=recipe.key,
+        timeout_seconds=300,
+        poll_interval_seconds=0.1,
+        clock=iter([0, 0, 1, 0, 0, 1]).__next__,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result["case_count"] == 2
+    assert [case["case_id"] for case in result["cases"]] == ["default", "alternate"]
+    assert [case["job_id"] for case in result["cases"]] == ["job-1", "job-2"]
+    assert len(set(client.request_ids)) == 2
+    events = {row["event"] for row in ledger.records}
+    assert "artifact-job.case.default.completed" in events
+    assert "artifact-job.case.alternate.completed" in events
+
+    resumed_client = _ArtifactClient()
+    resumed = adapter.run(
+        resumed_client,
+        "run-1",
+        preview,
+        ledger=ledger,
+        plan_digest="f" * 64,
+        recipe_key=recipe.key,
+        timeout_seconds=300,
+        poll_interval_seconds=0.1,
+        clock=iter([0, 0, 1, 0, 0, 1]).__next__,
+        sleeper=lambda _seconds: None,
+    )
+    assert resumed["case_count"] == 2
+    assert resumed_client.created == 0
+    assert resumed_client.uploaded == []

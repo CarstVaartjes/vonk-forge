@@ -38,6 +38,7 @@ _RECIPE_KEY = re.compile(r"[^/\s]+/[^/\s]+\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _AUTHORITY_FILES = {
+    "nl-single-spark-745a42b5": "nl-single-spark-745a42b5.json",
     "nl-single-spark-02ae8bb5": "nl-single-spark-02ae8bb5.json",
     "nl-single-spark-e996f025": "nl-single-spark-e996f025.json",
 }
@@ -62,6 +63,10 @@ class CampaignAuthority:
     catalog_recipe_count: int
     jurisdiction: str
     actionable_recipe_keys: tuple[str, ...]
+    capacity_blocked_recipe_keys: tuple[str, ...] = ()
+    legal_blocked_recipe_keys: tuple[str, ...] = ()
+    dual_spark_recipe_keys: tuple[str, ...] = ()
+    unsupported_topology_recipe_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -190,6 +195,21 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
             f"checked-in qualification authority is invalid: {authority_id}"
         ) from error
     root = _object(document, "qualification authority")
+    schema_version = root.get("schema_version")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version not in {1, 2}
+    ):
+        raise QualificationError(
+            f"checked-in qualification authority identity is invalid: {authority_id}"
+        )
+    category_fields = {
+        "capacity_blocked_recipe_keys",
+        "legal_blocked_recipe_keys",
+        "dual_spark_recipe_keys",
+        "unsupported_topology_recipe_keys",
+    }
     _exact_keys(
         root,
         required={
@@ -199,16 +219,12 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
             "jurisdiction",
             "reviewed_disposition",
             "actionable_recipe_keys",
-        },
+        }
+        | (category_fields if schema_version == 2 else set()),
         optional=set(),
         label="qualification authority",
     )
-    if (
-        not isinstance(root["schema_version"], int)
-        or isinstance(root["schema_version"], bool)
-        or root["schema_version"] != 1
-        or root["authority_id"] != authority_id
-    ):
+    if root["authority_id"] != authority_id:
         raise QualificationError(
             f"checked-in qualification authority identity is invalid: {authority_id}"
         )
@@ -266,6 +282,8 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         "legal_blocked_single_spark_count",
         "unsupported_topology_count",
     }
+    if schema_version == 2:
+        disposition_fields.add("capacity_blocked_single_spark_count")
     _exact_keys(
         disposition,
         required=disposition_fields,
@@ -281,10 +299,42 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         raise QualificationError(
             f"checked-in qualification authority counts are invalid: {authority_id}"
         )
-    if (
-        disposition["actionable_single_spark_count"] != len(recipe_keys)
-        or sum(int(disposition[field]) for field in disposition_fields) != recipe_count
-    ):
+    category_keys: dict[str, tuple[str, ...]] = {}
+    if schema_version == 2:
+        for field in sorted(category_fields):
+            values = _recipe_keys(root[field], f"authority {field}")
+            if values != tuple(sorted(values)):
+                raise QualificationError(
+                    "checked-in qualification authority category keys are not "
+                    f"sorted: {authority_id} {field}"
+                )
+            category_keys[field] = values
+        categories = {"actionable_recipe_keys": recipe_keys, **category_keys}
+        assigned = [key for values in categories.values() for key in values]
+        duplicates = sorted(key for key in set(assigned) if assigned.count(key) > 1)
+        if duplicates:
+            raise QualificationError(
+                "checked-in qualification authority classifies recipe more than "
+                f"once: {authority_id} {duplicates[0]}"
+            )
+        expected_counts = {
+            "actionable_recipe_keys": "actionable_single_spark_count",
+            "capacity_blocked_recipe_keys": "capacity_blocked_single_spark_count",
+            "legal_blocked_recipe_keys": "legal_blocked_single_spark_count",
+            "dual_spark_recipe_keys": "dual_spark_count",
+            "unsupported_topology_recipe_keys": "unsupported_topology_count",
+        }
+        counts_match = all(
+            len(categories[key]) == disposition[count_field]
+            for key, count_field in expected_counts.items()
+        )
+        closure_matches = len(assigned) == recipe_count
+    else:
+        counts_match = disposition["actionable_single_spark_count"] == len(recipe_keys)
+        closure_matches = (
+            sum(int(disposition[field]) for field in disposition_fields) == recipe_count
+        )
+    if not counts_match or not closure_matches:
         raise QualificationError(
             f"checked-in qualification authority closure is invalid: {authority_id}"
         )
@@ -297,6 +347,14 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         catalog_recipe_count=recipe_count,
         jurisdiction=jurisdiction,
         actionable_recipe_keys=recipe_keys,
+        capacity_blocked_recipe_keys=category_keys.get(
+            "capacity_blocked_recipe_keys", ()
+        ),
+        legal_blocked_recipe_keys=category_keys.get("legal_blocked_recipe_keys", ()),
+        dual_spark_recipe_keys=category_keys.get("dual_spark_recipe_keys", ()),
+        unsupported_topology_recipe_keys=category_keys.get(
+            "unsupported_topology_recipe_keys", ()
+        ),
     )
 
 

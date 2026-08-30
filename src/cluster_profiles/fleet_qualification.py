@@ -18,7 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from .qualification_fixtures import FixtureError, FixtureRegistry, validate_outputs
+from .qualification_fixtures import (
+    FixtureError,
+    FixtureRegistry,
+    RecipeFixture,
+    validate_outputs,
+)
 
 _TERMINAL_OPERATION_STATES = frozenset(
     {"cancelled", "canceled", "completed", "failed", "succeeded"}
@@ -1240,6 +1245,50 @@ class ArtifactJobSmokeAdapter:
             raise QualificationError(
                 str(blocker["detail"] if blocker else "fixture unavailable")
             )
+        cases = recipe.all_cases
+        results = [
+            self._run_case(
+                client,
+                run_id,
+                case,
+                ledger=ledger,
+                plan_digest=plan_digest,
+                recipe_key=recipe_key,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+                clock=clock,
+                sleeper=sleeper,
+                event_prefix=(
+                    event_prefix
+                    if len(cases) == 1
+                    else f"{event_prefix}.case.{case.case_id}"
+                ),
+            )
+            for case in cases
+        ]
+        if len(results) == 1:
+            return results[0]
+        return {
+            "fixture_manifest_sha256": self.fixtures.manifest_sha256,
+            "case_count": len(results),
+            "cases": results,
+        }
+
+    def _run_case(
+        self,
+        client: ControllerClient,
+        run_id: str,
+        recipe: RecipeFixture,
+        *,
+        ledger: EvidenceLedger,
+        plan_digest: str,
+        recipe_key: str,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+        clock: Callable[[], float],
+        sleeper: Callable[[float], None],
+        event_prefix: str,
+    ) -> Mapping[str, object]:
         records = ledger.recipe_records(plan_digest, recipe_key)
         created_records = _payloads(records, f"{event_prefix}.created")
         request_key = _request_key(plan_digest, recipe_key, event_prefix)
@@ -1350,6 +1399,7 @@ class ArtifactJobSmokeAdapter:
             except FixtureError as error:
                 raise QualificationError(str(error)) from error
         return {
+            "case_id": recipe.case_id,
             "job_id": job_id,
             "contract_sha256": status.get("contract_sha256"),
             "input_manifest_sha256": status.get("input_manifest_sha256"),

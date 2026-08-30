@@ -17,7 +17,7 @@ import zipfile
 import zlib
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -28,6 +28,7 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _KEY = re.compile(r"[a-z0-9][a-z0-9-]{0,62}/[a-z0-9][a-z0-9-]{0,62}\Z")
 _SLOT = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_CASE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 _MEDIA_TYPE = re.compile(
     r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\Z"
 )
@@ -96,9 +97,15 @@ class RecipeFixture:
     output_limits: dict[str, object]
     timeout_seconds: int
     assertions: tuple[dict[str, object], ...]
+    case_id: str = "default"
+    supplemental_cases: tuple[RecipeFixture, ...] = ()
+
+    @property
+    def all_cases(self) -> tuple[RecipeFixture, ...]:
+        return (self, *self.supplemental_cases)
 
     def preview(self) -> dict[str, object]:
-        return {
+        preview = {
             "kind": "artifact-job",
             "available": True,
             "recipe": self.key,
@@ -114,6 +121,22 @@ class RecipeFixture:
             "assertions": list(self.assertions),
             "capabilities_path": "/api/v1/artifact-jobs/capabilities",
         }
+        if self.supplemental_cases:
+            preview["cases"] = [
+                {
+                    "id": case.case_id,
+                    "parameters": case.parameters,
+                    "inputs": [
+                        {"fixture": fixture.fixture_id, **fixture.evidence(slot)}
+                        for slot, fixture in case.inputs
+                    ],
+                    "output_limits": case.output_limits,
+                    "timeout_seconds": case.timeout_seconds,
+                    "assertions": list(case.assertions),
+                }
+                for case in self.all_cases
+            ]
+        return preview
 
     @contextmanager
     def materialize(self) -> Iterator[list[tuple[dict[str, object], Path]]]:
@@ -561,7 +584,7 @@ def _validate_hunyuan_ocr_zip(content: bytes) -> None:
     expected = {
         "inference": "vllm-dflash",
         "model": "tencent/HunyuanOCR",
-        "model_revision": "449e7d471a8a1ef5bd5d652e4881183d7252cbc7",
+        "model_revision": "47644ecc4fc854efa4f505155158831f36773ee4",
         "runtime_source_revision": "c55965d3da1e6f41987abec8068f2e70851318bc",
         "schema_version": 1,
         "task_type": "doc_parse",
@@ -607,7 +630,7 @@ def _validate_hunyuan_ocr_zip(content: bytes) -> None:
         raise FixtureError("Hunyuan OCR Markdown semantic assertion failed")
 
 
-def _validate_moss_transcript(content: bytes) -> None:
+def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> None:
     lines = content.splitlines()
     if not 3 <= len(lines) <= 4_096 or any(not line for line in lines):
         raise FixtureError("MOSS transcript record count is invalid")
@@ -657,11 +680,11 @@ def _validate_moss_transcript(content: bytes) -> None:
     ):
         raise FixtureError("MOSS transcript model authority is invalid")
     frame_records = [record for record in records if record.get("type") == "frame-ack"]
-    if (
-        len(frame_records) != 1
-        or frame_records[0].get("event_index") != 0
-        or frame_records[0].get("timestamp") != 0.0
-        or not isinstance(frame_records[0].get("dropped_oldest"), bool)
+    if len(frame_records) != expected_frame_count or any(
+        record.get("event_index") != index
+        or record.get("timestamp") != float(index)
+        or not isinstance(record.get("dropped_oldest"), bool)
+        for index, record in enumerate(frame_records)
     ):
         raise FixtureError("MOSS transcript frame acknowledgement is invalid")
     stop_indexes = [
@@ -680,7 +703,9 @@ def _validate_moss_transcript(content: bytes) -> None:
 
 
 def _validate_ltx25_receipt(
-    content: bytes, output_contents: Mapping[str, bytes]
+    content: bytes,
+    output_contents: Mapping[str, bytes],
+    expected_profile: str,
 ) -> None:
     document = _parse_json_object(content, "LTX 2.5 receipt")
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
@@ -711,6 +736,8 @@ def _validate_ltx25_receipt(
         "fp8-cast-sequential-offload",
     }:
         raise FixtureError("LTX 2.5 receipt profile is invalid")
+    if document.get("profile") != expected_profile:
+        raise FixtureError("LTX 2.5 receipt does not match the requested profile")
     seed = document.get("seed")
     if (
         not isinstance(seed, int)
@@ -832,8 +859,8 @@ class FixtureRegistry:
                 "qualification fixture manifest is unreadable"
             ) from error
         document = _object(value, "qualification fixture manifest")
-        if document.get("schema_version") != 1:
-            raise FixtureError("qualification fixture schema_version must be 1")
+        if document.get("schema_version") not in {1, 2}:
+            raise FixtureError("qualification fixture schema_version must be 1 or 2")
         fixture_root = path.parent if path is not None else package_root
         raw_fixtures = _object(document.get("fixtures"), "fixtures")
         fixtures: dict[str, Fixture] = {}
@@ -918,6 +945,11 @@ class FixtureRegistry:
                 provenance,
             )
         raw_recipes = _object(document.get("recipes"), "recipes")
+        if document.get("schema_version") == 1 and any(
+            isinstance(raw_recipe, Mapping) and "cases" in raw_recipe
+            for raw_recipe in raw_recipes.values()
+        ):
+            raise FixtureError("qualification fixture cases require schema_version 2")
         recipes = {
             key: _parse_recipe_fixture(key, raw_recipe, fixtures)
             for key, raw_recipe in raw_recipes.items()
@@ -964,7 +996,8 @@ class FixtureRegistry:
         used_fixtures = {
             fixture.fixture_id
             for recipe in recipes.values()
-            for _, fixture in recipe.inputs
+            for case in recipe.all_cases
+            for _, fixture in case.inputs
         }
 
         def collect_service_fixture_references(value: object) -> None:
@@ -1052,6 +1085,60 @@ def _blocker(code: str, detail: str) -> dict[str, str]:
 
 
 def _parse_recipe_fixture(
+    key: object, raw: object, fixtures: Mapping[str, Fixture]
+) -> RecipeFixture:
+    if not isinstance(key, str) or not _KEY.fullmatch(key):
+        raise FixtureError("recipe fixture key is invalid")
+    item = _object(raw, f"recipe fixture {key}")
+    allowed = {
+        "content_sha256",
+        "interface",
+        "parameters",
+        "inputs",
+        "output_limits",
+        "timeout_seconds",
+        "assertions",
+        "cases",
+    }
+    if set(item) - allowed:
+        raise FixtureError(f"recipe fixture {key} fields are invalid")
+    base = {name: value for name, value in item.items() if name != "cases"}
+    primary = _parse_recipe_case(key, base, fixtures)
+    raw_cases = item.get("cases", [])
+    if not isinstance(raw_cases, list) or len(raw_cases) > 16:
+        raise FixtureError(f"recipe fixture {key} cases are invalid")
+    case_fields = {
+        "id",
+        "parameters",
+        "inputs",
+        "output_limits",
+        "timeout_seconds",
+        "assertions",
+    }
+    parsed_cases: list[RecipeFixture] = []
+    case_ids = {primary.case_id}
+    for raw_case in raw_cases:
+        case = _object(raw_case, f"recipe fixture {key} case")
+        case_id = case.get("id")
+        if (
+            not set(case).issubset(case_fields)
+            or len(case) < 2
+            or not isinstance(case_id, str)
+            or not _CASE_ID.fullmatch(case_id)
+            or case_id in case_ids
+        ):
+            raise FixtureError(f"recipe fixture {key} case identity is invalid")
+        parsed = _parse_recipe_case(
+            key,
+            {**base, **{name: value for name, value in case.items() if name != "id"}},
+            fixtures,
+        )
+        parsed_cases.append(replace(parsed, case_id=case_id))
+        case_ids.add(case_id)
+    return replace(primary, supplemental_cases=tuple(parsed_cases))
+
+
+def _parse_recipe_case(
     key: object, raw: object, fixtures: Mapping[str, Fixture]
 ) -> RecipeFixture:
     if not isinstance(key, str) or not _KEY.fullmatch(key):
@@ -1229,7 +1316,7 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             "nonempty",
         },
         "ocr-zip": {"kind", "media_type", "profile"},
-        "moss-transcript": {"kind", "media_type", "profile"},
+        "moss-transcript": {"kind", "media_type", "profile", "frame_count"},
         "json-document": {
             "kind",
             "media_type",
@@ -1389,6 +1476,7 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
     elif kind == "moss-transcript":
         if assertion.get("profile") != "moss-realtime-v1":
             raise FixtureError(f"recipe fixture {key} MOSS profile is invalid")
+        _integer(assertion.get("frame_count", 1), "MOSS frame count", 1, 128)
     elif kind in {"json-document", "jsonl-records"}:
         required = assertion.get("required_keys", [])
         if not isinstance(required, list) or any(
@@ -1873,7 +1961,9 @@ def validate_outputs(
                     _validate_hunyuan_ocr_zip(content)
             if kind == "moss-transcript":
                 for _, content, _ in selected:
-                    _validate_moss_transcript(content)
+                    _validate_moss_transcript(
+                        content, int(assertion.get("frame_count", 1))
+                    )
             if kind == "json-document":
                 for _, content, _ in selected:
                     document = _parse_json_object(content, "artifact JSON")
@@ -1895,8 +1985,30 @@ def validate_outputs(
                 output_contents = {
                     str(item["name"]): content for item, content, _ in contents
                 }
+                request_profiles = []
+                for slot, input_fixture in recipe.inputs:
+                    if slot != "request":
+                        continue
+                    request = _parse_json_object(
+                        input_fixture.content, "LTX 2.5 qualification request"
+                    )
+                    request_profiles.append(request.get("profile"))
+                if len(request_profiles) > 1 or any(
+                    profile
+                    not in {
+                        "fp8-cast-model-offload",
+                        "fp8-cast-sequential-offload",
+                    }
+                    for profile in request_profiles
+                ):
+                    raise FixtureError("LTX 2.5 qualification profile is invalid")
+                expected_profile = (
+                    str(request_profiles[0])
+                    if request_profiles
+                    else "bf16-model-offload"
+                )
                 for _, content, _ in selected:
-                    _validate_ltx25_receipt(content, output_contents)
+                    _validate_ltx25_receipt(content, output_contents, expected_profile)
     return {
         "assertions": list(recipe.assertions),
         "output_files": outputs,
