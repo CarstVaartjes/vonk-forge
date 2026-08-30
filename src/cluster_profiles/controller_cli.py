@@ -448,6 +448,29 @@ def add_controller_commands(
         lambda parser: parser.add_argument("--placement-digest", required=True),
     )
 
+    def build_shared(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--recipe-revision-id", required=True)
+        parser.add_argument("--builder-node-id", required=True)
+
+    _action_pair(
+        library_commands,
+        "build",
+        build_shared,
+        lambda parser: parser.add_argument("--build-input-sha256", required=True),
+    )
+
+    def distribute_shared(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--recipe-build-id", required=True)
+        parser.add_argument("--mapping-id", required=True)
+        parser.add_argument("--mapping-generation", type=int, required=True)
+
+    _action_pair(
+        library_commands,
+        "distribute",
+        distribute_shared,
+        lambda parser: parser.add_argument("--plan-digest", required=True),
+    )
+
     def install_shared(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--mapping-id", required=True)
         parser.add_argument("--recipe-build-id", required=True)
@@ -2075,7 +2098,15 @@ def _run_library(
             f"/api/v1/catalog/recipes/{_quoted(args.recipe_id)}/fork",
             {"revision": args.revision, "slug": args.slug},
         )
-    if command in {"map", "install", "load", "stop", "uninstall"}:
+    if command in {
+        "map",
+        "build",
+        "distribute",
+        "install",
+        "load",
+        "stop",
+        "uninstall",
+    }:
         variant = getattr(args, f"{command}_command")
         apply = variant == "apply"
         if command == "map":
@@ -2092,6 +2123,37 @@ def _run_library(
             if apply:
                 payload.update(
                     placement_digest=args.placement_digest,
+                    request_key=_request_key_value(args, request_id_factory),
+                )
+        elif command == "build":
+            payload = {
+                "recipe_revision_id": args.recipe_revision_id,
+                "builder_node_id": args.builder_node_id,
+            }
+            path = (
+                "/api/v1/recipes/builds"
+                if apply
+                else "/api/v1/recipes/build-plans/preview"
+            )
+            if apply:
+                payload.update(
+                    build_input_sha256=args.build_input_sha256,
+                    request_key=_request_key_value(args, request_id_factory),
+                )
+        elif command == "distribute":
+            payload = {
+                "recipe_build_id": args.recipe_build_id,
+                "mapping_id": args.mapping_id,
+                "mapping_generation": args.mapping_generation,
+            }
+            path = (
+                "/api/v1/recipes/image-distributions"
+                if apply
+                else "/api/v1/recipes/image-distribution-plans/preview"
+            )
+            if apply:
+                payload.update(
+                    plan_digest=args.plan_digest,
                     request_key=_request_key_value(args, request_id_factory),
                 )
         elif command == "install":
