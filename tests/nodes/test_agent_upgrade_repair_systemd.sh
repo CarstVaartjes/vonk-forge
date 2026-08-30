@@ -1219,7 +1219,9 @@ fi
 fixture_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 fixture_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
 snapshot_state "$test_root/before"
-snapshot_source_authority_state "$test_root/before-source-authority" 'ii '
+if [[ "$crash_phase" = pre-runner-rename ]]; then
+  snapshot_source_authority_state "$test_root/before-source-authority" 'ii '
+fi
 
 crash_watcher=
 if [[ "$crash_phase" = pre-runner-rename \

@@ -197,6 +197,7 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness
     assert '"$test_root/before-source-authority" \'ii \'' in harness
     assert '"$test_root/pre-runner-authority" iHR' in harness
+    assert 'if [[ "$crash_phase" = pre-runner-rename ]]; then' in harness
     assert 'snapshot_prepared_objects "$test_root/prepared-before"' in harness
     assert '"$test_root/before-source-authority"' in harness
     assert 'test "$(wc -l < "$repair_receipt")" -eq 16' in harness
