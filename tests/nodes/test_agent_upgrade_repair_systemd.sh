@@ -1230,8 +1230,9 @@ run_wrong_binary_but_restore_installed() {
     test ! -L "$source_gate"
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    source_gate_manager_path="$(realpath -e -- "$source_gate")"
     test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate"
+      "$agent_unit")" = "$source_gate_manager_path"
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
@@ -1271,8 +1272,9 @@ run_wrong_binary_but_restore_installed() {
     cmp -s "$gate_backup" "$source_gate"
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    test "$(realpath -e -- "$source_gate")" = "$source_gate_manager_path"
     test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate"
+      "$agent_unit")" = "$source_gate_manager_path"
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
