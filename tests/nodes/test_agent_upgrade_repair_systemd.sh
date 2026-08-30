@@ -1030,12 +1030,13 @@ snapshot_state() {
 }
 
 snapshot_source_authority_state() {
-  destination=$1
-  full_snapshot=${destination}.full
-  snapshot_state "$full_snapshot"
+  authority_destination=$1
+  authority_full_snapshot=${authority_destination}.full
+  snapshot_state "$authority_full_snapshot"
   grep -Fv -e "path=$standard_runner " \
-    -e "path=${standard_runner}.new " "$full_snapshot" > "$destination"
-  rm -f -- "$full_snapshot"
+    -e "path=${standard_runner}.new " "$authority_full_snapshot" \
+    > "$authority_destination"
+  rm -f -- "$authority_full_snapshot"
 }
 
 snapshot_prepared_objects() {
