@@ -1,7 +1,7 @@
 # Recipe qualification decision matrix
 
 This matrix is the operational decision record for the recipe-library checkout
-used by the 2026-08-28 two-Spark qualification campaign. It covers every exact
+used by the 2026-08-30 two-Spark qualification campaign. It covers every exact
 recipe slug present in `recipes/` at the snapshot recorded below, including
 recipes whose declared topology cannot run on the present fleet.
 
@@ -24,25 +24,26 @@ relay. SSH is not part of qualification or recovery.
 
 ## Inventory snapshot
 
-The settled recipe-library checkout contains **69** `recipes/*.json` documents
-and **218** catalog entities. This matrix is bound to the generated
+The settled recipe-library checkout contains **76** `recipes/*.json` documents
+and **236** catalog entities. This matrix is bound to recipe-library commit
+`745a42b5daa3ac8010483421c45235e32e866672` and the generated
 `catalog-index.json` SHA-256
-`a02d80639af37f518a9399f0a7a3d035c9269fe8a20b3ed0f89feb1fdd06294c`.
+`e864b644e374c76f594bcc4a394348844d4e5aa8d7dc78142f7d596b1fc2b55e`.
 
 The repository gates are green for this snapshot:
 
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
-- the final library verification passed 194 tests and 233 subtests;
-- the cross-repository validator passed all 69 recipes, all 218 entities, and
-  the secret scan; and
-- platform verification passed 2,523 tests plus the 45-test focused fleet
-  qualification suite before the final mechanical formatting pass; and
-- controller UI verification passed 245 tests and the production build, while
-  Playwright passed two browser tests with one opt-in screenshot test skipped.
+- the cross-repository validator passed all 76 recipes, all 236 entities, and
+  the secret scan;
+- the focused fixture, campaign, and cross-repository validator suite passed 38
+  tests; and
+- the portable cluster/control suite passed 201 tests and 45 subtests, while
+  Linux-only package and lifecycle gates remain delegated to Linux CI.
 
-The checked-in runner registry contains eight provenance-bound fixture blobs,
-38 exact artifact contracts, 27 digest-bound service contracts, and zero
-special/unresolved fixture dispositions. Together those are all **65** exact
+The checked-in runner registry contains 19 provenance-bound fixture records,
+42 exact artifact contracts with 56 explicit smoke cases, 30 digest-bound
+service contracts, and zero special/unresolved fixture dispositions. Together
+those are all **72** exact
 one- or two-Spark recipe contracts. Exactly four catalog recipes are omitted
 from execution because their declared topologies require three, four, four,
 and eight Sparks. Repository green means installable and directly qualifiable;
@@ -103,21 +104,24 @@ explicit and are never bypassed to reach that state.
 | `deepseek-v4-flash-0731-ds4-single` | 1 Spark | Current target-only, two-session concurrency baseline | EC, focused fix | Release wording now reflects ordered CUDA fallback, not native batching | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-mia-dual` | 2 Sparks | Current Mia distributed reference | EC, repository-green | Exact two-rank start/readiness, endpoint ownership, and rank-loss recovery remain unproved | Yes, exactly 2 Sparks | qualify |
 | `deepseek-v4-flash-0731-mia-sparkinfer-single` | 1 Spark | Mia checkpoint through SparkInfer/EXL3 | EC, repository-green | High 116 GB steady envelope; verify admission headroom and speculative decode | Yes, 1 Spark | qualify |
-| `deepseek-v4-flash-0731-sparkinfer-single` | 1 Spark | REAP-K216 SparkInfer alternative | EC, repository-green | High 116 GB steady envelope; verify admission headroom and output parity | Yes, 1 Spark | qualify |
+| `deepseek-v4-flash-0731-sparkinfer-single` | 1 Spark | REAP-K216 SparkInfer alternative | EC, repository-green; capacity-blocked | High 116 GB steady envelope exceeds the checked lower-node free-memory authority by 1,053,716,480 bytes | No on current free memory | capacity-blocked |
 | `gemma-4-26b-a4b-vllm-single` | 1 Spark | Current Gemma 4 plain-chat profile | EC, focused contract fix | Remains on vLLM 0.27.1; unsupported tool-use claims/flags were removed and thinking is disabled. Prove plain chat and absence of raw channel leakage | Yes, 1 Spark | qualify |
+| `gemma-4-26b-a4b-vllm028-single` | 1 Spark | Current stable-vLLM Gemma 4 profile | EC, repository-green, new candidate | vLLM 0.28 uses its own exact alias and retains the Gemma 4 reasoning/parser and multimodal smoke contract; qualify beside the 0.27.1 compatibility control | Yes, 1 Spark | qualify |
 | `glm-5-2-aqlm-vllm-triple` | 3 Sparks | Historical GLM 5.2 TP3/AQLM reference | EC, topology-inadmissible | No three-node placement exists on the present fleet | Yes on 3 Sparks, not now | unsupported topology |
 | `glm-5-2-quanttrio-vllm-four` | 4 Sparks | Explicitly historical and superseded | EC, topology-inadmissible | Four-node topology; GLM 5.3 two-Spark profiles are newer | No; qualify GLM 5.3 TP2 | superseded |
 | `glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual` | 2 Sparks | Current gated 1M-context abliterated specialist | EC, repository-green, gated | Gated weights; prove native MP startup, 1M profile, MTP4, and 120 GB/node safety | Yes, exactly 2 Sparks | qualify |
 | `glm-5-3-flash-nvfp4-vllm-dual` | 2 Sparks | Current standard GLM 5.3 Ray TP2 profile | EC, focused static audit | Prove Ray formation, sparse MLA build, MTP4, multimodal input, and rank recovery | Yes, exactly 2 Sparks | qualify |
+| `glm-5-3-flash-exl3-dflash2-vllm-dual` | 2 Sparks | Current Mia EXL3/DFlash2 TP2 profile | EC, repository-green, new candidate | Prove native-MP two-rank formation, EXL3 target, DFlash2 K7 decoding, 1M context, multimodal requests, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `glm-5-3-flash-nvfp4-vllm-four` | 4 Sparks | Future-only TP4 counterpart; redundant on this fleet | EC, topology-inadmissible | Four-node topology offers no present-fleet qualification path | No on present fleet | unsupported topology |
 | `inkling-975b-a41b-nvfp4-sglang-eight` | 8 Sparks | Future-only full Inkling profile | EC, topology-inadmissible | Requires eight Sparks; cannot be reduced without changing model/runtime semantics | No on present fleet | unsupported topology |
 | `inkling-small-nvfp4-sglang-dual` | 2 Sparks | Current smaller Inkling multimodal TP2 profile | EC, repository-green | Prove SGLang two-rank formation, multimodal requests, tool calls, and recovery | Yes, exactly 2 Sparks | qualify |
-| `laguna-s-2-1-nvfp4-vllm-single` | 1 Spark | Obsolete large Laguna S checkpoint/profile | EC, but unsafe current envelope | Pinned checkpoint is stale and the 105 GB steady profile leaves inadequate safe growth/reserve | No; qualify XS first | superseded |
+| `laguna-s-2-1-nvfp4-vllm-single` | 1 Spark | Obsolete large Laguna S checkpoint/profile | EC, but unsafe current envelope; capacity-blocked | Pinned checkpoint is stale and the checked fleet memory envelope is 3,053,716,480 bytes short | No; qualify XS first | capacity-blocked |
 | `laguna-xs-2-1-nvfp4-vllm-single` | 1 Spark | Current safer Laguna XS baseline | EC, repository-green | Prove model parser/tool path and memory envelope | Yes, 1 Spark | qualify |
 | `lfm2-5-vl-3b-vllm-single` | 1 Spark | Current small vision-language/OCR baseline | EC, repository-green | Retains its specialized vLLM 0.27.1 runtime; prove multimodal preprocessing, OCR/layout, grounding, and parsed tool calls | Yes, 1 Spark | qualify |
-| `ling-3-0-flash-dspark-sglang-single` | 1 Spark | Current Ling INT4 DSpark/SGLang profile | EC, focused fix | Exact DSpark dependency and immutable ledger revision corrected | Yes, 1 Spark | qualify |
+| `lfm2-5-vl-3b-vllm028-single` | 1 Spark | Current stable-vLLM LFM 2.5 VL profile | EC, repository-green, new candidate | vLLM 0.28 uses an exact distinct alias while preserving OCR, grounding, multimodal preprocessing, and parsed-tool smoke coverage | Yes, 1 Spark | qualify |
+| `ling-3-0-flash-dspark-sglang-single` | 1 Spark | Current Ling INT4 DSpark/SGLang profile | EC, focused fix; capacity-blocked | Exact DSpark dependency and immutable ledger revision corrected, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
 | `muse-glimmer-30b-bf16-vllm-single` | 1 Spark | Current multimodal/agentic specialist | EC, repository-green, upstream-pending tag | Uses its official Muse-specific CUDA 13 vLLM image; prove image, reasoning, and tool behavior on GB10 | Yes, 1 Spark | qualify |
-| `nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single` | 1 Spark | Current speculative low-concurrency latency profile | EC, focused harness fix | Typed attention/chunked-prefill/media options landed; high 116 GB envelope needs watchdog proof | Yes, 1 Spark | qualify |
+| `nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single` | 1 Spark | Current speculative low-concurrency latency profile | EC, focused harness fix; capacity-blocked | Typed attention/chunked-prefill/media options landed; the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
 | `nemotron-3-5-lightning-30b-a3b-vllm-single` | 1 Spark | Current target-only Lightning baseline | EC, focused harness fix | Use as control for DSpark latency delta; verify tool and reasoning parsers | Yes, 1 Spark | qualify |
 | `nemotron-3-nano-30b-a3b-vllm-single` | 1 Spark | Older compact text baseline | EC, repository-green | vLLM 0.20 runtime is older; retain as compatibility control | Yes only after 3.5 baseline | superseded |
 | `nemotron-3-nano-omni-30b-a3b-vllm-single` | 1 Spark | Distinct older Omni/text profile | EC, repository-green | Declared interface is text-only despite Omni lineage; prove exact exposed capabilities | Yes, 1 Spark | qualify |
@@ -136,9 +140,9 @@ explicit and are never bypassed to reach that state.
 These recipes must use the bounded artifact-job lane. A successful container
 exit is insufficient: the controller must receive an allowed output manifest,
 verify content type and size, retain the digest, and make the artifact
-retrievable. That lane is implemented end to end. Thirty-eight exact fixtures
-exercise it using eight provenance-bound blobs and no fallback or special-case
-disposition. SkinTokens uses a deterministic mesh-only derivative of Khronos'
+retrievable. That lane is implemented end to end. Forty-two exact contracts
+exercise 56 cases using 19 provenance-bound fixture records and no fallback or
+special-case disposition. SkinTokens uses a deterministic mesh-only derivative of Khronos'
 immutable CC-BY-4.0 RiggedFigure asset;
 Step1X texture uses a deterministic CC0 triangle cube plus its reference image.
 Both GLBs are structurally validated before upload and again by their adapters.
@@ -147,29 +151,33 @@ Both GLBs are structurally validated before upload and again by their adapters.
 |---|---:|---|---|---|---|---|
 | `flux-2-klein-4b-comfyui-single` | 1 Spark | Current small/fast text-to-image baseline | EC, repository-green; artifact lane green | Exact-output fixture and bounded controller retrieval are manifest-bound; physical PNG proof remains | Yes, 1 Spark | qualify |
 | `flux-2-klein-4b-nvfp4-comfyui-single` | 1 Spark | New official NVFP4 storage/memory-efficient FLUX baseline | EC, repository-green, new candidate; artifact lane green | Three immutable artifacts total 10.84 GB and declare 28 GB steady memory; prove SM121 execution and exact four-step PNG output | Yes, 1 Spark | qualify |
-| `hunyuan-video-15-distilled-diffusers-single` | 1 Spark | Distilled text-to-video speed profile | EC, repository-green; artifact lane green | Manifest binds the deterministic fixture and MP4 assertions; prove the 110 GB envelope | Yes, 1 Spark | qualify |
-| `hunyuan-video-15-i2v-step-distilled-diffusers-single` | 1 Spark | Step-distilled image-to-video speed profile | EC, repository-green; artifact lane green | Manifest binds input staging and MP4 assertions; prove the 110 GB envelope | Yes, 1 Spark | qualify |
-| `hunyuan-video-15-t2v-diffusers-single` | 1 Spark | Full text-to-video quality reference | EC, repository-green; artifact lane green | Manifest binds bounded output; prove the 110 GB envelope after the distilled control | Yes, 1 Spark | qualify |
-| `hunyuan-video-foley-xl-pytorch-single` | 1 Spark | Foley XL quality/cost baseline | EC, repository-green; artifact lane green | Manifest binds video input and WAV assertions; physical audio quality remains | Yes, 1 Spark | qualify |
-| `hunyuan-video-foley-xxl-pytorch-single` | 1 Spark | Foley XXL higher-quality variant | EC, repository-green; artifact lane green | Prove XXL output differs from XL while satisfying the bound WAV contract | Yes, 1 Spark | qualify |
+| `hunyuan-video-15-distilled-diffusers-single` | 1 Spark | Distilled text-to-video speed profile | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
+| `hunyuan-video-15-i2v-step-distilled-diffusers-single` | 1 Spark | Step-distilled image-to-video speed profile | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
+| `hunyuan-video-15-t2v-diffusers-single` | 1 Spark | Full text-to-video quality reference | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
+| `hunyuan-video-foley-xl-pytorch-single` | 1 Spark | Foley XL quality/cost baseline | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
+| `hunyuan-video-foley-xxl-pytorch-single` | 1 Spark | Foley XXL higher-quality variant | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
 | `hunyuan3d-omni-pytorch-single` | 1 Spark | Current Hunyuan multimodal 3D profile | EC, focused fix, build-unvalidated; artifact lane green; legal block | Offline DINOv2 companion, seeded sampling, and strict GLB validation landed, but upstream license excludes EU, UK, and South Korea; Netherlands fleet must reject admission | No in this jurisdiction | legal-blocked |
-| `hunyuanocr-1-5-vllm-dflash-single` | 1 Spark | Pending-tag DFlash OCR artifact-job specialist | EC, repository-green; artifact lane green | Exact fixture is manifest-bound; physical canary must prove vLLM/DFlash, all 12 OCR tasks, and Markdown normalization | Yes, 1 Spark | qualify |
-| `ltx-2-19b-dev-bf16-diffusers-single` | 1 Spark | Legacy LTX-2 development/fidelity reference | EC, build-unvalidated | Old LTX generation; replace with authenticated filtered LTX-2.5 snapshot/profile | No; qualify 2.5 first | superseded |
-| `ltx-2-19b-dev-fp4-pytorch-single` | 1 Spark | Legacy LTX-2 FP4 memory variant | EC, build-unvalidated | Old native path and generation; LTX-2.5 is the maintained target | No; qualify 2.5 first | superseded |
+| `hunyuanocr-1-5-vllm-dflash-single` | 1 Spark | Pending-tag DFlash OCR artifact-job specialist | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; HunyuanOCR must not be actionable in the Netherlands campaign | No in this jurisdiction | legal-blocked |
+| `ltx-2-19b-dev-bf16-diffusers-single` | 1 Spark | Legacy LTX-2 development/fidelity reference | EC, build-unvalidated; capacity-blocked | Old LTX generation and the checked fleet memory envelope is 1,053,716,480 bytes short | No; qualify 2.5 after capacity rises | capacity-blocked |
+| `ltx-2-19b-dev-fp4-pytorch-single` | 1 Spark | Legacy LTX-2 FP4 memory variant | EC, build-unvalidated; capacity-blocked | Old native path and the checked fleet memory envelope is 1,053,716,480 bytes short | No; qualify 2.5 after capacity rises | capacity-blocked |
 | `ltx-2-19b-distilled-diffusers-single` | 1 Spark | Legacy LTX-2 distilled baseline | EC, focused adapter fix | Upscaler resolution was corrected, but the generation is superseded by LTX-2.5 | No; qualify 2.5 first | superseded |
 | `ltx-2-19b-distilled-fp8-diffusers-single` | 1 Spark | Legacy lower-memory FP8 variant | EC, focused adapter fix | Upscaler resolution was corrected, but the generation is superseded by LTX-2.5 | No; qualify 2.5 first | superseded |
 | `ltx-2-3-22b-distilled-1-1-diffusers-single` | 1 Spark | Recent 2.3 compatibility profile | EC, focused adapter fix | Hard-coded upscaler slug fixed; authenticated filtered 2.5 recipe is the primary target | No; qualify 2.5 first | superseded |
-| `ltx-2-5-22b-distilled-bf16-diffusers-single` | 1 Spark | New primary LTX-2.5 BF16 baseline with optional FP8 layerwise-cast/offload profiles | EC, repository-green, build-unvalidated, gated; artifact lane green | Authenticated license preflight and exact 28-path/70.09 GB filtered HF snapshot must succeed; prove 118 GB startup guard. NVFP4 stays deferred because upstream lacks a deterministic SM121 kernel contract | Yes, 1 Spark | qualify |
-| `minimax-h3-diffusers-single` | 1 Spark | Current MiniMax H3 synchronized-media profile | EC, focused fix; artifact lane green | Added smoke-only 4/3, balanced 31/30, and qualification 51/50 sigma/eval profiles | Yes, 1 Spark | qualify |
+| `ltx-2-5-22b-distilled-bf16-diffusers-single` | 1 Spark | New primary LTX-2.5 BF16 baseline with optional FP8 layerwise-cast/offload profiles | EC, repository-green, build-unvalidated, gated; artifact fixture current; capacity-blocked | Authenticated 70.09 GB snapshot is current, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
+| `minimax-h3-diffusers-single` | 1 Spark | Full MiniMax H3 synchronized-media profile | EC, focused fix; artifact fixture current; legal block | Exact MiniMax model authority denies EU use; retain the fixture for lawful jurisdictions but reject the Netherlands campaign | No in this jurisdiction | legal-blocked |
+| `minimax-h3-fl2va-diffusers-single` | 1 Spark | Slim MiniMax H3 FL2VA text/keyframe profile | EC, repository-green; artifact fixture current; legal block | Distinct FL2VA artifacts and keyframe contract are current, but exact MiniMax model authority denies EU use | No in this jurisdiction | legal-blocked |
 | `moss-vl-realtime-11b-pytorch-single` | 1 Spark | Realtime session-replay artifact-job specialist | EC, repository-green; artifact lane green | Digest-bound schema-v1 session references an authenticated frame; exact H.264 replay and ordered authority/ack/terminal JSONL semantics are enforced | Yes, 1 Spark | qualify |
 | `mova-360p-diffusers-single` | 1 Spark | Current lower-cost MOVA synchronized profile | EC, repository-green; artifact lane green | Exact fixture/output contract is manifest-bound; physical synchronized-media proof remains | Yes, 1 Spark | qualify |
 | `mova-720p-diffusers-single` | 1 Spark | Current higher-quality MOVA profile | EC, repository-green; artifact lane green | Prove the 104 GB envelope after the 360p control succeeds | Yes, 1 Spark | qualify |
 | `nvidia-qwen-image-flash-diffusers-single` | 1 Spark | Current NVIDIA fast image profile | EC, focused fix; artifact lane green | Incorrect 32/24 GB memory declaration corrected to match the 57.7 GB BF16 artifact | Yes, 1 Spark | qualify |
 | `pixal3d-pytorch-single` | 1 Spark | Current image-to-3D alternative | EC, focused fix, build-unvalidated; artifact lane green | Strict GLB validation, early input validation, and read-only-safe FlexGEMM cache landed; native arm64 build remains | Yes, 1 Spark | qualify |
 | `qwen-image-2512-comfyui-single` | 1 Spark | ComfyUI compatibility path for Qwen Image 2512 | EC, focused job-output fix; artifact lane green | Validate the exact manifest-bound one-output contract; Diffusers is the primary baseline | Yes after Diffusers, 1 Spark | qualify |
+| `qwen-image-2512-fp8-lightning-comfyui-single` | 1 Spark | Current FP8 Lightning ComfyUI efficiency variant | EC, repository-green, new candidate; artifact fixture current | Exact ComfyUI workflow, FP8 checkpoint, Lightning LoRA, and one-PNG output are digest-bound | Yes after the base control, 1 Spark | qualify |
 | `qwen-image-2512-diffusers-single` | 1 Spark | Primary Qwen Image 2512 fidelity baseline | EC, focused adapter fix; artifact lane green | Prompt/output adapters corrected; exact build and PNG canary remain | Yes, 1 Spark | qualify |
 | `qwen-image-2512-lightning-diffusers-single` | 1 Spark | Fast Lightning LoRA variant | EC, repository-green; artifact lane green | Prove LoRA mount/activation and compare output to the base control | Yes after base, 1 Spark | qualify |
 | `qwen-image-edit-2511-comfyui-single` | 1 Spark | Current official-core-compatible ComfyUI edit variant | EC, focused fix; artifact lane green | Replaced the unloadable sharded snapshot/per-job merge with Comfy-Org's immutable monolithic transformer, scaled-FP8 encoder, and VAE (50.50 GB total); prove one- and two-reference edits | Yes, 1 Spark | qualify |
+| `qwen-image-edit-2511-fp8mixed-comfyui-single` | 1 Spark | Current mixed-FP8 ComfyUI edit efficiency variant | EC, repository-green; artifact fixture current | Exact mixed-FP8 workflow reuses the same one- or two-reference semantic output contract | Yes after the base control, 1 Spark | qualify |
+| `qwen-image-edit-2511-int8-convrot-comfyui-single` | 1 Spark | Current INT8 ConvRot ComfyUI edit efficiency variant | EC, repository-green, new candidate; artifact fixture current | Exact INT8 ConvRot workflow reuses the same one- or two-reference semantic output contract | Yes after the base control, 1 Spark | qualify |
 | `qwen-image-edit-2511-diffusers-single` | 1 Spark | Primary Qwen Image Edit baseline | EC, focused adapter fix; artifact lane green | Input-image/prompt adapter fixed; prove output and input immutability | Yes, 1 Spark | qualify |
 | `qwen-image-edit-2511-lightning-diffusers-single` | 1 Spark | Fast edit Lightning LoRA variant | EC, repository-green; artifact lane green | Prove LoRA activation and fidelity delta after base edit canary | Yes after base, 1 Spark | qualify |
 | `qwen-image-layered-diffusers-single` | 1 Spark | Current layered image specialist | EC, focused adapter fix; artifact lane green | Prove declared multi-layer output contract and bounded artifact count | Yes, 1 Spark | qualify |
@@ -182,7 +190,7 @@ Both GLBs are structurally validated before upload and again by their adapters.
 | `wan-2-2-i2v-14b-comfyui-single` | 1 Spark | Current Wan 2.2 image-to-video quality profile | EC, focused fix; artifact lane green | Exact 640x640, 81-frame, 16 fps contract and strict MP4 validation landed | Yes, 1 Spark | qualify |
 | `wan-2-2-t2v-14b-comfyui-single` | 1 Spark | Current Wan 2.2 text-to-video quality profile | EC, focused fix; artifact lane green | Exact 640x640, 81-frame, 16 fps contract and strict MP4 validation landed | Yes, 1 Spark | qualify |
 | `wan-2-2-ti2v-5b-comfyui-single` | 1 Spark | Current smaller TI2V efficiency profile | EC, focused fix; artifact lane green | Exact 1280x704, 121-frame, 24 fps H.264 contract and strict output validation landed | Yes, 1 Spark | qualify |
-| `wan-dancer-14b-pytorch-single` | 1 Spark | Current music-conditioned dance specialist | EC, repository-green; artifact lane green | Manifest uses a deterministic digest-pinned one-second PCM music fixture; prove native build, MP4 metadata, and 110 GB envelope | Yes, 1 Spark | qualify |
+| `wan-dancer-14b-pytorch-single` | 1 Spark | Current music-conditioned dance specialist | EC, repository-green; artifact fixture current; capacity-blocked | Manifest uses a deterministic digest-pinned one-second PCM music fixture, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
 
 ## Generic acceptance procedure
 
@@ -251,7 +259,7 @@ outcome is uncertain. Never repair or deploy through SSH.
    pre-install block; it never authorizes silent eviction.
 
 5. **Exercise the exact interface twice.** For OpenAI-compatible services, the
-   runner uses the 27 digest-bound capability cases and verifies the exact
+   runner uses the 105 digest-bound capability cases and verifies the exact
    `/models` alias plus the declared arithmetic, tool, reasoning, vision, OCR,
    or GUI-action contract. For artifact producers, it uses the durable
    controller artifact-job lifecycle with typed input slots, fixture hashes,

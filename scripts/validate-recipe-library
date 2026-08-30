@@ -13,6 +13,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "control" / "src"))
+sys.path.insert(0, str(ROOT / "src"))
 
 from vonk_control.catalog_contract import (
     CatalogContractError,
@@ -29,6 +30,12 @@ from vonk_control.recipe_contract import (
     recipe_content_sha256,
     recipe_references,
     validate_recipe,
+)
+
+from cluster_profiles.qualification_fixtures import (
+    FixtureError,
+    FixtureRegistry,
+    RecipeFixture,
 )
 
 _SECRET_MARKERS = (
@@ -69,7 +76,9 @@ def _content_root(root: Path) -> Path:
 def _documents(root: Path, directory: str) -> list[tuple[Path, Mapping[str, object]]]:
     source = root / directory
     if not source.is_dir():
-        raise LibraryValidationError(f"required recipe-library directory is missing: {directory}")
+        raise LibraryValidationError(
+            f"required recipe-library directory is missing: {directory}"
+        )
     result: list[tuple[Path, Mapping[str, object]]] = []
     for path in sorted(source.glob("*.json")):
         try:
@@ -79,7 +88,9 @@ def _documents(root: Path, directory: str) -> list[tuple[Path, Mapping[str, obje
             raise LibraryValidationError(f"{path}: {error}") from error
         result.append((path, document))
     if not result:
-        raise LibraryValidationError(f"required recipe-library directory is empty: {directory}")
+        raise LibraryValidationError(
+            f"required recipe-library directory is empty: {directory}"
+        )
     return result
 
 
@@ -114,7 +125,9 @@ def _catalog_map(
 
     harness_root = _content_root(platform_root) / "execution-harnesses"
     if not harness_root.is_dir():
-        raise LibraryValidationError("platform execution-harnesses directory is missing")
+        raise LibraryValidationError(
+            "platform execution-harnesses directory is missing"
+        )
     for path in sorted(harness_root.glob("*.json")):
         try:
             document = parse_catalog_json(path.read_bytes())
@@ -228,9 +241,13 @@ def _validate_recipe(
         try:
             context.relative_to(platform_root.resolve())
         except ValueError as error:
-            raise LibraryValidationError(f"{path}: build context escapes both roots") from error
+            raise LibraryValidationError(
+                f"{path}: build context escapes both roots"
+            ) from error
     if not context.is_dir():
-        raise LibraryValidationError(f"{path}: build context is unavailable: {context_path}")
+        raise LibraryValidationError(
+            f"{path}: build context is unavailable: {context_path}"
+        )
     qualifier = platform_root / "scripts" / "qualify-recipe"
     if not qualifier.is_file():
         raise LibraryValidationError(
@@ -265,21 +282,39 @@ def _validate_recipe(
 
 
 def _scan_secrets(root: Path) -> None:
-    scan_roots = [root / directory for directory in (*_DIRECTORIES, "recipes", "adapters")]
+    scan_roots = [
+        root / directory for directory in (*_DIRECTORIES, "recipes", "adapters")
+    ]
     for scan_root in scan_roots:
         if not scan_root.exists():
             continue
         for path in scan_root.rglob("*"):
-            if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+            if (
+                not path.is_file()
+                or ".git" in path.parts
+                or "__pycache__" in path.parts
+            ):
                 continue
-            if path.suffix.lower() in {".gz", ".tar", ".png", ".jpg", ".jpeg", ".bin", ".safetensors"}:
+            if path.suffix.lower() in {
+                ".gz",
+                ".tar",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".bin",
+                ".safetensors",
+            }:
                 continue
             try:
                 payload = path.read_bytes()
             except OSError as error:
-                raise LibraryValidationError(f"{path}: cannot read for secret scan") from error
+                raise LibraryValidationError(
+                    f"{path}: cannot read for secret scan"
+                ) from error
             if any(marker in payload for marker in _SECRET_MARKERS):
-                raise LibraryValidationError(f"{path}: possible private credential in recipe library")
+                raise LibraryValidationError(
+                    f"{path}: possible private credential in recipe library"
+                )
 
 
 def _validate_target_recipe_coverage(
@@ -328,33 +363,213 @@ def _validate_target_recipe_coverage(
                 )
 
 
+def _validate_qualification_fixture_bindings(
+    library_root: Path,
+    platform_root: Path,
+    recipe_bindings: Mapping[str, tuple[str, int, Mapping[str, object]]],
+) -> tuple[str, int]:
+    # The platform checkout is also a deliberately small recipe snapshot. Only a
+    # published library with a catalog index is expected to close the complete
+    # <=2-Spark qualification-fixture set.
+    if not (library_root / "catalog-index.json").is_file():
+        return "skipped", 0
+    fixture_path = (
+        platform_root / "src/cluster_profiles/resources/qualification-fixtures.json"
+    )
+    if not fixture_path.is_file():
+        raise LibraryValidationError(
+            "platform qualification fixture manifest is unavailable"
+        )
+    try:
+        registry = FixtureRegistry.packaged(fixture_path)
+    except FixtureError as error:
+        raise LibraryValidationError(
+            f"platform qualification fixture manifest is invalid: {error}"
+        ) from error
+    expected = {
+        key
+        for key, (_digest, node_count, _document) in recipe_bindings.items()
+        if node_count <= 2
+    }
+    actual = (
+        set(registry.recipes) | set(registry.service_recipes) | set(registry.special)
+    )
+    missing = sorted(expected - actual)
+    if missing:
+        raise LibraryValidationError(
+            f"qualification fixture is missing for recipe {missing[0]}"
+        )
+    unexpected = sorted(actual - expected)
+    if unexpected:
+        raise LibraryValidationError(
+            f"qualification fixture references unavailable recipe {unexpected[0]}"
+        )
+    for key in sorted(actual):
+        expected_digest = recipe_bindings[key][0]
+        if key in registry.recipes:
+            actual_digest = registry.recipes[key].content_sha256
+        elif key in registry.service_recipes:
+            actual_digest = registry.service_recipes[key].content_sha256
+        else:
+            actual_digest = registry.special[key].get("content_sha256")
+        if actual_digest != expected_digest:
+            raise LibraryValidationError(
+                f"qualification fixture recipe digest is stale: {key}"
+            )
+        if key in registry.recipes:
+            _validate_artifact_fixture_contract(
+                key, registry.recipes[key], recipe_bindings[key][2]
+            )
+    return "passed", len(actual)
+
+
+def _validate_artifact_fixture_contract(
+    key: str, fixture: RecipeFixture, recipe: Mapping[str, object]
+) -> None:
+    interfaces = recipe.get("interfaces")
+    rows = interfaces if isinstance(interfaces, list) else []
+    adapter = fixture.interface
+    matches = [
+        row
+        for row in rows
+        if isinstance(row, Mapping) and row.get("adapter") == adapter
+    ]
+    if len(matches) != 1:
+        raise LibraryValidationError(f"qualification fixture interface is stale: {key}")
+    interface = matches[0]
+    input_contract = interface.get("input")
+    output_contract = interface.get("output")
+    if not isinstance(input_contract, Mapping) or not isinstance(
+        output_contract, Mapping
+    ):
+        raise LibraryValidationError(
+            f"qualification fixture interface contract is invalid: {key}"
+        )
+    raw_slots = input_contract.get("slots")
+    slot_rows = raw_slots if isinstance(raw_slots, list) else []
+    slots = {
+        str(slot.get("id")): slot
+        for slot in slot_rows
+        if isinstance(slot, Mapping) and isinstance(slot.get("id"), str)
+    }
+    for case in fixture.all_cases:
+        grouped: dict[str, list[object]] = {}
+        total_bytes = 0
+        for slot_id, value in case.inputs:
+            grouped.setdefault(slot_id, []).append(value)
+            total_bytes += value.size_bytes
+        for slot_id, contract in slots.items():
+            values = grouped.pop(slot_id, [])
+            count = len(values)
+            if not contract.get("min_files") <= count <= contract.get("max_files"):
+                raise LibraryValidationError(
+                    f"qualification fixture case violates {slot_id} count: {key}"
+                )
+            allowed_media = contract.get("media_types")
+            extensions = contract.get("extensions")
+            if any(
+                value.media_type not in allowed_media
+                or Path(value.name).suffix.lower() not in extensions
+                or value.size_bytes > contract.get("max_file_bytes")
+                for value in values
+            ) or sum(value.size_bytes for value in values) > contract.get(
+                "max_total_bytes"
+            ):
+                raise LibraryValidationError(
+                    f"qualification fixture case violates {slot_id} bounds: {key}"
+                )
+        if grouped:
+            raise LibraryValidationError(
+                f"qualification fixture case uses unknown input slot: {key}"
+            )
+        if total_bytes > input_contract.get("max_bytes"):
+            raise LibraryValidationError(
+                f"qualification fixture case exceeds input bounds: {key}"
+            )
+        raw_outputs = output_contract.get("slots")
+        output_slots = (
+            [row for row in raw_outputs if isinstance(row, Mapping)]
+            if isinstance(raw_outputs, list)
+            else []
+        )
+        output_media = {
+            str(media_type)
+            for row in output_slots
+            for media_type in row.get("media_types", [])
+        }
+        limits = case.output_limits
+        if (
+            not set(limits["allowed_media_types"]).issubset(output_media)
+            or limits["max_files"]
+            > sum(int(row.get("max_files", 0)) for row in output_slots)
+            or limits["max_file_bytes"]
+            > max(
+                (int(row.get("max_file_bytes", 0)) for row in output_slots), default=0
+            )
+            or limits["max_total_bytes"] > output_contract.get("max_total_bytes")
+        ):
+            raise LibraryValidationError(
+                f"qualification fixture output bounds exceed recipe contract: {key}"
+            )
+
+
 def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
     library_root = library_root.resolve()
     platform_root = platform_root.resolve()
     if not library_root.is_dir():
-        raise LibraryValidationError(f"recipe-library root is unavailable: {library_root}")
+        raise LibraryValidationError(
+            f"recipe-library root is unavailable: {library_root}"
+        )
     _scan_secrets(library_root)
     entities, entity_count = _catalog_map(_content_root(library_root), platform_root)
     recipe_root = _content_root(library_root) / "recipes"
     if not recipe_root.is_dir():
-        raise LibraryValidationError("required recipe-library directory is missing: recipes")
+        raise LibraryValidationError(
+            "required recipe-library directory is missing: recipes"
+        )
     recipes = []
     recipe_slugs: set[str] = set()
+    recipe_bindings: dict[str, tuple[str, int, Mapping[str, object]]] = {}
     for path in sorted(recipe_root.glob("*.json")):
         recipe_document = parse_recipe_json(path.read_bytes())
         identity = recipe_document.get("identity")
-        if isinstance(identity, Mapping) and isinstance(identity.get("slug"), str):
-            recipe_slugs.add(identity["slug"])
-        recipes.append(_validate_recipe(path, library_root, platform_root, entities))
+        topology = recipe_document.get("topology")
+        publisher = identity.get("publisher") if isinstance(identity, Mapping) else None
+        slug = identity.get("slug") if isinstance(identity, Mapping) else None
+        node_count = (
+            topology.get("node_count") if isinstance(topology, Mapping) else None
+        )
+        if (
+            not isinstance(publisher, str)
+            or not isinstance(slug, str)
+            or not isinstance(node_count, int)
+            or isinstance(node_count, bool)
+            or node_count < 1
+        ):
+            raise LibraryValidationError(
+                f"{path}: recipe qualification identity is invalid"
+            )
+        recipe_slugs.add(slug)
+        digest = _validate_recipe(path, library_root, platform_root, entities)
+        key = f"{publisher}/{slug}"
+        if key in recipe_bindings:
+            raise LibraryValidationError(f"{path}: duplicate recipe identity {key}")
+        recipe_bindings[key] = (digest, node_count, recipe_document)
+        recipes.append(digest)
     if not recipes:
         raise LibraryValidationError("recipe-library contains no recipes")
     _validate_target_recipe_coverage(library_root, recipe_slugs)
+    fixture_validation, fixture_count = _validate_qualification_fixture_bindings(
+        library_root, platform_root, recipe_bindings
+    )
     return {
         "schema_version": 1,
         "catalog_entity_count": entity_count,
         "recipe_count": len(recipes),
         "recipe_content_sha256": recipes,
         "secret_scan": "passed",
+        "qualification_fixture_validation": fixture_validation,
+        "qualification_fixture_count": fixture_count,
     }
 
 
@@ -368,7 +583,9 @@ def main() -> int:
     if args.as_json:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     else:
-        print(f"validated {report['recipe_count']} recipes and {report['catalog_entity_count']} catalog entities")
+        print(
+            f"validated {report['recipe_count']} recipes and {report['catalog_entity_count']} catalog entities"
+        )
     return 0
 
 

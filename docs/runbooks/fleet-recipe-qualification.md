@@ -53,20 +53,32 @@ exactly one lane, and no other recipe is accepted. The two lane names, exact
 `spk_...` node IDs, ledgers, and plan outputs must all be distinct. Unknown
 fields and duplicate JSON keys fail closed.
 
-The current `nl-single-spark-02ae8bb5` authority is bound to jurisdiction `NL`,
-signed recipe-library commit `02ae8bb5065919e263183f59637f4d8954a7334a`, and
+The current `nl-single-spark-745a42b5` authority is bound to jurisdiction `NL`,
+merged recipe-library commit `745a42b5daa3ac8010483421c45235e32e866672`, and
 catalog-index SHA-256
-`165be2692acafa1fe51345d83dbdd3b3d07ba308463a031a98e9bc563e0da5c5`.
-Its reviewed 70-recipe closure contains 59 actionable single-Spark recipes,
-five dual-Spark recipes, four recipes wider than the present fleet, and two NL
-legal blocks: Hunyuan3D-Omni and HunyuanOCR. The historical
-`nl-single-spark-e996f025` authority remains immutable for existing evidence;
-do not use it against the corrected catalog.
+`e864b644e374c76f594bcc4a394348844d4e5aa8d7dc78142f7d596b1fc2b55e`.
+Its reviewed 76-recipe closure classifies every recipe exactly once: 49
+actionable single-Spark recipes, eight single-Spark recipes blocked by the
+checked fleet memory envelope, nine single-Spark recipes blocked in NL, six
+dual-Spark recipes, and four recipes wider than the present fleet. The v2
+authority names every non-actionable key, so an omission or overlap fails
+closed instead of disappearing behind aggregate counts. The NL legal set
+includes Hunyuan3D-Omni, HunyuanOCR, the five Hunyuan video/Foley recipes, and
+both MiniMax H3 variants. The historical `nl-single-spark-02ae8bb5` and
+`nl-single-spark-e996f025` authorities remain immutable for existing evidence;
+do not use them against the corrected catalog.
 
 A later catalog, recipe, or license update requires a new reviewed authority
 file and ID; do not edit an authority already named by evidence. The coordinator
 rejects catalog repository or commit drift before publishing plans or applying
 work.
+
+The executable reviewed partition is
+`config/qualification/nl-single-spark-745a42b5.json`: 25 recipes on Spark3542
+and 24 on Spark2297. It excludes every v2 legal- and capacity-blocked key while
+keeping shared artifact families together. Both lanes retain stopped
+installations and caches, but the apply-time capacity plan remains authoritative
+for current disk fit.
 
 Obtain the exact node identities with `vonkctl fleet list --json`, then create a
 manifest. Relative ledger and plan paths are resolved from the manifest's
@@ -76,7 +88,7 @@ with an explicitly reviewed partition of every key in the named authority:
 ```jsonc
 {
   "schema_version": 1,
-  "qualification_authority": "nl-single-spark-02ae8bb5",
+  "qualification_authority": "nl-single-spark-745a42b5",
   "options": {
     "jurisdiction": "NL",
     "cleanup": "stop",
@@ -276,9 +288,15 @@ Until that recipe-specific contract is supplied, the recipe is recorded as
 successful. This is intentional: activating an artifact worker without proving
 an output is not qualification.
 
-The checked-in qualification manifest currently binds all 38 artifact recipes
+The checked-in schema-v2 qualification manifest currently binds all 42 artifact recipes
 to executable fixtures with immutable provenance and no unresolved
-special-artifact dispositions. SkinTokens uses a deterministic mesh-only
+special-artifact dispositions. Artifact fixtures can declare multiple named
+cases; every case receives its own durable controller job, idempotency key,
+ledger event namespace, semantic output validation, and warm-redeploy rerun.
+The current 56 cases cover one- and two-reference Qwen edits, MOVA with and
+without a reference, one- and two-frame MOSS sessions, MiniMax FL2VA text and
+keyframe modes, both optional LTX 2.5 FP8 profiles, Wan-Dancer controls, and an
+explicit HunyuanOCR config bound. SkinTokens uses a deterministic mesh-only
 derivative of Khronos' CC-BY-4.0 RiggedFigure with its transformation pinned;
 Step1X texture uses a deterministic CC0 triangle cube and reference image.
 Wan-Dancer uses a deterministic, digest-pinned one-second PCM music fixture.
@@ -287,9 +305,9 @@ so SyncFormer is exercised rather than special-blocked. HunyuanOCR uses the
 digest-pinned digit-7 PNG and validates the exact safe ZIP members, closed
 manifest authority, sampling receipt, UTF-8 Markdown, character count, and OCR
 semantic result.
-MOSS realtime uses a closed one-frame schema-v1 session whose event references
-the authenticated `frames`-slot PNG; acceptance checks the exact replay MP4 and
-the ordered model-revision/frame-ack/session-stop JSONL transcript.
+MOSS realtime uses closed one- and two-frame schema-v1 sessions whose events
+reference authenticated `frames`-slot PNGs; acceptance checks each exact replay
+MP4 and its ordered model-revision/frame-ack/session-stop JSONL transcript.
 
 Artifact acceptance is physical, not extension-based. PNG validation checks
 CRC, exact dimensions, bit depth/color type, and bounded decoded scanlines; WAV
