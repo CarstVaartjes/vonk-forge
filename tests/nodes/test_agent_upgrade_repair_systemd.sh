@@ -1211,7 +1211,8 @@ atomic_replace() {
 mutate_installed_file() {
   local destination=$1
   local mode=$2
-  local temporary=$test_root/mutated-$(basename "$destination")
+  local temporary
+  temporary=$test_root/mutated-$(basename "$destination")
   cp -- "$destination" "$temporary"
   printf x >> "$temporary"
   atomic_replace "$temporary" "$destination" "$mode"
