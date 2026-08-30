@@ -21,6 +21,7 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fault=${REPAIR_FAULT:-none}
 crash_phase=${REPAIR_CRASH_PHASE:-none}
+standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
@@ -58,6 +59,16 @@ case " ${repair_faults[*]} " in *" $fault "*) ;; *)
 esac
 if [[ "$fault" != none && "$crash_phase" != none ]]; then
   printf '%s\n' 'repair fault and crash fixtures are mutually exclusive' >&2
+  exit 64
+fi
+case "$standard_residue" in none|exact-0755) ;; *)
+  printf 'unknown standard delegate residue fixture: %s\n' \
+    "$standard_residue" >&2
+  exit 64
+esac
+if [[ "$standard_residue" != none \
+  && ( "$fault" != none || "$crash_phase" != none ) ]]; then
+  printf '%s\n' 'delegate residue, repair fault, and crash fixtures are mutually exclusive' >&2
   exit 64
 fi
 
@@ -912,6 +923,15 @@ repair_sha="$(sha256sum "$repair_package" | cut -d' ' -f1)"
 repair_control=$test_root/extracted/repair-control
 dpkg-deb --control "$repair_package" "$repair_control"
 repair_runner_sha="$(sha256sum "$repair_control/preinst" | cut -d' ' -f1)"
+repair_payload=$test_root/extracted/repair-payload
+dpkg-deb --extract "$repair_package" "$repair_payload"
+repair_standard_payload=$repair_payload/usr/lib/vonk-forge/\
+vonk-forge-package-upgrade-recover.standard
+test -f "$repair_standard_payload"
+if [[ "$standard_residue" = exact-0755 ]]; then
+  install -o root -g root -m 0755 "$repair_standard_payload" "$standard_runner"
+  test "$(stat -c %u:%g:%a:%h "$standard_runner")" = 0:0:755:1
+fi
 release_key_sha="$(/usr/bin/python3 -c \
   'import hashlib, pathlib, sys; print(hashlib.sha256(bytes.fromhex(pathlib.Path(sys.argv[1]).read_text().strip())).hexdigest())' \
   "$source_payload/usr/share/keyrings/vonk-forge-release.pub")"
@@ -951,6 +971,7 @@ snapshot_state() {
       "$source_intent" "$source_lock" "$source_blocker" "$source_pending"
       "$source_state/$source_package_sha.deb"
       "$source_runner" "$source_unit" "$source_gate" "$source_dropin"
+      "$standard_runner" "${standard_runner}.new"
       "$repair_receipt" "$helper_receipt"
       "$custody/$repair_sha.deb"
     )
@@ -1366,6 +1387,9 @@ test ! -e "$repair_state"
 test "$(find "$source_state" -mindepth 1 -maxdepth 1 -type d \
   -name '.repair-build.*' | wc -l)" -eq 0
 test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$repair_version"
+test "$(stat -c %u:%g:%a:%h "$standard_runner")" = 0:0:555:1
+test "$(sha256sum "$standard_runner" | cut -d' ' -f1)" \
+  = "$(sha256sum "$repair_standard_payload" | cut -d' ' -f1)"
 assert_repair_probe_not_persisted
 target_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 target_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"

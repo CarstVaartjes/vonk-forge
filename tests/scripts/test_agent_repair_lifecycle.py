@@ -66,7 +66,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 def _assert_frozen_runtime_and_old_runner() -> None:
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "027d6015b89027518a8ab6d776cb11bde5bc1343df2794909fe7fc8dda9d335c"
+            "45bc818f088638fccf83fa1a88471c956c3906221d5dd9f48e39593997b4f3b4"
         ),
         ROOT / "packaging/debian/postinst-repair": (
             "551a80895f536f30d041ab8019db1df0fbadd2503cb1715f81299a850f5c28ba"
@@ -330,7 +330,7 @@ def test_stopped_source_recovery_accepts_only_collected_or_empty_exact_cgroup() 
     assert "--property=MainPID --property=ControlGroup" in stopped
     assert "--value" not in stopped
     for key in ("LoadState", "ActiveState", "SubState", "MainPID", "ControlGroup"):
-        assert f'grep -Ec "^${{stopped_key}}="' in stopped
+        assert 'grep -Ec "^${stopped_key}="' in stopped
         assert f"{key}=" in stopped
     assert '[ -z "$stopped_cgroup" ]' in stopped
     assert '[ "$stopped_cgroup" = "$expected_stopped_cgroup" ]' in stopped

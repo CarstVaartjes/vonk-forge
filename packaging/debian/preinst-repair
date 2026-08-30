@@ -188,30 +188,43 @@ atomic_install() {
 }
 
 stage_blob() {
-    encoded=$1
-    expected_digest=$2
-    destination=$3
-    mode=$4
-    destination_dir=$(/usr/bin/dirname "$destination")
-    ensure_root_directory "$destination_dir" 755 || return 1
-    temporary=${destination}.new
-    if [ -e "$temporary" ] || [ -L "$temporary" ]; then
-        [ -f "$temporary" ] && [ ! -L "$temporary" ] \
-            && [ "$(/usr/bin/stat -c %u:%g:%h "$temporary")" = 0:0:1 ] \
-            || return 1
-        /usr/bin/rm -- "$temporary" || return 1
-        /usr/bin/sync -f "$destination_dir" || return 1
+    stage_blob_encoded=$1
+    stage_blob_expected_digest=$2
+    stage_blob_destination=$3
+    stage_blob_mode=$4
+    stage_blob_failure=
+    stage_blob_destination_dir=$(/usr/bin/dirname "$stage_blob_destination")
+    ensure_root_directory "$stage_blob_destination_dir" 755 \
+        || { stage_blob_failure='destination directory custody'; return 1; }
+    stage_blob_temporary=${stage_blob_destination}.new
+    if [ -e "$stage_blob_temporary" ] || [ -L "$stage_blob_temporary" ]; then
+        [ -f "$stage_blob_temporary" ] && [ ! -L "$stage_blob_temporary" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%h "$stage_blob_temporary")" = 0:0:1 ] \
+            || { stage_blob_failure='temporary file custody'; return 1; }
+        /usr/bin/rm -- "$stage_blob_temporary" \
+            || { stage_blob_failure='temporary file cleanup'; return 1; }
+        /usr/bin/sync -f "$stage_blob_destination_dir" \
+            || { stage_blob_failure='cleanup directory sync'; return 1; }
     fi
-    : > "$temporary" || return 1
-    trap '/usr/bin/rm -f -- "$temporary"' EXIT HUP INT TERM
-    printf '%s' "$encoded" | /usr/bin/base64 -d > "$temporary" \
-        && [ "$(/usr/bin/sha256sum "$temporary" | /usr/bin/cut -d' ' -f1)" \
-            = "$expected_digest" ] \
-        && /usr/bin/chown root:root "$temporary" \
-        && /usr/bin/chmod "0$mode" "$temporary" \
-        && /usr/bin/sync -f "$temporary" \
-        && /usr/bin/mv -f -- "$temporary" "$destination" \
-        && /usr/bin/sync -f "$destination_dir" || return 1
+    : > "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file creation'; return 1; }
+    trap '/usr/bin/rm -f -- "$stage_blob_temporary"' EXIT HUP INT TERM
+    printf '%s' "$stage_blob_encoded" \
+        | /usr/bin/base64 -d > "$stage_blob_temporary" \
+        || { stage_blob_failure='embedded payload decode'; return 1; }
+    [ "$(/usr/bin/sha256sum "$stage_blob_temporary" \
+        | /usr/bin/cut -d' ' -f1)" = "$stage_blob_expected_digest" ] \
+        || { stage_blob_failure='embedded payload digest'; return 1; }
+    /usr/bin/chown root:root "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file ownership'; return 1; }
+    /usr/bin/chmod "0$stage_blob_mode" "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file mode'; return 1; }
+    /usr/bin/sync -f "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file sync'; return 1; }
+    /usr/bin/mv -f -- "$stage_blob_temporary" "$stage_blob_destination" \
+        || { stage_blob_failure='delegate publication'; return 1; }
+    /usr/bin/sync -f "$stage_blob_destination_dir" \
+        || { stage_blob_failure='publication directory sync'; return 1; }
     trap - EXIT HUP INT TERM
 }
 
@@ -1680,12 +1693,24 @@ standard_runner_ready() {
             | /usr/bin/cut -d' ' -f1)" = "$standard_runner_sha256" ]
 }
 
+standard_runner_is_exact_legacy_residue() {
+    safe_root_file "$standard_runner" 755 \
+        && [ "$(/usr/bin/sha256sum "$standard_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$standard_runner_sha256" ]
+}
+
 stage_standard_runner() {
     if standard_runner_ready; then return 0; fi
-    [ ! -e "$standard_runner" ] && [ ! -L "$standard_runner" ] || return 1
+    if { [ -e "$standard_runner" ] || [ -L "$standard_runner" ]; } \
+        && ! standard_runner_is_exact_legacy_residue; then
+        stage_blob_failure='conflicting delegate'
+        return 1
+    fi
     stage_blob "$standard_runner_base64" "$standard_runner_sha256" \
         "$standard_runner" 555 \
-        && standard_runner_ready
+        || return 1
+    standard_runner_ready \
+        || { stage_blob_failure='published delegate identity'; return 1; }
 }
 
 arm_repair() {
@@ -1785,7 +1810,8 @@ arm_repair() {
     repair_entries_absent \
         || unsafe_state 'repair evidence before unified runner handoff'
     stage_standard_runner \
-        || temporary_failure 'standard recovery delegate failed'
+        || temporary_failure \
+            "standard recovery delegate failed: ${stage_blob_failure:-unknown stage}"
     standard_runner_ready || unsafe_state 'standard recovery delegate identity'
 
     repair_build=$(/usr/bin/mktemp -d "$source_state/.repair-build.XXXXXX") \

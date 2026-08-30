@@ -30,6 +30,7 @@ esac
 for phase in "${phases[@]}"; do
   REPAIR_CRASH_PHASE=$phase "$harness"
 done
+REPAIR_STANDARD_RESIDUE=exact-0755 "$harness"
 for fault in "${faults[@]}"; do
   REPAIR_FAULT=$fault "$harness"
 done

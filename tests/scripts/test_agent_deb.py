@@ -2566,6 +2566,21 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "VONK_FORGE_PACKAGE_REPAIR_NONCE" in postinst
 
 
+def test_repair_blob_staging_preserves_mode_and_repairs_exact_legacy_residue() -> None:
+    runner = (ROOT / "packaging/debian/preinst-repair").read_text()
+    stage = runner[runner.index("stage_blob() {") : runner.index("load_authority() {")]
+    delegate = runner[
+        runner.index("standard_runner_ready() {") : runner.index("arm_repair() {")
+    ]
+
+    assert "stage_blob_mode=$4" in stage
+    assert 'chmod "0$stage_blob_mode" "$stage_blob_temporary"' in stage
+    assert "\n    mode=$4\n" not in stage
+    assert "standard_runner_is_exact_legacy_residue" in delegate
+    assert 'safe_root_file "$standard_runner" 755' in delegate
+    assert "&& ! standard_runner_is_exact_legacy_residue" in delegate
+
+
 def test_repair_manager_probe_uses_the_exact_transient_sandbox_contract() -> None:
     runner = (ROOT / "packaging/debian/preinst-repair").read_text()
     start = runner.index("probe_output=$(/usr/bin/systemd-run")
