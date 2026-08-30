@@ -1108,18 +1108,35 @@ unit_is_stopped_and_empty() {
     stopped_unit=$1
     values=$(/usr/bin/systemctl --system show \
         --property=LoadState --property=ActiveState --property=SubState \
-        --property=MainPID --property=ControlGroup --value "$stopped_unit") \
+        --property=MainPID --property=ControlGroup "$stopped_unit") \
         || return 1
     [ "$(printf '%s\n' "$values" | /usr/bin/wc -l)" -eq 5 ] || return 1
-    [ "$(printf '%s\n' "$values" | /usr/bin/sed -n '1p')" = loaded ] \
-        && [ "$(printf '%s\n' "$values" | /usr/bin/sed -n '2p')" = inactive ] \
-        && [ "$(printf '%s\n' "$values" | /usr/bin/sed -n '3p')" = dead ] \
-        && [ "$(printf '%s\n' "$values" | /usr/bin/sed -n '4p')" = 0 ] \
+    for stopped_key in LoadState ActiveState SubState MainPID ControlGroup; do
+        [ "$(printf '%s\n' "$values" \
+            | grep -Ec "^${stopped_key}=")" -eq 1 ] || return 1
+    done
+    stopped_load=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^LoadState=//p')
+    stopped_active=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^ActiveState=//p')
+    stopped_sub=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^SubState=//p')
+    stopped_pid=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^MainPID=//p')
+    stopped_cgroup=$(printf '%s\n' "$values" \
+        | /usr/bin/sed -n 's/^ControlGroup=//p')
+    expected_stopped_cgroup="/system.slice/$stopped_unit"
+    [ "$stopped_load" = loaded ] \
+        && [ "$stopped_active" = inactive ] \
+        && [ "$stopped_sub" = dead ] \
+        && [ "$stopped_pid" = 0 ] \
+        && { [ -z "$stopped_cgroup" ] \
+            || [ "$stopped_cgroup" = "$expected_stopped_cgroup" ]; } \
         || return 1
-    stopped_cgroup=$(printf '%s\n' "$values" | /usr/bin/sed -n '5p')
-    [ "$stopped_cgroup" = "/system.slice/$stopped_unit" ] || return 1
-    if [ -e "/sys/fs/cgroup$stopped_cgroup/cgroup.events" ]; then
-        grep -Fxq 'populated 0' "/sys/fs/cgroup$stopped_cgroup/cgroup.events"
+    expected_cgroup_path="/sys/fs/cgroup$expected_stopped_cgroup"
+    if [ -e "$expected_cgroup_path" ]; then
+        [ -d "$expected_cgroup_path" ] \
+            && [ -f "$expected_cgroup_path/cgroup.events" ] \
+            && [ "$(grep -Ec '^populated [01]$' \
+                "$expected_cgroup_path/cgroup.events")" -eq 1 ] \
+            && grep -Fxq 'populated 0' \
+                "$expected_cgroup_path/cgroup.events"
     fi
 }
 

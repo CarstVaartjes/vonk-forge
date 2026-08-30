@@ -66,7 +66,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 def _assert_frozen_runtime_and_old_runner() -> None:
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "4cb953e1eb82aa5cd63c5a98ffa48e7139b03919f003eb89d5e3904d64beb4f7"
+            "027d6015b89027518a8ab6d776cb11bde5bc1343df2794909fe7fc8dda9d335c"
         ),
         ROOT / "packaging/debian/postinst-repair": (
             "551a80895f536f30d041ab8019db1df0fbadd2503cb1715f81299a850f5c28ba"
@@ -317,6 +317,26 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
         assert (
             f'[ "${identity}" = "$probe_{identity.removeprefix("old_")}" ]' in manager
         )
+
+
+def test_stopped_source_recovery_accepts_only_collected_or_empty_exact_cgroup() -> None:
+    runner = RUNNER.read_text()
+    stopped = runner[
+        runner.index("unit_is_stopped_and_empty() {") : runner.index(
+            "stop_and_quiesce_source_recovery() {"
+        )
+    ]
+
+    assert "--property=MainPID --property=ControlGroup" in stopped
+    assert "--value" not in stopped
+    for key in ("LoadState", "ActiveState", "SubState", "MainPID", "ControlGroup"):
+        assert f'grep -Ec "^${{stopped_key}}="' in stopped
+        assert f"{key}=" in stopped
+    assert '[ -z "$stopped_cgroup" ]' in stopped
+    assert '[ "$stopped_cgroup" = "$expected_stopped_cgroup" ]' in stopped
+    assert 'expected_cgroup_path="/sys/fs/cgroup$expected_stopped_cgroup"' in stopped
+    assert '[ -e "$expected_cgroup_path" ]' in stopped
+    assert "grep -Fxq 'populated 0'" in stopped
 
 
 def test_repair_native_probe_is_ephemeral_and_denied_syscalls_are_exercised() -> None:
