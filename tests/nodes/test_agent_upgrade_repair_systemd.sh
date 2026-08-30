@@ -103,6 +103,10 @@ wrong_cgroup_pid=
 sandbox_probe_unit=
 native_transient_unit=
 repair_probe_control=vonk-repair-helper.probe
+repair_failed_line=unavailable
+repair_failed_status=unavailable
+
+trap 'repair_failed_status=$?; repair_failed_line=$LINENO' ERR
 
 assert_repair_probe_not_persisted() {
   test ! -e "/var/lib/dpkg/tmp.ci/$repair_probe_control"
@@ -113,6 +117,21 @@ assert_repair_probe_not_persisted() {
 
 dump_diagnostics() {
   printf '%s\n' '--- repair lifecycle diagnostics ---' >&2
+  printf 'fixture: fault=%s crash_phase=%s standard_residue=%s\n' \
+    "$fault" "$crash_phase" "$standard_residue" >&2
+  printf 'failed assertion: line=%s status=%s expected-agent=%s:%s\n' \
+    "$repair_failed_line" "$repair_failed_status" \
+    "${agent_uid:-unset}" "${agent_gid:-unset}" >&2
+  for receipt_path in "$repair_receipt" "$helper_receipt"; do
+    printf '%s\n' "--- $receipt_path ---" >&2
+    if [[ -f "$receipt_path" && ! -L "$receipt_path" ]]; then
+      stat -c '%u:%g:%a:%h %s' "$receipt_path" >&2 || true
+      sed -E 's/^repair_nonce=.*/repair_nonce=<redacted>/' \
+        "$receipt_path" >&2 || true
+    else
+      printf '%s\n' '<absent-or-unsafe>' >&2
+    fi
+  done
   systemctl --system --no-pager --full status \
     "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" >&2 || true
   journalctl --system --no-pager -n 240 \

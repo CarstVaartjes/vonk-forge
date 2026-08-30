@@ -28,10 +28,13 @@ case "$mode" in
 esac
 
 for phase in "${phases[@]}"; do
+  printf 'node repair matrix phase: crash=%s\n' "$phase"
   REPAIR_CRASH_PHASE=$phase "$harness"
 done
+printf '%s\n' 'node repair matrix phase: standard-residue=exact-0755'
 REPAIR_STANDARD_RESIDUE=exact-0755 "$harness"
 for fault in "${faults[@]}"; do
+  printf 'node repair matrix phase: fault=%s\n' "$fault"
   REPAIR_FAULT=$fault "$harness"
 done
 
