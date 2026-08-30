@@ -321,7 +321,12 @@ int main(int argc, char **argv) {
   if (argc >= 4 && strcmp(argv[1], "--config") == 0
       && strcmp(argv[3], "self-test") == 0) {
     char binary_digest[65] = {0};
-    FILE *digest = popen("/usr/bin/sha256sum /proc/self/exe", "r");
+    char digest_command[128] = {0};
+    int command_length = snprintf(digest_command, sizeof digest_command,
+        "/usr/bin/sha256sum /proc/%ld/exe", (long)getpid());
+    if (command_length <= 0 || (size_t)command_length >= sizeof digest_command)
+      return 2;
+    FILE *digest = popen(digest_command, "r");
     if (!digest || fscanf(digest, "%64[0-9a-f]", binary_digest) != 1
         || pclose(digest) != 0 || strlen(binary_digest) != 64) return 2;
     printf("{\"semantic_version\":\"%s\",\"build_digest\":\"%s\",\"binary_digest\":\"%s\",\"architecture\":\"linux-arm64\",\"self_test_passed\":true}\\n", "$semantic", "$build_digest", binary_digest);
@@ -401,6 +406,11 @@ for generation in old target next; do
   printf '%s fixture license\n' "$generation" \
     > "$test_root/$generation-bin/oras.LICENSE"
   chmod 0555 "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,oras}
+  fixture_agent=$test_root/$generation-bin/vonk-agent
+  fixture_agent_sha=$(sha256sum "$fixture_agent" | cut -d' ' -f1)
+  fixture_self_test=$("$fixture_agent" --config /dev/null self-test)
+  grep -Fq '"binary_digest":"'"$fixture_agent_sha"'"' \
+    <<< "$fixture_self_test"
 done
 
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"

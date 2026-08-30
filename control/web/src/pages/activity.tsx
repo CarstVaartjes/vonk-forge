@@ -328,7 +328,7 @@ function JobProgressDetails({
 
   useEffect(() => {
     if (!open || !detail || !jobUpdatesAutomatically(detail)) return undefined;
-    const interval = window.setInterval(() => void loadDetail(true), 5_000);
+    const interval = window.setInterval(() => loadDetail(true), 5_000);
     return () => window.clearInterval(interval);
   }, [detail, loadDetail, open]);
 

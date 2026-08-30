@@ -189,6 +189,10 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     helper_dispatch = harness.index('submit_helper_install "$dispatch_candidate"')
     assert prebuild_fixture < postbuild_fixture < fault_dispatch < helper_dispatch
     assert "source_recovery_nonce)=.*/\\1=<redacted>" in harness
+    assert '"/usr/bin/sha256sum /proc/%ld/exe", (long)getpid()' in harness
+    assert "/usr/bin/sha256sum /proc/self/exe" not in harness
+    assert 'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
+    assert "failed assertion: line=%s status=%s expected-agent=%s:%s" in harness
     assert 'test "$(wc -l < "$repair_receipt")" -eq 16' in harness
     assert 'test "$(wc -l < "$helper_receipt")" -eq 10' in harness
     assert "authority_sha256=$authority_sha" in harness
