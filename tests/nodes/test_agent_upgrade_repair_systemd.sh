@@ -768,6 +768,11 @@ agent_boot=$(sed -n '1p' /proc/sys/kernel/random/boot_id)
 agent_invocation=$(systemctl --system show --property=InvocationID --value \
   "$agent_unit")
 [[ "$agent_invocation" =~ ^[0-9a-f]{32}$ ]]
+grep -Fxq $'CapInh:\t00000000002000c2' "/proc/$old_agent_pid/status"
+grep -Fxq $'CapPrm:\t0000000000000000' "/proc/$old_agent_pid/status"
+grep -Fxq $'CapEff:\t0000000000000000' "/proc/$old_agent_pid/status"
+grep -Fxq $'CapBnd:\t00000000002000c2' "/proc/$old_agent_pid/status"
+grep -Fxq $'CapAmb:\t0000000000000000' "/proc/$old_agent_pid/status"
 
 install -d -o root -g root -m 0755 /var/lib/dpkg/tmp.ci
 native_probe=/var/lib/dpkg/tmp.ci/vonk-repair-helper.probe

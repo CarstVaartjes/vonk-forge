@@ -255,6 +255,7 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "validate_helper_probe_self()?;" in probe
     assert "validate_agent_probe_self(&args[7], &args[8], &args[9])?;" in probe
     assert 'const CAP_SYS_PTRACE: &str = "0000000000080000";' in probe
+    assert 'const AGENT_BOUNDING_CAPS: &str = "00000000002000c2";' in probe
     assert 'status_value(status, "NoNewPrivs:")? != "1"' in probe
     assert 'status_value(status, "Seccomp:")? != "2"' in probe
     assert "libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NOCTTY" in probe
@@ -265,7 +266,8 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "metadata_identity(&before) != metadata_identity(&after)" in probe
     assert "if values != [expected, expected, expected, expected]" in probe
     assert 'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]' in probe
-    assert 'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"]' in probe
+    assert 'for field in ["CapPrm:", "CapEff:", "CapAmb:"]' in probe
+    assert 'for field in ["CapInh:", "CapBnd:"]' in probe
     assert "if raw != expected" in probe
     assert "let held = File::open(&exe_link)" in probe
     assert "let digest = hash_reader(&held)?;" in probe

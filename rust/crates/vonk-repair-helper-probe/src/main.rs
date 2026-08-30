@@ -23,6 +23,7 @@ mod linux {
     const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
     const HELPER_CGROUP: &str = "/system.slice/vonk-forge-package-helper.service";
     const CAP_SYS_PTRACE: &str = "0000000000080000";
+    const AGENT_BOUNDING_CAPS: &str = "00000000002000c2";
     const ZERO_CAPS: &str = "0000000000000000";
 
     type Result<T> = std::result::Result<T, String>;
@@ -342,8 +343,13 @@ mod linux {
         if groups != expected_groups {
             return Err("unexpected target supplementary groups".to_string());
         }
-        for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"] {
+        for field in ["CapPrm:", "CapEff:", "CapAmb:"] {
             if status_value(&status, field)? != ZERO_CAPS {
+                return Err(format!("unexpected target {field}"));
+            }
+        }
+        for field in ["CapInh:", "CapBnd:"] {
+            if status_value(&status, field)? != AGENT_BOUNDING_CAPS {
                 return Err(format!("unexpected target {field}"));
             }
         }
