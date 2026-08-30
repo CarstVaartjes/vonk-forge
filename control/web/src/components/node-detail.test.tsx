@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from "@testing-library/react";
+import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, TelemetryHistory, VisualFleetNode} from "../api/types";
 import {NodeDetail} from "./node-detail";
@@ -108,10 +108,72 @@ test("opens a Spark-scoped model management workspace", () => {
   const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
   render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
-  expect(screen.getByRole("link", {name: "Manage models on this Spark"})).toHaveAttribute(
+  expect(screen.getByRole("link", {name: "Install model or recipe"})).toHaveAttribute(
     "href",
     `/library?spark=${encodeURIComponent(node().id)}`,
   );
+});
+
+test("stops a running model from the Spark inspector with an authority preview", async () => {
+  const projected = node();
+  projected.installed = [{
+    installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen Chat", topology_name: "single", expected_rank_count: 1, present_ranks: [0], member_node_ids: [projected.id], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+  }];
+  projected.loaded = [{
+    run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen Chat", alias: "qwen-chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: [projected.id], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 1, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,
+  }];
+  const applyLibraryStop = vi.fn(async () => ({id: "operation-stop", kind: "recipe.stop", owner_id: "run-chat", state: "succeeded", plan_digest: "stop-plan", nodes: [projected.id], result: null}));
+  const refresh = vi.fn(async () => { throw new Error("Fleet refresh temporarily unavailable"); });
+  const control = {
+    nodeTelemetryHistory: async () => history(),
+    previewLibraryStop: async () => ({
+      alias: "qwen-chat", allowed: true, authority_digest: "authority", blockers: [], installation_id: "install-chat",
+      nodes: [{active_memory_reservation_bytes: 4, node_id: projected.id, rank: 0, reserved_memory_bytes: 8, role: "leader", state: "running"}],
+      plan_digest: "stop-plan", recipe_revision_id: "revision-chat", route_digest: "route", route_generation: 1,
+      route_state: "published", route_withdrawal: true, run_id: "run-chat", run_state: "running", total_active_memory_reservation_bytes: 4, warnings: [],
+    }),
+    applyLibraryStop,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<NodeDetail api={control} node={projected} now={NOW} onClose={() => undefined} onLifecycleRefresh={refresh}/>);
+
+  expect(screen.getByText("Stop the active run before removing this recipe from this Spark.")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Stop Qwen Chat on this Spark"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Stop"});
+  expect(within(dialog).getByText("Published route will be withdrawn.")).toBeVisible();
+  await user.click(within(dialog).getByRole("button", {name: "Stop selected run"}));
+
+  expect(applyLibraryStop).toHaveBeenCalledWith("run-chat", {plan_digest: "stop-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
+  expect(await screen.findByRole("region", {name: "Stop operation progress"})).toHaveTextContent("Operation complete");
+  expect(refresh).toHaveBeenCalled();
+});
+
+test("removes an idle recipe from its complete Spark group in place", async () => {
+  const projected = node();
+  projected.installed = [{
+    installation_id: "install-pair", recipe_id: "recipe-pair", recipe_revision_id: "revision-pair", title: "Qwen Pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "spark-two"], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+  }];
+  const applyLibraryUninstall = vi.fn(async () => ({id: "operation-remove", kind: "recipe.uninstall", owner_id: "install-pair", state: "succeeded", plan_digest: "remove-plan", nodes: [projected.id, "spark-two"], result: null}));
+  const control = {
+    nodeTelemetryHistory: async () => history(),
+    previewLibraryUninstall: async () => ({
+      active_run_count: 0, active_runs: [], active_runs_truncated: false, allowed: true, blockers: [], bytes_removed: 120,
+      consequences: {automatic_stop: false, catalog_retained: true, reinstall_required: true}, installation_authority_digest: "authority", installation_id: "install-pair", installation_state: "installed",
+      nodes: [{installed_bytes: 60, node_id: projected.id, rank: 0, role: "leader", state: "installed"}, {installed_bytes: 60, node_id: "spark-two", rank: 1, role: "worker", state: "installed"}],
+      original_plan_digest: "install-plan", plan_digest: "remove-plan", recipe_content: {}, recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-pair", recipe_revision_id: "revision-pair", warnings: [],
+    }),
+    applyLibraryUninstall,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<NodeDetail api={control} node={projected} now={NOW} onClose={() => undefined}/>);
+
+  await user.click(screen.getByRole("button", {name: "Remove Qwen Pair from 2 Sparks"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Remove"});
+  expect(within(dialog).getByText("The local catalog recipe is retained.")).toBeVisible();
+  await user.click(within(dialog).getByRole("button", {name: "Remove selected installation"}));
+
+  expect(applyLibraryUninstall).toHaveBeenCalledWith("install-pair", {plan_digest: "remove-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
+  expect(await screen.findByRole("region", {name: "Remove operation progress"})).toHaveTextContent("Operation complete");
 });
 
 test("shows structured node evidence and a retryable history error", async () => {
