@@ -137,6 +137,47 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   expect(await screen.findByText("Succeeded")).toBeInTheDocument();
 });
 
+test("infers recipe-declared mesh and video media types when the browser omits them", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const fallbackDetail = detail();
+  fallbackDetail.visual_recipe = {
+    ...fallbackDetail.visual_recipe!,
+    interfaces: [{
+      adapter: "artifact-job",
+      path: "/outputs",
+      input: {path: "/inputs", required: true, media_types: ["model/obj", "model/ply", "video/quicktime", "video/x-matroska"], max_bytes: 16_384, min_files: 4, max_files: 4, slots: [
+        {id: "obj", label: "OBJ mesh", description: "Wavefront mesh.", media_types: ["model/obj"], extensions: [".obj"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
+        {id: "ply", label: "PLY mesh", description: "Polygon mesh.", media_types: ["model/ply"], extensions: [".ply"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
+        {id: "mov", label: "MOV video", description: "QuickTime video.", media_types: ["video/quicktime"], extensions: [".mov"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
+        {id: "mkv", label: "MKV video", description: "Matroska video.", media_types: ["video/x-matroska"], extensions: [".mkv"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
+      ]},
+      output: {path: "/outputs", allowed_media_types: ["application/json"], max_total_bytes: 4096, slots: [
+        {id: "result", label: "Result", description: "Job result.", media_types: ["application/json"], extensions: [".json"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
+      ]},
+    }],
+    parameters: [],
+  } as unknown as LibraryRecipeDetail["visual_recipe"];
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={fallbackDetail}/>);
+
+  await screen.findByText("No artifact jobs yet");
+  await user.upload(screen.getByLabelText("OBJ mesh"), new File(["obj"], "shape.obj"));
+  await user.upload(screen.getByLabelText("PLY mesh"), new File(["ply"], "shape.ply"));
+  await user.upload(screen.getByLabelText("MOV video"), new File(["mov"], "source.mov"));
+  await user.upload(screen.getByLabelText("MKV video"), new File(["mkv"], "source.mkv"));
+  const submit = screen.getByRole("button", {name: "Submit artifact job"});
+  expect(submit).toBeEnabled();
+  await user.click(submit);
+
+  await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
+  expect(client.createArtifactJob.mock.calls[0][1].inputs).toEqual([
+    expect.objectContaining({slot: "obj", name: "shape.obj", media_type: "model/obj"}),
+    expect.objectContaining({slot: "ply", name: "shape.ply", media_type: "model/ply"}),
+    expect.objectContaining({slot: "mov", name: "source.mov", media_type: "video/quicktime"}),
+    expect.objectContaining({slot: "mkv", name: "source.mkv", media_type: "video/x-matroska"}),
+  ]);
+});
+
 test("renders every declared job interface as a native bounded form and clears local inputs on change", async () => {
   const user = userEvent.setup();
   const client = api();
