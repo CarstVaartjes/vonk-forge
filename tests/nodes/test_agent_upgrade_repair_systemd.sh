@@ -752,14 +752,17 @@ agent_gid=$(id -g vonk-agent)
 test "$agent_uid" -gt 1
 test "$agent_gid" -gt 1
 agent_groups=$(awk '/^Groups:/ {
-  if (NF < 2) exit 1
+  if (NF == 1) {
+    print "none"
+    next
+  }
   groups=$2
   for (group_index=3; group_index <= NF; group_index++) {
     groups=groups "," $group_index
   }
   print groups
 }' "/proc/$old_agent_pid/status")
-test "$agent_groups" = "$agent_gid"
+[[ "$agent_groups" = none || "$agent_groups" = "$agent_gid" ]]
 agent_start=$(awk '{print $22}' "/proc/$old_agent_pid/stat")
 agent_boot=$(sed -n '1p' /proc/sys/kernel/random/boot_id)
 agent_invocation=$(systemctl --system show --property=InvocationID --value \
@@ -779,7 +782,10 @@ native_nonce=$(openssl rand -hex 32)
 run_zero_cap_agent_transient \
   "vonk-repair-agent-sandbox-${native_nonce}.service" \
   "$native_denials" zero "$agent_uid" "$agent_gid"
-test "$transient_status" -eq 0
+if [[ "$transient_status" -ne 0 ]]; then
+  printf 'zero-cap sandbox failed: %s\n' "$transient_output" >&2
+  exit 1
+fi
 test "$transient_output" = 'probe sandbox denied syscalls: PASS'
 
 probe_args=(
@@ -790,7 +796,10 @@ probe_args=(
 run_zero_cap_agent_transient \
   "vonk-repair-agent-positive-${native_nonce}.service" \
   "$native_probe" probe-agent "${probe_args[@]}"
-test "$transient_status" -eq 0
+if [[ "$transient_status" -ne 0 ]]; then
+  printf 'agent identity probe failed: %s\n' "$transient_output" >&2
+  exit 1
+fi
 grep -Eq \
   "^schema_version=1 nonce=$native_nonce authority_sha256=$authority_sha agent_pid=$old_agent_pid agent_start=$agent_start agent_sha256=$old_agent_sha boot_id=$agent_boot invocation_id=$agent_invocation agent_uid=$agent_uid agent_gid=$agent_gid agent_groups=$agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" \
   <<< "$transient_output"

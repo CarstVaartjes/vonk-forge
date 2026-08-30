@@ -2558,6 +2558,7 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "prove_running_agent_exact" not in manager_probe
     assert "--reuid" not in runner
     assert "--regid" not in runner
+    assert '[ "$old_agent_groups" = none ]' in runner
     assert '[ "$old_agent_groups" = "$vonk_agent_gid" ]' in runner
     assert "systemctl --system" not in postinst
     assert "package-repair.receipt" not in postinst

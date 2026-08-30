@@ -594,7 +594,10 @@ capture_running_old_metadata() {
     old_agent_invocation=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '3p')
     old_agent_cgroup=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '4p')
     old_agent_groups=$(/usr/bin/awk '/^Groups:/ {
-        if (NF < 2) exit 1
+        if (NF == 1) {
+            print "none"
+            next
+        }
         groups=$2
         for (group_index=3; group_index <= NF; group_index++) {
             groups=groups "," $group_index
@@ -607,7 +610,8 @@ capture_running_old_metadata() {
     old_helper_cgroup=$(printf '%s\n' "$old_helper_identity" | /usr/bin/sed -n '4p')
     [ "$old_agent_cgroup" = "/system.slice/$agent_unit" ] \
         && [ "$old_helper_cgroup" = "/system.slice/$helper_unit" ] \
-        && [ "$old_agent_groups" = "$vonk_agent_gid" ]
+        && { [ "$old_agent_groups" = none ] \
+            || [ "$old_agent_groups" = "$vonk_agent_gid" ]; }
 }
 
 probe_unit_absent() {

@@ -180,6 +180,18 @@ mod linux {
             .ok_or_else(|| format!("missing status field: {name}"))
     }
 
+    fn canonical_groups(status: &str) -> Result<String> {
+        let groups = status_value(status, "Groups:")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(if groups.is_empty() {
+            "none".to_string()
+        } else {
+            groups
+        })
+    }
+
     fn validate_self_ids(status: &str, expected_uid: &str, expected_gid: &str) -> Result<()> {
         for (field, expected) in [("Uid:", expected_uid), ("Gid:", expected_gid)] {
             let values: Vec<&str> = status_value(status, field)?.split_whitespace().collect();
@@ -226,10 +238,7 @@ mod linux {
         let status = fs::read_to_string("/proc/self/status")
             .map_err(|error| format!("self status: {error}"))?;
         validate_self_ids(&status, expected_uid, expected_gid)?;
-        let groups = status_value(&status, "Groups:")?
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(",");
+        let groups = canonical_groups(&status)?;
         if groups != expected_groups {
             return Err("unexpected self supplementary groups".to_string());
         }
@@ -329,10 +338,7 @@ mod linux {
     fn validate_agent_target_security(pid: &str, expected_groups: &str) -> Result<()> {
         let status = fs::read_to_string(format!("/proc/{pid}/status"))
             .map_err(|error| format!("target status: {error}"))?;
-        let groups = status_value(&status, "Groups:")?
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(",");
+        let groups = canonical_groups(&status)?;
         if groups != expected_groups {
             return Err("unexpected target supplementary groups".to_string());
         }
@@ -425,11 +431,7 @@ mod linux {
             || !is_hex(&args[6], 32)
             || !is_decimal(&args[7])
             || !is_decimal(&args[8])
-            || args[9].is_empty()
-            || !args[9]
-                .split(',')
-                .all(|value| canonical_u64(value).is_some())
-            || args[9] != args[8]
+            || (args[9] != "none" && args[9] != args[8])
             || !is_hex(&args[10], 64)
             || !is_hex(&args[11], 64)
         {

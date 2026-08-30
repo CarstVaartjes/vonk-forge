@@ -66,7 +66,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 def _assert_frozen_runtime_and_old_runner() -> None:
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "80b4d311bb873a1c030187dbe2f5ab07f396466c89e05d847a7d0e0100fc25ff"
+            "4cb953e1eb82aa5cd63c5a98ffa48e7139b03919f003eb89d5e3904d64beb4f7"
         ),
         ROOT / "packaging/debian/postinst-repair": (
             "551a80895f536f30d041ab8019db1df0fbadd2503cb1715f81299a850f5c28ba"
@@ -249,7 +249,7 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "if args.len() != 12" in probe
     assert '|| !is_decimal(&args[7])' in probe
     assert '|| !is_decimal(&args[8])' in probe
-    assert '|| args[9] != args[8]' in probe
+    assert '|| (args[9] != "none" && args[9] != args[8])' in probe
     assert ".filter(|number| number.to_string() == value)" in probe
     assert ".is_some_and(|number| number > 1)" in probe
     assert "validate_helper_probe_self()?;" in probe
@@ -294,6 +294,7 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert '"$repair_probe" probe-agent' in manager
     assert "--reuid" not in runner
     assert "--regid" not in runner
+    assert '[ "$old_agent_groups" = none ]' in runner
     assert '[ "$old_agent_groups" = "$vonk_agent_gid" ]' in runner
     assert "capture_running_old_metadata || return 1" in manager
     for identity in (
