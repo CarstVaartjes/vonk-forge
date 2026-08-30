@@ -1035,6 +1035,7 @@ snapshot_source_authority_state() {
   snapshot_state "$authority_full_snapshot"
   grep -Fv -e "path=$standard_runner " \
     -e "path=${standard_runner}.new " "$authority_full_snapshot" \
+    | sed -E 's/^dpkg=[^|]*\|/dpkg=<transition>|/' \
     > "$authority_destination"
   rm -f -- "$authority_full_snapshot"
 }
