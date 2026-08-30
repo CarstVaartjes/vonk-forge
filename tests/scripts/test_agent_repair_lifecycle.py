@@ -205,17 +205,19 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'rm -f -- "$source_gate"' in harness
     assert 'source_gate_manager_path="$(realpath -e -- "$source_gate")"' in harness
     assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
-    assert 'test "$restart_status" -eq 0' in harness
+    assert (
+        'assert_fixture_equal "wrong-process restart status" 0 "$restart_status"'
+        in harness
+    )
     assert "--property=DropInPaths" in harness
     assert "--property=ExecCondition" in harness
     assert (
-        'test "$wrong_cgroup_before" = "0::/system.slice/$agent_unit"' in harness
+        'assert_fixture_equal "wrong-process cgroup identity"' in harness
     )
-    assert 'test "$wrong_owner_before" = "$agent_uid:$agent_gid"' in harness
-    assert 'test "$wrong_groups_before" = "$agent_groups"' in harness
+    assert 'assert_fixture_equal "wrong-process uid and gid"' in harness
+    assert 'assert_fixture_equal "wrong-process supplementary groups"' in harness
     assert (
-        'test "$(readlink "/proc/$wrong_pid/exe")" = "$destination (deleted)"'
-        in harness
+        'assert_fixture_equal "running process deleted executable path"' in harness
     )
     assert "snapshot_source_authority_state()" in harness
     assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness

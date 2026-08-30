@@ -1280,38 +1280,56 @@ run_wrong_binary_but_restore_installed() {
     [[ "$gate_condition" = *"$source_runner"* ]]
     [[ "$gate_condition" = *"allow-agent-start"* ]]
   fi
-  test "$restart_status" -eq 0
+  assert_fixture_equal "wrong-process restart status" 0 "$restart_status"
   wrong_pid="$(systemctl --system show --property=MainPID --value "$unit")"
-  test "$wrong_pid" -gt 1
+  if ! [[ "$wrong_pid" =~ ^[0-9]+$ ]] || (( wrong_pid <= 1 )); then
+    printf 'wrong-process fixture mismatch: main pid expected=>1 observed=%s\n' \
+      "$wrong_pid" >&2
+    return 1
+  fi
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
-  test "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)" = "$wrong_sha"
+  assert_fixture_equal "wrong-process executable digest" "$wrong_sha" \
+    "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)"
   if [[ "$unit" = "$agent_unit" ]]; then
-    test "$wrong_pid" = "$wrong_pid_before"
-    test "$wrong_start_before" = \
+    assert_fixture_equal "wrong-process stable pid" "$wrong_pid_before" "$wrong_pid"
+    assert_fixture_equal "wrong-process stable start time" "$wrong_start_before" \
       "$(awk '{print $22}' "/proc/$wrong_pid/stat")"
-    test "$wrong_invocation_before" = \
+    assert_fixture_equal "wrong-process stable invocation" "$wrong_invocation_before" \
       "$(systemctl --system show --property=InvocationID --value "$unit")"
-    [[ "$wrong_invocation_before" =~ ^[0-9a-f]{32}$ ]]
-    test "$wrong_cgroup_before" = "0::/system.slice/$agent_unit"
-    test "$wrong_cgroup_before" = "$(cat "/proc/$wrong_pid/cgroup")"
-    test "$wrong_owner_before" = "$agent_uid:$agent_gid"
-    test "$wrong_groups_before" = "$agent_groups"
-    test "$wrong_exe_before" = "$destination"
-    test "$wrong_sha_before" = "$wrong_sha"
-    test "$(systemctl --system show --property=ActiveState --value "$unit")" \
-      = active
-    test "$(systemctl --system show --property=SubState --value "$unit")" \
-      = running
+    if ! [[ "$wrong_invocation_before" =~ ^[0-9a-f]{32}$ ]]; then
+      printf 'wrong-process fixture mismatch: invocation id observed=%s\n' \
+        "$wrong_invocation_before" >&2
+      return 1
+    fi
+    assert_fixture_equal "wrong-process cgroup identity" \
+      "0::/system.slice/$agent_unit" "$wrong_cgroup_before"
+    assert_fixture_equal "wrong-process stable cgroup" "$wrong_cgroup_before" \
+      "$(cat "/proc/$wrong_pid/cgroup")"
+    assert_fixture_equal "wrong-process uid and gid" "$agent_uid:$agent_gid" \
+      "$wrong_owner_before"
+    assert_fixture_equal "wrong-process supplementary groups" "$agent_groups" \
+      "$wrong_groups_before"
+    assert_fixture_equal "wrong-process executable path" "$destination" \
+      "$wrong_exe_before"
+    assert_fixture_equal "wrong-process captured digest" "$wrong_sha" \
+      "$wrong_sha_before"
+    assert_fixture_equal "wrong-process active state" active \
+      "$(systemctl --system show --property=ActiveState --value "$unit")"
+    assert_fixture_equal "wrong-process substate" running \
+      "$(systemctl --system show --property=SubState --value "$unit")"
   fi
   atomic_replace "$expected_installed" "$destination" 0555
-  test -f "$destination"
-  test ! -L "$destination"
-  test "$(stat -c %u:%g:%a:%h "$destination")" = 0:0:555:1
-  test "$(sha256sum "$destination" | cut -d' ' -f1)" = \
-    "$(sha256sum "$expected_installed" | cut -d' ' -f1)"
-  test "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)" = "$wrong_sha"
+  [[ -f "$destination" && ! -L "$destination" ]]
+  assert_fixture_equal "restored installed file custody" 0:0:555:1 \
+    "$(stat -c %u:%g:%a:%h "$destination")"
+  assert_fixture_equal "restored installed file digest" \
+    "$(sha256sum "$expected_installed" | cut -d' ' -f1)" \
+    "$(sha256sum "$destination" | cut -d' ' -f1)"
+  assert_fixture_equal "running process retains wrong digest" "$wrong_sha" \
+    "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)"
   if [[ "$unit" = "$agent_unit" ]]; then
-    test "$(readlink "/proc/$wrong_pid/exe")" = "$destination (deleted)"
+    assert_fixture_equal "running process deleted executable path" \
+      "$destination (deleted)" "$(readlink "/proc/$wrong_pid/exe")"
   fi
 }
 
