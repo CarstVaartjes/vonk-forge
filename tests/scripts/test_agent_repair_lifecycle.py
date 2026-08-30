@@ -201,6 +201,10 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert "/usr/bin/sha256sum /proc/self/exe" not in harness
     assert 'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
     assert "failed assertion: line=%s status=%s expected-agent=%s:%s" in harness
+    assert "gate_backup=$test_root/running-agent-source-gate" in harness
+    assert 'rm -f -- "$source_gate"' in harness
+    assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
+    assert 'test "$restart_status" -eq 0' in harness
     assert "snapshot_source_authority_state()" in harness
     assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness
     assert '"$test_root/before-source-authority" \'ii \'' in harness

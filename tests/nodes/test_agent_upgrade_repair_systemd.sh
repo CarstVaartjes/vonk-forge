@@ -1221,8 +1221,24 @@ run_wrong_binary_but_restore_installed() {
   destination=$2
   wrong_binary=$3
   expected_installed=$4
+  gate_backup=
   atomic_replace "$wrong_binary" "$destination" 0555
+  if [[ "$unit" = "$agent_unit" ]]; then
+    gate_backup=$test_root/running-agent-source-gate
+    cp -- "$source_gate" "$gate_backup"
+    rm -f -- "$source_gate"
+    systemctl --system daemon-reload
+  fi
+  set +e
   systemctl --system restart "$unit"
+  restart_status=$?
+  set -e
+  if [[ -n "$gate_backup" ]]; then
+    atomic_replace "$gate_backup" "$source_gate" 0644
+    systemctl --system daemon-reload
+    cmp -s "$gate_backup" "$source_gate"
+  fi
+  test "$restart_status" -eq 0
   wrong_pid="$(systemctl --system show --property=MainPID --value "$unit")"
   test "$wrong_pid" -gt 1
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
