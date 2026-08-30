@@ -704,6 +704,28 @@ def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() 
         ]
 
 
+def test_browser_source_bundle_upload_matches_controller_bound_only() -> None:
+    adapted = _adapted_caddy(_environment())
+    browser = _server_on_port(adapted, 8080)
+    trusted = next(
+        route
+        for route in _routes_with_handlers(browser["routes"])
+        if route.get("match") == [{"host": [_environment()["VONK_CONTROL_HOSTNAME"]]}]
+    )
+    trusted_routes = trusted["handle"][0]["routes"]
+    upload_match = [
+        {
+            "method": ["PUT"],
+            "path": ["/api/v1/catalog/source-bundles/*"],
+        }
+    ]
+
+    assert _request_body_routes(trusted_routes) == [
+        {"match": [{"not": upload_match}], "max_size": 1_000_000},
+        {"match": upload_match, "max_size": 64 * 1024**2},
+    ]
+
+
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> (
     None
 ):

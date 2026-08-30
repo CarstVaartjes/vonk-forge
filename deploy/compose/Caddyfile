@@ -20,6 +20,27 @@
 	import edge_headers
 }
 
+(browser_edge_guards) {
+	# Recipe source bundles are content-addressed, inspected by the Controller,
+	# and bounded there at the same 64 MiB ceiling. Keep every other browser
+	# request on the ordinary 1 MB boundary.
+	@recipe_source_bundle_upload {
+		method PUT
+		path /api/v1/catalog/source-bundles/*
+	}
+	@ordinary_browser_request not {
+		method PUT
+		path /api/v1/catalog/source-bundles/*
+	}
+	request_body @ordinary_browser_request {
+		max_size 1MB
+	}
+	request_body @recipe_source_bundle_upload {
+		max_size 67108864
+	}
+	import edge_headers
+}
+
 (agent_edge_guards) {
 	# Recipe OCI layouts are the only large inbound agent body. The API streams,
 	# hashes, and enforces this same 16 TiB protocol ceiling.
@@ -116,7 +137,7 @@ http://:8084 {
 :8080 {
 	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
 	handle @canonical_browser_host {
-		import edge_guards
+		import browser_edge_guards
 		handle /healthz {
 			respond 200
 		}
