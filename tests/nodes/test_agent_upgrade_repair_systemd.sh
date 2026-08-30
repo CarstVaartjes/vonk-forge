@@ -1198,10 +1198,10 @@ force_dpkg_version() {
 }
 
 atomic_replace() {
-  source=$1
-  destination=$2
-  mode=$3
-  temporary=${destination}.repair-fixture.$$
+  local source=$1
+  local destination=$2
+  local mode=$3
+  local temporary=${destination}.repair-fixture.$$
   install -o root -g root -m "$mode" "$source" "$temporary"
   sync -f "$temporary"
   mv -f -- "$temporary" "$destination"
@@ -1209,20 +1209,35 @@ atomic_replace() {
 }
 
 mutate_installed_file() {
-  destination=$1
-  mode=$2
-  temporary=$test_root/mutated-$(basename "$destination")
+  local destination=$1
+  local mode=$2
+  local temporary=$test_root/mutated-$(basename "$destination")
   cp -- "$destination" "$temporary"
   printf x >> "$temporary"
   atomic_replace "$temporary" "$destination" "$mode"
 }
 
 run_wrong_binary_but_restore_installed() {
-  unit=$1
-  destination=$2
-  wrong_binary=$3
-  expected_installed=$4
-  gate_backup=
+  local unit=$1
+  local destination=$2
+  local wrong_binary=$3
+  local expected_installed=$4
+  local gate_backup=
+  local wrong_sha
+  local restart_status
+  local wrong_pid=
+  local candidate_pid
+  local wrong_pid_before
+  local wrong_invocation_before
+  local wrong_start_before
+  local wrong_cgroup_before
+  local wrong_exe_before
+  local wrong_sha_before
+  local wrong_owner_before
+  local wrong_groups_before
+  local gate_condition
+  local source_gate_manager_path
+  wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   atomic_replace "$wrong_binary" "$destination" 0555
   if [[ "$unit" = "$agent_unit" ]]; then
     gate_backup=$test_root/running-agent-source-gate
@@ -1249,7 +1264,25 @@ run_wrong_binary_but_restore_installed() {
   set +e
   systemctl --system restart "$unit"
   restart_status=$?
-  if [[ "$unit" = "$agent_unit" ]]; then
+  set -e
+  wrong_pid=
+  if (( restart_status == 0 )); then
+    for _ in {1..500}; do
+      candidate_pid="$(systemctl --system show --property=MainPID --value \
+        "$unit")"
+      if [[ "$candidate_pid" =~ ^[0-9]+$ ]] && (( candidate_pid > 1 )) \
+        && [[ -e "/proc/$candidate_pid/exe" ]] \
+        && [[ "$(readlink "/proc/$candidate_pid/exe" 2>/dev/null)" \
+          = "$destination" ]] \
+        && [[ "$(sha256sum "/proc/$candidate_pid/exe" 2>/dev/null \
+          | cut -d' ' -f1)" = "$wrong_sha" ]]; then
+        wrong_pid=$candidate_pid
+        break
+      fi
+      sleep 0.01
+    done
+  fi
+  if [[ "$unit" = "$agent_unit" && -n "$wrong_pid" ]]; then
     wrong_pid_before="$(systemctl --system show --property=MainPID --value \
       "$unit")"
     wrong_invocation_before="$(systemctl --system show \
@@ -1265,7 +1298,6 @@ run_wrong_binary_but_restore_installed() {
       $1=""; sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print
     }' "/proc/$wrong_pid_before/status" 2>/dev/null)"
   fi
-  set -e
   if [[ -n "$gate_backup" ]]; then
     atomic_replace "$gate_backup" "$source_gate" 0644
     systemctl --system daemon-reload
@@ -1281,13 +1313,11 @@ run_wrong_binary_but_restore_installed() {
     [[ "$gate_condition" = *"allow-agent-start"* ]]
   fi
   assert_fixture_equal "wrong-process restart status" 0 "$restart_status"
-  wrong_pid="$(systemctl --system show --property=MainPID --value "$unit")"
   if ! [[ "$wrong_pid" =~ ^[0-9]+$ ]] || (( wrong_pid <= 1 )); then
     printf 'wrong-process fixture mismatch: main pid expected=>1 observed=%s\n' \
       "$wrong_pid" >&2
     return 1
   fi
-  wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   assert_fixture_equal "wrong-process executable digest" "$wrong_sha" \
     "$(sha256sum "/proc/$wrong_pid/exe" | cut -d' ' -f1)"
   if [[ "$unit" = "$agent_unit" ]]; then

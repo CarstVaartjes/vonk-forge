@@ -205,10 +205,14 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'rm -f -- "$source_gate"' in harness
     assert 'source_gate_manager_path="$(realpath -e -- "$source_gate")"' in harness
     assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
+    assert "local destination=$2" in harness
     assert (
         'assert_fixture_equal "wrong-process restart status" 0 "$restart_status"'
         in harness
     )
+    assert "for _ in {1..500}; do" in harness
+    assert 'readlink "/proc/$candidate_pid/exe"' in harness
+    assert '"$wrong_sha"' in harness
     assert "--property=DropInPaths" in harness
     assert "--property=ExecCondition" in harness
     assert (
