@@ -35,6 +35,20 @@ function artifactDetail() {
           {id: "mesh", label: "Mesh", description: "Generated scene geometry.", media_types: ["model/gltf-binary"], extensions: [".glb"], min_files: 0, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
         ],
       },
+    }, {
+      adapter: "video-job", path: "/outputs", timeout_seconds: 1800,
+      input: {
+        path: "/inputs", required: true, media_types: ["video/mp4"], max_bytes: 64 * 1024 ** 2, min_files: 1, max_files: 1,
+        slots: [
+          {id: "source", label: "Source clip", description: "A bounded source video.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
+        ],
+      },
+      output: {
+        path: "/outputs", allowed_media_types: ["video/mp4"], max_total_bytes: 128 * 1024 ** 2,
+        slots: [
+          {id: "video", label: "Generated video", description: "Rendered video result.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 128 * 1024 ** 2, max_total_bytes: 128 * 1024 ** 2},
+        ],
+      },
     }],
   };
   detail.operational_state.runs = [{
@@ -112,6 +126,15 @@ test("renders the real artifact workcell with durable active and multi-output hi
   const workcell = page.getByRole("region", {name: "Create artifacts"});
   await expect(workcell).toBeVisible();
   await expect(workcell.getByText("Run ready for jobs")).toBeVisible();
+  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
+  await expect(fit.getByText("Comfortable")).toBeVisible();
+  await expect(fit).toContainText("2 Sparks");
+  const interfaceSelector = workcell.getByRole("combobox", {name: "Job interface"});
+  await interfaceSelector.selectOption({label: "Video Job · 1 bounded slot"});
+  await expect(workcell.getByLabel("Source clip")).toHaveAttribute("accept", "video/mp4,.mp4");
+  await expect(workcell.getByLabel("Source clip")).toHaveAttribute("required", "");
+  await interfaceSelector.selectOption({label: "Artifact Job · 2 bounded slots"});
+  await expect(workcell.getByRole("textbox", {name: "Prompt"})).toBeVisible();
   await expect(workcell.getByRole("article", {name: /running/i})).toBeVisible();
   await expect(workcell.getByRole("article", {name: /ready/i})).toBeVisible();
   const succeeded = workcell.getByRole("article", {name: /succeeded/i});
@@ -154,6 +177,26 @@ test("exposes explicit empty and failed retry recovery states", async ({page}) =
   await expect(failed).toContainText("rejected the output manifest");
   await failed.getByRole("button", {name: "Prepare retry"}).click();
   await expect(page.getByText(/Retry prepared from/)).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+});
+
+test("keeps variant evidence and native input contracts accessible without phone overflow", async ({page}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await page.goto("/library/recipes/recipe-chat");
+  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
+  await expect(fit).toBeVisible();
+  const rows = await fit.locator(":scope > div").evaluateAll(elements => elements.map(element => ({
+    left: Math.round(element.getBoundingClientRect().left),
+    top: Math.round(element.getBoundingClientRect().top),
+    width: Math.round(element.getBoundingClientRect().width),
+  })));
+  expect(new Set(rows.map(row => row.top)).size).toBe(3);
+  expect(new Set(rows.map(row => row.left)).size).toBe(1);
+  expect(rows.every(row => row.width <= 358)).toBe(true);
+  const workcell = page.getByRole("region", {name: "Create artifacts"});
+  await expect(workcell.getByRole("combobox", {name: "Job interface"})).toBeVisible();
+  await expect(workcell.getByRole("textbox", {name: "Prompt"})).toHaveAttribute("aria-required", "true");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await expectNoAccessibilityViolations(page);
 });
 

@@ -137,6 +137,46 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   expect(await screen.findByText("Succeeded")).toBeInTheDocument();
 });
 
+test("renders every declared job interface as a native bounded form and clears local inputs on change", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const imageDetail = detail(false);
+  const imageInterface = imageDetail.visual_recipe!.interfaces[0]!;
+  const multiple = {
+    ...imageDetail,
+    visual_recipe: {
+      ...imageDetail.visual_recipe!,
+      interfaces: [imageInterface, {
+        adapter: "video-job",
+        path: "/outputs",
+        input: {path: "/inputs", required: true, media_types: ["video/mp4"], max_bytes: 4_194_304, min_files: 1, max_files: 1, slots: [
+          {id: "source", label: "Source clip", description: "A bounded source video.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 4_194_304, max_total_bytes: 4_194_304},
+        ]},
+        output: {path: "/outputs", allowed_media_types: ["video/mp4"], max_total_bytes: 8_388_608, slots: [
+          {id: "video", label: "Generated video", description: "Rendered video result.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
+        ]},
+      }],
+    } as unknown as LibraryRecipeDetail["visual_recipe"],
+  };
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={multiple}/>);
+
+  await screen.findByRole("button", {name: "Submit artifact job"});
+  const selector = screen.getByRole("combobox", {name: "Job interface"});
+  expect(within(selector).getByRole("option", {name: "Image Job · 2 bounded slots"})).toBeInTheDocument();
+  expect(within(selector).getByRole("option", {name: "Video Job · 1 bounded slot"})).toBeInTheDocument();
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Unsaved local prompt");
+  await user.selectOptions(selector, "1");
+
+  const source = screen.getByLabelText("Source clip");
+  expect(source).toHaveAttribute("type", "file");
+  expect(source).toHaveAttribute("accept", "video/mp4,.mp4");
+  expect(source).toBeRequired();
+  expect(source).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByText(/1–1 files · 4.0 MiB each · 4.0 MiB total/)).toBeVisible();
+  expect(screen.queryByDisplayValue("Unsaved local prompt")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Submit artifact job"})).toBeDisabled();
+});
+
 test("restores durable multi-output results with safe native previews and exact downloads", async () => {
   const image = {name: "frame.png", media_type: "image/png", size_bytes: 2048, sha256: "d".repeat(64)};
   const audio = {name: "sound.wav", media_type: "audio/wav", size_bytes: 4096, sha256: "e".repeat(64)};
@@ -232,4 +272,19 @@ test("keeps submission disabled and gives operators explicit recovery for prefli
   expect(await screen.findByRole("button", {name: "Submit artifact job"})).toBeDisabled();
   expect(client.artifactJobCapabilities).toHaveBeenCalledTimes(2);
   expect(client.artifactJobsForRun).toHaveBeenCalledTimes(2);
+});
+
+test("keeps the declared native form visible while controller capacity is loading", async () => {
+  let resolveCapabilities!: (value: Awaited<ReturnType<ReturnType<typeof api>["artifactJobCapabilities"]>>) => void;
+  const client = api();
+  const capability = await client.artifactJobCapabilities();
+  client.artifactJobCapabilities.mockReset();
+  client.artifactJobCapabilities.mockImplementationOnce(() => new Promise(resolve => { resolveCapabilities = resolve; }));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail(false)}/>);
+
+  expect(screen.getByRole("textbox", {name: "Prompt"})).toBeVisible();
+  expect(screen.getByLabelText("Reference image")).toHaveAttribute("type", "file");
+  expect(screen.getByRole("button", {name: "Checking controller capacity…"})).toBeDisabled();
+  resolveCapabilities(capability);
+  expect(await screen.findByRole("button", {name: "Submit artifact job"})).toBeDisabled();
 });

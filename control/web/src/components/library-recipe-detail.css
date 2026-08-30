@@ -1,4 +1,5 @@
 .recipe-authority {
+  container-type: inline-size;
   min-width: 0;
   padding: 0 1rem 1rem;
 }
@@ -30,6 +31,77 @@
 .recipe-authority-title {
   display: block;
   font-size: 1.15rem;
+}
+
+.recipe-fit-strip {
+  background: var(--surface-recessed);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.8rem;
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.9fr) minmax(12rem, 1.1fr) minmax(16rem, 1.5fr);
+  margin-top: 1rem;
+  overflow: hidden;
+}
+
+.recipe-fit-strip > div {
+  align-content: start;
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+}
+
+.recipe-fit-strip > div + div {
+  border-inline-start: 1px solid var(--border);
+}
+
+.recipe-fit-strip > div > span:first-child {
+  color: var(--text-subtle);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.recipe-fit-strip strong,
+.recipe-fit-strip small {
+  overflow-wrap: anywhere;
+}
+
+.recipe-fit-strip small {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.recipe-fit-result .status-pill {
+  justify-self: start;
+}
+
+.recipe-variant-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.recipe-variant-badges > span {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 750;
+  padding: 0.25rem 0.5rem;
+}
+
+@container (max-width: 46rem) {
+  .recipe-fit-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-fit-strip > div + div {
+    border-block-start: 1px solid var(--border);
+    border-inline-start: 0;
+  }
 }
 
 .identity-note {

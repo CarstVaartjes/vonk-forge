@@ -291,6 +291,7 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
           {detail && publicByLocalRecipe.get(detail.recipe.recipe_id) && <RecipeReleaseContext onNavigate={onNavigate} recipe={publicByLocalRecipe.get(detail.recipe.recipe_id)!}/>}
           {detail && <LibraryRecipeAuthority
             api={api}
+            catalogRecipe={publicByLocalRecipe.get(detail.recipe.recipe_id)}
             detail={detail}
             onBusyChange={onBusyChange}
             onRefresh={onRefresh}
