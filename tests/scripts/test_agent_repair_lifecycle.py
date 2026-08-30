@@ -194,7 +194,9 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
     assert "failed assertion: line=%s status=%s expected-agent=%s:%s" in harness
     assert "snapshot_source_authority_state()" in harness
-    assert "dpkg=<transition>" in harness
+    assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness
+    assert '"$test_root/before-source-authority" \'ii \'' in harness
+    assert '"$test_root/pre-runner-authority" iHR' in harness
     assert 'snapshot_prepared_objects "$test_root/prepared-before"' in harness
     assert '"$test_root/before-source-authority"' in harness
     assert 'test "$(wc -l < "$repair_receipt")" -eq 16' in harness

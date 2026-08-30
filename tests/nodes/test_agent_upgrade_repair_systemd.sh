@@ -1031,11 +1031,15 @@ snapshot_state() {
 
 snapshot_source_authority_state() {
   authority_destination=$1
+  authority_dpkg_status=$2
   authority_full_snapshot=${authority_destination}.full
   snapshot_state "$authority_full_snapshot"
+  grep -Fxq \
+    "dpkg=$authority_dpkg_status|arm64|$installed_version" \
+    "$authority_full_snapshot"
   grep -Fv -e "path=$standard_runner " \
     -e "path=${standard_runner}.new " "$authority_full_snapshot" \
-    | sed -E 's/^dpkg=[^|]*\|/dpkg=<transition>|/' \
+    | sed '/^dpkg=/d' \
     > "$authority_destination"
   rm -f -- "$authority_full_snapshot"
 }
@@ -1215,7 +1219,7 @@ fi
 fixture_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 fixture_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
 snapshot_state "$test_root/before"
-snapshot_source_authority_state "$test_root/before-source-authority"
+snapshot_source_authority_state "$test_root/before-source-authority" 'ii '
 
 crash_watcher=
 if [[ "$crash_phase" = pre-runner-rename \
@@ -1248,7 +1252,8 @@ if [[ "$crash_phase" = pre-runner-rename \
             -name '.repair-build.*' | wc -l)" -eq 1
           snapshot_prepared_objects "$test_root/prepared-before"
           if [[ "$crash_phase" = pre-runner-rename ]]; then
-            snapshot_source_authority_state "$test_root/pre-runner-authority"
+            snapshot_source_authority_state \
+              "$test_root/pre-runner-authority" iHR
             if ! cmp -s "$test_root/before-source-authority" \
               "$test_root/pre-runner-authority"; then
               diff -u "$test_root/before-source-authority" \
