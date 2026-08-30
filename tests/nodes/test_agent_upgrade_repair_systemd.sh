@@ -768,6 +768,8 @@ agent_boot=$(sed -n '1p' /proc/sys/kernel/random/boot_id)
 agent_invocation=$(systemctl --system show --property=InvocationID --value \
   "$agent_unit")
 [[ "$agent_invocation" =~ ^[0-9a-f]{32}$ ]]
+grep -E '^(Groups|CapInh|CapPrm|CapEff|CapBnd|CapAmb):' \
+  "/proc/$old_agent_pid/status" | sed 's/^/agent-runtime /'
 grep -Fxq $'CapInh:\t00000000002000c2' "/proc/$old_agent_pid/status"
 grep -Fxq $'CapPrm:\t0000000000000000' "/proc/$old_agent_pid/status"
 grep -Fxq $'CapEff:\t0000000000000000' "/proc/$old_agent_pid/status"
