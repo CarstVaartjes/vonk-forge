@@ -1,0 +1,226 @@
+#!/bin/sh
+set -eu
+umask 077
+
+# Configure-only maintainer script for a node-bound repair package. The
+# existing recovery runner owns service activation, receipts and retirement.
+# VONK_REPAIR_POSTINST_V1
+package_name=vonk-forge-agent
+package_version='@VERSION@'
+authority_sha256='@REPAIR_AUTHORITY_SHA256@'
+agent_semver=${package_version%%~*}
+agent_semver=${agent_semver%%+*}
+state=/var/lib/vonk-forge/package-upgrade
+source_intent=$state/intent
+repair_state=$state/repair
+repair_intent=$repair_state/intent
+repair_phase=$repair_state/phase
+repair_candidate=$repair_state/candidate.deb
+repair_authority=/usr/share/doc/vonk-forge-agent/repair-authority
+recovery_unit=vonk-forge-package-upgrade-recover.service
+
+fail() {
+    echo "vonk-forge-agent: repair postinst rejected: $1" >&2
+    exit 1
+}
+
+safe_root_file() {
+    file=$1
+    mode=$2
+    [ -f "$file" ] && [ ! -L "$file" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$file")" = "0:0:$mode:1" ]
+}
+
+canonical_line_file() {
+    [ "$(/usr/bin/wc -l < "$1")" -eq "$2" ] \
+        && [ "$(/usr/bin/tail -c 1 "$1" | /usr/bin/wc -l)" -eq 1 ]
+}
+
+valid_digest() {
+    case "$1" in *[!0-9a-f]*|'') return 1 ;; esac
+    [ "${#1}" -eq 64 ]
+}
+
+recursive_binding() {
+    [ "${1:-}" = configure ] \
+        && [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] \
+        && [ -d "$state" ] && [ ! -L "$state" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$state")" = 0:0:700 ] \
+        && [ -d "$repair_state" ] && [ ! -L "$repair_state" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$repair_state")" = 0:0:700 ] \
+        && safe_root_file "$source_intent" 600 \
+        && safe_root_file "$repair_intent" 600 \
+        && safe_root_file "$repair_phase" 600 \
+        && safe_root_file "$repair_candidate" 600 \
+        && safe_root_file "$repair_authority" 644 \
+        || return 1
+    canonical_line_file "$source_intent" 14 \
+        && canonical_line_file "$repair_intent" 17 \
+        && canonical_line_file "$repair_phase" 3 \
+        || return 1
+    source_snapshot=$(/usr/bin/sha256sum "$source_intent" \
+        | /usr/bin/cut -d' ' -f1) || return 1
+    intent_authority=$(/usr/bin/sed -n '2s/^authority_sha256=//p' "$repair_intent")
+    intent_source=$(/usr/bin/sed -n '4s/^source_intent_sha256=//p' "$repair_intent")
+    intent_candidate=$(/usr/bin/sed -n '6s/^candidate_sha256=//p' "$repair_intent")
+    intent_bytes=$(/usr/bin/sed -n '7s/^candidate_bytes=//p' "$repair_intent")
+    intent_version=$(/usr/bin/sed -n '8s/^target_version=//p' "$repair_intent")
+    intent_arch=$(/usr/bin/sed -n '9s/^architecture=//p' "$repair_intent")
+    intent_agent=$(/usr/bin/sed -n '10s/^agent_sha256=//p' "$repair_intent")
+    intent_helper=$(/usr/bin/sed -n '11s/^helper_sha256=//p' "$repair_intent")
+    intent_runner=$(/usr/bin/sed -n '13s/^repair_runner_sha256=//p' "$repair_intent")
+    intent_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
+    phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
+    valid_digest "$source_snapshot" \
+        && valid_digest "$intent_authority" \
+        && valid_digest "$intent_source" \
+        && valid_digest "$intent_candidate" \
+        && valid_digest "$intent_agent" \
+        && valid_digest "$intent_helper" \
+        && valid_digest "$intent_runner" \
+        && valid_digest "$intent_nonce" \
+        && [ "$intent_authority" = "$authority_sha256" ] \
+        && [ "$intent_source" = "$source_snapshot" ] \
+        && [ "$intent_version" = "$package_version" ] \
+        && [ "$intent_nonce" = "$VONK_FORGE_PACKAGE_REPAIR_NONCE" ] \
+        && [ "$phase_nonce" = "$intent_nonce" ] \
+        && /usr/bin/sed -n '3p' "$repair_phase" | grep -Fxq 'phase=installing' \
+        || return 1
+    [ "$(/usr/bin/stat -c %s "$repair_candidate")" = "$intent_bytes" ] \
+        && [ "$(/usr/bin/sha256sum "$repair_candidate" \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_candidate" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Package)" \
+            = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Version)" \
+            = "$package_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Architecture)" \
+            = "$intent_arch" ] \
+        && [ "$(/usr/bin/sha256sum "$repair_authority" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_sha256" ] \
+        && [ "$(/usr/bin/sha256sum /usr/lib/vonk-forge/vonk-agent \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_agent" ] \
+        && [ "$(/usr/bin/sha256sum /usr/lib/vonk-forge/vonk-agent-helper \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_helper" ] \
+        && [ "$(/usr/bin/sha256sum \
+            /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_runner" ] \
+        || return 1
+    grep -Fxq "0::/system.slice/$recovery_unit" /proc/self/cgroup \
+        || return 1
+    case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-postinst.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
+        || return 1
+    canonical_line_file "$command_file" 4 \
+        && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
+        && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
+        && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \
+        && /usr/bin/sed -n '4p' "$command_file" | grep -Fxq "$repair_candidate"
+    result=$?
+    /usr/bin/rm -f -- "$command_file"
+    trap - EXIT HUP INT TERM
+    return "$result"
+}
+
+recursive_binding "${1:-}" || fail 'recursive configure binding'
+
+if ! getent group vonk-agent >/dev/null; then
+    addgroup --system vonk-agent
+fi
+if ! getent passwd vonk-agent >/dev/null; then
+    adduser --system --ingroup vonk-agent --home /var/lib/vonk-forge-agent \
+        --no-create-home --shell /usr/sbin/nologin vonk-agent
+fi
+if [ ! -e /var/lib/systemd/linger/vonk-agent ]; then
+    /usr/bin/loginctl enable-linger vonk-agent >/dev/null
+fi
+
+login_value() {
+    key=$1
+    fallback=$2
+    value=$(awk -v key="$key" \
+        '$1 == key && $2 ~ /^[0-9]+$/ { value=$2 } END { print value }' \
+        /etc/login.defs)
+    if [ -n "$value" ]; then printf '%s\n' "$value"; else printf '%s\n' "$fallback"; fi
+}
+
+allocate_subid_range() {
+    file=$1 minimum=$2 maximum=$3 count=$4
+    LC_ALL=C sort -t: -k2,2n "$file" | awk -F: \
+        -v minimum="$minimum" -v maximum="$maximum" -v count="$count" '
+        BEGIN { candidate=minimum; found=0 }
+        $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $3 > 0 {
+            start=$2; after=start+$3
+            if (after <= candidate) next
+            if (start >= candidate+count) { print candidate "-" candidate+count-1; found=1; exit }
+            if (start <= candidate && after > candidate) candidate=after
+        }
+        END { if (!found && candidate+count-1 <= maximum) print candidate "-" candidate+count-1 }'
+}
+
+ensure_subid_range() {
+    file=$1 minimum=$2 maximum=$3 count=$4 option=$5 agent_uid=$6
+    if awk -F: -v user=vonk-agent -v uid="$agent_uid" -v count="$count" '
+        ($1 == user || $1 == uid) && $3 ~ /^[0-9]+$/ { total += $3 }
+        END { exit !(total >= count) }' "$file"; then return; fi
+    range=$(allocate_subid_range "$file" "$minimum" "$maximum" "$count")
+    [ -n "$range" ] || fail 'no subordinate ID range is available'
+    case "$option" in
+        uid) usermod --add-subuids "$range" vonk-agent ;;
+        gid) usermod --add-subgids "$range" vonk-agent ;;
+        *) return 1 ;;
+    esac
+}
+
+sub_uid_min=$(login_value SUB_UID_MIN 100000)
+sub_uid_max=$(login_value SUB_UID_MAX 600100000)
+sub_uid_count=$(login_value SUB_UID_COUNT 65536)
+sub_gid_min=$(login_value SUB_GID_MIN 100000)
+sub_gid_max=$(login_value SUB_GID_MAX 600100000)
+sub_gid_count=$(login_value SUB_GID_COUNT 65536)
+[ "$sub_uid_count" -ge 65536 ] || sub_uid_count=65536
+[ "$sub_gid_count" -ge 65536 ] || sub_gid_count=65536
+[ -f /etc/subuid ] || install -o root -g root -m 0644 /dev/null /etc/subuid
+[ -f /etc/subgid ] || install -o root -g root -m 0644 /dev/null /etc/subgid
+agent_uid=$(id -u vonk-agent)
+ensure_subid_range /etc/subuid "$sub_uid_min" "$sub_uid_max" "$sub_uid_count" uid "$agent_uid"
+ensure_subid_range /etc/subgid "$sub_gid_min" "$sub_gid_max" "$sub_gid_count" gid "$agent_uid"
+
+install -d -o root -g root -m 0755 /var/lib/vonk-forge
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent
+install -d -o vonk-agent -g vonk-agent -m 0750 \
+    /var/lib/vonk-forge-agent/models /var/lib/vonk-forge-agent/containers \
+    /var/lib/vonk-forge-agent/state /var/lib/vonk-forge-agent/workloads
+install -d -o vonk-agent -g vonk-agent -m 0700 \
+    /var/lib/vonk-forge-agent/image-imports \
+    /var/lib/vonk-forge-agent/installations \
+    /var/lib/vonk-forge-agent/run-metadata /var/lib/vonk-forge-agent/runs
+machine_evidence=/var/lib/vonk-forge-agent/machine-evidence
+if [ -e "$machine_evidence" ] || [ -L "$machine_evidence" ]; then
+    [ -f "$machine_evidence" ] && [ ! -L "$machine_evidence" ] \
+        && [ "$(stat -c '%U:%G:%a' "$machine_evidence")" = root:vonk-agent:640 ] \
+        && [ "$(wc -l < "$machine_evidence")" -eq 1 ] \
+        && grep -Eq '^[0-9a-f]{64}$' "$machine_evidence" \
+        || fail 'native machine evidence is unsafe'
+else
+    machine_evidence_new=$(mktemp /var/lib/vonk-forge-agent/.machine-evidence.XXXXXX)
+    trap 'rm -f -- "$machine_evidence_new"' EXIT HUP INT TERM
+    openssl rand -hex 32 > "$machine_evidence_new"
+    install -o root -g vonk-agent -m 0640 "$machine_evidence_new" "$machine_evidence"
+    rm -f -- "$machine_evidence_new"
+    trap - EXIT HUP INT TERM
+fi
+install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper \
+    /var/lib/vonk-forge/helper/requests /var/lib/vonk-forge/runtime-images
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
+deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
+deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
+if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
+    deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
+fi
+[ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ] \
+    || fail 'target agent version'
+
+exit 0

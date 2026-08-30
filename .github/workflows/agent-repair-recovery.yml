@@ -1,0 +1,112 @@
+name: Agent repair recovery acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/agent-repair-recovery.yml
+      - Cargo.lock
+      - Cargo.toml
+      - packaging/debian/postinst-repair
+      - packaging/debian/preinst-repair
+      - rust/crates/vonk-repair-helper-probe/**
+      - scripts/build-agent-deb
+      - scripts/verify-agent-deb
+      - tests/nodes/test_agent_upgrade_repair_matrix.sh
+      - tests/nodes/test_agent_upgrade_repair_systemd.sh
+      - tests/test_agent_repair_workflow.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agent-repair-recovery.yml
+      - Cargo.lock
+      - Cargo.toml
+      - packaging/debian/postinst-repair
+      - packaging/debian/preinst-repair
+      - rust/crates/vonk-repair-helper-probe/**
+      - scripts/build-agent-deb
+      - scripts/verify-agent-deb
+      - tests/nodes/test_agent_upgrade_repair_matrix.sh
+      - tests/nodes/test_agent_upgrade_repair_systemd.sh
+      - tests/test_agent_repair_workflow.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-agent-repair-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-arm64-repair-matrix:
+    name: Exercise full repair matrix on disposable ARM64 systemd
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          rustup set profile minimal
+          rustup toolchain install 1.97.1 --component clippy,rustfmt
+          rustup default 1.97.1
+      - name: Restore read-only ARM64 Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Install native acceptance dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            acl adduser build-essential ca-certificates curl fuse-overlayfs \
+            init-system-helpers iproute2 iptables openssl podman shellcheck \
+            slirp4netns systemd uidmap util-linux
+      - name: Validate repair scripts before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh \
+            tests/nodes/test_agent_upgrade_repair_systemd.sh
+          shellcheck -S error \
+            packaging/debian/postinst-repair \
+            packaging/debian/preinst-repair
+          shellcheck \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh \
+            tests/nodes/test_agent_upgrade_repair_systemd.sh
+      - name: Build exact repair probe once
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --package vonk-repair-helper-probe
+          probe=$(realpath target/release/vonk-repair-helper-probe)
+          probe_staged="$probe.root-owned"
+          sudo install -o root -g root -m 0755 "$probe" "$probe_staged"
+          sudo mv -f "$probe_staged" "$probe"
+          test "$(stat -c %u:%g:%a:%h "$probe")" = 0:0:755:1
+      - name: Exercise every repair success, refusal, and crash path
+        shell: bash
+        env:
+          REPAIR_MATRIX_MODE: full
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test -d /run/systemd/system
+          test "$(dpkg --print-architecture)" = arm64
+          probe=$(realpath target/release/vonk-repair-helper-probe)
+          sudo env REPAIR_MATRIX_MODE="$REPAIR_MATRIX_MODE" \
+            REPAIR_PROBE_BINARY="$probe" \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh

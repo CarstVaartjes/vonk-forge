@@ -1,0 +1,2124 @@
+#!/bin/sh
+set -eu
+umask 077
+
+# This maintainer script is emitted only for an immutable, node-bound repair
+# capsule. Ordinary packages continue to use packaging/debian/preinst.
+package_name=vonk-forge-agent
+target_version='@VERSION@'
+target_architecture='@ARCHITECTURE@'
+target_agent_sha256='@AGENT_SHA256@'
+target_helper_sha256='@HELPER_SHA256@'
+authority_sha256='@REPAIR_AUTHORITY_SHA256@'
+authority_base64='@REPAIR_AUTHORITY_BASE64@'
+standard_runner_sha256='@STANDARD_RUNNER_SHA256@'
+standard_runner_base64='@STANDARD_RUNNER_BASE64@'
+target_agent_unit_sha256='@TARGET_AGENT_UNIT_SHA256@'
+target_helper_unit_sha256='@TARGET_HELPER_UNIT_SHA256@'
+target_helper_socket_sha256='@TARGET_HELPER_SOCKET_SHA256@'
+repair_probe_sha256='@REPAIR_PROBE_SHA256@'
+
+state_parent=/var/lib/vonk-forge
+source_state=$state_parent/package-upgrade
+source_intent=$source_state/intent
+source_lock=$source_state/lock
+source_blocker=$source_state/agent-blocked
+source_pending=$state_parent/helper-upgrade.pending
+source_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
+source_unit_name=vonk-forge-package-upgrade-recover.service
+source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
+
+repair_state=$source_state/repair
+repair_ready=$source_state/.repair-ready
+repair_receipt=$state_parent/package-repair.receipt
+repair_helper_receipt=$state_parent/package-repair-helper.receipt
+repair_retired=$source_state/repair.retired
+standard_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard
+agent_config=/etc/vonk-forge-agent/agent.toml
+agent_binary=/usr/lib/vonk-forge/vonk-agent
+helper_binary=/usr/lib/vonk-forge/vonk-agent-helper
+agent_unit=vonk-forge-agent.service
+helper_unit=vonk-forge-package-helper.service
+agent_unit_file=/lib/systemd/system/vonk-forge-agent.service
+helper_unit_file=/lib/systemd/system/vonk-forge-package-helper.service
+helper_socket_file=/lib/systemd/system/vonk-forge-package-helper.socket
+repair_probe=/var/lib/dpkg/tmp.ci/vonk-repair-helper.probe
+setpriv_binary=/usr/bin/setpriv
+
+set_repair_paths() {
+    repair_state=$1
+    repair_authority=$repair_state/authority
+    repair_intent=$repair_state/intent
+    repair_phase=$repair_state/phase
+    repair_blocker=$repair_state/agent-blocked
+    repair_candidate=$repair_state/candidate.deb
+}
+
+set_repair_paths "$repair_state"
+
+temporary_failure() {
+    echo "vonk-forge-agent: repair will retry: $1" >&2
+    exit 75
+}
+
+unsafe_state() {
+    echo "vonk-forge-agent: repair state is unsafe: $1" >&2
+    exit 78
+}
+
+valid_digest() {
+    case "$1" in *[!0-9a-f]*|'') return 1 ;; esac
+    [ "${#1}" -eq 64 ]
+}
+
+valid_version() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9A-Za-z.+~:-]+$'
+}
+
+valid_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+valid_boot_id() {
+    printf '%s\n' "$1" \
+        | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
+process_start() {
+    process_pid=$1
+    valid_pid "$process_pid" && [ "$process_pid" -gt 1 ] \
+        && [ -r "/proc/$process_pid/stat" ] || return 1
+    process_ticks=$(/usr/bin/awk '{ print $22 }' "/proc/$process_pid/stat") \
+        || return 1
+    valid_pid "$process_ticks" || return 1
+    printf '%s\n' "$process_ticks"
+}
+
+process_executable_identity() {
+    process_pid=$1
+    expected_path=$2
+    expected_digest=$3
+    valid_pid "$process_pid" && [ "$process_pid" -gt 1 ] \
+        && valid_digest "$expected_digest" || return 1
+    process_exe=$(/usr/bin/readlink "/proc/$process_pid/exe") \
+        || return 1
+    process_digest=$(/usr/bin/sha256sum "/proc/$process_pid/exe" \
+        | /usr/bin/cut -d' ' -f1) || return 1
+    [ "$process_exe" = "$expected_path" ] \
+        && [ "$process_digest" = "$expected_digest" ]
+}
+
+safe_root_directory() {
+    directory=$1
+    mode=$2
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$directory")" = "0:0:$mode" ]
+}
+
+safe_root_file() {
+    file=$1
+    mode=$2
+    [ -f "$file" ] && [ ! -L "$file" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$file")" = "0:0:$mode:1" ]
+}
+
+canonical_line_file() {
+    [ "$(/usr/bin/wc -l < "$1")" -eq "$2" ] \
+        && [ "$(/usr/bin/tail -c 1 "$1" | /usr/bin/wc -l)" -eq 1 ]
+}
+
+ensure_root_directory() {
+    directory=$1
+    mode=$2
+    if [ -L "$directory" ] \
+        || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
+        return 1
+    fi
+    if [ ! -d "$directory" ]; then
+        /usr/bin/install -d -o root -g root -m "0$mode" "$directory" \
+            || return 1
+        /usr/bin/sync -f "$(/usr/bin/dirname "$directory")" || return 1
+    fi
+    safe_root_directory "$directory" "$mode"
+}
+
+atomic_text() {
+    destination=$1
+    mode=$2
+    contents=$3
+    destination_dir=$(/usr/bin/dirname "$destination")
+    temporary=${destination}.new
+    if [ -e "$temporary" ] || [ -L "$temporary" ]; then
+        [ -f "$temporary" ] && [ ! -L "$temporary" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%h "$temporary")" = 0:0:1 ] \
+            || return 1
+        /usr/bin/rm -- "$temporary" || return 1
+        /usr/bin/sync -f "$destination_dir" || return 1
+    fi
+    : > "$temporary" || return 1
+    trap '/usr/bin/rm -f -- "$temporary"' EXIT HUP INT TERM
+    printf '%s' "$contents" > "$temporary" \
+        && /usr/bin/chown root:root "$temporary" \
+        && /usr/bin/chmod "0$mode" "$temporary" \
+        && /usr/bin/sync -f "$temporary" \
+        && /usr/bin/mv -f -- "$temporary" "$destination" \
+        && /usr/bin/sync -f "$destination_dir" || return 1
+    trap - EXIT HUP INT TERM
+}
+
+atomic_install() {
+    source_path=$1
+    destination=$2
+    mode=$3
+    destination_dir=$(/usr/bin/dirname "$destination")
+    temporary=${destination}.new
+    if [ -e "$temporary" ] || [ -L "$temporary" ]; then
+        [ -f "$temporary" ] && [ ! -L "$temporary" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%h "$temporary")" = 0:0:1 ] \
+            || return 1
+        /usr/bin/rm -- "$temporary" || return 1
+        /usr/bin/sync -f "$destination_dir" || return 1
+    fi
+    : > "$temporary" || return 1
+    trap '/usr/bin/rm -f -- "$temporary"' EXIT HUP INT TERM
+    /usr/bin/cp --reflink=never -- "$source_path" "$temporary" \
+        && /usr/bin/chown root:root "$temporary" \
+        && /usr/bin/chmod "0$mode" "$temporary" \
+        && /usr/bin/sync -f "$temporary" \
+        && /usr/bin/mv -f -- "$temporary" "$destination" \
+        && /usr/bin/sync -f "$destination_dir" || return 1
+    trap - EXIT HUP INT TERM
+}
+
+stage_blob() {
+    stage_blob_encoded=$1
+    stage_blob_expected_digest=$2
+    stage_blob_destination=$3
+    stage_blob_mode=$4
+    stage_blob_failure=
+    stage_blob_destination_dir=$(/usr/bin/dirname "$stage_blob_destination")
+    ensure_root_directory "$stage_blob_destination_dir" 755 \
+        || { stage_blob_failure='destination directory custody'; return 1; }
+    stage_blob_temporary=${stage_blob_destination}.new
+    if [ -e "$stage_blob_temporary" ] || [ -L "$stage_blob_temporary" ]; then
+        [ -f "$stage_blob_temporary" ] && [ ! -L "$stage_blob_temporary" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%h "$stage_blob_temporary")" = 0:0:1 ] \
+            || { stage_blob_failure='temporary file custody'; return 1; }
+        /usr/bin/rm -- "$stage_blob_temporary" \
+            || { stage_blob_failure='temporary file cleanup'; return 1; }
+        /usr/bin/sync -f "$stage_blob_destination_dir" \
+            || { stage_blob_failure='cleanup directory sync'; return 1; }
+    fi
+    : > "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file creation'; return 1; }
+    trap '/usr/bin/rm -f -- "$stage_blob_temporary"' EXIT HUP INT TERM
+    printf '%s' "$stage_blob_encoded" \
+        | /usr/bin/base64 -d > "$stage_blob_temporary" \
+        || { stage_blob_failure='embedded payload decode'; return 1; }
+    [ "$(/usr/bin/sha256sum "$stage_blob_temporary" \
+        | /usr/bin/cut -d' ' -f1)" = "$stage_blob_expected_digest" ] \
+        || { stage_blob_failure='embedded payload digest'; return 1; }
+    /usr/bin/chown root:root "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file ownership'; return 1; }
+    /usr/bin/chmod "0$stage_blob_mode" "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file mode'; return 1; }
+    /usr/bin/sync -f "$stage_blob_temporary" \
+        || { stage_blob_failure='temporary file sync'; return 1; }
+    /usr/bin/mv -f -- "$stage_blob_temporary" "$stage_blob_destination" \
+        || { stage_blob_failure='delegate publication'; return 1; }
+    /usr/bin/sync -f "$stage_blob_destination_dir" \
+        || { stage_blob_failure='publication directory sync'; return 1; }
+    trap - EXIT HUP INT TERM
+}
+
+load_authority() {
+    valid_digest "$authority_sha256" || return 1
+    authority_text=$(printf '%s' "$authority_base64" | /usr/bin/base64 -d) \
+        || return 1
+    [ "$(printf '%s\n' "$authority_text" | /usr/bin/wc -l)" -eq 22 ] \
+        && [ "$(printf '%s\n' "$authority_text" \
+            | /usr/bin/sha256sum | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_sha256" ] || return 1
+    authority_names='schema_version node_id installed_version installed_agent_sha256 installed_helper_sha256 installed_agent_unit_sha256 installed_helper_unit_sha256 installed_helper_socket_sha256 source_target_version source_architecture source_package_sha256 source_agent_sha256 source_helper_sha256 source_runner_sha256 source_unit_sha256 source_agent_gate_sha256 source_socket_dropin_sha256 source_blocker_sha256 source_pending_sha256 repair_probe_sha256 setpriv_sha256 util_linux_version'
+    authority_index=1
+    for authority_name in $authority_names; do
+        authority_line=$(printf '%s\n' "$authority_text" \
+            | /usr/bin/sed -n "${authority_index}p")
+        case "$authority_line" in "$authority_name="*) ;; *) return 1 ;; esac
+        authority_value=${authority_line#*=}
+        case "$authority_name" in
+            schema_version) [ "$authority_value" = 1 ] || return 1 ;;
+            node_id)
+                printf '%s\n' "$authority_value" \
+                    | grep -Eq '^spk_[0-9a-f]{32}$' || return 1 ;;
+            installed_version|source_target_version|util_linux_version)
+                valid_version "$authority_value" || return 1 ;;
+            source_architecture)
+                [ "$authority_value" = arm64 ] \
+                    || [ "$authority_value" = amd64 ] || return 1 ;;
+            *) valid_digest "$authority_value" || return 1 ;;
+        esac
+        eval "authority_$authority_name=\$authority_value"
+        authority_index=$((authority_index + 1))
+    done
+    [ "$authority_source_architecture" = "$target_architecture" ] \
+        && /usr/bin/dpkg --compare-versions "$authority_installed_version" \
+            lt "$authority_source_target_version" \
+        && /usr/bin/dpkg --compare-versions "$authority_source_target_version" \
+            lt "$target_version"
+}
+
+safe_node_identity() {
+    [ -f "$agent_config" ] && [ ! -L "$agent_config" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$agent_config")" = 0:0:644:1 ] \
+        && [ "$(/usr/bin/stat -c %s "$agent_config")" -le 65536 ] \
+        || return 1
+    [ "$(grep -Ec '^[[:space:]]*node_id[[:space:]]*=' "$agent_config")" -eq 1 ] \
+        || return 1
+    node_line=$(grep -E '^[[:space:]]*node_id[[:space:]]*=' "$agent_config")
+    printf '%s\n' "$node_line" \
+        | grep -Eq '^[[:space:]]*node_id[[:space:]]*=[[:space:]]*"spk_[0-9a-f]{32}"[[:space:]]*(#.*)?$' \
+        || return 1
+    node_id=$(printf '%s\n' "$node_line" \
+        | /usr/bin/sed -E 's/^[[:space:]]*node_id[[:space:]]*=[[:space:]]*"(spk_[0-9a-f]{32})".*/\1/')
+    [ "$node_id" = "$authority_node_id" ]
+}
+
+query_package_state() {
+    package_state=$(LC_ALL=C /usr/bin/dpkg-query -W \
+        -f='${db:Status-Abbrev}\n${binary:Package}\n${Architecture}\n${Version}\n' \
+        "$package_name" 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$package_state" | /usr/bin/wc -l)" -eq 4 ] \
+        || return 1
+    package_status=$(printf '%s\n' "$package_state" | /usr/bin/sed -n '1p')
+    package_binary=$(printf '%s\n' "$package_state" | /usr/bin/sed -n '2p')
+    package_architecture=$(printf '%s\n' "$package_state" | /usr/bin/sed -n '3p')
+    package_version=$(printf '%s\n' "$package_state" | /usr/bin/sed -n '4p')
+    valid_version "$package_version"
+}
+
+prove_installed_old() {
+    query_package_state \
+        && [ "$package_status" = 'iHR' ] \
+        && [ "$package_binary" = "$package_name" ] \
+        && [ "$package_architecture" = "$authority_source_architecture" ] \
+        && [ "$package_version" = "$authority_installed_version" ] \
+        && [ "$(/usr/bin/dpkg --print-architecture)" \
+            = "$authority_source_architecture" ] \
+        && safe_root_file "$agent_binary" 555 \
+        && safe_root_file "$helper_binary" 555 \
+        && safe_root_file "$agent_unit_file" 644 \
+        && safe_root_file "$helper_unit_file" 644 \
+        && safe_root_file "$helper_socket_file" 644 \
+        && [ "$(/usr/bin/sha256sum "$agent_binary" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_installed_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_binary" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_installed_helper_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$agent_unit_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_installed_agent_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_unit_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_installed_helper_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_socket_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_installed_helper_socket_sha256" ]
+}
+
+dpkg_database_snapshot() {
+    safe_root_directory /var/lib/dpkg/updates 755 || return 1
+    for database_path in /var/lib/dpkg/status /var/lib/dpkg/status-old \
+        /var/lib/dpkg/updates/0000 /var/lib/dpkg/updates/0001 \
+        /var/lib/dpkg/updates/0002 /var/lib/dpkg/updates/tmp.i; do
+        safe_root_file "$database_path" 644 || return 1
+        database_stat=$(/usr/bin/stat -c %d:%i:%u:%g:%a:%h:%s:%Y:%Z \
+            "$database_path") || return 1
+        database_sha=$(/usr/bin/sha256sum "$database_path" \
+            | /usr/bin/cut -d' ' -f1) || return 1
+        valid_digest "$database_sha" || return 1
+        printf '%s=%s:%s\n' "$database_path" "$database_stat" "$database_sha"
+    done
+    updates_stat=$(/usr/bin/stat -c %d:%i:%u:%g:%a:%h:%s:%Y:%Z \
+        /var/lib/dpkg/updates) || return 1
+    printf '%s=%s\n' /var/lib/dpkg/updates "$updates_stat"
+}
+
+dpkg_database_package_state() {
+    status_path=$1
+    required=$2
+    /usr/bin/awk \
+        -v package="$package_name" \
+        -v architecture="$authority_source_architecture" \
+        -v version="$authority_installed_version" \
+        -v required="$required" '
+        BEGIN { RS=""; target_records=0; invalid=0 }
+        {
+            lines=split($0, line, "\n")
+            package_fields=0
+            package_exact=0
+            package_like=0
+            status_fields=0
+            status_exact=0
+            architecture_fields=0
+            architecture_exact=0
+            version_fields=0
+            version_exact=0
+            for (line_number=1; line_number<=lines; line_number++) {
+                lower=tolower(line[line_number])
+                if (lower ~ /^package:/) {
+                    package_fields++
+                    package_value=line[line_number]
+                    sub(/^[^:]*:/, "", package_value)
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", package_value)
+                    if (package_value == package) package_like++
+                }
+                if (line[line_number] == "Package: " package) package_exact++
+                if (lower ~ /^status:/) status_fields++
+                if (line[line_number] == "Status: install ok installed") status_exact++
+                if (lower ~ /^architecture:/) architecture_fields++
+                if (line[line_number] == "Architecture: " architecture) architecture_exact++
+                if (lower ~ /^version:/) version_fields++
+                if (line[line_number] == "Version: " version) version_exact++
+            }
+            if (package_like > 0) {
+                target_records++
+                if (package_fields != 1 || package_exact != 1 \
+                    || status_fields != 1 || status_exact != 1 \
+                    || architecture_fields != 1 || architecture_exact != 1 \
+                    || version_fields != 1 || version_exact != 1) invalid=1
+            }
+        }
+        END {
+            if (invalid != 0 || target_records > 1) exit(1)
+            if (required == "required") exit(target_records == 1 ? 0 : 1)
+            if (required == "optional") exit(target_records <= 1 ? 0 : 1)
+            exit(1)
+        }
+    ' "$status_path"
+}
+
+dpkg_transition_record() {
+    transition_path=$1
+    transition_status=$2
+    [ "$(/usr/bin/grep -Ec '^Package: ' "$transition_path")" -eq 1 ] \
+        && [ "$(/usr/bin/grep -Ec '^Status: ' "$transition_path")" -eq 1 ] \
+        && [ "$(/usr/bin/grep -Ec '^Architecture: ' "$transition_path")" -eq 1 ] \
+        && [ "$(/usr/bin/grep -Ec '^Version: ' "$transition_path")" -eq 1 ] \
+        && [ "$(/usr/bin/grep -Ec '^Config-Version: ' "$transition_path")" -eq 1 ] \
+        && /usr/bin/grep -Fxq "Package: $package_name" "$transition_path" \
+        && /usr/bin/grep -Fxq "Status: $transition_status" "$transition_path" \
+        && /usr/bin/grep -Fxq \
+            "Architecture: $authority_source_architecture" "$transition_path" \
+        && /usr/bin/grep -Fxq \
+            "Version: $authority_installed_version" "$transition_path" \
+        && /usr/bin/grep -Fxq \
+            "Config-Version: $authority_installed_version" "$transition_path" \
+        || return 1
+    /usr/bin/awk '
+        BEGIN { RS=""; records=0 }
+        { records++ }
+        END { exit(records == 1 ? 0 : 1) }
+    ' "$transition_path" || return 1
+    transition_normalized=$(
+        /usr/bin/sed \
+            "s/^Status: $transition_status\$/Status: VONK_NORMALIZED_STATUS/" \
+            "$transition_path" | /usr/bin/sha256sum | /usr/bin/cut -d' ' -f1
+    ) || return 1
+    valid_digest "$transition_normalized" || return 1
+    printf '%s\n' "$transition_normalized"
+}
+
+prove_dpkg_upgrade_transition() {
+    [ "$#" -eq 3 ] \
+        && [ "$1" = upgrade ] \
+        && [ "$2" = "$authority_installed_version" ] \
+        && [ "$3" = "$target_version" ] \
+        && [ "${DPKG_MAINTSCRIPT_NAME:-}" = preinst ] \
+        && [ "${DPKG_MAINTSCRIPT_PACKAGE:-}" = "$package_name" ] \
+        && [ "${DPKG_MAINTSCRIPT_ARCH:-}" = "$target_architecture" ] \
+        || return 1
+
+    # dpkg 1.22 records the in-memory transitions in numbered root-owned
+    # journal records before invoking the new preinst, while the canonical
+    # status database still contains the exact prior installed record until a
+    # later checkpoint.  Reconstruct the exact installed->iHR transition
+    # without copying or changing the package database.  A pre-existing
+    # iF/iU/iHR state produces a different record sequence.
+    expected_updates='0000
+0001
+0002
+tmp.i'
+    actual_updates=$(/usr/bin/find /var/lib/dpkg/updates \
+        -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C /usr/bin/sort) \
+        || return 1
+    [ "$actual_updates" = "$expected_updates" ] || return 1
+    database_before=$(dpkg_database_snapshot) || return 1
+    dpkg_database_package_state /var/lib/dpkg/status required \
+        && dpkg_database_package_state /var/lib/dpkg/status-old optional \
+        || return 1
+    normalized_0000=$(dpkg_transition_record /var/lib/dpkg/updates/0000 \
+        'install reinstreq half-configured') || return 1
+    normalized_0001=$(dpkg_transition_record /var/lib/dpkg/updates/0001 \
+        'install reinstreq unpacked') || return 1
+    normalized_0002=$(dpkg_transition_record /var/lib/dpkg/updates/0002 \
+        'install reinstreq half-installed') || return 1
+    [ "$normalized_0000" = "$normalized_0001" ] \
+        && [ "$normalized_0001" = "$normalized_0002" ] \
+        || return 1
+    database_after=$(dpkg_database_snapshot) || return 1
+    actual_updates_after=$(/usr/bin/find /var/lib/dpkg/updates \
+        -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C /usr/bin/sort) \
+        || return 1
+    [ "$database_before" = "$database_after" ] \
+        && [ "$actual_updates_after" = "$expected_updates" ] \
+        && [ "$(process_start "$PPID")" = "$dpkg_start" ] \
+        && [ "$(process_start "$old_helper_pid")" = "$old_helper_start" ]
+}
+
+prove_running_unit() {
+    service=$1
+    binary=$2
+    expected_digest=$3
+    expected_uid=$4
+    expected_gid=$5
+    unit_values=$(/usr/bin/systemctl --system show \
+        --property=LoadState --property=ActiveState --property=SubState \
+        --property=MainPID --property=ControlGroup --property=InvocationID \
+        "$service") || return 1
+    [ "$(printf '%s\n' "$unit_values" | /usr/bin/wc -l)" -eq 6 ] \
+        || return 1
+    for unit_key in LoadState ActiveState SubState MainPID ControlGroup \
+        InvocationID; do
+        [ "$(printf '%s\n' "$unit_values" \
+            | grep -Ec "^${unit_key}=")" -eq 1 ] || return 1
+    done
+    unit_load=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^LoadState=//p')
+    unit_active=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^ActiveState=//p')
+    unit_sub=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^SubState=//p')
+    unit_pid=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^MainPID=//p')
+    unit_cgroup=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^ControlGroup=//p')
+    unit_invocation=$(printf '%s\n' "$unit_values" \
+        | /usr/bin/sed -n 's/^InvocationID=//p')
+    [ "$unit_load" = loaded ] && [ "$unit_active" = active ] \
+        && [ "$unit_sub" = running ] \
+        && valid_pid "$unit_pid" && [ "$unit_pid" -gt 1 ] \
+        && printf '%s\n' "$unit_invocation" | grep -Eq '^[0-9a-f]{32}$' \
+        && [ "$unit_cgroup" = "/system.slice/$service" ] \
+        || return 1
+    unit_start_before=$(process_start "$unit_pid") || return 1
+    process_executable_identity "$unit_pid" "$binary" "$expected_digest" \
+        && [ "$(/usr/bin/awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' \
+            "/proc/$unit_pid/status")" \
+            = "$expected_uid:$expected_uid:$expected_uid:$expected_uid" ] \
+        && [ "$(/usr/bin/awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' \
+            "/proc/$unit_pid/status")" \
+            = "$expected_gid:$expected_gid:$expected_gid:$expected_gid" ] \
+        && grep -Fxq "0::$unit_cgroup" "/proc/$unit_pid/cgroup" \
+        || return 1
+    unit_after=$(/usr/bin/systemctl --system show --property=MainPID \
+        --property=ControlGroup --property=InvocationID "$service") \
+        || return 1
+    [ "$(printf '%s\n' "$unit_after" | /usr/bin/wc -l)" -eq 3 ] || return 1
+    for unit_key in MainPID ControlGroup InvocationID; do
+        [ "$(printf '%s\n' "$unit_after" \
+            | grep -Ec "^${unit_key}=")" -eq 1 ] || return 1
+    done
+    unit_pid_after=$(printf '%s\n' "$unit_after" \
+        | /usr/bin/sed -n 's/^MainPID=//p')
+    unit_cgroup_after=$(printf '%s\n' "$unit_after" \
+        | /usr/bin/sed -n 's/^ControlGroup=//p')
+    unit_invocation_after=$(printf '%s\n' "$unit_after" \
+        | /usr/bin/sed -n 's/^InvocationID=//p')
+    unit_start_after=$(process_start "$unit_pid") || return 1
+    [ "$unit_pid_after" = "$unit_pid" ] \
+        && [ "$unit_cgroup_after" = "$unit_cgroup" ] \
+        && [ "$unit_invocation_after" = "$unit_invocation" ] \
+        && grep -Fxq "0::$unit_cgroup" "/proc/$unit_pid/cgroup" \
+        && [ "$unit_start_after" = "$unit_start_before" ] || return 1
+    printf '%s\n' "$unit_pid" "$unit_start_before" \
+        "$unit_invocation" "$unit_cgroup"
+}
+
+capture_running_unit_metadata() {
+    service=$1
+    expected_uid=$2
+    expected_gid=$3
+    unit_values=$(/usr/bin/systemctl --system show \
+        --property=LoadState --property=ActiveState --property=SubState \
+        --property=MainPID --property=ControlGroup --property=InvocationID \
+        "$service") || return 1
+    [ "$(printf '%s\n' "$unit_values" | /usr/bin/wc -l)" -eq 6 ] \
+        || return 1
+    for unit_key in LoadState ActiveState SubState MainPID ControlGroup \
+        InvocationID; do
+        [ "$(printf '%s\n' "$unit_values" \
+            | grep -Ec "^${unit_key}=")" -eq 1 ] || return 1
+    done
+    unit_load=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^LoadState=//p')
+    unit_active=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^ActiveState=//p')
+    unit_sub=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^SubState=//p')
+    unit_pid=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^MainPID=//p')
+    unit_cgroup=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^ControlGroup=//p')
+    unit_invocation=$(printf '%s\n' "$unit_values" | /usr/bin/sed -n 's/^InvocationID=//p')
+    [ "$unit_load" = loaded ] && [ "$unit_active" = active ] \
+        && [ "$unit_sub" = running ] \
+        && valid_pid "$unit_pid" && [ "$unit_pid" -gt 1 ] \
+        && printf '%s\n' "$unit_invocation" | grep -Eq '^[0-9a-f]{32}$' \
+        && [ "$unit_cgroup" = "/system.slice/$service" ] || return 1
+    unit_start_before=$(process_start "$unit_pid") || return 1
+    [ "$(/usr/bin/awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$unit_pid/status")" \
+        = "$expected_uid:$expected_uid:$expected_uid:$expected_uid" ] \
+        && [ "$(/usr/bin/awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$unit_pid/status")" \
+            = "$expected_gid:$expected_gid:$expected_gid:$expected_gid" ] \
+        && grep -Fxq "0::$unit_cgroup" "/proc/$unit_pid/cgroup" || return 1
+    unit_after=$(/usr/bin/systemctl --system show --property=MainPID \
+        --property=ControlGroup --property=InvocationID "$service") || return 1
+    [ "$(printf '%s\n' "$unit_after" | /usr/bin/wc -l)" -eq 3 ] || return 1
+    for unit_key in MainPID ControlGroup InvocationID; do
+        [ "$(printf '%s\n' "$unit_after" | grep -Ec "^${unit_key}=")" -eq 1 ] || return 1
+    done
+    unit_pid_after=$(printf '%s\n' "$unit_after" | /usr/bin/sed -n 's/^MainPID=//p')
+    unit_cgroup_after=$(printf '%s\n' "$unit_after" | /usr/bin/sed -n 's/^ControlGroup=//p')
+    unit_invocation_after=$(printf '%s\n' "$unit_after" | /usr/bin/sed -n 's/^InvocationID=//p')
+    unit_start_after=$(process_start "$unit_pid") || return 1
+    [ "$unit_pid_after" = "$unit_pid" ] \
+        && [ "$unit_cgroup_after" = "$unit_cgroup" ] \
+        && [ "$unit_invocation_after" = "$unit_invocation" ] \
+        && [ "$unit_start_after" = "$unit_start_before" ] \
+        && [ "$(/usr/bin/awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$unit_pid/status")" \
+            = "$expected_uid:$expected_uid:$expected_uid:$expected_uid" ] \
+        && [ "$(/usr/bin/awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "/proc/$unit_pid/status")" \
+            = "$expected_gid:$expected_gid:$expected_gid:$expected_gid" ] \
+        && grep -Fxq "0::$unit_cgroup" "/proc/$unit_pid/cgroup" || return 1
+    printf '%s\n' "$unit_pid" "$unit_start_before" "$unit_invocation" "$unit_cgroup"
+}
+
+capture_running_old_metadata() {
+    vonk_agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+    vonk_agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
+    valid_pid "$vonk_agent_uid" && [ "$vonk_agent_uid" -gt 1 ] \
+        && valid_pid "$vonk_agent_gid" && [ "$vonk_agent_gid" -gt 1 ] \
+        || return 1
+    old_boot_id=$(current_boot_id) || return 1
+    old_agent_identity=$(capture_running_unit_metadata "$agent_unit" \
+        "$vonk_agent_uid" "$vonk_agent_gid") || return 1
+    old_helper_identity=$(capture_running_unit_metadata "$helper_unit" 0 0) || return 1
+    old_agent_pid=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '1p')
+    old_agent_start=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '2p')
+    old_agent_invocation=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '3p')
+    old_agent_cgroup=$(printf '%s\n' "$old_agent_identity" | /usr/bin/sed -n '4p')
+    old_agent_groups=$(/usr/bin/awk '/^Groups:/ {
+        if (NF == 1) {
+            print "none"
+            next
+        }
+        groups=$2
+        for (group_index=3; group_index <= NF; group_index++) {
+            groups=groups "," $group_index
+        }
+        print groups
+    }' "/proc/$old_agent_pid/status") || return 1
+    old_helper_pid=$(printf '%s\n' "$old_helper_identity" | /usr/bin/sed -n '1p')
+    old_helper_start=$(printf '%s\n' "$old_helper_identity" | /usr/bin/sed -n '2p')
+    old_helper_invocation=$(printf '%s\n' "$old_helper_identity" | /usr/bin/sed -n '3p')
+    old_helper_cgroup=$(printf '%s\n' "$old_helper_identity" | /usr/bin/sed -n '4p')
+    [ "$old_agent_cgroup" = "/system.slice/$agent_unit" ] \
+        && [ "$old_helper_cgroup" = "/system.slice/$helper_unit" ] \
+        && { [ "$old_agent_groups" = none ] \
+            || [ "$old_agent_groups" = "$vonk_agent_gid" ]; }
+}
+
+probe_unit_absent() {
+    probe_absent_unit=$1
+    probe_absent_values=$(/usr/bin/systemctl --system show \
+        --property=LoadState --property=FragmentPath --property=DropInPaths \
+        "$probe_absent_unit") || return 1
+    [ "$(printf '%s\n' "$probe_absent_values" | /usr/bin/wc -l)" -eq 3 ] \
+        && [ "$(printf '%s\n' "$probe_absent_values" | grep -Ec '^LoadState=')" -eq 1 ] \
+        && [ "$(printf '%s\n' "$probe_absent_values" | grep -Ec '^FragmentPath=')" -eq 1 ] \
+        && [ "$(printf '%s\n' "$probe_absent_values" | grep -Ec '^DropInPaths=')" -eq 1 ] \
+        && printf '%s\n' "$probe_absent_values" | grep -Fxq 'LoadState=not-found' \
+        && printf '%s\n' "$probe_absent_values" | grep -Fxq 'FragmentPath=' \
+        && printf '%s\n' "$probe_absent_values" | grep -Fxq 'DropInPaths=' \
+        && [ ! -e "/run/systemd/transient/$probe_absent_unit" ] \
+        && [ ! -L "/run/systemd/transient/$probe_absent_unit" ]
+}
+
+prove_probe_wrapper() {
+    [ "$repair_probe_sha256" = "$authority_repair_probe_sha256" ] \
+        && [ "$0" = /var/lib/dpkg/tmp.ci/preinst ] \
+        && safe_root_directory /var/lib/dpkg/tmp.ci 755 \
+        && safe_root_file "$0" 755 \
+        && safe_root_file "$repair_probe" 755 \
+        && safe_root_file "$setpriv_binary" 755 \
+        && [ "$(/usr/bin/sha256sum "$repair_probe" | /usr/bin/cut -d' ' -f1)" = "$repair_probe_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$setpriv_binary" | /usr/bin/cut -d' ' -f1)" = "$authority_setpriv_sha256" ] || return 1
+    util_linux_state=$(LC_ALL=C /usr/bin/dpkg-query -W \
+        -f='${db:Status-Abbrev}\n${binary:Package}\n${Architecture}\n${Version}\n' \
+        util-linux 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$util_linux_state" | /usr/bin/wc -l)" -eq 4 ] \
+        && [ "$(printf '%s\n' "$util_linux_state" | /usr/bin/sed -n '1p')" = 'ii ' ] \
+        && [ "$(printf '%s\n' "$util_linux_state" | /usr/bin/sed -n '2p')" = util-linux ] \
+        && [ "$(printf '%s\n' "$util_linux_state" | /usr/bin/sed -n '3p')" = "$authority_source_architecture" ] \
+        && [ "$(printf '%s\n' "$util_linux_state" | /usr/bin/sed -n '4p')" = "$authority_util_linux_version" ] || return 1
+    probe_wrapper_output=$("$repair_probe" check-wrapper \
+        "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
+    [ "$(printf '%s\n' "$probe_wrapper_output" | /usr/bin/wc -l)" -eq 1 ] \
+        && [ "$probe_wrapper_output" = "schema_version=1 setpriv_sha256=$authority_setpriv_sha256 probe_sha256=$repair_probe_sha256" ]
+}
+
+prove_helper_with_manager() {
+    prove_probe_wrapper || return 1
+    probe_agent_pid=$old_agent_pid
+    probe_agent_start=$old_agent_start
+    probe_agent_invocation=$old_agent_invocation
+    probe_agent_cgroup=$old_agent_cgroup
+    probe_agent_groups=$old_agent_groups
+    probe_helper_pid=$old_helper_pid
+    probe_helper_start=$old_helper_start
+    probe_helper_invocation=$old_helper_invocation
+    probe_helper_cgroup=$old_helper_cgroup
+    probe_boot_id=$old_boot_id
+    probe_dpkg_start=$dpkg_start
+    previous_probe_nonce=${probe_nonce:-}
+    probe_nonce=$(/usr/bin/openssl rand -hex 32) || return 1
+    valid_digest "$probe_nonce" || return 1
+    [ -z "$previous_probe_nonce" ] \
+        || [ "$probe_nonce" != "$previous_probe_nonce" ] || return 1
+    probe_authority_prefix=$(printf '%.16s' "$authority_sha256")
+    probe_unit="vonk-repair-helper-probe-${probe_authority_prefix}-${probe_nonce}.service"
+    agent_probe_unit="vonk-repair-agent-probe-${probe_authority_prefix}-${probe_nonce}.service"
+    probe_unit_absent "$probe_unit" \
+        && probe_unit_absent "$agent_probe_unit" || return 1
+    probe_output=$(/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+        --service-type=exec --unit="$probe_unit" \
+        --property=User=root --property=Group=root \
+        --property=NoNewPrivileges=yes \
+        --property=CapabilityBoundingSet=CAP_SYS_PTRACE \
+        --property=AmbientCapabilities= \
+        --property=Environment=LANG=C --property=Environment=LC_ALL=C \
+        --property=Environment=PATH=/usr/bin:/bin \
+        --property=UnsetEnvironment=LD_PRELOAD \
+        --property=UnsetEnvironment=LD_LIBRARY_PATH \
+        --property=UnsetEnvironment=LD_AUDIT \
+        --property=UnsetEnvironment=LD_DEBUG \
+        --property=UnsetEnvironment=BASH_ENV \
+        --property=UnsetEnvironment=ENV \
+        --property=UnsetEnvironment=GCONV_PATH \
+        --property=PrivateNetwork=yes --property=IPAddressDeny=any \
+        --property=PrivateDevices=yes --property=DevicePolicy=closed \
+        --property=ProtectSystem=strict --property=ProtectHome=yes \
+        --property=ReadOnlyPaths=/ \
+        --property=ProtectKernelTunables=yes \
+        --property=ProtectKernelModules=yes \
+        --property=ProtectKernelLogs=yes \
+        --property=ProtectControlGroups=yes \
+        --property=ProtectClock=yes --property=ProtectHostname=yes \
+        --property=ProtectProc=default --property=ProcSubset=all \
+        --property=RestrictSUIDSGID=yes --property=RestrictRealtime=yes \
+        --property=RestrictNamespaces=yes --property=LockPersonality=yes \
+        --property=MemoryDenyWriteExecute=yes --property=RemoveIPC=yes \
+        --property=KeyringMode=private \
+        --property=SystemCallArchitectures=native \
+        --property=SystemCallFilter=@system-service \
+        '--property=SystemCallFilter=~@network-io @mount @reboot @swap @obsolete @raw-io @resources @cpu-emulation @debug ptrace process_vm_readv process_vm_writev pidfd_getfd kcmp' \
+        --property=SystemCallErrorNumber=EPERM \
+        --property=RuntimeMaxSec=5s --property=TimeoutStartSec=5s \
+        --property=TimeoutStopSec=1s --property=Restart=no \
+        --property=UMask=0077 -- \
+        "$setpriv_binary" --no-new-privs -- "$repair_probe" probe-helper \
+        "$old_helper_pid" "$old_helper_start" "$probe_nonce" \
+        "$authority_sha256" "$authority_installed_helper_sha256" \
+        "$old_boot_id" "$old_helper_invocation" \
+        "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
+    [ "$(printf '%s\n' "$probe_output" | /usr/bin/wc -l)" -eq 1 ] \
+        && printf '%s\n' "$probe_output" | grep -Eq \
+            "^schema_version=1 nonce=$probe_nonce authority_sha256=$authority_sha256 helper_pid=$old_helper_pid helper_start=$old_helper_start helper_sha256=$authority_installed_helper_sha256 boot_id=$old_boot_id invocation_id=$old_helper_invocation exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000080000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
+    agent_probe_output=$(/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+        --service-type=exec --unit="$agent_probe_unit" \
+        --property=User=vonk-agent --property=Group=vonk-agent \
+        --property=SupplementaryGroups= \
+        --property=NoNewPrivileges=yes \
+        --property=CapabilityBoundingSet= \
+        --property=AmbientCapabilities= \
+        --property=Environment=LANG=C --property=Environment=LC_ALL=C \
+        --property=Environment=PATH=/usr/bin:/bin \
+        --property=UnsetEnvironment=LD_PRELOAD \
+        --property=UnsetEnvironment=LD_LIBRARY_PATH \
+        --property=UnsetEnvironment=LD_AUDIT \
+        --property=UnsetEnvironment=LD_DEBUG \
+        --property=UnsetEnvironment=BASH_ENV \
+        --property=UnsetEnvironment=ENV \
+        --property=UnsetEnvironment=GCONV_PATH \
+        --property=PrivateNetwork=yes --property=IPAddressDeny=any \
+        --property=PrivateDevices=yes --property=DevicePolicy=closed \
+        --property=ProtectSystem=strict --property=ProtectHome=yes \
+        --property=ReadOnlyPaths=/ \
+        --property=ProtectKernelTunables=yes \
+        --property=ProtectKernelModules=yes \
+        --property=ProtectKernelLogs=yes \
+        --property=ProtectControlGroups=yes \
+        --property=ProtectClock=yes --property=ProtectHostname=yes \
+        --property=ProtectProc=default --property=ProcSubset=all \
+        --property=RestrictSUIDSGID=yes --property=RestrictRealtime=yes \
+        --property=RestrictNamespaces=yes --property=LockPersonality=yes \
+        --property=MemoryDenyWriteExecute=yes --property=RemoveIPC=yes \
+        --property=KeyringMode=private \
+        --property=SystemCallArchitectures=native \
+        --property=SystemCallFilter=@system-service \
+        '--property=SystemCallFilter=~@network-io @mount @reboot @swap @obsolete @raw-io @resources @cpu-emulation @debug ptrace process_vm_readv process_vm_writev pidfd_getfd kcmp' \
+        --property=SystemCallErrorNumber=EPERM \
+        --property=RuntimeMaxSec=5s --property=TimeoutStartSec=5s \
+        --property=TimeoutStopSec=1s --property=Restart=no \
+        --property=UMask=0077 -- \
+        "$repair_probe" probe-agent \
+        "$old_agent_pid" "$old_agent_start" "$probe_nonce" \
+        "$authority_sha256" "$authority_installed_agent_sha256" \
+        "$old_boot_id" "$old_agent_invocation" \
+        "$vonk_agent_uid" "$vonk_agent_gid" "$old_agent_groups" \
+        "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
+    [ "$(printf '%s\n' "$agent_probe_output" | /usr/bin/wc -l)" -eq 1 ] \
+        && printf '%s\n' "$agent_probe_output" | grep -Eq \
+            "^schema_version=1 nonce=$probe_nonce authority_sha256=$authority_sha256 agent_pid=$old_agent_pid agent_start=$old_agent_start agent_sha256=$authority_installed_agent_sha256 boot_id=$old_boot_id invocation_id=$old_agent_invocation agent_uid=$vonk_agent_uid agent_gid=$vonk_agent_gid agent_groups=$old_agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
+    prove_probe_wrapper || return 1
+    capture_running_old_metadata || return 1
+    [ "$old_agent_pid" = "$probe_agent_pid" ] \
+        && [ "$old_agent_start" = "$probe_agent_start" ] \
+        && [ "$old_agent_invocation" = "$probe_agent_invocation" ] \
+        && [ "$old_agent_cgroup" = "$probe_agent_cgroup" ] \
+        && [ "$old_agent_groups" = "$probe_agent_groups" ] \
+        && [ "$old_helper_pid" = "$probe_helper_pid" ] \
+        && [ "$old_helper_start" = "$probe_helper_start" ] \
+        && [ "$old_helper_invocation" = "$probe_helper_invocation" ] \
+        && [ "$old_helper_cgroup" = "$probe_helper_cgroup" ] \
+        && [ "$old_boot_id" = "$probe_boot_id" ] \
+        && [ "$(process_start "$PPID")" = "$probe_dpkg_start" ] || return 1
+    probe_wait=0
+    until probe_unit_absent "$probe_unit" \
+        && probe_unit_absent "$agent_probe_unit"; do
+        probe_wait=$((probe_wait + 1))
+        [ "$probe_wait" -le 20 ] || return 1
+        /usr/bin/sleep 0.05 || return 1
+    done
+}
+
+prove_helper_parent_chain() {
+    valid_pid "$PPID" && [ "$PPID" -gt 1 ] || return 1
+    dpkg_start=$(process_start "$PPID") || return 1
+    dpkg_parent=$(/usr/bin/awk '/^PPid:/ { print $2 }' "/proc/$PPID/status") \
+        || return 1
+    [ "$dpkg_parent" = "$old_helper_pid" ] \
+        && [ "$(process_start "$old_helper_pid")" = "$old_helper_start" ] \
+        && grep -Fxq "0::/system.slice/$helper_unit" /proc/self/cgroup \
+        || return 1
+    helper_pid_after=$(/usr/bin/systemctl --system show --property=MainPID \
+        --value "$helper_unit") || return 1
+    [ "$helper_pid_after" = "$old_helper_pid" ] \
+        && [ "$(process_start "$PPID")" = "$dpkg_start" ] \
+        && [ "$(process_start "$old_helper_pid")" = "$old_helper_start" ]
+}
+
+read_candidate_from_dpkg() {
+    command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-command.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
+        || return 1
+    canonical_line_file "$command_file" 4 \
+        && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
+        && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
+        && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \
+        || return 1
+    candidate=$(/usr/bin/sed -n '4p' "$command_file")
+    /usr/bin/rm -f -- "$command_file"
+    trap - EXIT HUP INT TERM
+    case "$candidate" in
+        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb) ;;
+        *) return 1 ;;
+    esac
+    candidate_digest=${candidate##*/}
+    candidate_digest=${candidate_digest%.deb}
+    valid_digest "$candidate_digest" || return 1
+    agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+    agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+        && [ "$(/usr/bin/stat -Lc %u:%g:%a:%h "$candidate")" \
+            = "$agent_uid:$agent_gid:600:1" ] || return 1
+    candidate_before=$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z \
+        "$candidate") || return 1
+    candidate_bytes=$(/usr/bin/stat -Lc %s "$candidate") || return 1
+    case "$candidate_bytes" in ''|*[!0-9]*|0) return 1 ;; esac
+    [ "$(/usr/bin/sha256sum "$candidate" | /usr/bin/cut -d' ' -f1)" \
+        = "$candidate_digest" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$candidate" Package)" \
+            = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$candidate" Version)" \
+            = "$target_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$candidate" Architecture)" \
+            = "$target_architecture" ] || return 1
+    verify_root=$(/usr/bin/mktemp -d /tmp/vonk-repair-payload.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -rf -- "$verify_root"' EXIT HUP INT TERM
+    /usr/bin/dpkg-deb --extract "$candidate" "$verify_root" || return 1
+    [ -f "$verify_root$agent_binary" ] && [ ! -L "$verify_root$agent_binary" ] \
+        && [ -f "$verify_root$helper_binary" ] \
+        && [ ! -L "$verify_root$helper_binary" ] \
+        && [ "$(/usr/bin/sha256sum "$verify_root$agent_binary" \
+            | /usr/bin/cut -d' ' -f1)" = "$target_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$verify_root$helper_binary" \
+            | /usr/bin/cut -d' ' -f1)" = "$target_helper_sha256" ] \
+        || return 1
+    /usr/bin/rm -rf -- "$verify_root"
+    trap - EXIT HUP INT TERM
+    [ "$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z "$candidate")" \
+        = "$candidate_before" ] \
+        && [ "$(/usr/bin/sha256sum "$candidate" | /usr/bin/cut -d' ' -f1)" \
+            = "$candidate_digest" ]
+}
+
+read_source_intent() {
+    safe_root_directory "$source_state" 700 \
+        && safe_root_file "$source_intent" 600 \
+        && canonical_line_file "$source_intent" 14 \
+        && /usr/bin/sed -n '1p' "$source_intent" | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$source_intent" | grep -Fxq "package=$package_name" \
+        || return 1
+    source_target_version=$(/usr/bin/sed -n '3s/^target_version=//p' "$source_intent")
+    source_architecture=$(/usr/bin/sed -n '4s/^architecture=//p' "$source_intent")
+    source_package_sha256=$(/usr/bin/sed -n '5s/^package_sha256=//p' "$source_intent")
+    source_package_bytes=$(/usr/bin/sed -n '6s/^package_bytes=//p' "$source_intent")
+    source_agent_sha256=$(/usr/bin/sed -n '7s/^agent_sha256=//p' "$source_intent")
+    source_helper_sha256=$(/usr/bin/sed -n '8s/^helper_sha256=//p' "$source_intent")
+    source_runner_sha256=$(/usr/bin/sed -n '9s/^runner_sha256=//p' "$source_intent")
+    source_unit_sha256=$(/usr/bin/sed -n '10s/^unit_sha256=//p' "$source_intent")
+    source_boot_id=$(/usr/bin/sed -n '11s/^request_boot_id=//p' "$source_intent")
+    source_dpkg_pid=$(/usr/bin/sed -n '12s/^dpkg_pid=//p' "$source_intent")
+    source_dpkg_start=$(/usr/bin/sed -n '13s/^dpkg_start_time=//p' "$source_intent")
+    source_nonce=$(/usr/bin/sed -n '14s/^recovery_nonce=//p' "$source_intent")
+    valid_version "$source_target_version" \
+        && valid_digest "$source_package_sha256" \
+        && valid_digest "$source_agent_sha256" \
+        && valid_digest "$source_helper_sha256" \
+        && valid_digest "$source_runner_sha256" \
+        && valid_digest "$source_unit_sha256" \
+        && valid_boot_id "$source_boot_id" \
+        && valid_pid "$source_dpkg_pid" \
+        && valid_pid "$source_dpkg_start" \
+        && valid_digest "$source_nonce"
+}
+
+source_state_core_exact() {
+    source_cache=$source_state/$source_package_sha256.deb
+    safe_root_file "$source_lock" 600 \
+        && safe_root_file "$source_cache" 600 \
+        && safe_root_file "$source_runner" 555 \
+        && safe_root_file "$source_unit" 644 \
+        && safe_root_file "$source_gate" 644 \
+        && safe_root_file "$source_dropin" 644 \
+        && [ "$(/usr/bin/sha256sum "$source_cache" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_package_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_unit" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_gate" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_agent_gate_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_dropin" | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_socket_dropin_sha256" ] \
+        && [ "$source_target_version" = "$authority_source_target_version" ] \
+        && [ "$source_architecture" = "$authority_source_architecture" ] \
+        && [ "$source_package_sha256" = "$authority_source_package_sha256" ] \
+        && [ "$source_agent_sha256" = "$authority_source_agent_sha256" ] \
+        && [ "$source_helper_sha256" = "$authority_source_helper_sha256" ] \
+        && [ "$source_runner_sha256" = "$authority_source_runner_sha256" ] \
+        && [ "$source_unit_sha256" = "$authority_source_unit_sha256" ] \
+        && [ "$(/usr/bin/stat -c %s "$source_cache")" = "$source_package_bytes" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Package)" = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Version)" \
+            = "$authority_source_target_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Architecture)" \
+            = "$authority_source_architecture" ]
+}
+
+source_file_exact_or_absent() {
+    volatile_path=$1
+    volatile_digest=$2
+    if [ -e "$volatile_path" ] || [ -L "$volatile_path" ]; then
+        safe_root_file "$volatile_path" 600 \
+            && [ "$(/usr/bin/sha256sum "$volatile_path" \
+                | /usr/bin/cut -d' ' -f1)" = "$volatile_digest" ]
+    fi
+}
+
+source_volatile_state_matches_phase() {
+    case "$phase_name" in
+        armed|installing|configured)
+            safe_root_file "$source_blocker" 600 \
+                && safe_root_file "$source_pending" 600 \
+                && [ "$(/usr/bin/sha256sum "$source_blocker" \
+                    | /usr/bin/cut -d' ' -f1)" \
+                    = "$authority_source_blocker_sha256" ] \
+                && [ "$(/usr/bin/sha256sum "$source_pending" \
+                    | /usr/bin/cut -d' ' -f1)" \
+                    = "$authority_source_pending_sha256" ]
+            ;;
+        helper-proven|agent-proven)
+            source_file_exact_or_absent "$source_blocker" \
+                "$authority_source_blocker_sha256" \
+                && source_file_exact_or_absent "$source_pending" \
+                    "$authority_source_pending_sha256"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+source_runner_is() {
+    expected_runner=$1
+    safe_root_file "$source_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$source_runner" | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_runner" ]
+}
+
+source_request_is_stale() {
+    current_boot=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id) \
+        || return 1
+    valid_boot_id "$current_boot" || return 1
+    if [ "$current_boot" = "$source_boot_id" ] \
+        && [ "$(process_start "$source_dpkg_pid" 2>/dev/null || true)" \
+            = "$source_dpkg_start" ]; then
+        return 1
+    fi
+}
+
+read_repair_intent() {
+    safe_root_file "$repair_intent" 600 \
+        && canonical_line_file "$repair_intent" 17 \
+        && /usr/bin/sed -n '1p' "$repair_intent" | grep -Fxq 'schema_version=1' \
+        || return 1
+    repair_intent_authority=$(/usr/bin/sed -n '2s/^authority_sha256=//p' "$repair_intent")
+    repair_node=$(/usr/bin/sed -n '3s/^node_id=//p' "$repair_intent")
+    repair_source_intent_sha=$(/usr/bin/sed -n '4s/^source_intent_sha256=//p' "$repair_intent")
+    repair_source_nonce=$(/usr/bin/sed -n '5s/^source_recovery_nonce=//p' "$repair_intent")
+    repair_candidate_sha=$(/usr/bin/sed -n '6s/^candidate_sha256=//p' "$repair_intent")
+    repair_candidate_bytes=$(/usr/bin/sed -n '7s/^candidate_bytes=//p' "$repair_intent")
+    repair_target_version=$(/usr/bin/sed -n '8s/^target_version=//p' "$repair_intent")
+    repair_architecture=$(/usr/bin/sed -n '9s/^architecture=//p' "$repair_intent")
+    repair_agent_sha=$(/usr/bin/sed -n '10s/^agent_sha256=//p' "$repair_intent")
+    repair_helper_sha=$(/usr/bin/sed -n '11s/^helper_sha256=//p' "$repair_intent")
+    repair_standard_sha=$(/usr/bin/sed -n '12s/^standard_runner_sha256=//p' "$repair_intent")
+    repair_runner_sha=$(/usr/bin/sed -n '13s/^repair_runner_sha256=//p' "$repair_intent")
+    repair_boot_id=$(/usr/bin/sed -n '14s/^request_boot_id=//p' "$repair_intent")
+    repair_dpkg_pid=$(/usr/bin/sed -n '15s/^dpkg_pid=//p' "$repair_intent")
+    repair_dpkg_start=$(/usr/bin/sed -n '16s/^dpkg_start_time=//p' "$repair_intent")
+    repair_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
+    valid_digest "$repair_intent_authority" \
+        && valid_digest "$repair_source_intent_sha" \
+        && valid_digest "$repair_source_nonce" \
+        && valid_digest "$repair_candidate_sha" \
+        && valid_digest "$repair_agent_sha" \
+        && valid_digest "$repair_helper_sha" \
+        && valid_digest "$repair_standard_sha" \
+        && valid_digest "$repair_runner_sha" \
+        && valid_boot_id "$repair_boot_id" \
+        && valid_pid "$repair_dpkg_pid" \
+        && valid_pid "$repair_dpkg_start" \
+        && valid_digest "$repair_nonce" \
+        && valid_version "$repair_target_version" \
+        && case "$repair_candidate_bytes" in ''|*[!0-9]*|0) false ;; *) true ;; esac \
+        && [ "$repair_architecture" = "$target_architecture" ]
+}
+
+repair_candidate_safe() {
+    safe_root_file "$repair_candidate" 600 \
+        && [ "$(/usr/bin/stat -c %s "$repair_candidate")" \
+            = "$repair_candidate_bytes" ] \
+        && [ "$(/usr/bin/sha256sum "$repair_candidate" | /usr/bin/cut -d' ' -f1)" \
+            = "$repair_candidate_sha" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Package)" \
+            = "$package_name" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Version)" \
+            = "$target_version" ] \
+        && [ "$(/usr/bin/dpkg-deb --field "$repair_candidate" Architecture)" \
+            = "$target_architecture" ] || return 1
+    verify_root=$(/usr/bin/mktemp -d /tmp/vonk-repair-custody.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -rf -- "$verify_root"' EXIT HUP INT TERM
+    /usr/bin/dpkg-deb --extract "$repair_candidate" "$verify_root" \
+        || return 1
+    safe_root_file "$verify_root$agent_binary" 555 \
+        && safe_root_file "$verify_root$helper_binary" 555 \
+        && [ "$(/usr/bin/sha256sum "$verify_root$agent_binary" \
+            | /usr/bin/cut -d' ' -f1)" = "$target_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$verify_root$helper_binary" \
+            | /usr/bin/cut -d' ' -f1)" = "$target_helper_sha256" ]
+    result=$?
+    /usr/bin/rm -rf -- "$verify_root"
+    trap - EXIT HUP INT TERM
+    return "$result"
+}
+
+repair_blocker_safe() {
+    safe_root_file "$repair_blocker" 600 \
+        && canonical_line_file "$repair_blocker" 5 \
+        && /usr/bin/sed -n '1p' "$repair_blocker" | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$repair_blocker" \
+            | grep -Fxq "repair_nonce=$repair_nonce" \
+        && /usr/bin/sed -n '3p' "$repair_blocker" \
+            | grep -Fxq "target_version=$target_version" \
+        && /usr/bin/sed -n '4p' "$repair_blocker" \
+            | grep -Fxq "helper_sha256=$target_helper_sha256" \
+        && /usr/bin/sed -n '5p' "$repair_blocker" \
+            | grep -Fxq "agent_sha256=$target_agent_sha256"
+}
+
+repair_authority_safe() {
+    safe_root_file "$repair_authority" 600 \
+        && [ "$(/usr/bin/sha256sum "$repair_authority" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_sha256" ]
+}
+
+read_phase() {
+    safe_root_file "$repair_phase" 600 \
+        && canonical_line_file "$repair_phase" 3 \
+        && /usr/bin/sed -n '1p' "$repair_phase" | grep -Fxq 'schema_version=1' \
+        || return 1
+    phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
+    phase_name=$(/usr/bin/sed -n '3s/^phase=//p' "$repair_phase")
+    [ "$phase_nonce" = "$repair_nonce" ] \
+        && case "$phase_name" in
+            armed|installing|configured|helper-proven|agent-proven) true ;;
+            *) false ;;
+        esac
+}
+
+write_phase() {
+    next_phase=$1
+    case "$next_phase" in
+        armed|installing|configured|helper-proven|agent-proven) ;;
+        *) return 1 ;;
+    esac
+    atomic_text "$repair_phase" 600 "schema_version=1
+repair_nonce=$repair_nonce
+phase=$next_phase
+"
+    phase_name=$next_phase
+}
+
+repair_state_complete() {
+    safe_root_directory "$repair_state" 700 \
+        && repair_authority_safe \
+        && read_repair_intent \
+        && [ "$repair_intent_authority" = "$authority_sha256" ] \
+        && [ "$repair_node" = "$authority_node_id" ] \
+        && [ "$repair_source_nonce" = "$source_nonce" ] \
+        && [ "$repair_source_intent_sha" = "$source_intent_snapshot" ] \
+        && [ "$repair_target_version" = "$target_version" ] \
+        && [ "$repair_agent_sha" = "$target_agent_sha256" ] \
+        && [ "$repair_helper_sha" = "$target_helper_sha256" ] \
+        && [ "$repair_standard_sha" = "$standard_runner_sha256" ] \
+        && repair_candidate_safe \
+        && read_phase
+}
+
+unit_is_stopped_and_empty() {
+    stopped_unit=$1
+    values=$(/usr/bin/systemctl --system show \
+        --property=LoadState --property=ActiveState --property=SubState \
+        --property=MainPID --property=ControlGroup "$stopped_unit") \
+        || return 1
+    [ "$(printf '%s\n' "$values" | /usr/bin/wc -l)" -eq 5 ] || return 1
+    for stopped_key in LoadState ActiveState SubState MainPID ControlGroup; do
+        [ "$(printf '%s\n' "$values" \
+            | grep -Ec "^${stopped_key}=")" -eq 1 ] || return 1
+    done
+    stopped_load=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^LoadState=//p')
+    stopped_active=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^ActiveState=//p')
+    stopped_sub=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^SubState=//p')
+    stopped_pid=$(printf '%s\n' "$values" | /usr/bin/sed -n 's/^MainPID=//p')
+    stopped_cgroup=$(printf '%s\n' "$values" \
+        | /usr/bin/sed -n 's/^ControlGroup=//p')
+    expected_stopped_cgroup="/system.slice/$stopped_unit"
+    [ "$stopped_load" = loaded ] \
+        && [ "$stopped_active" = inactive ] \
+        && [ "$stopped_sub" = dead ] \
+        && [ "$stopped_pid" = 0 ] \
+        && { [ -z "$stopped_cgroup" ] \
+            || [ "$stopped_cgroup" = "$expected_stopped_cgroup" ]; } \
+        || return 1
+    expected_cgroup_path="/sys/fs/cgroup$expected_stopped_cgroup"
+    if [ -e "$expected_cgroup_path" ]; then
+        [ -d "$expected_cgroup_path" ] \
+            && [ -f "$expected_cgroup_path/cgroup.events" ] \
+            && [ "$(grep -Ec '^populated [01]$' \
+                "$expected_cgroup_path/cgroup.events")" -eq 1 ] \
+            && grep -Fxq 'populated 0' \
+                "$expected_cgroup_path/cgroup.events"
+    fi
+}
+
+stop_and_quiesce_source_recovery() {
+    /usr/bin/systemctl --system stop "$source_unit_name" >/dev/null \
+        || return 1
+    unit_is_stopped_and_empty "$source_unit_name"
+}
+
+public_repair_entries_absent() {
+    for path in "$repair_state" "$repair_ready" "$repair_retired" "$repair_receipt" \
+        "$repair_helper_receipt"; do
+        [ ! -e "$path" ] && [ ! -L "$path" ] || return 1
+    done
+}
+
+repair_builds_absent() {
+    for build_tree in "$source_state"/.repair-build.*; do
+        [ ! -e "$build_tree" ] && [ ! -L "$build_tree" ] || return 1
+    done
+}
+
+repair_entries_absent() {
+    public_repair_entries_absent && repair_builds_absent
+}
+
+clean_repair_temps() {
+    tree=$1
+    safe_root_directory "$tree" 700 || return 1
+    set_repair_paths "$tree"
+    for temporary in "$repair_authority.new" "$repair_intent.new" \
+        "$repair_phase.new" "$repair_blocker.new" "$repair_candidate.new"; do
+        if [ -e "$temporary" ] || [ -L "$temporary" ]; then
+            [ -f "$temporary" ] && [ ! -L "$temporary" ] \
+                && [ "$(/usr/bin/stat -c %u:%g:%h "$temporary")" = 0:0:1 ] \
+                || return 1
+            /usr/bin/rm -- "$temporary" || return 1
+            /usr/bin/sync -f "$tree" || return 1
+        fi
+    done
+}
+
+active_repair_precleanup_safe() {
+    [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
+        && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+        && [ ! -e "$repair_receipt" ] && [ ! -L "$repair_receipt" ] \
+        && repair_builds_absent \
+        && safe_root_directory "$repair_state" 700 || return 1
+    unknown=$(/usr/bin/find "$repair_state" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name agent-blocked \
+        ! -name candidate.deb ! -name authority.new ! -name intent.new \
+        ! -name phase.new ! -name agent-blocked.new \
+        ! -name candidate.deb.new -print -quit) || return 1
+    [ -z "$unknown" ]
+}
+
+repair_tree_exact() {
+    tree=$1
+    clean_repair_temps "$tree" || return 1
+    unknown=$(/usr/bin/find "$tree" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name agent-blocked \
+        ! -name candidate.deb -print -quit) || return 1
+    [ -z "$unknown" ] \
+        && repair_state_complete \
+        && [ "$phase_name" = armed ] \
+        && repair_blocker_safe \
+        && source_volatile_state_matches_phase
+    result=$?
+    set_repair_paths "$source_state/repair"
+    return "$result"
+}
+
+repair_tree_exact_read_only() {
+    tree=$1
+    safe_root_directory "$tree" 700 || return 1
+    set_repair_paths "$tree"
+    unknown=$(/usr/bin/find "$tree" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name agent-blocked \
+        ! -name candidate.deb -print -quit) || return 1
+    [ -z "$unknown" ] \
+        && repair_state_complete \
+        && [ "$phase_name" = armed ] \
+        && repair_blocker_safe \
+        && source_volatile_state_matches_phase
+    result=$?
+    set_repair_paths "$source_state/repair"
+    return "$result"
+}
+
+promote_hidden_repair() {
+    load_authority \
+        && safe_node_identity \
+        && read_source_intent \
+        && source_snapshot \
+        && source_state_core_exact \
+        && safe_root_file "$source_blocker" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_blocker" \
+            | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_blocker_sha256" ] \
+        && safe_root_file "$source_pending" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_pending" \
+            | /usr/bin/cut -d' ' -f1)" \
+            = "$authority_source_pending_sha256" ] \
+        && public_repair_entries_absent \
+        || return 1
+    hidden_count=0
+    hidden_repair=
+    for build_tree in "$source_state"/.repair-build.*; do
+        [ -e "$build_tree" ] || [ -L "$build_tree" ] || continue
+        hidden_count=$((hidden_count + 1))
+        hidden_repair=$build_tree
+    done
+    [ "$hidden_count" -eq 1 ] \
+        && repair_tree_exact_read_only "$hidden_repair" \
+        && source_runner_is "$repair_runner_sha" \
+        && standard_runner_ready \
+        || return 1
+    /usr/bin/mv -- "$hidden_repair" "$source_state/repair" || return 1
+    /usr/bin/sync -f "$source_state" || return 1
+    set_repair_paths "$source_state/repair"
+}
+
+discard_incomplete_build_tree() {
+    build_tree=$1
+    safe_root_directory "$build_tree" 700 || return 1
+    unknown=$(/usr/bin/find "$build_tree" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name agent-blocked \
+        ! -name candidate.deb ! -name authority.new ! -name intent.new \
+        ! -name phase.new ! -name agent-blocked.new \
+        ! -name candidate.deb.new -print -quit) || return 1
+    [ -z "$unknown" ] || return 1
+    for name in candidate.deb.new agent-blocked.new phase.new intent.new \
+        authority.new candidate.deb agent-blocked phase intent authority; do
+        path=$build_tree/$name
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            [ -f "$path" ] && [ ! -L "$path" ] \
+                && [ "$(/usr/bin/stat -c %u:%g:%h "$path")" = 0:0:1 ] \
+                || return 1
+            /usr/bin/rm -- "$path" || return 1
+        fi
+    done
+    /usr/bin/sync -f "$build_tree" || return 1
+    /usr/bin/rmdir "$build_tree" || return 1
+    /usr/bin/sync -f "$source_state"
+}
+
+cleanup_incomplete_build_trees() {
+    for build_tree in "$source_state"/.repair-build.*; do
+        [ -e "$build_tree" ] || [ -L "$build_tree" ] || continue
+        case "$build_tree" in "$source_state"/.repair-build.*) ;;
+            *) return 1 ;;
+        esac
+        discard_incomplete_build_tree "$build_tree" || return 1
+    done
+}
+
+source_snapshot() {
+    source_intent_snapshot=$(/usr/bin/sha256sum "$source_intent" \
+        | /usr/bin/cut -d' ' -f1) || return 1
+    valid_digest "$source_intent_snapshot"
+}
+
+current_boot_id() {
+    current_boot=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id) \
+        || return 1
+    valid_boot_id "$current_boot" && printf '%s\n' "$current_boot"
+}
+
+wait_for_dispatch_dpkg() {
+    current_boot=$(current_boot_id) || return 1
+    [ "$current_boot" = "$repair_boot_id" ] || return 0
+    attempts=0
+    while [ "$attempts" -lt 2400 ]; do
+        [ "$(process_start "$repair_dpkg_pid" 2>/dev/null || true)" \
+            = "$repair_dpkg_start" ] || return 0
+        /bin/sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    return 1
+}
+
+recursive_dpkg_binding() {
+    [ "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" = "$repair_nonce" ] \
+        && grep -Fxq "0::/system.slice/$source_unit_name" /proc/self/cgroup \
+        || return 1
+    valid_pid "$PPID" && [ "$PPID" -gt 1 ] || return 1
+    command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-recursive.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
+        || return 1
+    canonical_line_file "$command_file" 4 \
+        && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
+        && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --install \
+        && /usr/bin/sed -n '3p' "$command_file" | grep -Fxq -- --force-confold \
+        && /usr/bin/sed -n '4p' "$command_file" | grep -Fxq "$repair_candidate"
+    result=$?
+    /usr/bin/rm -f -- "$command_file"
+    trap - EXIT HUP INT TERM
+    return "$result"
+}
+
+target_payload_installed() {
+    query_package_state \
+        && [ "$package_status" = 'ii ' ] \
+        && [ "$package_binary" = "$package_name" ] \
+        && [ "$package_architecture" = "$target_architecture" ] \
+        && [ "$package_version" = "$target_version" ] \
+        && safe_root_file "$agent_binary" 555 \
+        && safe_root_file "$helper_binary" 555 \
+        && safe_root_file "$source_runner" 555 \
+        && safe_root_file "$standard_runner" 555 \
+        && safe_root_file "$agent_unit_file" 644 \
+        && safe_root_file "$helper_unit_file" 644 \
+        && safe_root_file "$helper_socket_file" 644 \
+        && [ "$(/usr/bin/sha256sum "$agent_binary" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_agent_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_binary" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_helper_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_runner" | /usr/bin/cut -d' ' -f1)" \
+            = "$repair_runner_sha" ] \
+        && [ "$(/usr/bin/sha256sum "$standard_runner" | /usr/bin/cut -d' ' -f1)" \
+            = "$standard_runner_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$agent_unit_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_agent_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_unit_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_helper_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$helper_socket_file" | /usr/bin/cut -d' ' -f1)" \
+            = "$target_helper_socket_sha256" ]
+}
+
+write_helper_receipt() {
+    helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
+        "$target_helper_sha256" 0 0) || return 1
+    helper_pid=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')
+    helper_start=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')
+    receipt_boot=$(current_boot_id) || return 1
+    atomic_text "$repair_helper_receipt" 600 "schema_version=1
+authority_sha256=$authority_sha256
+repair_nonce=$repair_nonce
+version=$target_version
+helper_sha256=$target_helper_sha256
+agent_sha256=$target_agent_sha256
+source_intent_sha256=$source_intent_snapshot
+boot_id=$receipt_boot
+helper_main_pid=$helper_pid
+helper_start_time=$helper_start
+"
+}
+
+helper_receipt_contract_safe() {
+    safe_root_file "$repair_helper_receipt" 600 \
+        && canonical_line_file "$repair_helper_receipt" 10 \
+        && /usr/bin/sed -n '1p' "$repair_helper_receipt" | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$repair_helper_receipt" | grep -Fxq "authority_sha256=$authority_sha256" \
+        && /usr/bin/sed -n '3p' "$repair_helper_receipt" | grep -Fxq "repair_nonce=$repair_nonce" \
+        && /usr/bin/sed -n '4p' "$repair_helper_receipt" | grep -Fxq "version=$target_version" \
+        && /usr/bin/sed -n '5p' "$repair_helper_receipt" | grep -Fxq "helper_sha256=$target_helper_sha256" \
+        && /usr/bin/sed -n '6p' "$repair_helper_receipt" | grep -Fxq "agent_sha256=$target_agent_sha256" \
+        && /usr/bin/sed -n '7p' "$repair_helper_receipt" | grep -Fxq "source_intent_sha256=$source_intent_snapshot" \
+        && /usr/bin/sed -n '8p' "$repair_helper_receipt" \
+            | grep -Eq '^boot_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+        && /usr/bin/sed -n '9p' "$repair_helper_receipt" \
+            | grep -Eq '^helper_main_pid=[0-9]+$' \
+        && /usr/bin/sed -n '10p' "$repair_helper_receipt" \
+            | grep -Eq '^helper_start_time=[0-9]+$' || return 1
+    receipt_boot=$(/usr/bin/sed -n '8s/^boot_id=//p' "$repair_helper_receipt")
+    receipt_helper_pid=$(/usr/bin/sed -n '9s/^helper_main_pid=//p' "$repair_helper_receipt")
+    receipt_helper_start=$(/usr/bin/sed -n '10s/^helper_start_time=//p' "$repair_helper_receipt")
+    valid_boot_id "$receipt_boot" \
+        && valid_pid "$receipt_helper_pid" \
+        && valid_pid "$receipt_helper_start"
+}
+
+helper_receipt_safe() {
+    helper_receipt_contract_safe \
+        && [ "$(current_boot_id)" = "$receipt_boot" ] \
+        && [ "$(/usr/bin/systemctl --system show --property=MainPID \
+            --value "$helper_unit")" = "$receipt_helper_pid" ] \
+        && [ "$(process_start "$receipt_helper_pid")" = "$receipt_helper_start" ]
+}
+
+helper_receipt_and_live_safe() {
+    helper_receipt_safe || return 1
+    bound_helper_pid=$receipt_helper_pid
+    bound_helper_start=$receipt_helper_start
+    helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
+        "$target_helper_sha256" 0 0) || return 1
+    [ "$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')" \
+        = "$bound_helper_pid" ] \
+        && [ "$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')" \
+            = "$bound_helper_start" ] \
+        && helper_receipt_safe \
+        && [ "$receipt_helper_pid" = "$bound_helper_pid" ] \
+        && [ "$receipt_helper_start" = "$bound_helper_start" ]
+}
+
+refresh_target_helper_after_boot() {
+    helper_receipt_contract_safe || return 1
+    if helper_receipt_and_live_safe; then
+        return 0
+    fi
+    /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
+        && write_helper_receipt \
+        && helper_receipt_and_live_safe
+}
+
+write_final_receipt() {
+    agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+    agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
+    agent_identity=$(prove_running_unit "$agent_unit" "$agent_binary" \
+        "$target_agent_sha256" "$agent_uid" "$agent_gid") || return 1
+    agent_pid=$(printf '%s\n' "$agent_identity" | /usr/bin/sed -n '1p')
+    agent_start=$(printf '%s\n' "$agent_identity" | /usr/bin/sed -n '2p')
+    helper_identity=$(prove_running_unit "$helper_unit" "$helper_binary" \
+        "$target_helper_sha256" 0 0) || return 1
+    helper_pid=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '1p')
+    helper_start=$(printf '%s\n' "$helper_identity" | /usr/bin/sed -n '2p')
+    receipt_boot=$(current_boot_id) || return 1
+    activated_at=$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
+    atomic_text "$repair_receipt" 600 "schema_version=1
+authority_sha256=$authority_sha256
+node_id=$authority_node_id
+version=$target_version
+source_intent_sha256=$source_intent_snapshot
+candidate_sha256=$repair_candidate_sha
+repair_runner_sha256=$repair_runner_sha
+helper_sha256=$target_helper_sha256
+helper_main_pid=$helper_pid
+helper_start_time=$helper_start
+agent_sha256=$target_agent_sha256
+agent_main_pid=$agent_pid
+agent_start_time=$agent_start
+boot_id=$receipt_boot
+activated_at=$activated_at
+repair_nonce=$repair_nonce
+"
+}
+
+final_receipt_safe() {
+    safe_root_file "$repair_receipt" 600 \
+        && canonical_line_file "$repair_receipt" 16 \
+        && /usr/bin/sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$repair_receipt" | grep -Fxq "authority_sha256=$authority_sha256" \
+        && /usr/bin/sed -n '3p' "$repair_receipt" | grep -Fxq "node_id=$authority_node_id" \
+        && /usr/bin/sed -n '4p' "$repair_receipt" | grep -Fxq "version=$target_version" \
+        && /usr/bin/sed -n '5p' "$repair_receipt" | grep -Fxq "source_intent_sha256=$source_intent_snapshot" \
+        && /usr/bin/sed -n '6p' "$repair_receipt" | grep -Eq '^candidate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '7p' "$repair_receipt" | grep -Eq '^repair_runner_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '8p' "$repair_receipt" | grep -Fxq "helper_sha256=$target_helper_sha256" \
+        && /usr/bin/sed -n '9p' "$repair_receipt" | grep -Eq '^helper_main_pid=[0-9]+$' \
+        && /usr/bin/sed -n '10p' "$repair_receipt" | grep -Eq '^helper_start_time=[0-9]+$' \
+        && /usr/bin/sed -n '11p' "$repair_receipt" | grep -Fxq "agent_sha256=$target_agent_sha256" \
+        && /usr/bin/sed -n '12p' "$repair_receipt" | grep -Eq '^agent_main_pid=[0-9]+$' \
+        && /usr/bin/sed -n '13p' "$repair_receipt" | grep -Eq '^agent_start_time=[0-9]+$' \
+        && /usr/bin/sed -n '14p' "$repair_receipt" \
+            | grep -Eq '^boot_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+        && /usr/bin/sed -n '15p' "$repair_receipt" \
+            | grep -Eq '^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
+        && /usr/bin/sed -n '16p' "$repair_receipt" | grep -Eq '^repair_nonce=[0-9a-f]{64}$' \
+        || return 1
+    receipt_candidate_sha=$(/usr/bin/sed -n '6s/^candidate_sha256=//p' "$repair_receipt")
+    receipt_runner_sha=$(/usr/bin/sed -n '7s/^repair_runner_sha256=//p' "$repair_receipt")
+    receipt_helper_pid=$(/usr/bin/sed -n '9s/^helper_main_pid=//p' "$repair_receipt")
+    receipt_helper_start=$(/usr/bin/sed -n '10s/^helper_start_time=//p' "$repair_receipt")
+    receipt_agent_pid=$(/usr/bin/sed -n '12s/^agent_main_pid=//p' "$repair_receipt")
+    receipt_agent_start=$(/usr/bin/sed -n '13s/^agent_start_time=//p' "$repair_receipt")
+    receipt_boot=$(/usr/bin/sed -n '14s/^boot_id=//p' "$repair_receipt")
+    receipt_nonce=$(/usr/bin/sed -n '16s/^repair_nonce=//p' "$repair_receipt")
+    valid_digest "$receipt_candidate_sha" \
+        && valid_digest "$receipt_runner_sha" \
+        && valid_digest "$receipt_nonce" \
+        && valid_pid "$receipt_helper_pid" \
+        && valid_pid "$receipt_helper_start" \
+        && valid_pid "$receipt_agent_pid" \
+        && valid_pid "$receipt_agent_start" \
+        && valid_boot_id "$receipt_boot"
+}
+
+remove_exact_file() {
+    path=$1
+    expected=$2
+    mode=$3
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        safe_root_file "$path" "$mode" \
+            && [ "$(/usr/bin/sha256sum "$path" | /usr/bin/cut -d' ' -f1)" \
+                = "$expected" ] || return 1
+        /usr/bin/rm -- "$path" || return 1
+        /usr/bin/sync -f "$(/usr/bin/dirname "$path")" || return 1
+    fi
+}
+
+cleanup_retired_state() {
+    retired_state_safe || return 1
+    if [ -e "$repair_retired/candidate.deb" ] \
+        || [ -L "$repair_retired/candidate.deb" ]; then
+        remove_exact_file "$repair_retired/candidate.deb" \
+            "$receipt_candidate_sha" 600 || return 1
+    fi
+    if [ -e "$repair_retired/phase" ] || [ -L "$repair_retired/phase" ]; then
+        /usr/bin/rm -- "$repair_retired/phase" || return 1
+        /usr/bin/sync -f "$repair_retired" || return 1
+    fi
+    if [ -e "$repair_retired/intent" ] || [ -L "$repair_retired/intent" ]; then
+        /usr/bin/rm -- "$repair_retired/intent" || return 1
+        /usr/bin/sync -f "$repair_retired" || return 1
+    fi
+    if [ -e "$repair_retired/authority" ] \
+        || [ -L "$repair_retired/authority" ]; then
+        remove_exact_file "$repair_retired/authority" "$authority_sha256" 600 \
+            || return 1
+    fi
+    /usr/bin/rmdir "$repair_retired" || return 1
+    /usr/bin/sync -f "$source_state"
+}
+
+retired_state_safe() (
+    safe_root_directory "$repair_retired" 700 || return 1
+    unknown=$(/usr/bin/find "$repair_retired" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name candidate.deb \
+        -print -quit) || return 1
+    [ -z "$unknown" ] || return 1
+    [ ! -e "$repair_retired/agent-blocked" ] \
+        && [ ! -L "$repair_retired/agent-blocked" ] || return 1
+
+    retired_candidate=0
+    retired_phase=0
+    retired_intent=0
+    retired_authority=0
+    [ ! -e "$repair_retired/candidate.deb" ] \
+        && [ ! -L "$repair_retired/candidate.deb" ] \
+        || retired_candidate=1
+    [ ! -e "$repair_retired/phase" ] && [ ! -L "$repair_retired/phase" ] \
+        || retired_phase=1
+    [ ! -e "$repair_retired/intent" ] && [ ! -L "$repair_retired/intent" ] \
+        || retired_intent=1
+    [ ! -e "$repair_retired/authority" ] \
+        && [ ! -L "$repair_retired/authority" ] \
+        || retired_authority=1
+
+    # cleanup_retired_state removes these in exactly this order. Accept only
+    # the complete state or a durable prefix reachable after a power loss.
+    case "$retired_candidate$retired_phase$retired_intent$retired_authority" in
+        1111|0111|0011|0001|0000) ;;
+        *) return 1 ;;
+    esac
+
+    set_repair_paths "$repair_retired"
+    if [ "$retired_authority" -eq 1 ]; then
+        repair_authority_safe || return 1
+    fi
+    if [ "$retired_intent" -eq 1 ]; then
+        read_repair_intent \
+            && [ "$repair_intent_authority" = "$authority_sha256" ] \
+            && [ "$repair_node" = "$authority_node_id" ] \
+            && [ "$repair_source_intent_sha" = "$source_intent_snapshot" ] \
+            && [ "$repair_source_nonce" = "$source_nonce" ] \
+            && [ "$repair_candidate_sha" = "$receipt_candidate_sha" ] \
+            && [ "$repair_target_version" = "$target_version" ] \
+            && [ "$repair_architecture" = "$target_architecture" ] \
+            && [ "$repair_agent_sha" = "$target_agent_sha256" ] \
+            && [ "$repair_helper_sha" = "$target_helper_sha256" ] \
+            && [ "$repair_standard_sha" = "$standard_runner_sha256" ] \
+            && [ "$repair_runner_sha" = "$receipt_runner_sha" ] \
+            && [ "$repair_nonce" = "$receipt_nonce" ] \
+            || return 1
+    fi
+    if [ -e "$repair_retired/candidate.deb" ] \
+        || [ -L "$repair_retired/candidate.deb" ]; then
+        repair_candidate_safe || return 1
+    fi
+    if [ -e "$repair_retired/phase" ] || [ -L "$repair_retired/phase" ]; then
+        read_phase && [ "$phase_name" = agent-proven ] || return 1
+    fi
+)
+
+active_final_state_safe() {
+    safe_root_directory "$repair_state" 700 || return 1
+    unknown=$(/usr/bin/find "$repair_state" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name candidate.deb \
+        -print -quit) || return 1
+    [ -z "$unknown" ] \
+        && repair_state_complete \
+        && [ "$phase_name" = agent-proven ] \
+        && [ "$repair_nonce" = "$receipt_nonce" ] \
+        && [ "$repair_candidate_sha" = "$receipt_candidate_sha" ] \
+        && [ "$repair_runner_sha" = "$receipt_runner_sha" ] \
+        && [ ! -e "$repair_blocker" ] && [ ! -L "$repair_blocker" ]
+}
+
+final_state_shape_safe() {
+    [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
+        && repair_builds_absent || return 1
+    if [ -d "$repair_state" ] && [ ! -L "$repair_state" ]; then
+        [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+            && active_final_state_safe
+    elif [ -d "$repair_retired" ] && [ ! -L "$repair_retired" ]; then
+        [ ! -e "$repair_state" ] && [ ! -L "$repair_state" ] \
+            && retired_state_safe
+    else
+        [ ! -e "$repair_state" ] && [ ! -L "$repair_state" ] \
+            && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+            && [ ! -e "$source_cache" ] && [ ! -L "$source_cache" ] \
+            && [ ! -e "$source_dropin" ] && [ ! -L "$source_dropin" ]
+    fi
+}
+
+retire_source_state() {
+    if [ -d "$repair_state" ] && [ ! -L "$repair_state" ]; then
+        active_final_state_safe || return 1
+        [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] || return 1
+        /usr/bin/mv -- "$repair_state" "$repair_retired" || return 1
+        /usr/bin/sync -f "$source_state" || return 1
+    fi
+    if [ -d "$repair_retired" ] && [ ! -L "$repair_retired" ]; then
+        retired_state_safe || return 1
+    fi
+    remove_exact_file "$source_cache" "$authority_source_package_sha256" 600 \
+        || return 1
+    remove_exact_file "$source_dropin" "$authority_source_socket_dropin_sha256" 644 \
+        || return 1
+    /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+    if [ -d "$repair_retired" ] && [ ! -L "$repair_retired" ]; then
+        cleanup_retired_state || return 1
+    fi
+    remove_exact_file "$source_intent" "$source_intent_snapshot" 600
+}
+
+dispatch_recovery() {
+    /usr/bin/systemctl --system daemon-reload >/dev/null \
+        || temporary_failure 'systemd reload failed'
+    /usr/bin/systemctl --system reset-failed "$source_unit_name" \
+        >/dev/null 2>&1 || true
+    /usr/bin/systemctl --system --no-block start "$source_unit_name" \
+        >/dev/null || temporary_failure 'recovery dispatch failed'
+    temporary_failure 'node-bound repair handed off to durable recovery'
+}
+
+standard_runner_ready() {
+    safe_root_file "$standard_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$standard_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$standard_runner_sha256" ]
+}
+
+standard_runner_is_exact_legacy_residue() {
+    safe_root_file "$standard_runner" 755 \
+        && [ "$(/usr/bin/sha256sum "$standard_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$standard_runner_sha256" ]
+}
+
+stage_standard_runner() {
+    if standard_runner_ready; then return 0; fi
+    if { [ -e "$standard_runner" ] || [ -L "$standard_runner" ]; } \
+        && ! standard_runner_is_exact_legacy_residue; then
+        stage_blob_failure='conflicting delegate'
+        return 1
+    fi
+    stage_blob "$standard_runner_base64" "$standard_runner_sha256" \
+        "$standard_runner" 555 \
+        || return 1
+    standard_runner_ready \
+        || { stage_blob_failure='published delegate identity'; return 1; }
+}
+
+arm_repair() {
+    load_authority || unsafe_state 'embedded authority'
+    safe_node_identity || unsafe_state 'node identity'
+    prove_installed_old || unsafe_state 'installed source package identity'
+    capture_running_old_metadata \
+        || unsafe_state 'running source package metadata'
+    prove_helper_parent_chain || unsafe_state 'package-helper parent chain'
+    read_candidate_from_dpkg || unsafe_state 'candidate custody'
+    initial_candidate=$candidate
+    initial_candidate_before=$candidate_before
+    initial_candidate_digest=$candidate_digest
+    initial_candidate_bytes=$candidate_bytes
+    prove_dpkg_upgrade_transition "$@" \
+        || unsafe_state 'dpkg upgrade transition'
+    read_source_intent || unsafe_state 'source intent'
+    source_snapshot || unsafe_state 'source intent snapshot'
+    initial_source_intent_snapshot=$source_intent_snapshot
+    source_state_core_exact || unsafe_state 'exact source recovery state'
+    safe_root_file "$source_blocker" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_blocker" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_source_blocker_sha256" ] \
+        && safe_root_file "$source_pending" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_pending" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_source_pending_sha256" ] \
+        || unsafe_state 'exact source recovery gates'
+    source_request_is_stale || unsafe_state 'source recovery request is not stale'
+    prove_helper_with_manager \
+        || unsafe_state 'manager-held source helper identity'
+    prove_helper_parent_chain \
+        || unsafe_state 'package-helper parent chain changed after probe'
+    stop_and_quiesce_source_recovery \
+        || temporary_failure 'source recovery did not quiesce'
+    exec 9>> "$source_lock"
+    /usr/bin/flock -n -x 9 \
+        || temporary_failure 'source recovery lock is busy'
+    stop_and_quiesce_source_recovery \
+        || temporary_failure 'source recovery restarted while locking'
+    prove_installed_old \
+        && capture_running_old_metadata \
+        && prove_helper_parent_chain \
+        && read_candidate_from_dpkg \
+        && [ "$candidate" = "$initial_candidate" ] \
+        && [ "$candidate_before" = "$initial_candidate_before" ] \
+        && [ "$candidate_digest" = "$initial_candidate_digest" ] \
+        && [ "$candidate_bytes" = "$initial_candidate_bytes" ] \
+        && prove_dpkg_upgrade_transition "$@" \
+        || unsafe_state 'source identity changed before handoff'
+    read_source_intent && source_snapshot && source_state_core_exact \
+        && [ "$source_intent_snapshot" = "$initial_source_intent_snapshot" ] \
+        || unsafe_state 'source recovery changed before handoff'
+    safe_root_file "$source_blocker" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_blocker" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_source_blocker_sha256" ] \
+        && safe_root_file "$source_pending" 600 \
+        && [ "$(/usr/bin/sha256sum "$source_pending" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_source_pending_sha256" ] \
+        && source_request_is_stale \
+        || unsafe_state 'source recovery gates changed before handoff'
+    prove_helper_with_manager \
+        && prove_helper_parent_chain \
+        || unsafe_state 'source helper changed before handoff'
+
+    repair_runner_sha=$(/usr/bin/sha256sum "$0" | /usr/bin/cut -d' ' -f1) \
+        || temporary_failure 'runner digest failed'
+    valid_digest "$repair_runner_sha" || unsafe_state 'runner digest'
+    if [ -d "$repair_state" ] && [ ! -L "$repair_state" ]; then
+        [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
+            && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+            && [ ! -e "$repair_receipt" ] && [ ! -L "$repair_receipt" ] \
+            && [ ! -e "$repair_helper_receipt" ] \
+            && [ ! -L "$repair_helper_receipt" ] \
+            && repair_builds_absent \
+            || unsafe_state 'published repair sibling constellation'
+        repair_tree_exact "$repair_state" \
+            || unsafe_state 'published repair state'
+        [ "$repair_candidate_sha" = "$candidate_digest" ] \
+            && source_runner_is "$repair_runner_sha" \
+            && standard_runner_ready \
+            || unsafe_state 'published repair handoff identity'
+        dispatch_recovery
+    fi
+    if source_runner_is "$repair_runner_sha"; then
+        promote_hidden_repair \
+            || unsafe_state 'hidden repair handoff after unified runner'
+        [ "$repair_candidate_sha" = "$candidate_digest" ] \
+            || unsafe_state 'promoted repair candidate identity'
+        dispatch_recovery
+    fi
+    source_runner_is "$authority_source_runner_sha256" \
+        || unsafe_state 'source recovery runner before repair staging'
+    public_repair_entries_absent \
+        || unsafe_state 'conflicting public repair evidence'
+    cleanup_incomplete_build_trees \
+        || unsafe_state 'incomplete hidden repair staging'
+    repair_entries_absent \
+        || unsafe_state 'repair evidence before unified runner handoff'
+    stage_standard_runner \
+        || temporary_failure \
+            "standard recovery delegate failed: ${stage_blob_failure:-unknown stage}"
+    standard_runner_ready || unsafe_state 'standard recovery delegate identity'
+
+    repair_build=$(/usr/bin/mktemp -d "$source_state/.repair-build.XXXXXX") \
+        || temporary_failure 'hidden repair staging allocation failed'
+    /usr/bin/chown root:root "$repair_build" \
+        && /usr/bin/chmod 0700 "$repair_build" \
+        || temporary_failure 'hidden repair staging custody failed'
+    set_repair_paths "$repair_build"
+    atomic_text "$repair_authority" 600 "$authority_text
+" || temporary_failure 'authority commit failed'
+    atomic_install "$candidate" "$repair_candidate" 600 \
+        || temporary_failure 'candidate commit failed'
+    repair_candidate_sha=$candidate_digest
+    repair_candidate_bytes=$candidate_bytes
+    repair_candidate_safe || unsafe_state 'root-custodied candidate snapshot'
+    [ "$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z "$candidate")" \
+        = "$candidate_before" ] \
+        && [ "$(/usr/bin/sha256sum "$candidate" | /usr/bin/cut -d' ' -f1)" \
+            = "$candidate_digest" ] \
+        || unsafe_state 'candidate source changed during custody transfer'
+    repair_nonce=$(/usr/bin/openssl rand -hex 32) \
+        || temporary_failure 'nonce generation failed'
+    valid_digest "$repair_nonce" || unsafe_state 'generated nonce'
+    repair_boot_id=$(current_boot_id) || unsafe_state 'current boot identity'
+    repair_intent_text="schema_version=1
+authority_sha256=$authority_sha256
+node_id=$authority_node_id
+source_intent_sha256=$source_intent_snapshot
+source_recovery_nonce=$source_nonce
+candidate_sha256=$candidate_digest
+candidate_bytes=$candidate_bytes
+target_version=$target_version
+architecture=$target_architecture
+agent_sha256=$target_agent_sha256
+helper_sha256=$target_helper_sha256
+standard_runner_sha256=$standard_runner_sha256
+repair_runner_sha256=$repair_runner_sha
+request_boot_id=$repair_boot_id
+dpkg_pid=$PPID
+dpkg_start_time=$dpkg_start
+repair_nonce=$repair_nonce
+"
+    atomic_text "$repair_intent" 600 "$repair_intent_text" \
+        || temporary_failure 'repair intent commit failed'
+    repair_blocker_text="schema_version=1
+repair_nonce=$repair_nonce
+target_version=$target_version
+helper_sha256=$target_helper_sha256
+agent_sha256=$target_agent_sha256
+"
+    atomic_text "$repair_blocker" 600 "$repair_blocker_text" \
+        || temporary_failure 'repair blocker commit failed'
+    write_phase armed || temporary_failure 'repair phase commit failed'
+    repair_tree_exact "$repair_build" \
+        || unsafe_state 'complete hidden repair staging'
+    # Linearization invariant: until atomic_install below, every a122-owned
+    # byte is unchanged and the exact a122 runner does not observe either the
+    # standard sidecar or .repair-build.*. After atomic_install, this prepared
+    # tree is already durable and is the only state the unified runner may
+    # promote. Thus both sides of the single runner-rename commit are safe.
+    /usr/bin/sync -f "$source_state" \
+        || temporary_failure 'hidden repair parent durability failed'
+    repair_tree_exact_read_only "$repair_build" \
+        && source_runner_is "$authority_source_runner_sha256" \
+        && standard_runner_ready \
+        || unsafe_state 'hidden repair pre-handoff revalidation'
+    atomic_install "$0" "$source_runner" 555 \
+        || temporary_failure 'fail-closed unified runner handoff failed'
+    source_runner_is "$repair_runner_sha" \
+        || unsafe_state 'fail-closed unified runner identity'
+    promote_hidden_repair || temporary_failure 'repair publish failed'
+    dispatch_recovery
+}
+
+load_active_repair() {
+    load_authority || return 1
+    safe_node_identity || return 1
+    [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
+        && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+        && [ ! -e "$repair_receipt" ] && [ ! -L "$repair_receipt" ] \
+        && repair_builds_absent || return 1
+    unknown=$(/usr/bin/find "$repair_state" -mindepth 1 -maxdepth 1 \
+        ! -name authority ! -name intent ! -name phase ! -name agent-blocked \
+        ! -name candidate.deb -print -quit) || return 1
+    [ -z "$unknown" ] || return 1
+    read_source_intent || return 1
+    source_snapshot || return 1
+    repair_state_complete || return 1
+    source_state_core_exact || return 1
+    source_volatile_state_matches_phase || return 1
+    [ "$repair_candidate_sha" = "$(/usr/bin/sha256sum "$repair_candidate" \
+        | /usr/bin/cut -d' ' -f1)" ]
+}
+
+finalize_from_receipt() {
+    load_authority || unsafe_state 'embedded authority'
+    safe_node_identity || unsafe_state 'node identity'
+    read_source_intent || unsafe_state 'source intent during finalization'
+    source_snapshot || unsafe_state 'source snapshot during finalization'
+    final_receipt_safe || unsafe_state 'final receipt during finalization'
+    repair_runner_sha=$receipt_runner_sha
+    repair_nonce=$receipt_nonce
+    repair_candidate_sha=$receipt_candidate_sha
+    final_receipt_boot=$receipt_boot
+    final_receipt_helper_pid=$receipt_helper_pid
+    final_receipt_helper_start=$receipt_helper_start
+    helper_receipt_contract_safe \
+        && [ "$receipt_boot" = "$final_receipt_boot" ] \
+        && [ "$receipt_helper_pid" = "$final_receipt_helper_pid" ] \
+        && [ "$receipt_helper_start" = "$final_receipt_helper_start" ] \
+        || unsafe_state 'helper receipt finalization binding'
+    target_payload_installed || unsafe_state 'target payload during finalization'
+    [ ! -e "$source_blocker" ] && [ ! -L "$source_blocker" ] \
+        && [ ! -e "$source_pending" ] && [ ! -L "$source_pending" ] \
+        || unsafe_state 'source gates remain after final receipt'
+    final_state_shape_safe \
+        || unsafe_state 'repair finalization state is missing or conflicting'
+    agent_uid=$(/usr/bin/id -u vonk-agent) || unsafe_state 'agent uid'
+    agent_gid=$(/usr/bin/id -g vonk-agent) || unsafe_state 'agent gid'
+    if ! prove_running_unit "$helper_unit" "$helper_binary" \
+        "$target_helper_sha256" 0 0 >/dev/null; then
+        /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
+            || temporary_failure 'helper restart during finalization failed'
+    fi
+    prove_running_unit "$helper_unit" "$helper_binary" "$target_helper_sha256" \
+        0 0 >/dev/null || temporary_failure 'helper changed during finalization'
+    write_helper_receipt \
+        || temporary_failure 'helper receipt refresh during finalization failed'
+    helper_receipt_and_live_safe \
+        || unsafe_state 'helper receipt refresh during finalization'
+    if ! prove_running_unit "$agent_unit" "$agent_binary" \
+        "$target_agent_sha256" "$agent_uid" "$agent_gid" >/dev/null; then
+        /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
+            || temporary_failure 'agent restart during finalization failed'
+        /bin/sleep 1
+    fi
+    prove_running_unit "$agent_unit" "$agent_binary" "$target_agent_sha256" \
+        "$agent_uid" "$agent_gid" >/dev/null \
+        || temporary_failure 'agent changed during finalization'
+    write_final_receipt \
+        || temporary_failure 'final receipt refresh during finalization failed'
+    final_receipt_safe \
+        || unsafe_state 'final receipt refresh during finalization'
+    retire_source_state || temporary_failure 'final repair state retirement failed'
+}
+
+allow_agent_start() {
+    if [ ! -e "$source_intent" ] && [ ! -L "$source_intent" ]; then
+        [ ! -e "$repair_state" ] && [ ! -L "$repair_state" ] \
+            && [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
+            && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
+            && repair_builds_absent \
+            || return 1
+        return 0
+    fi
+    if [ -e "$repair_receipt" ] || [ -L "$repair_receipt" ]; then
+        load_authority && safe_node_identity && read_source_intent \
+            && source_snapshot && final_receipt_safe || return 1
+        repair_runner_sha=$receipt_runner_sha
+        repair_nonce=$receipt_nonce
+        repair_candidate_sha=$receipt_candidate_sha
+        helper_receipt_and_live_safe || return 1
+        [ ! -e "$source_blocker" ] && [ ! -L "$source_blocker" ] \
+            && [ ! -e "$source_pending" ] && [ ! -L "$source_pending" ] \
+            && target_payload_installed \
+            && final_state_shape_safe
+        return $?
+    fi
+    if { [ ! -d "$repair_state" ] || [ -L "$repair_state" ]; } \
+        && ! repair_builds_absent; then
+        safe_root_file "$source_lock" 600 || return 1
+        exec 9>> "$source_lock"
+        /usr/bin/flock -n -x 9 || return 1
+        promote_hidden_repair || return 1
+    fi
+    load_active_repair || return 1
+    [ "$phase_name" = helper-proven ] || [ "$phase_name" = agent-proven ] \
+        || return 1
+    [ ! -e "$repair_blocker" ] && [ ! -L "$repair_blocker" ] \
+        && [ ! -e "$source_blocker" ] && [ ! -L "$source_blocker" ] \
+        && helper_receipt_and_live_safe \
+        && target_payload_installed
+}
+
+recover_repair() {
+    load_authority || unsafe_state 'embedded authority'
+    safe_node_identity || unsafe_state 'node identity'
+    safe_root_file "$source_lock" 600 || unsafe_state 'source recovery lock'
+    exec 9>> "$source_lock"
+    /usr/bin/flock -n -x 9 || temporary_failure 'source recovery lock is busy'
+    if [ -e "$repair_receipt" ] || [ -L "$repair_receipt" ]; then
+        finalize_from_receipt
+        return
+    fi
+    if [ ! -d "$repair_state" ] || [ -L "$repair_state" ]; then
+        promote_hidden_repair \
+            || unsafe_state 'hidden repair promotion during recovery'
+    fi
+    active_repair_precleanup_safe \
+        || unsafe_state 'active repair pre-cleanup constellation'
+    clean_repair_temps "$source_state/repair" \
+        || unsafe_state 'active repair temporary ledger'
+    load_active_repair || unsafe_state 'active repair siblings'
+    source_runner_is "$repair_runner_sha" || unsafe_state 'unified runner identity'
+    case "$phase_name" in
+        armed|installing|configured)
+            repair_blocker_safe || unsafe_state 'repair blocker'
+            wait_for_dispatch_dpkg \
+                || temporary_failure 'dispatch dpkg is still active'
+            /usr/bin/systemctl --system stop "$agent_unit" >/dev/null \
+                || temporary_failure 'agent stop failed'
+            /usr/bin/systemctl --system stop "$helper_unit" >/dev/null \
+                || temporary_failure 'helper stop failed'
+            write_phase installing \
+                || temporary_failure 'installing phase commit failed'
+            VONK_FORGE_PACKAGE_REPAIR_NONCE=$repair_nonce \
+                /usr/bin/dpkg --install --force-confold "$repair_candidate" \
+                || temporary_failure 'exact repair package install failed'
+            target_payload_installed \
+                || temporary_failure 'target package is not configured'
+            write_phase configured \
+                || temporary_failure 'configured phase commit failed'
+            /usr/bin/systemctl --system daemon-reload >/dev/null \
+                || temporary_failure 'systemd reload failed'
+            /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
+                || temporary_failure 'target helper restart failed'
+            write_helper_receipt \
+                || temporary_failure 'target helper receipt failed'
+            helper_receipt_and_live_safe \
+                || unsafe_state 'target helper receipt identity'
+            write_phase helper-proven \
+                || temporary_failure 'helper phase commit failed'
+            ;;
+        helper-proven)
+            target_payload_installed || unsafe_state 'target package identity'
+            refresh_target_helper_after_boot \
+                || temporary_failure 'target helper reboot recovery failed'
+            ;;
+        agent-proven)
+            target_payload_installed || unsafe_state 'target package identity'
+            refresh_target_helper_after_boot \
+                || temporary_failure 'target helper reboot recovery failed'
+            ;;
+        *) unsafe_state 'repair phase' ;;
+    esac
+    remove_exact_file "$source_pending" "$authority_source_pending_sha256" 600 \
+        || unsafe_state 'source pending retirement'
+    if [ -e "$repair_blocker" ] || [ -L "$repair_blocker" ]; then
+        repair_blocker_safe || unsafe_state 'repair blocker before retirement'
+        repair_blocker_digest=$(/usr/bin/sha256sum "$repair_blocker" \
+            | /usr/bin/cut -d' ' -f1) || unsafe_state 'repair blocker digest'
+        remove_exact_file "$repair_blocker" "$repair_blocker_digest" 600 \
+            || unsafe_state 'repair blocker retirement'
+    fi
+    remove_exact_file "$source_blocker" "$authority_source_blocker_sha256" 600 \
+        || unsafe_state 'source blocker retirement'
+    agent_uid=$(/usr/bin/id -u vonk-agent) || unsafe_state 'agent uid'
+    agent_gid=$(/usr/bin/id -g vonk-agent) || unsafe_state 'agent gid'
+    if ! prove_running_unit "$agent_unit" "$agent_binary" \
+        "$target_agent_sha256" "$agent_uid" "$agent_gid" >/dev/null; then
+        /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
+            || temporary_failure 'target agent restart failed'
+        /bin/sleep 1
+    fi
+    prove_running_unit "$agent_unit" "$agent_binary" "$target_agent_sha256" \
+        "$agent_uid" "$agent_gid" >/dev/null \
+        || temporary_failure 'target agent proof failed'
+    prove_running_unit "$helper_unit" "$helper_binary" "$target_helper_sha256" \
+        0 0 >/dev/null || temporary_failure 'target helper changed after unblock'
+    write_phase agent-proven || temporary_failure 'agent phase commit failed'
+    write_final_receipt || temporary_failure 'final repair receipt failed'
+    final_receipt_safe || unsafe_state 'final repair receipt identity'
+    retire_source_state || temporary_failure 'final repair state retirement failed'
+}
+
+# VONK_REPAIR_DISPATCH_V1
+case "${1:-}" in
+    allow-agent-start|recover)
+        if [ "$1" = allow-agent-start ]; then
+            allow_agent_start
+        else
+            recover_repair
+        fi
+        ;;
+    install|upgrade)
+        if [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ]; then
+            load_active_repair && recursive_dpkg_binding \
+                || unsafe_state 'recursive preinst binding'
+            [ "$phase_name" = installing ] \
+                || unsafe_state 'recursive preinst phase'
+            exit 0
+        fi
+        arm_repair "$@"
+        ;;
+    abort-upgrade)
+        [ -z "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] \
+            || unsafe_state 'recursive abort-upgrade'
+        exit 0
+        ;;
+    *)
+        echo 'vonk-forge-agent: unsupported repair maintainer-script action' >&2
+        exit 1
+        ;;
+esac

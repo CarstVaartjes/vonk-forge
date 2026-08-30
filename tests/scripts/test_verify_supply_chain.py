@@ -81,6 +81,7 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/build-agent-deb",
         "scripts/materialize-agent-tools",
         "scripts/build-agent-package-evidence",
+        "scripts/repair-capsule-publication",
         "scripts/container-release-metadata",
         "scripts/accept-development-image-archive",
         "scripts/agent-package-metadata",
@@ -271,6 +272,7 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",
+        "scripts/repair-capsule-publication",
         "scripts/verify-agent-binaries",
     ),
 )

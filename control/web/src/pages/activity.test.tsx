@@ -312,10 +312,14 @@ test("explains an unresolved legacy agent upgrade without guessing its failure s
 });
 
 test("polls a safety-delayed helper retry and shows specific recovery guidance", async () => {
-  let intervalCallback: (() => void) | undefined;
-  vi.spyOn(window, "setInterval").mockImplementation(handler => {
-    intervalCallback = handler as () => void;
-    return 1;
+  let intervalCallback: (() => Promise<unknown>) | undefined;
+  const realSetInterval = window.setInterval.bind(window);
+  vi.spyOn(window, "setInterval").mockImplementation((handler, timeout) => {
+    if (timeout === 5_000) {
+      intervalCallback = handler as () => Promise<unknown>;
+      return 1;
+    }
+    return realSetInterval(handler, timeout);
   });
   const nextAction = "Wait for the controller-managed retry behind its safety delay; it will not dispatch before the reported retry time. Do not manually resume the rollout again.";
   const detail = {
@@ -339,8 +343,9 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   expect(screen.getByText("Controller retry not before")).toBeVisible();
   expect(screen.getByText("Updates automatically while this operation is active.")).toBeVisible();
   expect(screen.queryByRole("button", {name: "Queue retry after inspection"})).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", {name: "Refresh details"})).toBeEnabled());
   expect(intervalCallback).toBeDefined();
-  await act(async () => intervalCallback?.());
+  await act(async () => { await intervalCallback?.(); });
   await waitFor(() => expect(loadJob).toHaveBeenCalledTimes(2));
 });
 
