@@ -18,9 +18,12 @@ mod linux {
 
     const PROBE: &str = "/var/lib/dpkg/tmp.ci/vonk-repair-helper.probe";
     const SETPRIV: &str = "/usr/bin/setpriv";
+    const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";
+    const AGENT_CGROUP: &str = "/system.slice/vonk-forge-agent.service";
     const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
     const HELPER_CGROUP: &str = "/system.slice/vonk-forge-package-helper.service";
     const CAP_SYS_PTRACE: &str = "0000000000080000";
+    const ZERO_CAPS: &str = "0000000000000000";
 
     type Result<T> = std::result::Result<T, String>;
 
@@ -177,17 +180,33 @@ mod linux {
             .ok_or_else(|| format!("missing status field: {name}"))
     }
 
-    fn validate_probe_self() -> Result<()> {
-        let status = fs::read_to_string("/proc/self/status")
-            .map_err(|error| format!("self status: {error}"))?;
-        for field in ["Uid:", "Gid:"] {
-            let values: Vec<&str> = status_value(&status, field)?.split_whitespace().collect();
-            if values != ["0", "0", "0", "0"] {
+    fn validate_self_ids(status: &str, expected_uid: &str, expected_gid: &str) -> Result<()> {
+        for (field, expected) in [("Uid:", expected_uid), ("Gid:", expected_gid)] {
+            let values: Vec<&str> = status_value(status, field)?.split_whitespace().collect();
+            if values != [expected, expected, expected, expected] {
                 return Err(format!("unexpected self {field}"));
             }
         }
+        Ok(())
+    }
+
+    fn validate_sandbox(status: &str) -> Result<()> {
+        if status_value(status, "NoNewPrivs:")? != "1"
+            || status_value(status, "Seccomp:")? != "2"
+            || !canonical_u64(status_value(status, "Seccomp_filters:")?)
+                .is_some_and(|count| count >= 1)
+        {
+            return Err("probe sandbox is not active".to_string());
+        }
+        Ok(())
+    }
+
+    fn validate_helper_probe_self() -> Result<()> {
+        let status = fs::read_to_string("/proc/self/status")
+            .map_err(|error| format!("self status: {error}"))?;
+        validate_self_ids(&status, "0", "0")?;
         for field in ["CapInh:", "CapAmb:"] {
-            if status_value(&status, field)? != "0000000000000000" {
+            if status_value(&status, field)? != ZERO_CAPS {
                 return Err(format!("unexpected self {field}"));
             }
         }
@@ -196,14 +215,30 @@ mod linux {
                 return Err(format!("unexpected self {field}"));
             }
         }
-        if status_value(&status, "NoNewPrivs:")? != "1"
-            || status_value(&status, "Seccomp:")? != "2"
-            || !canonical_u64(status_value(&status, "Seccomp_filters:")?)
-                .is_some_and(|count| count >= 1)
-        {
-            return Err("probe sandbox is not active".to_string());
+        validate_sandbox(&status)
+    }
+
+    fn validate_agent_probe_self(
+        expected_uid: &str,
+        expected_gid: &str,
+        expected_groups: &str,
+    ) -> Result<()> {
+        let status = fs::read_to_string("/proc/self/status")
+            .map_err(|error| format!("self status: {error}"))?;
+        validate_self_ids(&status, expected_uid, expected_gid)?;
+        let groups = status_value(&status, "Groups:")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(",");
+        if groups != expected_groups {
+            return Err("unexpected self supplementary groups".to_string());
         }
-        Ok(())
+        for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+            if status_value(&status, field)? != ZERO_CAPS {
+                return Err(format!("unexpected self {field}"));
+            }
+        }
+        validate_sandbox(&status)
     }
 
     fn read_boot_id() -> Result<String> {
@@ -238,36 +273,42 @@ mod linux {
         Ok((*start).to_string())
     }
 
-    fn validate_target_ids(pid: &str) -> Result<()> {
+    fn validate_target_ids(pid: &str, expected_uid: &str, expected_gid: &str) -> Result<String> {
         let status = fs::read_to_string(format!("/proc/{pid}/status"))
             .map_err(|error| format!("target status: {error}"))?;
-        for field in ["Uid:", "Gid:"] {
+        for (field, expected) in [("Uid:", expected_uid), ("Gid:", expected_gid)] {
             let values: Vec<&str> = status_value(&status, field)?.split_whitespace().collect();
-            if values != ["0", "0", "0", "0"] {
+            if values != [expected, expected, expected, expected] {
                 return Err(format!("unexpected target {field}"));
             }
         }
-        Ok(())
+        Ok(status)
     }
 
-    fn read_cgroup(pid: &str) -> Result<String> {
+    fn read_cgroup(pid: &str, expected_cgroup: &str) -> Result<String> {
         let raw = fs::read_to_string(format!("/proc/{pid}/cgroup"))
             .map_err(|error| format!("target cgroup: {error}"))?;
-        let expected = format!("0::{HELPER_CGROUP}\n");
+        let expected = format!("0::{expected_cgroup}\n");
         if raw != expected {
             return Err("unexpected target cgroup".to_string());
         }
-        Ok(HELPER_CGROUP.to_string())
+        Ok(expected_cgroup.to_string())
     }
 
-    fn capture_target(pid: &str) -> Result<TargetTuple> {
-        validate_target_ids(pid)?;
+    fn capture_target(
+        pid: &str,
+        expected_uid: &str,
+        expected_gid: &str,
+        expected_path: &str,
+        expected_cgroup: &str,
+    ) -> Result<TargetTuple> {
+        validate_target_ids(pid, expected_uid, expected_gid)?;
         let start = read_start(pid)?;
-        let cgroup = read_cgroup(pid)?;
+        let cgroup = read_cgroup(pid, expected_cgroup)?;
         let boot = read_boot_id()?;
         let exe_link = PathBuf::from(format!("/proc/{pid}/exe"));
         let exe = fs::read_link(&exe_link).map_err(|error| format!("target exe link: {error}"))?;
-        if exe != Path::new(HELPER) || exe.as_os_str().as_bytes().ends_with(b" (deleted)") {
+        if exe != Path::new(expected_path) || exe.as_os_str().as_bytes().ends_with(b" (deleted)") {
             return Err("unexpected target executable".to_string());
         }
         let metadata =
@@ -283,6 +324,24 @@ mod linux {
             exe_dev: metadata.dev(),
             exe_ino: metadata.ino(),
         })
+    }
+
+    fn validate_agent_target_security(pid: &str, expected_groups: &str) -> Result<()> {
+        let status = fs::read_to_string(format!("/proc/{pid}/status"))
+            .map_err(|error| format!("target status: {error}"))?;
+        let groups = status_value(&status, "Groups:")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(",");
+        if groups != expected_groups {
+            return Err("unexpected target supplementary groups".to_string());
+        }
+        for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"] {
+            if status_value(&status, field)? != ZERO_CAPS {
+                return Err(format!("unexpected target {field}"));
+            }
+        }
+        Ok(())
     }
 
     fn check_wrapper(args: &[String]) -> Result<()> {
@@ -316,11 +375,11 @@ mod linux {
         }
         // SAFETY: alarm only bounds this short-lived process and installs no handler.
         unsafe { libc::alarm(5) };
-        validate_probe_self()?;
+        validate_helper_probe_self()?;
         validate_authority_file(Path::new(SETPRIV), &args[7])?;
         validate_authority_file(Path::new(PROBE), &args[8])?;
 
-        let before = capture_target(&args[0])?;
+        let before = capture_target(&args[0], "0", "0", HELPER, HELPER_CGROUP)?;
         if before.start != args[1] || before.boot != args[5] {
             return Err("target tuple does not match authority".to_string());
         }
@@ -336,7 +395,7 @@ mod linux {
         if digest != args[4] {
             return Err("target helper digest mismatch".to_string());
         }
-        let after = capture_target(&args[0])?;
+        let after = capture_target(&args[0], "0", "0", HELPER, HELPER_CGROUP)?;
         if before != after {
             return Err("target tuple changed during probe".to_string());
         }
@@ -355,6 +414,73 @@ mod linux {
         Ok(())
     }
 
+    fn probe_agent(args: &[String]) -> Result<()> {
+        if args.len() != 12
+            || !is_decimal(&args[0])
+            || !is_decimal(&args[1])
+            || !is_hex(&args[2], 64)
+            || !is_hex(&args[3], 64)
+            || !is_hex(&args[4], 64)
+            || args[5].len() != 36
+            || !is_hex(&args[6], 32)
+            || !is_decimal(&args[7])
+            || !is_decimal(&args[8])
+            || args[9].is_empty()
+            || !args[9]
+                .split(',')
+                .all(|value| canonical_u64(value).is_some())
+            || args[9] != args[8]
+            || !is_hex(&args[10], 64)
+            || !is_hex(&args[11], 64)
+        {
+            return Err("invalid probe-agent arguments".to_string());
+        }
+        // SAFETY: alarm only bounds this short-lived process and installs no handler.
+        unsafe { libc::alarm(5) };
+        validate_agent_probe_self(&args[7], &args[8], &args[9])?;
+        validate_authority_file(Path::new(SETPRIV), &args[10])?;
+        validate_authority_file(Path::new(PROBE), &args[11])?;
+
+        validate_agent_target_security(&args[0], &args[9])?;
+        let before = capture_target(&args[0], &args[7], &args[8], AGENT, AGENT_CGROUP)?;
+        if before.start != args[1] || before.boot != args[5] {
+            return Err("target tuple does not match authority".to_string());
+        }
+        let exe_link = PathBuf::from(format!("/proc/{}/exe", args[0]));
+        let held = File::open(&exe_link).map_err(|error| format!("open target exe: {error}"))?;
+        let held_metadata = held
+            .metadata()
+            .map_err(|error| format!("held target metadata: {error}"))?;
+        if held_metadata.dev() != before.exe_dev || held_metadata.ino() != before.exe_ino {
+            return Err("target executable changed before hold".to_string());
+        }
+        let digest = hash_reader(&held)?;
+        if digest != args[4] {
+            return Err("target agent digest mismatch".to_string());
+        }
+        validate_agent_target_security(&args[0], &args[9])?;
+        let after = capture_target(&args[0], &args[7], &args[8], AGENT, AGENT_CGROUP)?;
+        if before != after {
+            return Err("target tuple changed during probe".to_string());
+        }
+        println!(
+            "schema_version=1 nonce={} authority_sha256={} agent_pid={} agent_start={} agent_sha256={} boot_id={} invocation_id={} agent_uid={} agent_gid={} agent_groups={} exe_dev={} exe_ino={} cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2",
+            args[2],
+            args[3],
+            args[0],
+            args[1],
+            digest,
+            args[5],
+            args[6],
+            args[7],
+            args[8],
+            args[9],
+            before.exe_dev,
+            before.exe_ino
+        );
+        Ok(())
+    }
+
     pub fn run() -> Result<()> {
         let mut args = env::args();
         let _program = args.next();
@@ -363,6 +489,7 @@ mod linux {
         match command.as_str() {
             "check-wrapper" => check_wrapper(&rest),
             "probe-helper" => probe_helper(&rest),
+            "probe-agent" => probe_agent(&rest),
             _ => Err("unsupported command".to_string()),
         }
     }

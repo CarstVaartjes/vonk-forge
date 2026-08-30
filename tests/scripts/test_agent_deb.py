@@ -2549,6 +2549,16 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "--property=SystemCallFilter=@system-service" in runner
     assert "process_vm_readv process_vm_writev pidfd_getfd kcmp" in runner
     assert '"$setpriv_binary" --no-new-privs -- "$repair_probe" probe-helper' in runner
+    assert '"$repair_probe" probe-agent' in runner
+    manager_probe = runner[
+        runner.index("prove_helper_with_manager() {") : runner.index(
+            "prove_helper_parent_chain() {"
+        )
+    ]
+    assert "prove_running_agent_exact" not in manager_probe
+    assert "--reuid" not in runner
+    assert "--regid" not in runner
+    assert '[ "$old_agent_groups" = "$vonk_agent_gid" ]' in runner
     assert "systemctl --system" not in postinst
     assert "package-repair.receipt" not in postinst
     assert "helper-upgrade.pending" not in postinst
@@ -2640,6 +2650,99 @@ def test_repair_manager_probe_uses_the_exact_transient_sandbox_contract() -> Non
         "$authority_installed_helper_sha256",
         "$old_boot_id",
         "$old_helper_invocation",
+        "$authority_setpriv_sha256",
+        "$repair_probe_sha256",
+    ]
+
+    agent_start = runner.index("agent_probe_output=$(/usr/bin/systemd-run")
+    agent_end = runner.index(") || return 1", agent_start)
+    agent_command = runner[
+        agent_start + len("agent_probe_output=$(") : agent_end
+    ]
+    agent_tokens = shlex.split(agent_command.replace("\\\n", " "))
+    agent_properties = tuple(
+        token for token in agent_tokens if token.startswith("--property=")
+    )
+
+    assert agent_tokens[:10] == [
+        "/usr/bin/systemd-run",
+        "--system",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--quiet",
+        "--service-type=exec",
+        "--unit=$agent_probe_unit",
+        "--property=User=vonk-agent",
+        "--property=Group=vonk-agent",
+    ]
+    assert agent_properties == (
+        "--property=User=vonk-agent",
+        "--property=Group=vonk-agent",
+        "--property=SupplementaryGroups=",
+        "--property=NoNewPrivileges=yes",
+        "--property=CapabilityBoundingSet=",
+        "--property=AmbientCapabilities=",
+        "--property=Environment=LANG=C",
+        "--property=Environment=LC_ALL=C",
+        "--property=Environment=PATH=/usr/bin:/bin",
+        "--property=UnsetEnvironment=LD_PRELOAD",
+        "--property=UnsetEnvironment=LD_LIBRARY_PATH",
+        "--property=UnsetEnvironment=LD_AUDIT",
+        "--property=UnsetEnvironment=LD_DEBUG",
+        "--property=UnsetEnvironment=BASH_ENV",
+        "--property=UnsetEnvironment=ENV",
+        "--property=UnsetEnvironment=GCONV_PATH",
+        "--property=PrivateNetwork=yes",
+        "--property=IPAddressDeny=any",
+        "--property=PrivateDevices=yes",
+        "--property=DevicePolicy=closed",
+        "--property=ProtectSystem=strict",
+        "--property=ProtectHome=yes",
+        "--property=ReadOnlyPaths=/",
+        "--property=ProtectKernelTunables=yes",
+        "--property=ProtectKernelModules=yes",
+        "--property=ProtectKernelLogs=yes",
+        "--property=ProtectControlGroups=yes",
+        "--property=ProtectClock=yes",
+        "--property=ProtectHostname=yes",
+        "--property=ProtectProc=default",
+        "--property=ProcSubset=all",
+        "--property=RestrictSUIDSGID=yes",
+        "--property=RestrictRealtime=yes",
+        "--property=RestrictNamespaces=yes",
+        "--property=LockPersonality=yes",
+        "--property=MemoryDenyWriteExecute=yes",
+        "--property=RemoveIPC=yes",
+        "--property=KeyringMode=private",
+        "--property=SystemCallArchitectures=native",
+        "--property=SystemCallFilter=@system-service",
+        (
+            "--property=SystemCallFilter=~@network-io @mount @reboot @swap "
+            "@obsolete @raw-io @resources @cpu-emulation @debug ptrace "
+            "process_vm_readv process_vm_writev pidfd_getfd kcmp"
+        ),
+        "--property=SystemCallErrorNumber=EPERM",
+        "--property=RuntimeMaxSec=5s",
+        "--property=TimeoutStartSec=5s",
+        "--property=TimeoutStopSec=1s",
+        "--property=Restart=no",
+        "--property=UMask=0077",
+    )
+    agent_separator = agent_tokens.index("--")
+    assert agent_tokens[agent_separator + 1 :] == [
+        "$repair_probe",
+        "probe-agent",
+        "$old_agent_pid",
+        "$old_agent_start",
+        "$probe_nonce",
+        "$authority_sha256",
+        "$authority_installed_agent_sha256",
+        "$old_boot_id",
+        "$old_agent_invocation",
+        "$vonk_agent_uid",
+        "$vonk_agent_gid",
+        "$old_agent_groups",
         "$authority_setpriv_sha256",
         "$repair_probe_sha256",
     ]

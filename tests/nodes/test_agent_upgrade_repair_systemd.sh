@@ -90,6 +90,7 @@ lock_holder=
 wrong_cgroup=
 wrong_cgroup_pid=
 sandbox_probe_unit=
+native_transient_unit=
 repair_probe_control=vonk-repair-helper.probe
 
 assert_repair_probe_not_persisted() {
@@ -146,6 +147,13 @@ cleanup() {
     systemctl --system stop "$sandbox_probe_unit" >/dev/null 2>&1 || true
     systemctl --system reset-failed "$sandbox_probe_unit" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$native_transient_unit" ]]; then
+    systemctl --system stop "$native_transient_unit" >/dev/null 2>&1 || true
+    systemctl --system reset-failed "$native_transient_unit" \
+      >/dev/null 2>&1 || true
+  fi
+  rm -f -- "/var/lib/dpkg/tmp.ci/$repair_probe_control" \
+    /var/lib/dpkg/tmp.ci/vonk-repair-probe-sandbox-denials
   systemctl --system reset-failed "$recovery_unit" "$agent_unit" \
     "$helper_unit" "$socket_unit" "$firewall_name" >/dev/null 2>&1 || true
   if [[ -n "$wrong_cgroup" ]]; then
@@ -401,33 +409,58 @@ static int denied(long result, const char *name) {
   return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  if (argc != 4
+      || (strcmp(argv[1], "ptrace") != 0 && strcmp(argv[1], "zero") != 0)) {
+    return 1;
+  }
   char status[16384] = {0};
+  char uid[128] = {0};
+  char gid[128] = {0};
+  if (snprintf(uid, sizeof(uid), "Uid:\t%s\t%s\t%s\t%s\n",
+               argv[2], argv[2], argv[2], argv[2]) <= 0
+      || snprintf(gid, sizeof(gid), "Gid:\t%s\t%s\t%s\t%s\n",
+                  argv[3], argv[3], argv[3], argv[3]) <= 0) return 2;
   int fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
-  if (fd < 0) return 2;
+  if (fd < 0) return 3;
   ssize_t count = read(fd, status, sizeof(status) - 1);
-  if (count <= 0 || close(fd) != 0) return 3;
-  if (!strstr(status, "Uid:\t0\t0\t0\t0\n")
-      || !strstr(status, "Gid:\t0\t0\t0\t0\n")
+  if (count <= 0 || close(fd) != 0) return 4;
+  if (!strstr(status, uid)
+      || !strstr(status, gid)
       || !strstr(status, "CapInh:\t0000000000000000\n")
-      || !strstr(status, "CapPrm:\t0000000000080000\n")
-      || !strstr(status, "CapEff:\t0000000000080000\n")
-      || !strstr(status, "CapBnd:\t0000000000080000\n")
       || !strstr(status, "CapAmb:\t0000000000000000\n")
       || !strstr(status, "NoNewPrivs:\t1\n")
-      || !strstr(status, "Seccomp:\t2\n")) return 4;
+      || !strstr(status, "Seccomp:\t2\n")) return 5;
+  const char *caps = strcmp(argv[1], "ptrace") == 0
+    ? "0000000000080000" : "0000000000000000";
+  char permitted[64] = {0};
+  char effective[64] = {0};
+  char bounding[64] = {0};
+  if (snprintf(permitted, sizeof(permitted), "CapPrm:\t%s\n", caps) <= 0
+      || snprintf(effective, sizeof(effective), "CapEff:\t%s\n", caps) <= 0
+      || snprintf(bounding, sizeof(bounding), "CapBnd:\t%s\n", caps) <= 0
+      || !strstr(status, permitted)
+      || !strstr(status, effective)
+      || !strstr(status, bounding)) return 6;
 
   errno = 0;
-  if (denied(syscall(SYS_ptrace, PTRACE_TRACEME, 0, 0, 0), "ptrace")) return 5;
+  if (denied(syscall(SYS_ptrace, PTRACE_TRACEME, 0, 0, 0), "ptrace")) return 7;
   struct iovec local = {.iov_base = status, .iov_len = 1};
   struct iovec remote = {.iov_base = status, .iov_len = 1};
   errno = 0;
   if (denied(syscall(SYS_process_vm_readv, getpid(), &local, 1, &remote, 1, 0),
-             "process_vm_readv")) return 6;
+             "process_vm_readv")) return 8;
   errno = 0;
-  if (denied(syscall(SYS_socket, AF_INET, SOCK_STREAM, 0), "socket")) return 7;
+  if (denied(syscall(SYS_process_vm_writev, getpid(), &local, 1, &remote, 1, 0),
+             "process_vm_writev")) return 9;
   errno = 0;
-  if (denied(syscall(SYS_mount, "none", "/", "none", 0, 0), "mount")) return 8;
+  if (denied(syscall(SYS_pidfd_getfd, -1, -1, 0), "pidfd_getfd")) return 10;
+  errno = 0;
+  if (denied(syscall(SYS_kcmp, getpid(), getpid(), 0, 0, 0), "kcmp")) return 11;
+  errno = 0;
+  if (denied(syscall(SYS_socket, AF_INET, SOCK_STREAM, 0), "socket")) return 12;
+  errno = 0;
+  if (denied(syscall(SYS_mount, "none", "/", "none", 0, 0), "mount")) return 13;
   puts("probe sandbox denied syscalls: PASS");
   return 0;
 }
@@ -477,7 +510,8 @@ sandbox_denial_output=$(/usr/bin/systemd-run --system --wait --pipe --collect --
   --property=RuntimeMaxSec=5s --property=TimeoutStartSec=5s \
   --property=TimeoutStopSec=1s --property=Restart=no \
   --property=UMask=0077 -- \
-  /usr/bin/setpriv --no-new-privs -- "$test_root/probe-sandbox-denials")
+  /usr/bin/setpriv --no-new-privs -- \
+    "$test_root/probe-sandbox-denials" ptrace 0 0)
 test "$sandbox_denial_output" = 'probe sandbox denied syscalls: PASS'
 for _ in {1..200}; do
   [[ "$(systemctl --system show --property=LoadState --value \
@@ -652,6 +686,155 @@ printf '%s\n' \
   "util_linux_version=$util_linux_version" > "$authority"
 chmod 0600 "$authority"
 authority_sha="$(sha256sum "$authority" | cut -d' ' -f1)"
+
+wait_for_transient_collection() {
+  local unit=$1
+  for _ in {1..200}; do
+    [[ "$(systemctl --system show --property=LoadState --value "$unit")" \
+      = not-found ]] && break
+    sleep 0.01
+  done
+  test "$(systemctl --system show --property=LoadState --value "$unit")" \
+    = not-found
+  test ! -e "/run/systemd/transient/$unit"
+}
+
+run_zero_cap_agent_transient() {
+  local unit=$1
+  shift
+  native_transient_unit=$unit
+  set +e
+  transient_output=$(/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+    --service-type=exec --unit="$unit" \
+    --property=User=vonk-agent --property=Group=vonk-agent \
+    --property=SupplementaryGroups= \
+    --property=NoNewPrivileges=yes \
+    --property=CapabilityBoundingSet= \
+    --property=AmbientCapabilities= \
+    --property=Environment=LANG=C --property=Environment=LC_ALL=C \
+    --property=Environment=PATH=/usr/bin:/bin \
+    --property=UnsetEnvironment=LD_PRELOAD \
+    --property=UnsetEnvironment=LD_LIBRARY_PATH \
+    --property=UnsetEnvironment=LD_AUDIT \
+    --property=UnsetEnvironment=LD_DEBUG \
+    --property=UnsetEnvironment=BASH_ENV \
+    --property=UnsetEnvironment=ENV \
+    --property=UnsetEnvironment=GCONV_PATH \
+    --property=PrivateNetwork=yes --property=IPAddressDeny=any \
+    --property=PrivateDevices=yes --property=DevicePolicy=closed \
+    --property=ProtectSystem=strict --property=ProtectHome=yes \
+    --property=ReadOnlyPaths=/ \
+    --property=ProtectKernelTunables=yes \
+    --property=ProtectKernelModules=yes \
+    --property=ProtectKernelLogs=yes \
+    --property=ProtectControlGroups=yes \
+    --property=ProtectClock=yes --property=ProtectHostname=yes \
+    --property=ProtectProc=default --property=ProcSubset=all \
+    --property=RestrictSUIDSGID=yes --property=RestrictRealtime=yes \
+    --property=RestrictNamespaces=yes --property=LockPersonality=yes \
+    --property=MemoryDenyWriteExecute=yes --property=RemoveIPC=yes \
+    --property=KeyringMode=private \
+    --property=SystemCallArchitectures=native \
+    --property=SystemCallFilter=@system-service \
+    '--property=SystemCallFilter=~@network-io @mount @reboot @swap @obsolete @raw-io @resources @cpu-emulation @debug ptrace process_vm_readv process_vm_writev pidfd_getfd kcmp' \
+    --property=SystemCallErrorNumber=EPERM \
+    --property=RuntimeMaxSec=5s --property=TimeoutStartSec=5s \
+    --property=TimeoutStopSec=1s --property=Restart=no \
+    --property=UMask=0077 -- "$@" 2>&1)
+  transient_status=$?
+  set -e
+  wait_for_transient_collection "$unit"
+  native_transient_unit=
+}
+
+agent_uid=$(id -u vonk-agent)
+agent_gid=$(id -g vonk-agent)
+test "$agent_uid" -gt 1
+test "$agent_gid" -gt 1
+agent_groups=$(awk '/^Groups:/ {
+  if (NF < 2) exit 1
+  groups=$2
+  for (index=3; index <= NF; index++) groups=groups "," $index
+  print groups
+}' "/proc/$old_agent_pid/status")
+test "$agent_groups" = "$agent_gid"
+agent_start=$(awk '{print $22}' "/proc/$old_agent_pid/stat")
+agent_boot=$(sed -n '1p' /proc/sys/kernel/random/boot_id)
+agent_invocation=$(systemctl --system show --property=InvocationID --value \
+  "$agent_unit")
+[[ "$agent_invocation" =~ ^[0-9a-f]{32}$ ]]
+
+install -d -o root -g root -m 0755 /var/lib/dpkg/tmp.ci
+native_probe=/var/lib/dpkg/tmp.ci/vonk-repair-helper.probe
+native_denials=/var/lib/dpkg/tmp.ci/vonk-repair-probe-sandbox-denials
+install -o root -g root -m 0755 "$repair_probe_binary" "$native_probe"
+install -o root -g root -m 0755 "$test_root/probe-sandbox-denials" \
+  "$native_denials"
+test "$(stat -c %u:%g:%a:%h "$native_probe")" = 0:0:755:1
+test "$(stat -c %u:%g:%a:%h "$native_denials")" = 0:0:755:1
+
+native_nonce=$(openssl rand -hex 32)
+run_zero_cap_agent_transient \
+  "vonk-repair-agent-sandbox-${native_nonce}.service" \
+  "$native_denials" zero "$agent_uid" "$agent_gid"
+test "$transient_status" -eq 0
+test "$transient_output" = 'probe sandbox denied syscalls: PASS'
+
+probe_args=(
+  "$old_agent_pid" "$agent_start" "$native_nonce" "$authority_sha"
+  "$old_agent_sha" "$agent_boot" "$agent_invocation" "$agent_uid"
+  "$agent_gid" "$agent_groups" "$setpriv_sha" "$repair_probe_sha"
+)
+run_zero_cap_agent_transient \
+  "vonk-repair-agent-positive-${native_nonce}.service" \
+  "$native_probe" probe-agent "${probe_args[@]}"
+test "$transient_status" -eq 0
+grep -Eq \
+  "^schema_version=1 nonce=$native_nonce authority_sha256=$authority_sha agent_pid=$old_agent_pid agent_start=$agent_start agent_sha256=$old_agent_sha boot_id=$agent_boot invocation_id=$agent_invocation agent_uid=$agent_uid agent_gid=$agent_gid agent_groups=$agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" \
+  <<< "$transient_output"
+
+wrong_boot=00000000-0000-0000-0000-000000000001
+wrong_digest=$(printf '0%.0s' {1..64})
+negative_cases=(
+  "uid|7|0"
+  "gid|8|0"
+  "groups|9|0"
+  "pid|0|$old_helper_pid"
+  "start|1|1"
+  "boot|5|$wrong_boot"
+  "agent-digest|4|$wrong_digest"
+  "setpriv-digest|10|$wrong_digest"
+  "probe-digest|11|$wrong_digest"
+)
+for negative_case in "${negative_cases[@]}"; do
+  IFS='|' read -r negative_label negative_index negative_value \
+    <<< "$negative_case"
+  negative_args=("${probe_args[@]}")
+  negative_args[$negative_index]=$negative_value
+  negative_nonce=$(openssl rand -hex 32)
+  negative_args[2]=$negative_nonce
+  run_zero_cap_agent_transient \
+    "vonk-repair-agent-negative-${negative_label}-${negative_nonce}.service" \
+    "$native_probe" probe-agent "${negative_args[@]}"
+  test "$transient_status" -ne 0
+done
+
+collision_nonce=$(openssl rand -hex 32)
+collision_unit="vonk-repair-agent-collision-${collision_nonce}.service"
+native_transient_unit=$collision_unit
+/usr/bin/systemd-run --system --collect --quiet --unit="$collision_unit" \
+  -- /bin/sleep 1
+set +e
+/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+  --unit="$collision_unit" -- /bin/true >/dev/null 2>&1
+collision_status=$?
+set -e
+test "$collision_status" -ne 0
+wait_for_transient_collection "$collision_unit"
+native_transient_unit=
+
+rm -f -- "$native_denials" "$native_probe"
+assert_repair_probe_not_persisted
 
 assert_fixture_equal() {
   local label=$1

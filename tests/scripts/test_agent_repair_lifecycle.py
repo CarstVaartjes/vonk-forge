@@ -66,7 +66,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 def _assert_frozen_runtime_and_old_runner() -> None:
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "24f5db0f24c45f0c0d3a38033d8cc990879b9f0a65197f055141d1ded8644390"
+            "80b4d311bb873a1c030187dbe2f5ab07f396466c89e05d847a7d0e0100fc25ff"
         ),
         ROOT / "packaging/debian/postinst-repair": (
             "551a80895f536f30d041ab8019db1df0fbadd2503cb1715f81299a850f5c28ba"
@@ -229,6 +229,11 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
         'const PROBE: &str = "/var/lib/dpkg/tmp.ci/vonk-repair-helper.probe";' in probe
     )
     assert 'const SETPRIV: &str = "/usr/bin/setpriv";' in probe
+    assert 'const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";' in probe
+    assert (
+        'const AGENT_CGROUP: &str = "/system.slice/vonk-forge-agent.service";'
+        in probe
+    )
     assert 'const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";' in probe
     assert (
         "const HELPER_CGROUP: &str = "
@@ -237,22 +242,30 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     dispatch = probe[probe.index("match command.as_str()") :]
     assert dispatch.count('"check-wrapper" =>') == 1
     assert dispatch.count('"probe-helper" =>') == 1
+    assert dispatch.count('"probe-agent" =>') == 1
     assert '_ => Err("unsupported command".to_string())' in dispatch
     assert "if args.len() != 2" in probe
     assert "if args.len() != 9" in probe
+    assert "if args.len() != 12" in probe
+    assert '|| !is_decimal(&args[7])' in probe
+    assert '|| !is_decimal(&args[8])' in probe
+    assert '|| args[9] != args[8]' in probe
     assert ".filter(|number| number.to_string() == value)" in probe
     assert ".is_some_and(|number| number > 1)" in probe
-    assert "validate_probe_self()?;" in probe
+    assert "validate_helper_probe_self()?;" in probe
+    assert "validate_agent_probe_self(&args[7], &args[8], &args[9])?;" in probe
     assert 'const CAP_SYS_PTRACE: &str = "0000000000080000";' in probe
-    assert 'status_value(&status, "NoNewPrivs:")? != "1"' in probe
-    assert 'status_value(&status, "Seccomp:")? != "2"' in probe
+    assert 'status_value(status, "NoNewPrivs:")? != "1"' in probe
+    assert 'status_value(status, "Seccomp:")? != "2"' in probe
     assert "libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NOCTTY" in probe
     assert "held.nlink() != 1" in probe
     assert "held.mode() & 0o7777 != 0o755" in probe
     assert 'name.starts_with(b"security.")' in probe
     assert "if hash_reader(&file)? != expected_sha" in probe
     assert "metadata_identity(&before) != metadata_identity(&after)" in probe
-    assert 'if values != ["0", "0", "0", "0"]' in probe
+    assert "if values != [expected, expected, expected, expected]" in probe
+    assert 'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]' in probe
+    assert 'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"]' in probe
     assert "if raw != expected" in probe
     assert "let held = File::open(&exe_link)" in probe
     assert "let digest = hash_reader(&held)?;" in probe
@@ -268,16 +281,27 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
         "probe_output=$(/usr/bin/systemd-run"
     )
     assert manager.count('probe_unit_absent "$probe_unit"') == 2
+    assert manager.count('probe_unit_absent "$agent_probe_unit"') == 2
     assert (
         "vonk-repair-helper-probe-${probe_authority_prefix}-${probe_nonce}.service"
         in manager
     )
+    assert (
+        "vonk-repair-agent-probe-${probe_authority_prefix}-${probe_nonce}.service"
+        in manager
+    )
+    assert "--property=CapabilityBoundingSet=" in manager
+    assert '"$repair_probe" probe-agent' in manager
+    assert "--reuid" not in runner
+    assert "--regid" not in runner
+    assert '[ "$old_agent_groups" = "$vonk_agent_gid" ]' in runner
     assert "capture_running_old_metadata || return 1" in manager
     for identity in (
         "old_agent_pid",
         "old_agent_start",
         "old_agent_invocation",
         "old_agent_cgroup",
+        "old_agent_groups",
         "old_helper_pid",
         "old_helper_start",
         "old_helper_invocation",
@@ -295,7 +319,7 @@ def test_repair_native_probe_is_ephemeral_and_denied_syscalls_are_exercised() ->
     matrix = MATRIX.read_text()
 
     assert "assert_repair_probe_not_persisted()" in harness
-    assert harness.count("assert_repair_probe_not_persisted") == 6
+    assert harness.count("assert_repair_probe_not_persisted") == 7
     assert 'test ! -e "/var/lib/dpkg/tmp.ci/$repair_probe_control"' in harness
     assert 'test ! -L "/var/lib/dpkg/tmp.ci/$repair_probe_control"' in harness
     assert '-name "*$repair_probe_control*" -print -quit' in harness
@@ -305,16 +329,32 @@ def test_repair_native_probe_is_ephemeral_and_denied_syscalls_are_exercised() ->
     assert harness.count("errno != EPERM") == 1
     for status in (
         "CapInh:\\t0000000000000000",
-        "CapPrm:\\t0000000000080000",
-        "CapEff:\\t0000000000080000",
-        "CapBnd:\\t0000000000080000",
         "CapAmb:\\t0000000000000000",
         "NoNewPrivs:\\t1",
         "Seccomp:\\t2",
     ):
         assert status in harness
+    assert '? "0000000000080000" : "0000000000000000"' in harness
+    for cap_field in ("CapPrm", "CapEff", "CapBnd"):
+        assert f'"{cap_field}:\\t%s\\n"' in harness
     assert "--property=CapabilityBoundingSet=CAP_SYS_PTRACE" in harness
+    assert "--property=CapabilityBoundingSet=" in harness
     assert "--property=AmbientCapabilities=" in harness
     assert "--property=SystemCallErrorNumber=EPERM" in harness
+    assert '"$native_denials" zero "$agent_uid" "$agent_gid"' in harness
+    assert '"$native_probe" probe-agent "${probe_args[@]}"' in harness
+    for rejection in (
+        "uid|7|0",
+        "gid|8|0",
+        "groups|9|0",
+        "pid|0|$old_helper_pid",
+        "start|1|1",
+        "boot|5|$wrong_boot",
+        "agent-digest|4|$wrong_digest",
+        "setpriv-digest|10|$wrong_digest",
+        "probe-digest|11|$wrong_digest",
+    ):
+        assert rejection in harness
+    assert "vonk-repair-agent-collision-${collision_nonce}.service" in harness
     assert "probe sandbox denied syscalls: PASS" in harness
     assert "phases=(none" in matrix
