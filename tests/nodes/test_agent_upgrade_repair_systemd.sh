@@ -103,6 +103,7 @@ wrong_cgroup_pid=
 sandbox_probe_unit=
 native_transient_unit=
 repair_probe_control=vonk-repair-helper.probe
+synthetic_dpkg_fault_applied=false
 repair_failed_line=unavailable
 repair_failed_status=unavailable
 
@@ -219,9 +220,45 @@ cleanup() {
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.service.d
   rm -rf -- /run/vonk-forge-package-helper
   rm -f -- "$standard_runner"
+  case "$fault" in
+    dpkg-iU) fixture_dpkg_status='iU '; fixture_dpkg_version=$installed_version ;;
+    dpkg-iF) fixture_dpkg_status='iF '; fixture_dpkg_version=$installed_version ;;
+    dpkg-iHR) fixture_dpkg_status=iHR; fixture_dpkg_version=$installed_version ;;
+    absent) fixture_dpkg_status='rc '; fixture_dpkg_version=$installed_version ;;
+    newer) fixture_dpkg_status='ii '; fixture_dpkg_version=$ordinary_version ;;
+    *) fixture_dpkg_status=; fixture_dpkg_version= ;;
+  esac
+  if [[ "$synthetic_dpkg_fault_applied" = true ]]; then
+    if [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' \
+      vonk-forge-agent 2>/dev/null)" != "$fixture_dpkg_status" \
+      || "$(dpkg-query -W -f='${Version}' \
+        vonk-forge-agent 2>/dev/null)" != "$fixture_dpkg_version" ]]; then
+      printf 'unexpected synthetic dpkg cleanup state for %s\n' "$fault" >&2
+      status=1
+    fi
+    cleanup_normalize_log=$test_root/cleanup-normalize.log
+    if ! SYSTEMD_OFFLINE=1 dpkg --install --force-confold --force-downgrade \
+      "$old_package" >"$cleanup_normalize_log" 2>&1; then
+      printf 'failed to normalize synthetic dpkg cleanup state for %s\n' \
+        "$fault" >&2
+      sed -n '1,160p' "$cleanup_normalize_log" >&2 || true
+      status=1
+    elif [[ "$(dpkg-query -W \
+      -f='${db:Status-Abbrev}|${Architecture}|${Version}' \
+      vonk-forge-agent 2>/dev/null)" \
+      != "ii |arm64|$installed_version" ]]; then
+      printf 'normalized synthetic dpkg cleanup state is not exact for %s\n' \
+        "$fault" >&2
+      status=1
+    fi
+  fi
   if dpkg-query --show vonk-forge-agent >/dev/null 2>&1; then
-    SYSTEMD_OFFLINE=1 dpkg --purge --force-remove-reinstreq \
-      vonk-forge-agent >/dev/null 2>&1 || status=1
+    cleanup_dpkg_log=$test_root/cleanup-dpkg.log
+    if ! SYSTEMD_OFFLINE=1 dpkg --purge --force-remove-reinstreq \
+      vonk-forge-agent >"$cleanup_dpkg_log" 2>&1; then
+      sed -n '1,160p' "$cleanup_dpkg_log" >&2 || true
+      status=1
+    fi
   fi
   systemctl --system daemon-reload >/dev/null 2>&1 || true
   rm -rf -- /etc/vonk-forge-agent
@@ -1206,6 +1243,11 @@ case "$fault" in
     lock_holder=$!
     for _ in {1..200}; do [[ -e "$test_root/lock-held" ]] && break; sleep 0.01; done
     test -e "$test_root/lock-held"
+    ;;
+esac
+case "$fault" in
+  dpkg-iU|dpkg-iF|dpkg-iHR|absent|newer)
+    synthetic_dpkg_fault_applied=true
     ;;
 esac
 

@@ -185,7 +185,7 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert harness.count('scripts/verify-agent-deb" --json') == 3
     prebuild_fixture = harness.index("assert_old_fixture")
     postbuild_fixture = harness.index("assert_old_fixture", prebuild_fixture + 1)
-    fault_dispatch = harness.index('case "$fault" in')
+    fault_dispatch = harness.index('case "$fault" in', postbuild_fixture)
     helper_dispatch = harness.index('submit_helper_install "$dispatch_candidate"')
     assert prebuild_fixture < postbuild_fixture < fault_dispatch < helper_dispatch
     assert "source_recovery_nonce)=.*/\\1=<redacted>" in harness
@@ -198,6 +198,14 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert '"$test_root/before-source-authority" \'ii \'' in harness
     assert '"$test_root/pre-runner-authority" iHR' in harness
     assert 'if [[ "$crash_phase" = pre-runner-rename ]]; then' in harness
+    assert "unexpected synthetic dpkg cleanup state" in harness
+    assert "failed to normalize synthetic dpkg cleanup state" in harness
+    assert "normalized synthetic dpkg cleanup state is not exact" in harness
+    assert "--install --force-confold --force-downgrade" in harness
+    assert '!= "ii |arm64|$installed_version"' in harness
+    assert "synthetic_dpkg_fault_applied=true" in harness
+    assert "cleanup-normalize.log" in harness
+    assert "cleanup-dpkg.log" in harness
     assert 'snapshot_prepared_objects "$test_root/prepared-before"' in harness
     assert '"$test_root/before-source-authority"' in harness
     assert 'test "$(wc -l < "$repair_receipt")" -eq 16' in harness
