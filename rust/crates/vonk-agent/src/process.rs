@@ -256,7 +256,8 @@ fn run_process(
 ) -> Result<ProcessOutput, ProcessError> {
     let mut stdout = tempfile()?;
     let mut stderr = tempfile()?;
-    let environment = subprocess_environment(program, rustix::process::geteuid().as_raw());
+    let environment =
+        subprocess_environment(program, rustix::process::geteuid().as_raw(), arguments);
     let stdin = match input {
         Some(input) => Stdio::from(input.try_clone()?),
         None => Stdio::null(),
@@ -323,7 +324,8 @@ fn run_process_to_file(
     sink.set_len(0)?;
     sink.seek(SeekFrom::Start(0))?;
     let mut stderr = tempfile()?;
-    let environment = subprocess_environment(program, rustix::process::geteuid().as_raw());
+    let environment =
+        subprocess_environment(program, rustix::process::geteuid().as_raw(), arguments);
     let mut child = Command::new(program.path())
         .args(arguments)
         .stdin(Stdio::null())
@@ -365,7 +367,11 @@ fn run_process_to_file(
     })
 }
 
-fn subprocess_environment(program: Program, effective_uid: u32) -> BTreeMap<&'static str, String> {
+fn subprocess_environment(
+    program: Program,
+    effective_uid: u32,
+    arguments: &[String],
+) -> BTreeMap<&'static str, String> {
     let mut environment = BTreeMap::from([
         ("LANG", "C.UTF-8".to_owned()),
         ("LC_ALL", "C.UTF-8".to_owned()),
@@ -384,10 +390,22 @@ fn subprocess_environment(program: Program, effective_uid: u32) -> BTreeMap<&'st
             "DBUS_SESSION_BUS_ADDRESS",
             format!("unix:path={runtime}/bus"),
         );
+        if let Some(temporary_directory) = podman_image_tmpdir(arguments) {
+            environment.insert("TMPDIR", temporary_directory.display().to_string());
+        }
     } else {
         environment.insert("XDG_RUNTIME_DIR", "/run/vonk-forge-agent".to_owned());
     }
     environment
+}
+
+fn podman_image_tmpdir(arguments: &[String]) -> Option<std::path::PathBuf> {
+    arguments.windows(2).find_map(|pair| {
+        (pair[0] == "--root")
+            .then_some(Path::new(&pair[1]))
+            .and_then(Path::parent)
+            .map(|parent| parent.join("podman-image-tmp"))
+    })
 }
 
 fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
@@ -457,7 +475,7 @@ fn output_bytes(output: &ProcessOutput) -> u64 {
 mod tests {
     use super::{
         ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes,
-        present_during_scan, subprocess_environment,
+        podman_image_tmpdir, present_during_scan, subprocess_environment,
     };
     use std::{
         fs,
@@ -471,18 +489,33 @@ mod tests {
 
     #[test]
     fn podman_uses_the_effective_users_systemd_bus() {
-        let environment = subprocess_environment(Program::Podman, 128);
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("podman-storage");
+        let arguments = vec!["--root".to_owned(), root.display().to_string()];
+        let environment = subprocess_environment(Program::Podman, 128, &arguments);
 
         assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/user/128");
         assert_eq!(
             environment["DBUS_SESSION_BUS_ADDRESS"],
             "unix:path=/run/user/128/bus"
         );
+        assert_eq!(
+            environment["TMPDIR"],
+            temporary
+                .path()
+                .join("podman-image-tmp")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            podman_image_tmpdir(&arguments),
+            Some(temporary.path().join("podman-image-tmp"))
+        );
     }
 
     #[test]
     fn non_podman_tools_keep_the_private_agent_runtime() {
-        let environment = subprocess_environment(Program::Curl, 128);
+        let environment = subprocess_environment(Program::Curl, 128, &[]);
 
         assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/vonk-forge-agent");
         assert!(!environment.contains_key("DBUS_SESSION_BUS_ADDRESS"));

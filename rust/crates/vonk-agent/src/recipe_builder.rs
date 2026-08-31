@@ -1,7 +1,7 @@
 //! Rootless, typed recipe image build execution.
 
 use std::{
-    fs,
+    fmt, fs,
     io::{Seek, SeekFrom},
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::Path,
@@ -40,8 +40,8 @@ pub enum RecipeBuildError {
     BaseImageBlob,
     #[error("base image OCI archive verification failed")]
     BaseImageArchive,
-    #[error("Podman could not import the verified base image")]
-    BaseImageImport,
+    #[error("Podman could not import the verified base image ({diagnostic})")]
+    BaseImageImport { diagnostic: PodmanImportDiagnostic },
     #[error("Podman imported base image evidence is invalid")]
     BaseImageInspect,
     #[error("Podman recipe image build failed")]
@@ -58,6 +58,51 @@ pub enum RecipeBuildError {
     NetworkPolicy,
     #[error("build storage is unavailable")]
     Io(#[from] std::io::Error),
+}
+
+/// Stable, secret-free evidence extracted from bounded Podman output. Raw
+/// subprocess output can contain host paths and registry details, so operation
+/// results expose only this reviewed classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PodmanImportDiagnostic {
+    TemporaryStorageExhausted,
+    DeclaredStorageLimitExceeded,
+    SubordinateIdMappingUnavailable,
+    ArchiveFormatRejected,
+    PermissionDenied,
+    DeadlineExceeded,
+    DiagnosticOutputLimitExceeded,
+    SubprocessUnavailable,
+    Unknown,
+}
+
+impl fmt::Display for PodmanImportDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
+            Self::DeclaredStorageLimitExceeded => "declared-storage-limit-exceeded",
+            Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
+            Self::ArchiveFormatRejected => "archive-format-rejected",
+            Self::PermissionDenied => "permission-denied",
+            Self::DeadlineExceeded => "deadline-exceeded",
+            Self::DiagnosticOutputLimitExceeded => "diagnostic-output-limit-exceeded",
+            Self::SubprocessUnavailable => "subprocess-unavailable",
+            Self::Unknown => "unclassified-podman-load-failure",
+        })
+    }
+}
+
+impl RecipeBuildError {
+    pub(crate) fn failure_evidence(&self) -> serde_json::Value {
+        match self {
+            Self::BaseImageImport { diagnostic } => serde_json::json!({
+                "diagnostic": diagnostic.to_string(),
+                "reason": self.to_string(),
+                "stage": "base-image-import",
+            }),
+            _ => serde_json::json!({"reason": self.to_string()}),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -124,6 +169,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         let staging = PodmanBuildStaging::create(&staging_root)?;
         let context = staging.path().join("context");
         let storage = staging.path().join("podman-storage");
+        let podman_image_tmp = staging.path().join("podman-image-tmp");
         fs::create_dir_all(self.runtime_root)?;
         // Ubuntu 24.04 ships Podman 4.9, which rejects runroot path strings
         // longer than 50 bytes. Keep the durable, storage-accounted graphroot
@@ -134,6 +180,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             return Err(RecipeBuildError::Evidence);
         }
         fs::create_dir_all(&storage)?;
+        fs::create_dir(&podman_image_tmp)?;
         let source = materialize_source_bundle(archive, &request.source_bundle_sha256, &context)?;
         let policy = inspect_build_source(&source.files, &request.dockerfile);
         if !policy.passed {
@@ -187,11 +234,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             &arguments,
             timeout,
             staging.path(),
-            request
-                .limits
-                .temporary_bytes
-                .checked_add(request.base_image_storage_bytes)
-                .ok_or(RecipeBuildError::Evidence)?,
+            build_staging_limit(request)?,
             request.limits.output_bytes,
         )?;
         if !output.success {
@@ -306,17 +349,22 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             }
             archive.file.seek(SeekFrom::Start(0))?;
             let mut load_arguments = podman_storage_arguments(storage, runroot);
-            load_arguments.push("load".to_owned());
-            let loaded = self.runner.run_bounded_directory_with_input(
-                Program::Podman,
-                &load_arguments,
-                Duration::from_secs(600),
-                &archive.file,
-                storage,
-                request.base_image_storage_bytes,
-            )?;
+            load_arguments.extend(["load".to_owned(), "--quiet".to_owned()]);
+            let loaded = self
+                .runner
+                .run_bounded_directory_with_input(
+                    Program::Podman,
+                    &load_arguments,
+                    Duration::from_secs(600),
+                    &archive.file,
+                    storage.parent().ok_or(RecipeBuildError::Evidence)?,
+                    build_staging_limit(request)?,
+                )
+                .map_err(podman_import_process_error)?;
             if !loaded.success {
-                return Err(RecipeBuildError::BaseImageImport);
+                return Err(RecipeBuildError::BaseImageImport {
+                    diagnostic: podman_import_diagnostic(&loaded),
+                });
             }
             let mut inspect_arguments = podman_storage_arguments(storage, runroot);
             inspect_arguments.extend([
@@ -334,6 +382,55 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }
         Ok(())
     }
+}
+
+fn build_staging_limit(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
+    request
+        .base_image_storage_bytes
+        .checked_add(request.limits.temporary_bytes)
+        .and_then(|bytes| bytes.checked_add(request.source_bundle_bytes))
+        .ok_or(RecipeBuildError::Evidence)
+}
+
+fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImportDiagnostic {
+    let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
+    evidence.extend_from_slice(&output.stdout);
+    evidence.push(b'\n');
+    evidence.extend_from_slice(&output.stderr);
+    let evidence = String::from_utf8_lossy(&evidence).to_ascii_lowercase();
+    if evidence.contains("no space left on device") || evidence.contains("disk quota exceeded") {
+        PodmanImportDiagnostic::TemporaryStorageExhausted
+    } else if evidence.contains("insufficient uids or gids")
+        || evidence.contains("subuid")
+        || evidence.contains("subgid")
+        || evidence.contains("newuidmap")
+        || evidence.contains("newgidmap")
+        || evidence.contains("lchown")
+    {
+        PodmanImportDiagnostic::SubordinateIdMappingUnavailable
+    } else if evidence.contains("permission denied") || evidence.contains("operation not permitted")
+    {
+        PodmanImportDiagnostic::PermissionDenied
+    } else if evidence.contains("payload does not match any of the supported image formats")
+        || evidence.contains("oci archive")
+        || evidence.contains("oci-archive")
+        || evidence.contains("invalid reference format")
+        || evidence.contains("invalid image name")
+    {
+        PodmanImportDiagnostic::ArchiveFormatRejected
+    } else {
+        PodmanImportDiagnostic::Unknown
+    }
+}
+
+fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
+    let diagnostic = match error {
+        ProcessError::StorageLimit => PodmanImportDiagnostic::DeclaredStorageLimitExceeded,
+        ProcessError::Timeout => PodmanImportDiagnostic::DeadlineExceeded,
+        ProcessError::OutputLimit => PodmanImportDiagnostic::DiagnosticOutputLimitExceeded,
+        ProcessError::Io(_) => PodmanImportDiagnostic::SubprocessUnavailable,
+    };
+    RecipeBuildError::BaseImageImport { diagnostic }
 }
 
 fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
@@ -449,4 +546,36 @@ fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
         digest.update(&buffer[..read]);
     }
     Ok(hex::encode(digest.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecipeBuildError, podman_import_process_error};
+    use crate::process::ProcessError;
+
+    #[test]
+    fn podman_import_process_failures_have_stable_secret_free_evidence() {
+        for (error, diagnostic) in [
+            (
+                ProcessError::StorageLimit,
+                "declared-storage-limit-exceeded",
+            ),
+            (ProcessError::Timeout, "deadline-exceeded"),
+            (
+                ProcessError::OutputLimit,
+                "diagnostic-output-limit-exceeded",
+            ),
+            (
+                ProcessError::Io(std::io::Error::other("/private/secret")),
+                "subprocess-unavailable",
+            ),
+        ] {
+            let error = podman_import_process_error(error);
+            assert!(matches!(error, RecipeBuildError::BaseImageImport { .. }));
+            assert_eq!(error.failure_evidence()["stage"], "base-image-import");
+            assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
+            assert!(!error.failure_evidence().to_string().contains("private"));
+            assert!(!error.failure_evidence().to_string().contains("secret"));
+        }
+    }
 }

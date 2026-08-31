@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{Cursor, Read, Seek, SeekFrom},
     os::unix::fs::{MetadataExt, PermissionsExt, symlink},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     thread,
     time::{Duration, Instant},
@@ -34,6 +34,60 @@ struct Runner {
 struct RetryManifestRunner {
     inner: Runner,
     remaining_failures: Cell<usize>,
+}
+
+struct FailedImportRunner {
+    inner: Runner,
+    stderr: Vec<u8>,
+    temporary_directory: RefCell<Option<PathBuf>>,
+    monitored_directory: RefCell<Option<PathBuf>>,
+    maximum_bytes: Cell<u64>,
+}
+
+impl ProcessRunner for FailedImportRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.inner.run(program, arguments, timeout)
+    }
+
+    fn run_bounded_directory_with_input(
+        &self,
+        program: Program,
+        arguments: &[String],
+        _timeout: Duration,
+        input: &File,
+        directory: &Path,
+        maximum_bytes: u64,
+    ) -> Result<ProcessOutput, ProcessError> {
+        assert_eq!(program, Program::Podman);
+        assert!(arguments.iter().any(|argument| argument == "load"));
+        assert!(arguments.iter().any(|argument| argument == "--quiet"));
+        let storage = arguments
+            .windows(2)
+            .find(|pair| pair[0] == "--root")
+            .map(|pair| Path::new(&pair[1]))
+            .unwrap();
+        let temporary_directory = storage.parent().unwrap().join("podman-image-tmp");
+        assert!(temporary_directory.is_dir());
+        assert_eq!(temporary_directory.parent(), Some(directory));
+        assert!(input.metadata()?.len() > 0);
+        self.temporary_directory
+            .borrow_mut()
+            .replace(temporary_directory);
+        self.monitored_directory
+            .borrow_mut()
+            .replace(directory.to_path_buf());
+        self.maximum_bytes.set(maximum_bytes);
+        Ok(ProcessOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: self.stderr.clone(),
+        })
+    }
 }
 
 impl ProcessRunner for RetryManifestRunner {
@@ -702,12 +756,46 @@ fn faithful_untagged_oci_layout_loads_with_spark_podman() {
 
     let storage = archive_root.path().join("storage");
     let runroot = archive_root.path().join("run");
+    let image_tmp = archive_root.path().join("image-tmp");
+    let home = archive_root.path().join("home");
+    let user_runtime = archive_root.path().join("user-runtime");
+    let storage_config = archive_root.path().join("containers-storage.conf");
     fs::create_dir_all(&storage).unwrap();
     fs::create_dir_all(&runroot).unwrap();
+    fs::create_dir_all(&image_tmp).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&user_runtime).unwrap();
+    fs::write(
+        &storage_config,
+        format!(
+            "[storage]\ndriver = \"overlay\"\nrunroot = \"{}\"\ngraphroot = \"{}\"\n\n[storage.options.overlay]\nmount_program = \"/usr/bin/fuse-overlayfs\"\n",
+            runroot.display(),
+            storage.display()
+        ),
+    )
+    .unwrap();
+    let configure_podman = |command: &mut Command| {
+        command
+            .env_clear()
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", &home)
+            .env("XDG_DATA_HOME", &home)
+            .env("XDG_RUNTIME_DIR", &user_runtime)
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!("unix:path={}", user_runtime.join("bus").display()),
+            )
+            .env("CONTAINERS_STORAGE_CONF", &storage_config)
+            .env("TMPDIR", &image_tmp);
+    };
     let storage_arguments = podman_arguments(&storage, &runroot);
     let mut load_arguments = storage_arguments.clone();
-    load_arguments.push("load".to_owned());
-    let loaded = Command::new("/usr/bin/podman")
+    load_arguments.extend(["load".to_owned(), "--quiet".to_owned()]);
+    let mut load = Command::new("/usr/bin/podman");
+    configure_podman(&mut load);
+    let loaded = load
         .args(&load_arguments)
         .stdin(Stdio::from(File::open(&archive).unwrap()))
         .output()
@@ -726,7 +814,9 @@ fn faithful_untagged_oci_layout_loads_with_spark_podman() {
         "{{.Digest}}\t{{.Os}}\t{{.Architecture}}".to_owned(),
         fixture.reference.clone(),
     ]);
-    let inspected = Command::new("/usr/bin/podman")
+    let mut inspect = Command::new("/usr/bin/podman");
+    configure_podman(&mut inspect);
+    let inspected = inspect
         .args(&inspect_arguments)
         .stdin(Stdio::null())
         .output()
@@ -914,7 +1004,8 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
 
 #[test]
 fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() {
-    let fixture = registry_fixture();
+    let mut fixture = registry_fixture();
+    fixture.reference = format!("1.1.1.1/vonkforge/base@{}", fixture.manifest_digest);
     let (archive, digest) = bundle_for(&fixture.reference);
     let mut build_request = request(archive.len(), digest);
     build_request.base_images = vec![RecipeBuildBaseImage {
@@ -1010,6 +1101,83 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
         !arguments.iter().any(|value| value == "pull")
             && !arguments.iter().any(|value| value == "--pull")
     }));
+}
+
+#[test]
+fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
+    let cases = [
+        (
+            b"write /private/secret/cache: no space left on device".as_slice(),
+            "temporary-storage-exhausted",
+        ),
+        (
+            b"potentially insufficient UIDs or GIDs; inspect /etc/subuid".as_slice(),
+            "subordinate-id-mapping-unavailable",
+        ),
+        (
+            b"payload does not match any of the supported image formats: oci-archive".as_slice(),
+            "archive-format-rejected",
+        ),
+        (
+            b"open /private/secret/archive: permission denied".as_slice(),
+            "permission-denied",
+        ),
+        (
+            b"opaque failure containing /private/secret".as_slice(),
+            "unclassified-podman-load-failure",
+        ),
+    ];
+    for (stderr, diagnostic) in cases {
+        let (archive, digest) = bundle();
+        let request = request(archive.len(), digest);
+        let root = tempdir().unwrap();
+        stage_base_archive(root.path());
+        let runtime = tempdir().unwrap();
+        let runner = FailedImportRunner {
+            inner: Runner {
+                calls: RefCell::new(Vec::new()),
+                fail_build: false,
+                oversize_base: false,
+                registry: None,
+                substitute_base: false,
+            },
+            stderr: stderr.to_vec(),
+            temporary_directory: RefCell::new(None),
+            monitored_directory: RefCell::new(None),
+            maximum_bytes: Cell::new(0),
+        };
+
+        let error = RecipeBuilder {
+            runner: &runner,
+            data_root: root.path(),
+            runtime_root: runtime.path(),
+        }
+        .build(
+            &request,
+            Uuid::parse_str("00000000-0000-4000-8000-00000000003a").unwrap(),
+            &archive,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("Podman could not import the verified base image ({diagnostic})")
+        );
+        assert!(!error.to_string().contains("private"));
+        assert!(!error.to_string().contains("secret"));
+        let temporary_directory = runner.temporary_directory.borrow();
+        let temporary_directory = temporary_directory.as_ref().unwrap();
+        let monitored_directory = runner.monitored_directory.borrow();
+        let monitored_directory = monitored_directory.as_ref().unwrap();
+        assert!(temporary_directory.starts_with(root.path().join("build-staging")));
+        assert!(monitored_directory.starts_with(root.path().join("build-staging")));
+        assert_eq!(
+            runner.maximum_bytes.get(),
+            request.base_image_storage_bytes
+                + request.limits.temporary_bytes
+                + request.source_bundle_bytes
+        );
+    }
 }
 
 #[test]
