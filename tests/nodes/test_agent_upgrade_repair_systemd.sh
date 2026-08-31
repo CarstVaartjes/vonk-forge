@@ -433,6 +433,20 @@ SOURCE
   gcc -O2 -o "$output" "$test_root/helper-$identity.c"
 }
 
+if [[ -n "${BUILD_EGRESS_BINARY:-}" ]]; then
+  build_egress_fixture=$(realpath -e -- "$BUILD_EGRESS_BINARY")
+  test "$build_egress_fixture" = \
+    "$repo_root/target/release/vonk-build-egress"
+else
+  RUSTFLAGS='-C target-feature=+crt-static' \
+    cargo build --locked --release --manifest-path "$repo_root/Cargo.toml" \
+      --package vonk-build-egress
+  build_egress_fixture=$repo_root/target/release/vonk-build-egress
+fi
+test ! -L "$build_egress_fixture"
+test -f "$build_egress_fixture"
+test -x "$build_egress_fixture"
+
 for generation in old target next; do
   case "$generation" in
     old) digest=$build_digest_old; marker=old; semantic=0.1.0 ;;
@@ -443,9 +457,12 @@ for generation in old target next; do
   build_helper "$test_root/$generation-bin/vonk-agent-helper" "$marker"
   cp -- "$test_root/$generation-bin/vonk-agent-helper" \
     "$test_root/$generation-bin/oras"
+  cp -- "$build_egress_fixture" \
+    "$test_root/$generation-bin/vonk-build-egress"
   printf '%s fixture license\n' "$generation" \
     > "$test_root/$generation-bin/oras.LICENSE"
-  chmod 0555 "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,oras}
+  chmod 0555 \
+    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,oras}
   fixture_agent=$test_root/$generation-bin/vonk-agent
   fixture_agent_sha=$(sha256sum "$fixture_agent" | cut -d' ' -f1)
   fixture_self_test=$("$fixture_agent" --config /dev/null self-test)
@@ -627,6 +644,16 @@ old_package="$test_root/old-dist/vonk-forge-agent_${installed_version}_arm64.deb
 source_package="$test_root/target-dist/vonk-forge-agent_${source_version}_arm64.deb"
 "$repo_root/scripts/verify-agent-deb" --json "$old_package" >/dev/null
 "$repo_root/scripts/verify-agent-deb" --json "$source_package" >/dev/null
+for ordinary_package in "$old_package" "$source_package"; do
+  ordinary_name=$(basename "$ordinary_package" .deb)
+  ordinary_payload=$test_root/extracted/$ordinary_name
+  dpkg-deb --extract "$ordinary_package" "$ordinary_payload"
+  ordinary_egress=$ordinary_payload/usr/lib/vonk-forge/vonk-build-egress
+  test -f "$ordinary_egress"
+  test ! -L "$ordinary_egress"
+  test "$(stat -c %u:%g:%a:%h "$ordinary_egress")" = 0:0:555:1
+  cmp -s -- "$build_egress_fixture" "$ordinary_egress"
+done
 
 cat > "$firewall_unit" <<'UNIT'
 [Unit]
@@ -997,6 +1024,8 @@ dpkg-deb --extract "$repair_package" "$repair_payload"
 repair_standard_payload=$repair_payload/usr/lib/vonk-forge/\
 vonk-forge-package-upgrade-recover.standard
 test -f "$repair_standard_payload"
+test ! -e "$repair_payload/usr/lib/vonk-forge/vonk-build-egress"
+test ! -L "$repair_payload/usr/lib/vonk-forge/vonk-build-egress"
 if [[ "$standard_residue" = exact-0755 ]]; then
   install -o root -g root -m 0755 "$repair_standard_payload" "$standard_runner"
   test "$(stat -c %u:%g:%a:%h "$standard_runner")" = 0:0:755:1

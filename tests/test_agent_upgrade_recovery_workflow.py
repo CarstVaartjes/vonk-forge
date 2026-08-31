@@ -18,6 +18,8 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert "fuse-overlayfs iproute2 iptables openssl podman shellcheck" in text
     assert "slirp4netns systemd uidmap util-linux" in text
     assert "shellcheck tests/nodes/test_agent_upgrade_recovery_systemd.sh" in text
+    assert "cargo build --locked --release --package vonk-build-egress" in text
+    assert "BUILD_EGRESS_BINARY" in text
     assert "VERSION=0.1.0~dev.381+ga122909feaa3" in text
     assert "STALE_PENDING_FORMAT=legacy2" in text
     assert "CRASH_MODE=full-cgroup" in text
@@ -43,6 +45,7 @@ def test_upgrade_recovery_workflow_is_scoped_to_recovery_inputs() -> None:
         "control/src/vonk_control/host_helper_authority.py",
         "rust/crates/vonk-agent-helper/**",
         "rust/crates/vonk-agent-protocol/**",
+        "rust/crates/vonk-build-egress/**",
         "scripts/build-agent-deb",
         "tests/nodes/test_agent_upgrade_recovery_systemd.sh",
     ):

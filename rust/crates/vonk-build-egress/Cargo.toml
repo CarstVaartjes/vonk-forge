@@ -1,0 +1,10 @@
+[package]
+name = "vonk-build-egress"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "vonk-build-egress"
+path = "src/main.rs"

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{cell::RefCell, fs, time::Duration};
+use std::{cell::RefCell, fs, path::Path, time::Duration};
 
 use tempfile::tempdir;
 use vonk_agent::{
@@ -55,6 +55,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
         runner: &runner,
         meminfo_path: &meminfo,
         store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
         fabric_address: Some("192.168.100.2".parse().unwrap()),
         fabric_bandwidth_mbps: Some(200_000),
     }
@@ -80,6 +81,11 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
         inventory
             .capabilities
             .contains(&"build.rootless-podman.v1".to_owned())
+    );
+    assert!(
+        inventory
+            .capabilities
+            .contains(&"recipe.build.egress-proxy.v1".to_owned())
     );
     assert!(
         inventory
@@ -120,6 +126,7 @@ fn malformed_or_inconsistent_memory_evidence_fails_closed() {
             runner: &runner,
             meminfo_path: &meminfo,
             store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
             fabric_address: None,
             fabric_bandwidth_mbps: None,
         }
@@ -148,6 +155,7 @@ fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
         runner: &runner,
         meminfo_path: &meminfo,
         store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
         fabric_address: None,
         fabric_bandwidth_mbps: None,
     }
@@ -183,6 +191,7 @@ fn unavailable_memory_on_an_unknown_gpu_fails_closed() {
             runner: &runner,
             meminfo_path: &meminfo,
             store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
             fabric_address: None,
             fabric_bandwidth_mbps: None,
         }
@@ -211,6 +220,7 @@ fn inventory_refuses_to_advertise_spark_runtime_without_nvidia_cdi() {
             runner: &runner,
             meminfo_path: &meminfo,
             store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
             fabric_address: None,
             fabric_bandwidth_mbps: None,
         }

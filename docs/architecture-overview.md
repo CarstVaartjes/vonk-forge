@@ -158,11 +158,18 @@ complete shape plus the host-firewall preflight. It rejects every partial or
 additional host privilege, arbitrary devices, privileged containers,
 additional capabilities, and socket mounts.
 
-Public build networking is fail-closed until a hostname-aware egress
-proxy/firewall is installed. `slirp4netns` is not an allowlist, so the agent
-rejects `network.mode: public` rather than allowing a Dockerfile to reach
-private or metadata endpoints. Networkless recipes and cached pinned bases are
-the supported initial build path.
+Public builds use a per-build hostname-aware egress boundary. The build joins
+only an internal rootless Podman network; a minimal dual-homed proxy sidecar is
+the sole member that also joins a fresh outbound network. The proxy accepts
+HTTP GET/HEAD and CONNECT only for each exact declared hostname on ports 80 or
+443, resolves the name for every connection, rejects the connection if any DNS
+answer is private, link-local, metadata, multicast, documentation, or reserved,
+and connects only a vetted address. Proxy credentials and hop-by-hop headers
+are not forwarded, concurrency/header/transfer/idle limits are bounded, and all
+containers, networks, images, and private storage are removed on every terminal
+path. `slirp4netns` is never treated as an allowlist. The Controller requires
+fresh `recipe.build.egress-proxy.v1` capability evidence before dispatching a
+public build, while networkless builds remain `--network=none`.
 
 Installation maps a resolved recipe revision to exact node identities and ranks.
 The controller transfers that one verified Docker-loadable archive over the

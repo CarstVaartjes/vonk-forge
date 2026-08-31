@@ -90,6 +90,26 @@ impl ProcessRunner for FailedImportRunner {
     }
 }
 
+struct CancellingRunner {
+    inner: Runner,
+    cancelled: Cell<bool>,
+}
+
+impl ProcessRunner for CancellingRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        let output = self.inner.run(program, arguments, timeout);
+        if arguments.iter().any(|value| value == "build") {
+            self.cancelled.set(true);
+        }
+        output
+    }
+}
+
 impl ProcessRunner for RetryManifestRunner {
     fn run(
         &self,
@@ -882,6 +902,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(&request(archive.len(), digest), operation, &archive)
     .unwrap();
@@ -1026,6 +1047,7 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1151,6 +1173,7 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
             runner: &runner,
             data_root: root.path(),
             runtime_root: runtime.path(),
+            egress_binary: Path::new("/bin/true"),
         }
         .build(
             &request,
@@ -1206,6 +1229,7 @@ fn fresh_node_retries_a_failed_manifest_transfer() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1243,6 +1267,7 @@ fn fresh_node_reports_manifest_stage_after_bounded_retries() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1278,6 +1303,7 @@ fn repeated_identical_base_image_layer_is_materialized_once() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1337,6 +1363,7 @@ fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1375,6 +1402,7 @@ fn base_image_producer_rejects_declared_archive_above_bound_before_blob_fetch() 
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1415,6 +1443,7 @@ fn base_image_storage_rejects_symlinked_data_and_supply_roots() {
         runner: &runner,
         data_root: &linked_data,
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest.clone()),
@@ -1444,6 +1473,7 @@ fn base_image_storage_rejects_symlinked_data_and_supply_roots() {
         runner: &runner,
         data_root: data.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1488,6 +1518,7 @@ fn base_image_storage_rejects_symlinked_digest_directory_and_archive() {
         runner: &runner,
         data_root: data.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest.clone()),
@@ -1514,6 +1545,7 @@ fn base_image_storage_rejects_symlinked_digest_directory_and_archive() {
         runner: &runner,
         data_root: data.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1543,6 +1575,7 @@ fn base_image_storage_rejects_digest_path_escape_before_registry_or_podman() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,
@@ -1616,6 +1649,7 @@ fn base_image_consumer_holds_verified_descriptor_across_path_replacement() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1653,6 +1687,7 @@ fn base_image_archive_rejects_a_layer_substituted_under_the_exact_manifest() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1690,6 +1725,7 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(&request(archive.len(), digest), operation, &archive)
     .unwrap_err();
@@ -1705,7 +1741,7 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
 }
 
 #[test]
-fn build_rejects_declared_public_hosts_before_running_podman() {
+fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
@@ -1715,6 +1751,111 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
         substitute_base: false,
     };
     let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    let mut build_request = request(archive.len(), digest);
+    build_request.network = RecipeBuildNetwork {
+        mode: "public".to_owned(),
+        hosts: vec!["pypi.org".to_owned()],
+    };
+
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(&build_request, operation, &archive)
+    .unwrap();
+
+    let calls = runner.calls.borrow();
+    let proxy = calls
+        .iter()
+        .find(|(_, arguments)| arguments.iter().any(|value| value == "run"))
+        .unwrap();
+    assert!(
+        proxy
+            .1
+            .windows(2)
+            .any(|pair| pair == ["--allow-host", "pypi.org"])
+    );
+    assert!(proxy.1.iter().any(|value| value == "--read-only"));
+    assert!(proxy.1.iter().any(|value| value == "--cap-drop=all"));
+    let build = calls
+        .iter()
+        .find(|(_, arguments)| arguments.iter().any(|value| value == "build"))
+        .unwrap();
+    assert!(
+        build
+            .1
+            .iter()
+            .any(|value| value.starts_with("--network=vonk-build-in-"))
+    );
+    assert!(
+        build
+            .1
+            .iter()
+            .any(|value| value.starts_with("HTTP_PROXY=http://vonk-build-proxy-"))
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(_, arguments)| arguments.windows(2).any(|pair| pair == ["network", "rm"]))
+    );
+}
+
+#[test]
+fn build_rejects_recipe_proxy_argument_override_before_starting_the_boundary() {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: None,
+        substitute_base: false,
+    };
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let mut build_request = request(archive.len(), digest);
+    build_request.network = RecipeBuildNetwork {
+        mode: "public".to_owned(),
+        hosts: vec!["pypi.org".to_owned()],
+    };
+    build_request.arguments[0].name = "HTTPS_PROXY".to_owned();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::NetworkPolicy));
+}
+
+#[test]
+fn public_build_cancellation_stops_work_and_removes_the_egress_boundary() {
+    let (archive, digest) = bundle();
+    let runner = CancellingRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: None,
+            substitute_base: false,
+        },
+        cancelled: Cell::new(false),
+    };
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
@@ -1727,12 +1868,36 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
-    .build(&build_request, operation, &archive)
+    .build_cancellable(&build_request, operation, &archive, &|| {
+        runner.cancelled.get()
+    })
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::NetworkPolicy));
-    assert!(runner.calls.borrow().is_empty());
+    assert!(matches!(
+        error,
+        RecipeBuildError::Process(ProcessError::Cancelled)
+    ));
+    let calls = runner.inner.calls.borrow();
+    assert!(calls.iter().any(|(_, arguments)| {
+        arguments
+            .windows(2)
+            .any(|pair| pair == ["stop", "--time=1"])
+    }));
+    assert!(
+        calls
+            .iter()
+            .any(|(_, arguments)| arguments.windows(2).any(|pair| pair == ["network", "rm"]))
+    );
+    assert!(
+        !root
+            .path()
+            .join("build-staging")
+            .read_dir()
+            .unwrap()
+            .any(|_| true)
+    );
 }
 
 #[test]
@@ -1756,6 +1921,7 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(&build_request, operation, &archive)
     .unwrap_err();
@@ -1780,6 +1946,7 @@ fn build_fails_closed_when_declared_base_archive_is_absent() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1823,6 +1990,7 @@ fn build_rejects_substituted_base_before_offline_build() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &request(archive.len(), digest),
@@ -1861,6 +2029,7 @@ fn base_import_is_bounded_before_offline_build() {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
     }
     .build(
         &build_request,

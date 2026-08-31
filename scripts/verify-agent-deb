@@ -24,8 +24,10 @@ MAX_MEMBER_BYTES = 512 * 1024 * 1024
 REQUIRED_ELF = {
     "usr/lib/vonk-forge/vonk-agent",
     "usr/lib/vonk-forge/vonk-agent-helper",
+    "usr/lib/vonk-forge/vonk-build-egress",
     "usr/lib/vonk-forge/oras",
 }
+REPAIR_ELF_REMOVALS = {"usr/lib/vonk-forge/vonk-build-egress"}
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
@@ -355,10 +357,10 @@ def _verify_members(
     members: dict[str, tarfile.TarInfo], *, repair: bool = False
 ) -> None:
     files = {name for name, member in members.items() if member.isfile()}
-    required_payload = REQUIRED_PAYLOAD | (
+    required_payload = (REQUIRED_PAYLOAD - (REPAIR_ELF_REMOVALS if repair else set())) | (
         REPAIR_PAYLOAD_ADDITIONS if repair else set()
     )
-    required_executable = REQUIRED_EXECUTABLE | (
+    required_executable = (REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())) | (
         {REPAIR_STANDARD_RUNNER} if repair else set()
     )
     missing = required_payload - files
@@ -621,15 +623,33 @@ def _verify_payload(
         payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
     ).read_bytes() != (control / "preinst").read_bytes():
         raise VerificationError("preinst and durable recovery runner differ")
-    for name in REQUIRED_ELF:
+    for name in REQUIRED_ELF - (REPAIR_ELF_REMOVALS if repair else set()):
         path = payload / name
-        raw = path.read_bytes()[:64]
+        binary = path.read_bytes()
+        raw = binary[:64]
         if (
             len(raw) != 64
             or raw[:7] != b"\x7fELF\x02\x01\x01"
             or struct.unpack_from("<H", raw, 18)[0] != ARCHITECTURES[architecture]
         ):
             raise VerificationError(f"binary architecture is invalid: {name}")
+        if name == "usr/lib/vonk-forge/vonk-build-egress":
+            program_offset = struct.unpack_from("<Q", raw, 32)[0]
+            program_size = struct.unpack_from("<H", raw, 54)[0]
+            program_count = struct.unpack_from("<H", raw, 56)[0]
+            if (
+                program_size < 56
+                or program_count < 1
+                or program_offset + program_size * program_count > len(binary)
+                or any(
+                    struct.unpack_from(
+                        "<I", binary, program_offset + index * program_size
+                    )[0]
+                    == 3
+                    for index in range(program_count)
+                )
+            ):
+                raise VerificationError("build egress binary is not static")
     units = {
         name: (payload / f"lib/systemd/system/{name}").read_text(encoding="utf-8")
         for name in (
@@ -1349,6 +1369,12 @@ def _verify_package_signature(public_key: bytes, deb: Path, digest: str) -> str:
     return signature_text
 
 
+def _evidence_executables(*, repair: bool) -> set[str]:
+    return (REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())) | (
+        {REPAIR_STANDARD_RUNNER} if repair else set()
+    )
+
+
 def _verify_evidence(
     payload: Path,
     version: str,
@@ -1370,9 +1396,8 @@ def _verify_evidence(
         raise VerificationError("CycloneDX SBOM is invalid")
     if documents["sbom.spdx.json"].get("spdxVersion") != "SPDX-2.3":
         raise VerificationError("SPDX SBOM is invalid")
-    evidence_executables = REQUIRED_EXECUTABLE | (
-        {REPAIR_STANDARD_RUNNER} if repair_authority is not None else set()
-    )
+    is_repair = repair_authority is not None
+    evidence_executables = _evidence_executables(repair=is_repair)
     expected = {
         Path(name).name: hashlib.sha256((payload / name).read_bytes()).hexdigest()
         for name in evidence_executables

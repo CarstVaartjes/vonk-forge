@@ -14,6 +14,7 @@ on:
       - rust/crates/vonk-agent/**
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
+      - rust/crates/vonk-build-egress/**
       - scripts/build-agent-deb
       - tests/nodes/test_agent_upgrade_recovery_systemd.sh
       - tests/test_agent_upgrade_recovery_workflow.py
@@ -30,6 +31,7 @@ on:
       - rust/crates/vonk-agent/**
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
+      - rust/crates/vonk-build-egress/**
       - scripts/build-agent-deb
       - tests/nodes/test_agent_upgrade_recovery_systemd.sh
       - tests/test_agent_upgrade_recovery_workflow.py
@@ -87,6 +89,14 @@ jobs:
           test "$(dpkg --print-architecture)" = arm64
           bash -n tests/nodes/test_agent_upgrade_recovery_systemd.sh
           shellcheck tests/nodes/test_agent_upgrade_recovery_systemd.sh
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
+          build_egress=$(realpath target/release/vonk-build-egress)
+          build_egress_staged="$build_egress.root-owned"
+          sudo install -o root -g root -m 0755 \
+            "$build_egress" "$build_egress_staged"
+          sudo mv -f "$build_egress_staged" "$build_egress"
+          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
           compatibility_cargo_dir=$(dirname "$(command -v cargo)")
           compatibility_cargo_home=$(dirname "$compatibility_cargo_dir")
           compatibility_rustup_home=$(rustup show home)
@@ -98,4 +108,5 @@ jobs:
             STALE_PENDING_FORMAT=legacy2 \
             CRASH_MODE=full-cgroup \
             CANDIDATE_CUSTODY=legacy \
+            BUILD_EGRESS_BINARY="$build_egress" \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh

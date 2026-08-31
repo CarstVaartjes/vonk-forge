@@ -64,6 +64,10 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
 
 
 def _assert_frozen_runtime_and_old_runner() -> None:
+    # The package builder is deliberately frozen with the repair lifecycle:
+    # ordinary packages now bind the static build-egress binary, while repair
+    # capsules continue to omit that new binary because legacy repair authority
+    # does not authenticate it.
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
             "046feb4448695d945dee13f3751674cbcf5824a4de4efadf026306a4122a9c60"
@@ -72,7 +76,7 @@ def _assert_frozen_runtime_and_old_runner() -> None:
             "37cdae6cac4c447dce347b58874b7c0800346303362a86519c54bca4efdc88b1"
         ),
         ROOT / "scripts/build-agent-deb": (
-            "1d87e67ee919149a77cdb246d6462b7542acaa37f07805b38e78637bcf6498d3"
+            "17a540f1e35d43ef0a0347a5fcb46282dd38e7a89c8793e626040139f57e1b44"
         ),
     }
     for path, digest in expected.items():

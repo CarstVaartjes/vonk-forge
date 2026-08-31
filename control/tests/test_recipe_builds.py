@@ -120,7 +120,11 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 build_digest="sha256:" + "a" * 64,
                 binary_digest="1" * 64,
                 self_test_passed=True,
-                capabilities=["recipe.build.v1", "recipe.image.import.v1"],
+                capabilities=[
+                    "recipe.build.v1",
+                    "recipe.build.egress-proxy.v1",
+                    "recipe.image.import.v1",
+                ],
                 last_seen_at=now,
             )
         )
@@ -148,7 +152,11 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
             80_000,
             1,
             False,
-            ("recipe.build.v1", "recipe.image.import.v1"),
+            (
+                "recipe.build.v1",
+                "recipe.build.egress-proxy.v1",
+                "recipe.image.import.v1",
+            ),
         )
     )
     catalog = CatalogService(
@@ -590,16 +598,57 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
         )
 
 
-def test_build_plan_rejects_public_network_until_egress_boundary_exists(
+def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(
         tmp_path, network={"mode": "public", "hosts": ["pypi.org"]}
     )
 
-    with pytest.raises(RecipeBuildError, match="public build networking"):
+    plan = RecipeBuildService(sessions, bundles=bundles).plan(
+        revision.id, node_id, now=now
+    )
+    assert plan.agent_payload["network"] == {
+        "mode": "public",
+        "hosts": ["pypi.org"],
+    }
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.capabilities = ["recipe.build.v1", "recipe.image.import.v1"]
+    with pytest.raises(RecipeBuildError, match="hostname-aware build egress"):
         RecipeBuildService(sessions, bundles=bundles).plan(
             revision.id, node_id, now=now
+        )
+
+
+def test_public_build_rejects_stale_inventory_without_egress_capability(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(
+        tmp_path, network={"mode": "public", "hosts": ["pypi.org"]}
+    )
+    newer = now + timedelta(seconds=1)
+    InventoryRepository(sessions, clock=lambda: newer).record(
+        InventorySnapshotInput(
+            node_id,
+            newer,
+            8 * 1024 * 1024 * 1024,
+            7 * 1024 * 1024 * 1024,
+            100_000,
+            80_000,
+            100_000,
+            80_000,
+            1,
+            False,
+            ("recipe.build.v1", "recipe.image.import.v1"),
+        )
+    )
+
+    with pytest.raises(RecipeBuildError, match="fresh builder inventory"):
+        RecipeBuildService(sessions, bundles=bundles).plan(
+            revision.id, node_id, now=newer
         )
 
 

@@ -25,13 +25,13 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
     assert '"package.prepare"' not in main
 
     package_builder = _source("scripts/build-agent-deb")
-    assert 'BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")' in package_builder
+    assert 'EGRESS_BINARY = "vonk-build-egress"' in package_builder
     assert "vonk_agent" not in package_builder
 
 
 def test_debian_package_is_the_only_agent_installer_authority() -> None:
     package_builder = _source("scripts/build-agent-deb")
-    for binary in ("vonk-agent", "vonk-agent-helper", "oras"):
+    for binary in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras"):
         assert binary in package_builder
     for unit in (
         "vonk-forge-agent.service",

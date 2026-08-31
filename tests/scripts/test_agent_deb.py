@@ -26,7 +26,7 @@ POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 RECOVERY_LIFECYCLE = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
-PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
+PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras")
 BUILD_DIGEST = "sha256:" + "b" * 64
 REPAIR_NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 REPAIR_SOURCE_VERSION = "0.1.0~dev.381+ga122909feaa3"
@@ -137,6 +137,8 @@ def _package_members(*, repair: bool) -> dict[str, tarfile.TarInfo]:
     required = set(VERIFY_MODULE.REQUIRED_PAYLOAD)
     executable = set(VERIFY_MODULE.REQUIRED_EXECUTABLE)
     if repair:
+        required.difference_update(VERIFY_MODULE.REPAIR_ELF_REMOVALS)
+        executable.difference_update(VERIFY_MODULE.REPAIR_ELF_REMOVALS)
         required.update(VERIFY_MODULE.REPAIR_PAYLOAD_ADDITIONS)
         executable.add(VERIFY_MODULE.REPAIR_STANDARD_RUNNER)
     members = {}
@@ -461,12 +463,30 @@ def _elf_fixture(path: Path, marker: bytes, architecture: str = "linux-arm64") -
     raw[128 : 128 + len(identity_marker)] = identity_marker
     semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
     raw[256 : 256 + len(semantic_marker)] = semantic_marker
+    if path.name == "vonk-build-egress":
+        struct.pack_into("<Q", raw, 32, 320)
+        struct.pack_into("<H", raw, 54, 56)
+        struct.pack_into("<H", raw, 56, 1)
+        struct.pack_into("<I", raw, 320, 1)
     path.write_bytes(raw)
     path.chmod(0o555)
 
 
 def _aarch64_fixture(path: Path, marker: bytes) -> None:
     _elf_fixture(path, marker)
+
+
+def test_build_egress_release_binary_must_be_static(tmp_path: Path) -> None:
+    path = tmp_path / "vonk-build-egress"
+    _elf_fixture(path, b"proxy")
+    raw = bytearray(path.read_bytes())
+    struct.pack_into("<I", raw, 320, 3)
+    path.chmod(0o755)
+    path.write_bytes(raw)
+    path.chmod(0o555)
+
+    with pytest.raises(BUILD_MODULE.BuildError, match="is not static"):
+        BUILD_MODULE.read_release_binary(path, machine=183, require_static=True)
 
 
 def _release_key(path: Path) -> None:
@@ -1421,11 +1441,20 @@ def test_default_and_repair_payload_sets_are_strictly_disjoint() -> None:
     VERIFY_MODULE._verify_members(ordinary)
     VERIFY_MODULE._verify_members(repair, repair=True)
     with pytest.raises(
-        VERIFY_MODULE.VerificationError, match="undeclared payload file"
+        VERIFY_MODULE.VerificationError, match="package payload is incomplete"
     ):
         VERIFY_MODULE._verify_members(repair)
     with pytest.raises(VERIFY_MODULE.VerificationError, match="payload is incomplete"):
         VERIFY_MODULE._verify_members(ordinary, repair=True)
+
+
+def test_repair_evidence_omits_only_the_unbound_build_egress_binary() -> None:
+    ordinary = VERIFY_MODULE._evidence_executables(repair=False)
+    repair = VERIFY_MODULE._evidence_executables(repair=True)
+
+    assert ordinary - repair == VERIFY_MODULE.REPAIR_ELF_REMOVALS
+    assert repair - ordinary == {VERIFY_MODULE.REPAIR_STANDARD_RUNNER}
+    assert "usr/lib/vonk-forge/vonk-build-egress" not in repair
 
 
 def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None:

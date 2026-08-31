@@ -1,9 +1,13 @@
 //! Rootless, typed recipe image build execution.
 
 use std::{
-    fmt, fs,
+    fmt,
+    fs::{self, File},
     io::{Seek, SeekFrom},
-    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{MetadataExt, PermissionsExt},
+    },
     path::Path,
     time::Duration,
 };
@@ -18,9 +22,11 @@ use vonk_agent_protocol::RecipeBuildRequest;
 use crate::{
     base_images::{BaseImageError, BaseImageStore},
     build_source::{BuildSourceError, materialize_source_bundle},
-    process::{ProcessError, ProcessRunner, Program},
+    process::{ProcessError, ProcessInputBounds, ProcessOutputBounds, ProcessRunner, Program},
     source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
 };
+
+const MAX_EGRESS_BINARY_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum RecipeBuildError {
@@ -120,6 +126,7 @@ pub struct RecipeBuilder<'a, R> {
     pub runner: &'a R,
     pub data_root: &'a Path,
     pub runtime_root: &'a Path,
+    pub egress_binary: &'a Path,
 }
 
 struct PodmanBuildStaging(TempDir);
@@ -159,11 +166,39 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         operation_id: Uuid,
         archive: &[u8],
     ) -> Result<RecipeBuildEvidence, RecipeBuildError> {
+        self.build_cancellable(request, operation_id, archive, &|| false)
+    }
+
+    pub fn build_cancellable(
+        &self,
+        request: &RecipeBuildRequest,
+        operation_id: Uuid,
+        archive: &[u8],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<RecipeBuildEvidence, RecipeBuildError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled.into());
+        }
         // `slirp4netns` only isolates the host network namespace; it does not
         // enforce a destination allowlist.  Never silently widen a declared
-        // host policy into unrestricted egress.  Until the dedicated egress
-        // boundary is installed, only explicitly networkless builds run.
+        // host policy into unrestricted egress. Public builds therefore get
+        // an operation-private internal network and dual-homed proxy below.
         let network = build_network(&request.network)?;
+        if network == BuildNetwork::Public
+            && request.arguments.iter().any(|argument| {
+                matches!(
+                    argument.name.as_str(),
+                    "HTTP_PROXY"
+                        | "HTTPS_PROXY"
+                        | "NO_PROXY"
+                        | "http_proxy"
+                        | "https_proxy"
+                        | "no_proxy"
+                )
+            })
+        {
+            return Err(RecipeBuildError::NetworkPolicy);
+        }
         let staging_root = self.data_root.join("build-staging");
         fs::create_dir_all(&staging_root)?;
         let staging = PodmanBuildStaging::create(&staging_root)?;
@@ -197,7 +232,23 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         {
             return Err(RecipeBuildError::Evidence);
         }
-        self.import_base_images(request, &storage, runroot.path())?;
+        self.import_base_images(request, &storage, runroot.path(), cancelled)?;
+        let egress = match network {
+            BuildNetwork::None => None,
+            BuildNetwork::Public => Some(BuildEgress::start(
+                self.runner,
+                BuildEgressStart {
+                    storage: &storage,
+                    runroot: runroot.path(),
+                    staging: staging.path(),
+                    binary: self.egress_binary,
+                    operation_id,
+                    hosts: &request.network.hosts,
+                    staging_limit: build_staging_limit(request)?,
+                    cancelled,
+                },
+            )?),
+        };
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
         // Ubuntu 24.04's supported Podman 4.9 build command does not accept
         // the `--cpus` or `--pids-limit` aliases. Express the same boundaries
@@ -221,22 +272,43 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             format!("--cpu-quota={cpu_quota}"),
             format!("--memory={}b", request.limits.memory_bytes),
             format!("--ulimit=nproc={0}:{0}", request.limits.processes),
-            format!("--network={network}"),
+            format!(
+                "--network={}",
+                egress
+                    .as_ref()
+                    .map_or("none", |value| value.internal_network.as_str())
+            ),
         ]);
+        if let Some(egress) = &egress {
+            let proxy = format!("http://{}:18080", egress.proxy_name);
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+                arguments.push("--build-arg".to_owned());
+                arguments.push(format!("{name}={proxy}"));
+            }
+            for name in ["NO_PROXY", "no_proxy"] {
+                arguments.push("--build-arg".to_owned());
+                arguments.push(format!("{name}="));
+            }
+        }
         for argument in &request.arguments {
             arguments.push("--build-arg".to_owned());
             arguments.push(format!("{}={}", argument.name, scalar(&argument.value)?));
         }
         arguments.push(context.display().to_string());
         let timeout = Duration::from_secs(request.limits.timeout_seconds.into());
-        let output = self.runner.run_bounded_directory_with_output_limit(
-            Program::Podman,
-            &arguments,
-            timeout,
-            staging.path(),
-            build_staging_limit(request)?,
-            request.limits.output_bytes,
-        )?;
+        let output = self
+            .runner
+            .run_bounded_directory_with_output_limit_cancellable(
+                Program::Podman,
+                &arguments,
+                timeout,
+                ProcessOutputBounds::new(
+                    staging.path(),
+                    build_staging_limit(request)?,
+                    request.limits.output_bytes,
+                ),
+                cancelled,
+            )?;
         if !output.success {
             return Err(RecipeBuildError::ImageBuild);
         }
@@ -248,9 +320,12 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
             tag.clone(),
         ]);
-        let inspected =
-            self.runner
-                .run(Program::Podman, &inspect_arguments, Duration::from_secs(60))?;
+        let inspected = self.runner.run_cancellable(
+            Program::Podman,
+            &inspect_arguments,
+            Duration::from_secs(60),
+            cancelled,
+        )?;
         inspect_image(&inspected.stdout).map_err(|_| RecipeBuildError::ImageInspect)?;
         let build_root = self.data_root.join("builds");
         fs::create_dir_all(&build_root)?;
@@ -269,14 +344,19 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             // load path without exposing the daemon to the rootless builder.
             format!("docker-archive:{}", layout.display()),
         ]);
-        let saved = self.runner.run_bounded_directory_with_output_limit(
-            Program::Podman,
-            &push_arguments,
-            Duration::from_secs(600),
-            &operation_root,
-            request.limits.temporary_bytes,
-            request.limits.output_bytes,
-        )?;
+        let saved = self
+            .runner
+            .run_bounded_directory_with_output_limit_cancellable(
+                Program::Podman,
+                &push_arguments,
+                Duration::from_secs(600),
+                ProcessOutputBounds::new(
+                    &operation_root,
+                    request.limits.temporary_bytes,
+                    request.limits.output_bytes,
+                ),
+                cancelled,
+            )?;
         if !saved.success {
             return Err(RecipeBuildError::ImageExport);
         }
@@ -321,6 +401,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         request: &RecipeBuildRequest,
         storage: &Path,
         runroot: &Path,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), RecipeBuildError> {
         if request.base_images.is_empty() {
             return Ok(());
@@ -352,13 +433,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             load_arguments.extend(["load".to_owned(), "--quiet".to_owned()]);
             let loaded = self
                 .runner
-                .run_bounded_directory_with_input(
+                .run_bounded_directory_with_input_cancellable(
                     Program::Podman,
                     &load_arguments,
                     Duration::from_secs(600),
-                    &archive.file,
-                    storage.parent().ok_or(RecipeBuildError::Evidence)?,
-                    build_staging_limit(request)?,
+                    ProcessInputBounds::new(
+                        &archive.file,
+                        storage.parent().ok_or(RecipeBuildError::Evidence)?,
+                        build_staging_limit(request)?,
+                    ),
+                    cancelled,
                 )
                 .map_err(podman_import_process_error)?;
             if !loaded.success {
@@ -429,6 +513,9 @@ fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
         ProcessError::Timeout => PodmanImportDiagnostic::DeadlineExceeded,
         ProcessError::OutputLimit => PodmanImportDiagnostic::DiagnosticOutputLimitExceeded,
         ProcessError::Io(_) => PodmanImportDiagnostic::SubprocessUnavailable,
+        ProcessError::Cancelled => {
+            return RecipeBuildError::Process(ProcessError::Cancelled);
+        }
     };
     RecipeBuildError::BaseImageImport { diagnostic }
 }
@@ -462,14 +549,257 @@ fn make_owned_directories_removable(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BuildNetwork {
+    None,
+    Public,
+}
+
 fn build_network(
     network: &vonk_agent_protocol::RecipeBuildNetwork,
-) -> Result<&'static str, RecipeBuildError> {
+) -> Result<BuildNetwork, RecipeBuildError> {
     if network.mode == "none" && network.hosts.is_empty() {
-        Ok("none")
+        Ok(BuildNetwork::None)
+    } else if network.mode == "public" && !network.hosts.is_empty() {
+        Ok(BuildNetwork::Public)
     } else {
         Err(RecipeBuildError::NetworkPolicy)
     }
+}
+
+struct BuildEgress<'a, R: ProcessRunner> {
+    runner: &'a R,
+    storage: &'a Path,
+    runroot: &'a Path,
+    internal_network: String,
+    outbound_network: String,
+    proxy_name: String,
+    image: String,
+}
+
+struct BuildEgressStart<'a> {
+    storage: &'a Path,
+    runroot: &'a Path,
+    staging: &'a Path,
+    binary: &'a Path,
+    operation_id: Uuid,
+    hosts: &'a [String],
+    staging_limit: u64,
+    cancelled: &'a dyn Fn() -> bool,
+}
+
+impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
+    fn start(runner: &'a R, context: BuildEgressStart<'a>) -> Result<Self, RecipeBuildError> {
+        let suffix = context.operation_id.simple().to_string();
+        let internal_network = format!("vonk-build-in-{suffix}");
+        let outbound_network = format!("vonk-build-out-{suffix}");
+        let proxy_name = format!("vonk-build-proxy-{suffix}");
+        let image = format!("localhost/vonk/build-egress:{suffix}");
+        let rootfs = context.staging.join("build-egress-rootfs.tar");
+        write_proxy_rootfs(context.binary, &rootfs)?;
+        let result = Self {
+            runner,
+            storage: context.storage,
+            runroot: context.runroot,
+            internal_network,
+            outbound_network,
+            proxy_name,
+            image,
+        };
+        let imported = result.run_with_file(
+            &[
+                "import",
+                "--quiet",
+                "--change",
+                "ENTRYPOINT [\"/vonk-build-egress\"]",
+                "-",
+                &result.image,
+            ],
+            &rootfs,
+            context.staging,
+            context.staging_limit,
+            Duration::from_secs(120),
+            context.cancelled,
+        )?;
+        if !imported.success {
+            return Err(RecipeBuildError::NetworkPolicy);
+        }
+        for arguments in [
+            vec![
+                "network".to_owned(),
+                "create".to_owned(),
+                "--internal".to_owned(),
+                result.internal_network.clone(),
+            ],
+            vec![
+                "network".to_owned(),
+                "create".to_owned(),
+                result.outbound_network.clone(),
+            ],
+        ] {
+            let output =
+                result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+            if !output.success {
+                return Err(RecipeBuildError::NetworkPolicy);
+            }
+        }
+        let mut arguments = vec![
+            "run".to_owned(),
+            "--detach".to_owned(),
+            "--rm".to_owned(),
+            "--name".to_owned(),
+            result.proxy_name.clone(),
+            "--network".to_owned(),
+            format!("{},{}", result.outbound_network, result.internal_network),
+            "--read-only".to_owned(),
+            "--cap-drop=all".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+            "--pids-limit=96".to_owned(),
+            "--memory=134217728b".to_owned(),
+            "--cpus=1".to_owned(),
+            "--user=65532:65532".to_owned(),
+            result.image.clone(),
+        ];
+        for host in context.hosts {
+            arguments.push("--allow-host".to_owned());
+            arguments.push(host.clone());
+        }
+        let started =
+            result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+        if !started.success {
+            return Err(RecipeBuildError::NetworkPolicy);
+        }
+        let probed = result.run_cancellable(
+            &[
+                "exec".to_owned(),
+                result.proxy_name.clone(),
+                "/vonk-build-egress".to_owned(),
+                "--probe".to_owned(),
+            ],
+            Duration::from_secs(10),
+            context.cancelled,
+        )?;
+        if !probed.success {
+            return Err(RecipeBuildError::NetworkPolicy);
+        }
+        Ok(result)
+    }
+
+    fn arguments(&self) -> Vec<String> {
+        podman_storage_arguments(self.storage, self.runroot)
+    }
+
+    fn run(
+        &self,
+        extra: &[String],
+        timeout: Duration,
+    ) -> Result<crate::process::ProcessOutput, ProcessError> {
+        let mut arguments = self.arguments();
+        arguments.extend_from_slice(extra);
+        self.runner.run(Program::Podman, &arguments, timeout)
+    }
+
+    fn run_cancellable(
+        &self,
+        extra: &[String],
+        timeout: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::process::ProcessOutput, ProcessError> {
+        let mut arguments = self.arguments();
+        arguments.extend_from_slice(extra);
+        self.runner
+            .run_cancellable(Program::Podman, &arguments, timeout, cancelled)
+    }
+
+    fn run_with_file(
+        &self,
+        extra: &[&str],
+        path: &Path,
+        monitored_directory: &Path,
+        maximum_bytes: u64,
+        timeout: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::process::ProcessOutput, ProcessError> {
+        let mut arguments = self.arguments();
+        arguments.extend(extra.iter().map(|value| (*value).to_owned()));
+        let file = File::open(path)?;
+        self.runner.run_bounded_directory_with_input_cancellable(
+            Program::Podman,
+            &arguments,
+            timeout,
+            ProcessInputBounds::new(&file, monitored_directory, maximum_bytes),
+            cancelled,
+        )
+    }
+}
+
+impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
+    fn drop(&mut self) {
+        for arguments in [
+            vec![
+                "stop".to_owned(),
+                "--time=1".to_owned(),
+                self.proxy_name.clone(),
+            ],
+            vec![
+                "rm".to_owned(),
+                "--force".to_owned(),
+                self.proxy_name.clone(),
+            ],
+            vec![
+                "network".to_owned(),
+                "rm".to_owned(),
+                "--force".to_owned(),
+                self.internal_network.clone(),
+            ],
+            vec![
+                "network".to_owned(),
+                "rm".to_owned(),
+                "--force".to_owned(),
+                self.outbound_network.clone(),
+            ],
+            vec![
+                "image".to_owned(),
+                "rm".to_owned(),
+                "--force".to_owned(),
+                self.image.clone(),
+            ],
+        ] {
+            let _ = self.run(&arguments, Duration::from_secs(15));
+        }
+    }
+}
+
+fn write_proxy_rootfs(binary: &Path, destination: &Path) -> Result<(), RecipeBuildError> {
+    let descriptor = rustix::fs::open(
+        binary,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut source = File::from(descriptor);
+    let metadata = source.metadata()?;
+    if !metadata.is_file()
+        || metadata.uid() != 0
+        || metadata.nlink() != 1
+        || !(64..=MAX_EGRESS_BINARY_BYTES).contains(&metadata.len())
+        || metadata.permissions().mode() & 0o022 != 0
+        || metadata.permissions().mode() & 0o111 == 0
+    {
+        return Err(RecipeBuildError::NetworkPolicy);
+    }
+    let destination = File::create(destination)?;
+    let mut archive = tar::Builder::new(destination);
+    let mut header = tar::Header::new_gnu();
+    header.set_size(metadata.len());
+    header.set_mode(0o555);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    archive.append_data(&mut header, "vonk-build-egress", &mut source)?;
+    archive.finish()?;
+    Ok(())
 }
 
 fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {

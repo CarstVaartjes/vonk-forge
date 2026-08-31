@@ -241,8 +241,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     runner: self.runtime.runner,
                     data_root: self.runtime.data_root,
                     runtime_root: self.runtime_root,
+                    egress_binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 };
-                match builder.build(&request, claim.operation_id, &archive) {
+                let cancelled = || *cancellation.borrow();
+                match builder.build_cancellable(&request, claim.operation_id, &archive, &cancelled)
+                {
                     Ok(evidence) => {
                         if self
                             .client

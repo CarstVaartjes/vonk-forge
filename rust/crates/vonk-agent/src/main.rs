@@ -206,6 +206,7 @@ async fn run_control_lane(
                 runner: &runner,
                 meminfo_path: Path::new("/proc/meminfo"),
                 store_path: &config.data_dir,
+                egress_binary_path: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 fabric_address: config.fabric_address,
                 fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
             }

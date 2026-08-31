@@ -1,4 +1,9 @@
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::Path,
+    time::Duration,
+};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -41,6 +46,7 @@ pub struct InventoryCollector<'a, R> {
     pub runner: &'a R,
     pub meminfo_path: &'a Path,
     pub store_path: &'a Path,
+    pub egress_binary_path: &'a Path,
     pub fabric_address: Option<std::net::IpAddr>,
     pub fabric_bandwidth_mbps: Option<u64>,
 }
@@ -115,6 +121,9 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             "recipe.job.run.v1".to_owned(),
             "runtime.vonk.v1".to_owned(),
         ];
+        if egress_boundary_available(self.egress_binary_path) {
+            capabilities.push("recipe.build.egress-proxy.v1".to_owned());
+        }
         if let Some(speed) = self.fabric_bandwidth_mbps {
             capabilities.push(format!("fabric.connected.mbps.{speed}"));
         }
@@ -136,6 +145,18 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
         })
     }
+}
+
+fn egress_boundary_available(path: &Path) -> bool {
+    fs::symlink_metadata(path).ok().is_some_and(|metadata| {
+        metadata.is_file()
+            && !metadata.file_type().is_symlink()
+            && metadata.uid() == 0
+            && metadata.nlink() == 1
+            && (64..=16 * 1024 * 1024).contains(&metadata.len())
+            && metadata.permissions().mode() & 0o022 == 0
+            && metadata.permissions().mode() & 0o111 != 0
+    })
 }
 
 pub fn available_memory_bytes<R: ProcessRunner>(

@@ -43,6 +43,40 @@ pub struct ProcessOutput {
     pub stderr: Vec<u8>,
 }
 
+#[derive(Clone, Copy)]
+pub struct ProcessOutputBounds<'a> {
+    directory: &'a Path,
+    maximum_bytes: u64,
+    maximum_output_bytes: u64,
+}
+
+impl<'a> ProcessOutputBounds<'a> {
+    pub fn new(directory: &'a Path, maximum_bytes: u64, maximum_output_bytes: u64) -> Self {
+        Self {
+            directory,
+            maximum_bytes,
+            maximum_output_bytes,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ProcessInputBounds<'a> {
+    input: &'a File,
+    directory: &'a Path,
+    maximum_bytes: u64,
+}
+
+impl<'a> ProcessInputBounds<'a> {
+    pub fn new(input: &'a File, directory: &'a Path, maximum_bytes: u64) -> Self {
+        Self {
+            input,
+            directory,
+            maximum_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ProcessError {
     #[error("approved subprocess failed to start or complete")]
@@ -53,6 +87,8 @@ pub enum ProcessError {
     OutputLimit,
     #[error("approved subprocess exceeded its storage limit")]
     StorageLimit,
+    #[error("approved subprocess was cancelled")]
+    Cancelled,
 }
 
 pub trait ProcessRunner {
@@ -62,6 +98,23 @@ pub trait ProcessRunner {
         arguments: &[String],
         timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError>;
+
+    fn run_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        let output = self.run(program, arguments, timeout)?;
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        Ok(output)
+    }
 
     fn run_bounded_directory(
         &self,
@@ -97,6 +150,31 @@ pub trait ProcessRunner {
             self.run_bounded_directory(program, arguments, timeout, directory, maximum_bytes)?;
         if output_bytes(&output) > diagnostic_limit {
             return Err(ProcessError::OutputLimit);
+        }
+        Ok(output)
+    }
+
+    fn run_bounded_directory_with_output_limit_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        bounds: ProcessOutputBounds<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        let output = self.run_bounded_directory_with_output_limit(
+            program,
+            arguments,
+            timeout,
+            bounds.directory,
+            bounds.maximum_bytes,
+            bounds.maximum_output_bytes,
+        )?;
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
         }
         Ok(output)
     }
@@ -139,6 +217,24 @@ pub trait ProcessRunner {
         self.run(program, arguments, timeout)
     }
 
+    fn run_with_input_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        input: &File,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        let output = self.run_with_input(program, arguments, timeout, input)?;
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        Ok(output)
+    }
+
     fn run_bounded_directory_with_input(
         &self,
         program: Program,
@@ -154,6 +250,31 @@ pub trait ProcessRunner {
         }
         Ok(output)
     }
+
+    fn run_bounded_directory_with_input_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        bounds: ProcessInputBounds<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        let output = self.run_bounded_directory_with_input(
+            program,
+            arguments,
+            timeout,
+            bounds.input,
+            bounds.directory,
+            bounds.maximum_bytes,
+        )?;
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        Ok(output)
+    }
 }
 
 pub struct SystemProcessRunner;
@@ -165,7 +286,25 @@ impl ProcessRunner for SystemProcessRunner {
         arguments: &[String],
         timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError> {
-        run_process(program, arguments, timeout, None, OUTPUT_LIMIT, None)
+        run_process(program, arguments, timeout, None, OUTPUT_LIMIT, None, None)
+    }
+
+    fn run_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        run_process(
+            program,
+            arguments,
+            timeout,
+            None,
+            OUTPUT_LIMIT,
+            None,
+            Some(cancelled),
+        )
     }
 
     fn run_bounded_directory(
@@ -182,6 +321,7 @@ impl ProcessRunner for SystemProcessRunner {
             timeout,
             Some((directory, maximum_bytes)),
             OUTPUT_LIMIT,
+            None,
             None,
         )
     }
@@ -202,6 +342,26 @@ impl ProcessRunner for SystemProcessRunner {
             Some((directory, maximum_bytes)),
             maximum_output_bytes.min(OUTPUT_LIMIT),
             None,
+            None,
+        )
+    }
+
+    fn run_bounded_directory_with_output_limit_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        bounds: ProcessOutputBounds<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        run_process(
+            program,
+            arguments,
+            timeout,
+            Some((bounds.directory, bounds.maximum_bytes)),
+            bounds.maximum_output_bytes.min(OUTPUT_LIMIT),
+            None,
+            Some(cancelled),
         )
     }
 
@@ -223,7 +383,34 @@ impl ProcessRunner for SystemProcessRunner {
         timeout: Duration,
         input: &File,
     ) -> Result<ProcessOutput, ProcessError> {
-        run_process(program, arguments, timeout, None, OUTPUT_LIMIT, Some(input))
+        run_process(
+            program,
+            arguments,
+            timeout,
+            None,
+            OUTPUT_LIMIT,
+            Some(input),
+            None,
+        )
+    }
+
+    fn run_with_input_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        input: &File,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        run_process(
+            program,
+            arguments,
+            timeout,
+            None,
+            OUTPUT_LIMIT,
+            Some(input),
+            Some(cancelled),
+        )
     }
 
     fn run_bounded_directory_with_input(
@@ -242,6 +429,26 @@ impl ProcessRunner for SystemProcessRunner {
             Some((directory, maximum_bytes)),
             OUTPUT_LIMIT,
             Some(input),
+            None,
+        )
+    }
+
+    fn run_bounded_directory_with_input_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        bounds: ProcessInputBounds<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        run_process(
+            program,
+            arguments,
+            timeout,
+            Some((bounds.directory, bounds.maximum_bytes)),
+            OUTPUT_LIMIT,
+            Some(bounds.input),
+            Some(cancelled),
         )
     }
 }
@@ -253,6 +460,7 @@ fn run_process(
     storage_limit: Option<(&Path, u64)>,
     output_limit: u64,
     input: Option<&File>,
+    cancellation: Option<&dyn Fn() -> bool>,
 ) -> Result<ProcessOutput, ProcessError> {
     let mut stdout = tempfile()?;
     let mut stderr = tempfile()?;
@@ -274,6 +482,11 @@ fn run_process(
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
+        }
+        if cancellation.is_some_and(|cancelled| cancelled()) {
+            let _ = child.kill();
+            child.wait()?;
+            return Err(ProcessError::Cancelled);
         }
         if started.elapsed() >= timeout {
             child.kill()?;
@@ -307,6 +520,9 @@ fn run_process(
         }
         thread::sleep(Duration::from_millis(25));
     };
+    if cancellation.is_some_and(|cancelled| cancelled()) {
+        return Err(ProcessError::Cancelled);
+    }
     Ok(ProcessOutput {
         success: status.success(),
         stdout: bounded_read(&mut stdout, output_limit)?,

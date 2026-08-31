@@ -155,10 +155,14 @@ runs:
         export VONK_AGENT_SEMANTIC_VERSION="$semantic_version"
         cargo build --release --locked --target "$TARGET" \
           --package vonk-agent --package vonk-agent-helper
+        RUSTFLAGS='-C target-feature=+crt-static' \
+          cargo build --release --locked --target "$TARGET" \
+            --package vonk-build-egress
         install -d -m 0755 "compiled/$BINARY_SET"
         install -m 0555 \
           "target/$TARGET/release/vonk-agent" \
           "target/$TARGET/release/vonk-agent-helper" \
+          "target/$TARGET/release/vonk-build-egress" \
           "compiled/$BINARY_SET/"
         scripts/verify-agent-binaries \
           --architecture "$ARCHITECTURE" \
@@ -189,3 +193,4 @@ runs:
           compiled/${{ inputs.binary_set }}.json
           compiled/${{ inputs.binary_set }}/vonk-agent
           compiled/${{ inputs.binary_set }}/vonk-agent-helper
+          compiled/${{ inputs.binary_set }}/vonk-build-egress

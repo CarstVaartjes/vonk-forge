@@ -2307,6 +2307,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vonk-build-egress"
+version = "0.1.0"
+
+[[package]]
 name = "vonk-nas-setup"
 version = "0.1.0"
 dependencies = [
