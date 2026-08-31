@@ -7,6 +7,7 @@ import io
 import json
 import re
 import tempfile
+import uuid
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit, urlunsplit
@@ -28,6 +29,7 @@ from .catalog_service import (
     RecipeSummary,
     _document_summary,
 )
+from .catalog_sync import CatalogSyncError, CatalogSyncView
 from .global_catalog import GlobalCatalogError, GlobalRecipeRevision
 from .models import CatalogEntityRevision
 from .recipe_library import (
@@ -114,6 +116,14 @@ CATALOG_OPERATION_IDS = {
     ("post", "/api/v1/catalog/imports/global/preview"): "previewGlobalRecipeImport",
     ("post", "/api/v1/catalog/imports/global"): "importGlobalRecipe",
     ("post", "/api/v1/catalog/imports/recipe-library"): "importRecipeLibrary",
+    (
+        "post",
+        "/api/v1/catalog/managed-recipes/sync",
+    ): "syncManagedRecipeCatalog",
+    (
+        "get",
+        "/api/v1/catalog/managed-recipes/sync-status",
+    ): "getManagedRecipeCatalogSyncStatus",
     ("get", "/api/v1/catalog/public-recipes"): "listPublicRecipes",
     ("post", "/api/v1/catalog/imports/public/preview"): "previewPublicRecipeImport",
     ("post", "/api/v1/catalog/imports/public"): "importPublicRecipe",
@@ -140,6 +150,19 @@ class GlobalCatalogReader(Protocol):
 class RecipeLibraryReader(Protocol):
     def list(self) -> RecipeLibrarySnapshot: ...
     def fetch(self, uri: str) -> RecipeLibraryItem: ...
+
+
+class ManagedRecipeCatalogSync(Protocol):
+    def sync(
+        self,
+        *,
+        request_key: str,
+        trigger: str,
+        actor: str,
+        expected_commit: str | None = None,
+    ) -> CatalogSyncView: ...
+
+    def latest(self) -> CatalogSyncView | None: ...
 
 
 class StrictModel(BaseModel):
@@ -200,6 +223,54 @@ class RecipeLibraryImportRequest(StrictModel):
     source_path: str = Field(pattern=r"^recipes/[a-z0-9][a-z0-9-]{1,62}\.json$")
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     document: dict[str, object]
+
+
+class ManagedCatalogSyncRequest(StrictModel):
+    request_key: str = Field(default_factory=lambda: str(uuid.uuid4()), pattern=_UUID)
+    expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+
+
+class ManagedCatalogSyncProblem(StrictModel):
+    recipe_uri: str | None = Field(default=None, max_length=256)
+    code: str = Field(min_length=1, max_length=128)
+    detail: str = Field(min_length=1, max_length=256)
+
+
+class ManagedCatalogWithdrawnRecipe(StrictModel):
+    recipe_id: str = Field(pattern=_UUID)
+    recipe_uri: str | None = Field(default=None, max_length=256)
+    release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
+    model_version_key: str | None = Field(default=None, max_length=256)
+
+
+class ManagedCatalogStaleRecipe(StrictModel):
+    recipe_id: str = Field(pattern=_UUID)
+    current_revision_id: str = Field(pattern=_UUID)
+    stale_installation_count: int = Field(ge=0)
+    stale_run_count: int = Field(ge=0)
+
+
+class ManagedCatalogSyncResponse(StrictModel):
+    schema_version: Literal[1] = 1
+    sync_id: str = Field(pattern=_UUID)
+    request_key: str = Field(pattern=_UUID)
+    trigger: Literal["manual", "automatic"]
+    state: Literal["syncing", "current", "partial", "failed"]
+    repository: str = Field(min_length=1, max_length=200)
+    commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    total_count: int = Field(ge=0, le=256)
+    processed_count: int = Field(ge=0, le=256)
+    imported_count: int = Field(ge=0)
+    updated_count: int = Field(ge=0)
+    unchanged_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    withdrawn_count: int = Field(ge=0)
+    withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe] = Field(max_length=256)
+    stale_recipes: list[ManagedCatalogStaleRecipe] = Field(max_length=256)
+    problems: list[ManagedCatalogSyncProblem] = Field(max_length=256)
+    created_at: str
+    completed_at: str | None
 
 
 class TestReportRequest(StrictModel):
@@ -482,6 +553,33 @@ def _revision(value: RecipeRevisionView) -> dict[str, object]:
         "document": value.document,
         "created_by": value.created_by,
         "created_at": value.created_at.isoformat(),
+    }
+
+
+def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "sync_id": value.id,
+        "request_key": value.request_key,
+        "trigger": value.trigger,
+        "state": value.state,
+        "repository": value.repository,
+        "commit": value.commit,
+        "expected_commit": value.expected_commit,
+        "total_count": value.total_count,
+        "processed_count": value.processed_count,
+        "imported_count": value.imported_count,
+        "updated_count": value.updated_count,
+        "unchanged_count": value.unchanged_count,
+        "skipped_count": value.skipped_count,
+        "withdrawn_count": value.withdrawn_count,
+        "withdrawn_recipes": list(value.withdrawn_recipes),
+        "stale_recipes": list(value.stale_recipes),
+        "problems": list(value.problems),
+        "created_at": value.created_at.isoformat(),
+        "completed_at": (
+            value.completed_at.isoformat() if value.completed_at is not None else None
+        ),
     }
 
 
@@ -981,6 +1079,7 @@ def install_catalog_routes(
     service: CatalogService | None,
     global_catalog: GlobalCatalogReader | None = None,
     recipe_library: RecipeLibraryReader | None = None,
+    managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS
 
@@ -1028,6 +1127,13 @@ def install_catalog_routes(
                 "recipe library is not configured",
             )
         return recipe_library.fetch(uri)
+
+    def sync_service() -> ManagedRecipeCatalogSync:
+        if managed_sync is None:
+            raise HTTPException(
+                status_code=503, detail="managed recipe catalog sync is unavailable"
+            )
+        return managed_sync
 
     def public_preview(value: RecipeLibraryItem) -> dict[str, object]:
         release_state, changes = _public_recipe_release_state(
@@ -1627,6 +1733,83 @@ def install_catalog_routes(
                 for item in snapshot.items
             ],
         }
+
+    @app.post(
+        "/api/v1/catalog/managed-recipes/sync",
+        response_model=ManagedCatalogSyncResponse,
+        responses={
+            401: {"model": CatalogProblem},
+            403: {"model": CatalogProblem},
+            409: {"model": CatalogProblem},
+            422: {"model": CatalogProblem},
+            503: {"model": CatalogProblem},
+        },
+        operation_id="syncManagedRecipeCatalog",
+    )
+    def sync_managed_recipe_catalog(
+        body: ManagedCatalogSyncRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            value = sync_service().sync(
+                request_key=body.request_key,
+                trigger="manual",
+                actor=actor.subject,
+                expected_commit=body.expected_commit,
+            )
+        except CatalogSyncError as error:
+            return _catalog_problem(
+                request,
+                status_code=(
+                    409
+                    if error.code
+                    in {
+                        "catalog.sync_in_progress",
+                        "catalog.sync_preview_changed",
+                        "catalog.sync_request_reused",
+                    }
+                    else 422
+                ),
+                code=error.code,
+                detail=error.detail,
+            )
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "catalog.managed.sync",
+                value.commit,
+                (value.id, value.repository, value.commit or ""),
+            )
+        )
+        return _managed_sync(value)
+
+    @app.get(
+        "/api/v1/catalog/managed-recipes/sync-status",
+        response_model=ManagedCatalogSyncResponse,
+        responses={
+            401: {"model": CatalogProblem},
+            403: {"model": CatalogProblem},
+            404: {"model": CatalogProblem},
+            503: {"model": CatalogProblem},
+        },
+        operation_id="getManagedRecipeCatalogSyncStatus",
+    )
+    def get_managed_recipe_catalog_sync_status(
+        request: Request, actor: Actor = authenticated
+    ):
+        administrator(actor)
+        value = sync_service().latest()
+        if value is None:
+            return _catalog_problem(
+                request,
+                status_code=404,
+                code="catalog.sync_not_found",
+                detail="no managed recipe catalog sync has run yet",
+            )
+        return _managed_sync(value)
 
     @app.post(
         "/api/v1/catalog/imports/public/preview",

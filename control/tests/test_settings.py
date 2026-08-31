@@ -12,6 +12,7 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.database_host == "postgres"
     assert settings.global_catalog_url == "https://vonkforge.ai"
     assert settings.recipe_library_api_url == "https://api.github.com"
+    assert settings.recipe_library_sync_interval_seconds == 900
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
     assert settings.operator_jurisdiction is None
 
@@ -50,6 +51,16 @@ def test_recipe_library_api_uses_only_github_or_the_internal_relay(monkeypatch) 
         monkeypatch.setenv("VONK_RECIPE_LIBRARY_API_URL", invalid)
         with pytest.raises(SettingsError, match="recipe library API URL"):
             Settings.from_env_and_secrets()
+
+
+def test_recipe_library_sync_interval_is_bounded(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "60")
+    assert Settings.from_env_and_secrets().recipe_library_sync_interval_seconds == 60
+
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "59")
+    with pytest.raises(SettingsError, match="recipe library sync interval"):
+        Settings.from_env_and_secrets()
 
 
 def test_agent_release_api_uses_only_public_origin_or_internal_relay(

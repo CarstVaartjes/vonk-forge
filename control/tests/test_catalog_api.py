@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from vonk_control.catalog_api import (
     install_catalog_routes,
 )
 from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256
@@ -77,7 +79,12 @@ def test_public_recipe_topology_role_matches_canonical_recipe_name_and_count(
 
 
 def _catalog_app(
-    codec, audits, service, global_catalog=None, recipe_library=None
+    codec,
+    audits,
+    service,
+    global_catalog=None,
+    recipe_library=None,
+    managed_sync=None,
 ) -> FastAPI:
     app = FastAPI()
 
@@ -119,6 +126,7 @@ def _catalog_app(
         service=service,
         global_catalog=global_catalog,
         recipe_library=recipe_library,
+        managed_sync=managed_sync,
     )
     return app
 
@@ -862,6 +870,78 @@ def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
     assert imported.status_code == 201, imported.text
     assert imported.json()["origin"] == "recipe_library"
     assert any(event.action == "catalog.public.import" for event in audits.list())
+
+
+def test_managed_catalog_sync_api_is_idempotent_and_exposes_durable_status(
+    bridge_api,
+) -> None:
+    _client, _headers, audits, service, remote = bridge_api
+    item = RecipeLibraryItem(
+        library_commit="a" * 40,
+        source_path="recipes/synthetic-tiny-openai.json",
+        publisher=remote.publisher,
+        slug=remote.slug,
+        title="Synthetic Tiny OpenAI",
+        description="A complete executable public recipe.",
+        tags=tuple(remote.document["metadata"]["tags"]),
+        content_sha256=remote.content_sha256,
+        uri=remote.uri,
+        document=remote.document,
+    )
+
+    class Library:
+        def list(self):
+            return RecipeLibrarySnapshot(commit="a" * 40, items=(item,))
+
+        def fetch(self, uri: str):
+            assert uri == item.uri
+            return item
+
+    library = Library()
+    managed_sync = ManagedRecipeCatalogSyncService(
+        service._sessions,
+        catalog=service,
+        reader=library,
+        clock=lambda: datetime(2026, 9, 1, tzinfo=UTC),
+    )
+    codec = TokenCodec(b"s" * 32)
+    app = _catalog_app(
+        codec,
+        audits,
+        service,
+        recipe_library=library,
+        managed_sync=managed_sync,
+    )
+    client = TestClient(app)
+    token = codec.issue(
+        Actor("administrator", "administrator"), ttl_seconds=100, now=0
+    )
+    auth = {"Authorization": f"Bearer {token}"}
+    request_key = str(uuid.uuid4())
+
+    first = client.post(
+        "/api/v1/catalog/managed-recipes/sync",
+        headers=auth,
+        json={"request_key": request_key, "expected_commit": "a" * 40},
+    )
+    replay = client.post(
+        "/api/v1/catalog/managed-recipes/sync",
+        headers=auth,
+        json={"request_key": request_key, "expected_commit": "a" * 40},
+    )
+    status = client.get(
+        "/api/v1/catalog/managed-recipes/sync-status", headers=auth
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["state"] == "current"
+    assert first.json()["imported_count"] == 1
+    assert first.json()["commit"] == "a" * 40
+    assert replay.status_code == 200
+    assert replay.json()["sync_id"] == first.json()["sync_id"]
+    assert status.status_code == 200
+    assert status.json() == first.json()
+    assert any(event.action == "catalog.managed.sync" for event in audits.list())
 
 
 @pytest.mark.parametrize(

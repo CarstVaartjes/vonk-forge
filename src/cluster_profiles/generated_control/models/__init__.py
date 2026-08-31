@@ -130,6 +130,13 @@ from .library_snapshot import LibrarySnapshot
 from .list_artifact_jobs_for_run_response_listartifactjobsforrun import ListArtifactJobsForRunResponseListartifactjobsforrun
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
 from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
+from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
+from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
+from .managed_catalog_sync_request import ManagedCatalogSyncRequest
+from .managed_catalog_sync_response import ManagedCatalogSyncResponse
+from .managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
+from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
+from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 from .mapping_node_plan_response import MappingNodePlanResponse
 from .mapping_plan_response import MappingPlanResponse
 from .mapping_plan_response_parameters import MappingPlanResponseParameters
@@ -459,6 +466,13 @@ __all__ = (
     "ListArtifactJobsForRunResponseListartifactjobsforrun",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
     "ListIdentityHistoryResponseListidentityhistory",
+    "ManagedCatalogStaleRecipe",
+    "ManagedCatalogSyncProblem",
+    "ManagedCatalogSyncRequest",
+    "ManagedCatalogSyncResponse",
+    "ManagedCatalogSyncResponseState",
+    "ManagedCatalogSyncResponseTrigger",
+    "ManagedCatalogWithdrawnRecipe",
     "MappingNodePlanResponse",
     "MappingPlanResponse",
     "MappingPlanResponseParameters",

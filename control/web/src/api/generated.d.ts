@@ -566,6 +566,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/managed-recipes/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Managed Recipe Catalog */
+        post: operations["syncManagedRecipeCatalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/managed-recipes/sync-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Managed Recipe Catalog Sync Status */
+        get: operations["getManagedRecipeCatalogSyncStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/public-recipes": {
         parameters: {
             query?: never;
@@ -2774,6 +2808,97 @@ export interface components {
              * @constant
              */
             detail: "login request is invalid";
+        };
+        /** ManagedCatalogStaleRecipe */
+        ManagedCatalogStaleRecipe: {
+            /** Current Revision Id */
+            current_revision_id: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Stale Installation Count */
+            stale_installation_count: number;
+            /** Stale Run Count */
+            stale_run_count: number;
+        };
+        /** ManagedCatalogSyncProblem */
+        ManagedCatalogSyncProblem: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Recipe Uri */
+            recipe_uri?: string | null;
+        };
+        /** ManagedCatalogSyncRequest */
+        ManagedCatalogSyncRequest: {
+            /** Expected Commit */
+            expected_commit?: string | null;
+            /** Request Key */
+            request_key?: string;
+        };
+        /** ManagedCatalogSyncResponse */
+        ManagedCatalogSyncResponse: {
+            /** Commit */
+            commit?: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Created At */
+            created_at: string;
+            /** Expected Commit */
+            expected_commit?: string | null;
+            /** Imported Count */
+            imported_count: number;
+            /** Problems */
+            problems: components["schemas"]["ManagedCatalogSyncProblem"][];
+            /** Processed Count */
+            processed_count: number;
+            /** Repository */
+            repository: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Skipped Count */
+            skipped_count: number;
+            /** Stale Recipes */
+            stale_recipes: components["schemas"]["ManagedCatalogStaleRecipe"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "syncing" | "current" | "partial" | "failed";
+            /** Sync Id */
+            sync_id: string;
+            /** Total Count */
+            total_count: number;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "manual" | "automatic";
+            /** Unchanged Count */
+            unchanged_count: number;
+            /** Updated Count */
+            updated_count: number;
+            /** Withdrawn Count */
+            withdrawn_count: number;
+            /** Withdrawn Recipes */
+            withdrawn_recipes: components["schemas"]["ManagedCatalogWithdrawnRecipe"][];
+        };
+        /** ManagedCatalogWithdrawnRecipe */
+        ManagedCatalogWithdrawnRecipe: {
+            /** Model Version Key */
+            model_version_key?: string | null;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Uri */
+            recipe_uri?: string | null;
+            /** Release Version */
+            release_version?: string | null;
         };
         /** MappingNodePlanResponse */
         MappingNodePlanResponse: {
@@ -6367,6 +6492,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    syncManagedRecipeCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManagedCatalogSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedCatalogSyncResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
+    getManagedRecipeCatalogSyncStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedCatalogSyncResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
                 };
             };
         };
