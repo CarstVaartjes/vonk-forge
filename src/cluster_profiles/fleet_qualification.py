@@ -731,12 +731,16 @@ def _temporary_build_bytes(value: Mapping[str, object] | None) -> int:
         else value
     )
     build = document.get("build")
-    resources_value = build.get("resources") if isinstance(build, Mapping) else None
-    temporary = (
-        resources_value.get("temporary_bytes")
-        if isinstance(resources_value, Mapping)
-        else None
-    )
+    temporary = build.get("temporary_bytes") if isinstance(build, Mapping) else None
+    if temporary is None:
+        resources_value = (
+            build.get("resources") if isinstance(build, Mapping) else None
+        )
+        temporary = (
+            resources_value.get("temporary_bytes")
+            if isinstance(resources_value, Mapping)
+            else None
+        )
     if not isinstance(temporary, int) or isinstance(temporary, bool) or temporary < 0:
         return 0
     return temporary

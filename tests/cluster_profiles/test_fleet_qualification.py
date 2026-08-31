@@ -225,6 +225,16 @@ def test_exact_capacity_projection_accepts_full_immutable_artifacts() -> None:
     assert _temporary_build_bytes(document) == 30
 
 
+def test_capacity_helpers_accept_public_visual_build_projection() -> None:
+    document = {
+        "visual_recipe": {
+            "build": {"temporary_bytes": 40},
+        }
+    }
+
+    assert _temporary_build_bytes(document) == 40
+
+
 def test_ledger_is_hash_chained_durable_and_resumable(tmp_path: Path) -> None:
     path = tmp_path / "evidence.jsonl"
     ledger = EvidenceLedger(path)
