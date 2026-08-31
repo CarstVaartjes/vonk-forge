@@ -21,11 +21,11 @@ T = TypeVar("T", bound="Spark3542CompatibilityRecoveryApplyRequest")
 class Spark3542CompatibilityRecoveryApplyRequest:
     """
         Attributes:
-            confirmation (Literal['restart-staged-a122-recovery-on-spark3542']):
+            confirmation (Literal['retry-exact-staged-a122-package-on-spark3542']):
             plan_digest (str):
      """
 
-    confirmation: Literal['restart-staged-a122-recovery-on-spark3542']
+    confirmation: Literal['retry-exact-staged-a122-package-on-spark3542']
     plan_digest: str
 
 
@@ -52,9 +52,9 @@ class Spark3542CompatibilityRecoveryApplyRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        confirmation = cast(Literal['restart-staged-a122-recovery-on-spark3542'] , d.pop("confirmation"))
-        if confirmation != 'restart-staged-a122-recovery-on-spark3542':
-            raise ValueError(f"confirmation must match const 'restart-staged-a122-recovery-on-spark3542', got '{confirmation}'")
+        confirmation = cast(Literal['retry-exact-staged-a122-package-on-spark3542'] , d.pop("confirmation"))
+        if confirmation != 'retry-exact-staged-a122-package-on-spark3542':
+            raise ValueError(f"confirmation must match const 'retry-exact-staged-a122-package-on-spark3542', got '{confirmation}'")
 
         plan_digest = d.pop("plan_digest")
 

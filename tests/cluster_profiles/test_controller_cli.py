@@ -1349,7 +1349,7 @@ def test_spark3542_compatibility_recovery_requires_typed_preview_and_apply() -> 
         "--plan-digest",
         "b" * 64,
         "--confirm",
-        "restart-staged-a122-recovery-on-spark3542",
+        "retry-exact-staged-a122-package-on-spark3542",
     )
     assert result == 0
     assert plan["mode"] == "plan"
@@ -1364,7 +1364,7 @@ def test_spark3542_compatibility_recovery_requires_typed_preview_and_apply() -> 
         "--plan-digest",
         "b" * 64,
         "--confirm",
-        "restart-staged-a122-recovery-on-spark3542",
+        "retry-exact-staged-a122-package-on-spark3542",
         "--apply",
     )
     assert result == 0
@@ -1373,7 +1373,7 @@ def test_spark3542_compatibility_recovery_requires_typed_preview_and_apply() -> 
         endpoint,
         {
             "plan_digest": "b" * 64,
-            "confirmation": "restart-staged-a122-recovery-on-spark3542",
+            "confirmation": "retry-exact-staged-a122-package-on-spark3542",
         },
     )
 

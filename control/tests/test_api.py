@@ -170,8 +170,7 @@ class CompatibilityRecovery:
         return CompatibilityRecoveryPlan(
             plan_digest="d" * 64,
             document={
-                "action": "restart-vonk-unit",
-                "unit": "helper",
+                "action": "retry-exact-package-install",
                 "compatibility_recovery_id": RECOVERY_ID,
                 "authority_revision": "c" * 64,
                 "node_id": NODE_ID,
@@ -494,7 +493,7 @@ def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
     assert preview.json()["plan_digest"] == "d" * 64
     assert (
         preview.json()["required_confirmation"]
-        == "restart-staged-a122-recovery-on-spark3542"
+        == "retry-exact-staged-a122-package-on-spark3542"
     )
 
     invalid = client.post(
@@ -509,7 +508,7 @@ def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
         headers=headers,
         json={
             "plan_digest": "d" * 64,
-            "confirmation": "restart-staged-a122-recovery-on-spark3542",
+            "confirmation": "retry-exact-staged-a122-package-on-spark3542",
         },
     )
     assert applied.status_code == 202

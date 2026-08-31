@@ -4086,7 +4086,7 @@ export interface components {
              * Confirmation
              * @constant
              */
-            confirmation: "restart-staged-a122-recovery-on-spark3542";
+            confirmation: "retry-exact-staged-a122-package-on-spark3542";
             /** Plan Digest */
             plan_digest: string;
         };
@@ -4096,14 +4096,14 @@ export interface components {
              * Action
              * @constant
              */
-            action: "restart-vonk-unit";
+            action: "retry-exact-package-install";
             /** Authority Revision */
             authority_revision: string;
             /**
              * Compatibility Recovery Id
              * @constant
              */
-            compatibility_recovery_id: "spark3542-a122-helper-restart-v1";
+            compatibility_recovery_id: "spark3542-a122-exact-package-retry-v1";
             /**
              * Expected Retry Attempt
              * @constant
@@ -4130,7 +4130,7 @@ export interface components {
              * Required Confirmation
              * @constant
              */
-            required_confirmation: "restart-staged-a122-recovery-on-spark3542";
+            required_confirmation: "retry-exact-staged-a122-package-on-spark3542";
             /**
              * Source Attempt
              * @constant
@@ -4147,11 +4147,6 @@ export interface components {
              */
             state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked";
             target: components["schemas"]["Spark3542CompatibilityRecoveryTarget"];
-            /**
-             * Unit
-             * @constant
-             */
-            unit: "helper";
             /** Upgrade Payload Sha256 */
             upgrade_payload_sha256: string;
         };
@@ -4161,14 +4156,14 @@ export interface components {
              * Action
              * @constant
              */
-            action: "restart-vonk-unit";
+            action: "retry-exact-package-install";
             /** Authority Revision */
             authority_revision: string;
             /**
              * Compatibility Recovery Id
              * @constant
              */
-            compatibility_recovery_id: "spark3542-a122-helper-restart-v1";
+            compatibility_recovery_id: "spark3542-a122-exact-package-retry-v1";
             /**
              * Expected Retry Attempt
              * @constant
@@ -4207,11 +4202,6 @@ export interface components {
              */
             state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked";
             target: components["schemas"]["Spark3542CompatibilityRecoveryTarget"];
-            /**
-             * Unit
-             * @constant
-             */
-            unit: "helper";
             /** Upgrade Payload Sha256 */
             upgrade_payload_sha256: string;
         };

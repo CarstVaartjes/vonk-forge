@@ -1,9 +1,10 @@
 //! Native-only proof for the one pinned Spark3542 recovery grant.
 //!
 //! This is intentionally not a utility: it has no arguments, accepts no key or
-//! operation input, and signs only RestartVonkUnit(helper) with a public test
-//! seed.  The systemd lifecycle harness runs the ignored test against its
-//! disposable dev335 helper/socket fixture.
+//! operation input beyond the lifecycle harness's exact generated package
+//! identity, and signs only InstallVonkDeb for that package with a public test
+//! seed. The systemd lifecycle harness runs the ignored test against its
+//! disposable dev335 helper/socket fixture and already-staged recovery intent.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -12,14 +13,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use uuid::Uuid;
 use vonk_agent_helper::protocol::{
-    GrantClaims, GrantSignature, HostOperation, RestartUnit, SignedGrant, canonical_signing_bytes,
+    GrantClaims, GrantSignature, HostOperation, SignedGrant, canonical_signing_bytes,
 };
 use vonk_agent_protocol::canonical_json;
 
 const SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 const NODE_ID: &str = "spk_2818d189042b4c77aefa7796f4befd23";
 const REQUEST_ID: &str = "35420000-0000-4000-8000-000000000001";
-const COLLISION_REQUEST_ID: &str = "35420000-0000-4000-8000-000000000002";
 const TEST_SEED: [u8; 32] = [b'm'; 32];
 const MAX_FRAME: usize = 256 * 1024;
 
@@ -46,7 +46,11 @@ fn send(body: &[u8], lose_response: bool) -> Option<Vec<u8>> {
 }
 
 fn pinned_grant(request_id: &str) -> Vec<u8> {
-    assert!(matches!(request_id, REQUEST_ID | COLLISION_REQUEST_ID));
+    assert_eq!(request_id, REQUEST_ID);
+    let package_sha256 =
+        std::env::var("VONK_SPARK3542_COMPAT_PACKAGE_SHA256").expect("package digest");
+    let package_signature =
+        std::env::var("VONK_SPARK3542_COMPAT_PACKAGE_SIGNATURE").expect("package signature");
     let key_pair = Ed25519KeyPair::from_seed_unchecked(&TEST_SEED).unwrap();
     assert_eq!(
         hex::encode(key_pair.public_key().as_ref()),
@@ -63,8 +67,9 @@ fn pinned_grant(request_id: &str) -> Vec<u8> {
         node_id: NODE_ID.to_owned(),
         issued_at: now,
         expires_at: now + 30,
-        operation: HostOperation::RestartVonkUnit {
-            unit: RestartUnit::Helper,
+        operation: HostOperation::InstallVonkDeb {
+            package_sha256,
+            package_signature,
         },
     };
     let signature = key_pair.sign(&canonical_signing_bytes(&claims).unwrap());
@@ -82,19 +87,7 @@ fn pinned_grant(request_id: &str) -> Vec<u8> {
 
 #[test]
 #[ignore = "requires the disposable root/systemd dev335 recovery fixture"]
-fn transient_unit_collision_fails_closed_for_the_second_pinned_request() {
-    assert_eq!(
-        std::env::var("VONK_SPARK3542_COMPAT_FIXTURE").as_deref(),
-        Ok("1")
-    );
-    let response = send(&pinned_grant(COLLISION_REQUEST_ID), false).unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&response).unwrap();
-    assert_eq!(value["status"], "rejected");
-}
-
-#[test]
-#[ignore = "requires the disposable root/systemd dev335 recovery fixture"]
-fn sends_only_one_pinned_helper_restart_and_replay_is_rejected() {
+fn sends_only_one_pinned_exact_package_retry_and_replay_is_rejected() {
     assert_eq!(
         std::env::var("VONK_SPARK3542_COMPAT_FIXTURE").as_deref(),
         Ok("1")
@@ -107,10 +100,13 @@ fn sends_only_one_pinned_helper_restart_and_replay_is_rejected() {
     std::thread::sleep(Duration::from_millis(200));
 
     // If the helper is still accepting before its delayed self-restart, the
-    // same persisted grant must hit dev335's request ledger, not schedule a
-    // second root action.  A connection loss is also acceptable because the
-    // first authorization deliberately restarts this service.
+    // same persisted grant must hit dev335's request ledger, not start a second
+    // package command. A connection loss is also acceptable because recovery
+    // deliberately stops this service after the first preinst wakes it.
     if let Ok(mut stream) = UnixStream::connect(SOCKET) {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
         stream
             .write_all(&(body.len() as u32).to_be_bytes())
             .unwrap();

@@ -753,7 +753,7 @@ class AgentJobService:
         This path cannot issue, refresh, or re-enable a grant. It only consumes
         authenticated target contact. Before dispatch it preserves the failed
         source attempt as audit; after dispatch it also requires the exact
-        signed helper-restart grant and retry fence already persisted.
+        signed exact-package grant and retry fence already persisted.
         """
 
         from .compat_recovery import (
