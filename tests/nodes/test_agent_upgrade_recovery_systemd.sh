@@ -35,6 +35,37 @@ case "$(dpkg --print-architecture)" in
   *) printf '%s\n' 'unsupported recovery test architecture' >&2; exit 77 ;;
 esac
 
+if (( compatibility_trigger == 1 )); then
+  # Keep the Controller's durable replay window at least twice the largest
+  # polling backoff accepted by the packaged agent. This systemd lane is the
+  # physical lifecycle gate for the exact dev335 -> a122 compatibility path.
+  python3 - \
+    "$repo_root/control/src/vonk_control/compat_recovery.py" \
+    "$repo_root/control/src/vonk_control/agent_jobs.py" \
+    "$repo_root/rust/crates/vonk-agent/src/config.rs" <<'PY'
+import pathlib
+import re
+import sys
+
+compatibility = pathlib.Path(sys.argv[1]).read_text()
+jobs = pathlib.Path(sys.argv[2]).read_text()
+agent_config = pathlib.Path(sys.argv[3]).read_text()
+rearm_minutes = int(
+    re.search(r"_REARM_LEASE = timedelta\(minutes=(\d+)\)", compatibility).group(1)
+)
+arm_minutes = int(
+    re.search(
+        r"_COMPATIBILITY_ARM_TIMEOUT = timedelta\(minutes=(\d+)\)", jobs
+    ).group(1)
+)
+max_backoff = int(
+    re.search(r"poll_max_seconds > (\d+)", agent_config).group(1)
+)
+assert rearm_minutes == arm_minutes
+assert rearm_minutes * 60 >= max_backoff * 2
+PY
+fi
+
 test_root="$(mktemp -d /var/lib/vonk-forge-recovery-test.XXXXXX)"
 old_helper_unit=/lib/systemd/system/vonk-forge-package-helper.service
 old_socket_unit=/lib/systemd/system/vonk-forge-package-helper.socket

@@ -90,7 +90,7 @@ _TERMINAL_PARENT_STATES = frozenset(
 )
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
-_COMPATIBILITY_ARM_TIMEOUT = timedelta(minutes=5)
+_COMPATIBILITY_ARM_TIMEOUT = timedelta(minutes=10)
 _REQUIRED_CAPABILITIES = frozenset(
     {
         AgentOperation.NODE_PROBE.value,
@@ -1789,11 +1789,10 @@ class AgentJobService:
             if attempt is not None and attempt.state == "running":
                 attempt.state = "waiting-for-operator"
             if job is not None and job.state != "succeeded":
+                from .compat_recovery import COMPATIBILITY_TIMEOUT_REASON
+
                 job.state = "waiting-for-operator"
-                job.status_reason = (
-                    "Spark3542 compatibility recovery timed out before exact "
-                    "authenticated a122 identity; no replacement grant will be issued"
-                )
+                job.status_reason = COMPATIBILITY_TIMEOUT_REASON
                 job.updated_at = now
             return True
 

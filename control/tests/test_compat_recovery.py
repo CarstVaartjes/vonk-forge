@@ -14,6 +14,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.compat_recovery import (
     ABANDON_CONFIRMATION,
+    COMPATIBILITY_TIMEOUT_REASON,
     CONFIRMATION,
     FOLLOWING_NODE_ID,
     GRANTLESS_RETRY_CERTIFICATE_SERIAL,
@@ -222,7 +223,7 @@ def seed_grantless_operator_blocked_retry(sessions) -> None:
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         job.state = "waiting-for-operator"
-        job.status_reason = "compatibility recovery timed out"
+        job.status_reason = COMPATIBILITY_TIMEOUT_REASON
         session.add(
             AgentOperationAttempt(
                 operation_id=OPERATION_ID,
@@ -683,7 +684,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
             "reason": "agent upgrade authority is unavailable",
             "status": "failed",
         }
-        assert retry.lease_deadline.replace(tzinfo=UTC) == NOW + timedelta(seconds=60)
+        assert retry.lease_deadline.replace(tzinfo=UTC) == NOW + timedelta(minutes=10)
         assert operation is not None and operation.state == "running"
         assert operation.current_attempt == RETRY_ATTEMPT
         assert job is not None and job.state == "running"
@@ -930,8 +931,24 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
         request_id=str(uuid.uuid4()),
     )
 
-    later = NOW + timedelta(minutes=6)
-    operations = AgentJobService(sessions, clock=lambda: later)
+    clock = [NOW + timedelta(minutes=6)]
+    operations = AgentJobService(sessions, clock=lambda: clock[0])
+    # A maximum five-minute agent backoff plus an in-flight long poll cannot
+    # consume the durable re-arm before dev335 has a chance to reclaim it.
+    assert operations.reconcile_compatibility_recoveries() is False
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert recovery is not None and recovery.state == "armed"
+        assert retry is not None and retry.state == "running"
+        assert retry.lease_deadline.replace(tzinfo=UTC) == NOW + timedelta(minutes=10)
+
+    clock[0] = NOW + timedelta(minutes=11)
     assert operations.reconcile_compatibility_recoveries() is True
     with sessions.begin() as session:
         recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
@@ -944,12 +961,29 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
         )
         assert recovery is not None and recovery.state == "operator-blocked"
         assert node is not None
-        node.last_seen_at = later
+        node.last_seen_at = clock[0]
         assert retry is not None and retry.state == "waiting-for-operator"
+        assert retry.fence == RETRY_FENCE
+        assert retry.result == {
+            "error_code": "agent_upgrade_failed",
+            "reason": "agent upgrade authority is unavailable",
+            "status": "failed",
+        }
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.signed_grant is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
+
+        job = session.get(Job, JOB_ID)
+        assert job is not None
+        assert job.status_reason == COMPATIBILITY_TIMEOUT_REASON
 
     later_service = Spark3542CompatibilityRecoveryService(
         sessions,
-        clock=lambda: later,
+        clock=lambda: clock[0],
         notify_available=lambda: notifications.append(True),
     )
     repeated_preview = later_service.preview()
@@ -963,6 +997,7 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
     assert repeated.state == "armed"
     assert notifications == [True, True, True]
     with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         retry = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == OPERATION_ID,
@@ -970,7 +1005,136 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
             )
         )
         assert retry is not None and retry.state == "running"
-        assert retry.lease_deadline.replace(tzinfo=UTC) == later + timedelta(seconds=60)
+        assert retry.fence == RETRY_FENCE
+        assert retry.lease_deadline.replace(tzinfo=UTC) == clock[0] + timedelta(
+            minutes=10
+        )
+        assert recovery is not None
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.signed_grant is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("rearm_attempt_certificate_serial", "rearm_dispatch_certificate_serial"),
+)
+def test_second_grantless_rearm_rejects_prior_certificate_binding_drift(
+    tmp_path, field
+):
+    sessions, service, _ = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    preview = service.preview()
+    service.apply(
+        plan_digest=preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    later = NOW + timedelta(minutes=11)
+    operations = AgentJobService(sessions, clock=lambda: later)
+    assert operations.reconcile_compatibility_recoveries() is True
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert node is not None and recovery is not None
+        node.last_seen_at = later
+        setattr(recovery, field, "inexact-certificate")
+
+    later_service = Spark3542CompatibilityRecoveryService(
+        sessions,
+        clock=lambda: later,
+        notify_available=lambda: None,
+    )
+    with pytest.raises(CompatibilityRecoveryConflict, match="no longer recoverable"):
+        later_service.preview()
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None and recovery.state == "operator-blocked"
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.signed_grant is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
+
+
+def test_postgres_second_grantless_rearm_preserves_attempt_and_null_grant(
+    tmp_path, postgres_engine
+):
+    sessions, service, _ = seeded_services(tmp_path, engine=postgres_engine)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    first_preview = service.preview()
+    service.apply(
+        plan_digest=first_preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    later = NOW + timedelta(minutes=11)
+    operations = AgentJobService(sessions, clock=lambda: later)
+    assert operations.reconcile_compatibility_recoveries() is True
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        assert node is not None
+        node.last_seen_at = later
+    later_service = Spark3542CompatibilityRecoveryService(
+        sessions,
+        clock=lambda: later,
+        notify_available=lambda: None,
+    )
+    second_preview = later_service.preview()
+    second = later_service.apply(
+        plan_digest=second_preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    assert second.state == "armed"
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        attempts = session.scalars(
+            select(AgentOperationAttempt)
+            .where(AgentOperationAttempt.operation_id == OPERATION_ID)
+            .order_by(AgentOperationAttempt.attempt)
+        ).all()
+        retry = attempts[-1]
+        assert [attempt.attempt for attempt in attempts] == [
+            SOURCE_ATTEMPT,
+            RETRY_ATTEMPT,
+        ]
+        assert retry.fence == RETRY_FENCE
+        assert retry.state == "running"
+        assert retry.lease_deadline.replace(tzinfo=UTC) == later + timedelta(minutes=10)
+        assert recovery is not None and recovery.state == "armed"
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.signed_grant is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
 
 
 @pytest.mark.parametrize(
@@ -978,6 +1142,7 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
     (
         "failure",
         "failure-status",
+        "timeout-reason",
         "protocol",
         "capabilities",
         "self-test",
@@ -1005,8 +1170,9 @@ def test_grantless_operator_blocked_rearm_rejects_every_drift(tmp_path, drift):
         )
         node = session.get(AgentNode, NODE_ID)
         operation = session.get(AgentOperation, OPERATION_ID)
+        job = session.get(Job, JOB_ID)
         assert recovery is not None and retry is not None
-        assert node is not None and operation is not None
+        assert node is not None and operation is not None and job is not None
         if drift == "failure":
             retry.result = {
                 "error_code": "agent_upgrade_failed",
@@ -1018,6 +1184,8 @@ def test_grantless_operator_blocked_rearm_rejects_every_drift(tmp_path, drift):
                 "error_code": "agent_upgrade_failed",
                 "reason": "agent upgrade authority is unavailable",
             }
+        elif drift == "timeout-reason":
+            job.status_reason = "different timeout"
         elif drift == "protocol":
             node.protocol_version = 2
         elif drift == "capabilities":
@@ -1837,7 +2005,7 @@ def test_exact_target_contact_completes_grantless_operator_blocked_recovery(
         actor="admin",
         request_id=str(uuid.uuid4()),
     )
-    clock = [NOW + timedelta(minutes=5)]
+    clock = [NOW + timedelta(minutes=11)]
     operations = AgentJobService(sessions, clock=lambda: clock[0])
     upgrades = AgentUpgradeService(
         sessions,
@@ -1944,7 +2112,7 @@ def test_identity_only_terminal_reconciliation_rejects_every_inexact_contact(
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
     if terminal_state == "operator-blocked":
-        clock[0] = NOW + timedelta(minutes=5)
+        clock[0] = NOW + timedelta(minutes=11)
         assert operations.reconcile_compatibility_recoveries() is True
 
     certificate_serial = SOURCE_CERTIFICATE
