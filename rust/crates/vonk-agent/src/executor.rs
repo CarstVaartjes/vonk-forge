@@ -267,7 +267,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     Err(error) => ExecutionResult {
                         state: "failed",
-                        body: json!({"reason": error.to_string()}),
+                        body: error.failure_evidence(),
                     },
                 }
             }
@@ -1399,13 +1399,19 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         "recipe.uninstall" => "recipe_uninstall_failed",
         _ => "operation_failed",
     };
+    let mut body = json!({
+        "error_code": error_code,
+        "reason": reason,
+        "status": "failed",
+    });
+    for field in ["stage", "diagnostic"] {
+        if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
+            body[field] = Value::String(value.to_owned());
+        }
+    }
     ExecutionResult {
         state: "failed",
-        body: json!({
-            "error_code": error_code,
-            "reason": reason,
-            "status": "failed",
-        }),
+        body,
     }
 }
 
@@ -1449,9 +1455,9 @@ async fn run_heartbeats<C: LoopClient>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RunOncePolicy, output_media_type,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        wait_ready_with_runtime_guard,
+        ExecutionResult, Executor, InterruptibleJob, LoopClient, RunOncePolicy,
+        normalize_execution_result, output_media_type, run_interruptible_job,
+        run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_ready_with_runtime_guard,
     };
     use crate::{client::ClientError, runtime_identity::AgentRuntimeIdentity, state::StateStore};
     use async_trait::async_trait;
@@ -1472,6 +1478,35 @@ mod tests {
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn failed_recipe_build_preserves_only_safe_classified_evidence() {
+        let mut build_claim = claim();
+        build_claim.operation = "recipe.build.v1".to_owned();
+        let result = normalize_execution_result(
+            &build_claim,
+            ExecutionResult {
+                state: "failed",
+                body: json!({
+                    "diagnostic": "temporary-storage-exhausted",
+                    "host_path": "/private/secret",
+                    "reason": "Podman could not import the verified base image (temporary-storage-exhausted)",
+                    "stage": "base-image-import",
+                }),
+            },
+        );
+
+        assert_eq!(
+            result.body,
+            json!({
+                "diagnostic": "temporary-storage-exhausted",
+                "error_code": "recipe_build_failed",
+                "reason": "Podman could not import the verified base image (temporary-storage-exhausted)",
+                "stage": "base-image-import",
+                "status": "failed",
+            })
+        );
+    }
 
     #[test]
     fn signed_output_mappings_cover_pdf_avif_and_custom_suffixes() {
