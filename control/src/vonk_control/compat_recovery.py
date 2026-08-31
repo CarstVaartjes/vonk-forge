@@ -33,6 +33,8 @@ NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 JOB_ID = "6b945136-1be6-47e4-8ba0-5c5f815304ad"
 OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
 SOURCE_ATTEMPT = 3
+SOURCE_ATTEMPT_CERTIFICATE_SERIAL = "45537549826457139242802212060416390279"
+DISPATCH_CERTIFICATE_SERIAL = "40880403280010118153316063771942676957"
 SOURCE_SEMANTIC_VERSION = "0.1.0"
 SOURCE_BINARY_DIGEST = (
     "dcad0a7bac861ad929e287112dedf09f6b845037979f17ca3cd7b8c5fcb0045e"
@@ -214,12 +216,21 @@ class Spark3542CompatibilityRecoveryService:
         upgrade_payload_sha256 = hashlib.sha256(
             canonical_message(dict(package))
         ).hexdigest()
-        certificate_query = select(AgentCertificate).where(
+        source_certificate_query = select(AgentCertificate).where(
             AgentCertificate.serial == source.agent_certificate_serial
         )
+        dispatch_certificate_query = select(AgentCertificate).where(
+            AgentCertificate.serial == DISPATCH_CERTIFICATE_SERIAL
+        )
         if lock:
-            certificate_query = certificate_query.with_for_update(of=AgentCertificate)
-        certificate = session.scalar(certificate_query)
+            source_certificate_query = source_certificate_query.with_for_update(
+                of=AgentCertificate
+            )
+            dispatch_certificate_query = dispatch_certificate_query.with_for_update(
+                of=AgentCertificate
+            )
+        source_certificate = session.scalar(source_certificate_query)
+        dispatch_certificate = session.scalar(dispatch_certificate_query)
         if (
             node.state != "active"
             or node.revoked_at is not None
@@ -228,17 +239,36 @@ class Spark3542CompatibilityRecoveryService:
             or node.binary_digest != SOURCE_BINARY_DIGEST
             or node.build_digest != SOURCE_BUILD_DIGEST
             or node.self_test_passed is not True
-            or node.contact_certificate_serial != source.agent_certificate_serial
+            or node.protocol_version != 3
+            or source.agent_certificate_serial != SOURCE_ATTEMPT_CERTIFICATE_SERIAL
+            or node.contact_certificate_serial != DISPATCH_CERTIFICATE_SERIAL
             or "agent.upgrade.v1" not in set(node.capabilities or ())
+            or "agent.runtime.rust.v1" not in set(node.capabilities or ())
             or node.last_seen_at is None
             or _aware(node.last_seen_at) > _aware(now)
             or _aware(now) - _aware(node.last_seen_at) > _ONLINE_WINDOW
-            or certificate is None
-            or certificate.node_id != NODE_ID
-            or certificate.state != "active"
-            or certificate.revoked_at is not None
-            or _aware(certificate.not_before) > _aware(now)
-            or _aware(certificate.not_after) <= _aware(now)
+            or source_certificate is None
+            or source_certificate.node_id != NODE_ID
+            or source_certificate.state not in {"active", "revoked"}
+            or _aware(source_certificate.not_before) > _aware(source.lease_deadline)
+            or _aware(source_certificate.not_after) <= _aware(source.lease_deadline)
+            or (
+                source_certificate.revoked_at is not None
+                and _aware(source_certificate.revoked_at)
+                <= _aware(source.lease_deadline)
+            )
+            or (
+                source_certificate.ca_revoked_at is not None
+                and _aware(source_certificate.ca_revoked_at)
+                <= _aware(source.lease_deadline)
+            )
+            or dispatch_certificate is None
+            or dispatch_certificate.node_id != NODE_ID
+            or dispatch_certificate.state != "active"
+            or dispatch_certificate.revoked_at is not None
+            or dispatch_certificate.ca_revoked_at is not None
+            or _aware(dispatch_certificate.not_before) > _aware(now)
+            or _aware(dispatch_certificate.not_after) <= _aware(now)
         ):
             raise CompatibilityRecoveryConflict(
                 "Spark3542 does not report the exact live dev335 identity"
@@ -297,6 +327,7 @@ class Spark3542CompatibilityRecoveryService:
             "source_attempt": SOURCE_ATTEMPT,
             "source_fence": source.fence,
             "source_certificate_serial": source.agent_certificate_serial,
+            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
             "expected_retry_attempt": SOURCE_ATTEMPT + 1,
             "authority_revision": operation.authority_revision,
             "upgrade_payload_sha256": upgrade_payload_sha256,
@@ -365,6 +396,7 @@ class Spark3542CompatibilityRecoveryService:
             "source_attempt": recovery.source_attempt,
             "source_fence": recovery.source_fence,
             "source_certificate_serial": recovery.source_certificate_serial,
+            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
             "expected_retry_attempt": recovery.expected_retry_attempt,
             "authority_revision": recovery.authority_revision,
             "upgrade_payload_sha256": recovery.upgrade_payload_sha256,

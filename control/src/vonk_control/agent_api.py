@@ -378,6 +378,7 @@ class Spark3542CompatibilityRecoveryResponse(BaseModel):
     source_attempt: Literal[3]
     source_fence: str = Field(pattern=r"^[0-9a-f-]{36}$")
     source_certificate_serial: str = Field(min_length=1, max_length=128)
+    dispatch_certificate_serial: str = Field(min_length=1, max_length=128)
     expected_retry_attempt: Literal[4]
     authority_revision: str = Field(min_length=1, max_length=128)
     upgrade_payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

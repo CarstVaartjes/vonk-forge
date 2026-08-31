@@ -8364,6 +8364,12 @@
             "title": "Delay Seconds",
             "type": "integer"
           },
+          "dispatch_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dispatch Certificate Serial",
+            "type": "string"
+          },
           "expected_retry_attempt": {
             "const": 4,
             "title": "Expected Retry Attempt",
@@ -8446,6 +8452,7 @@
           "source_attempt",
           "source_fence",
           "source_certificate_serial",
+          "dispatch_certificate_serial",
           "expected_retry_attempt",
           "authority_revision",
           "upgrade_payload_sha256",
@@ -8480,6 +8487,12 @@
             "const": 60,
             "title": "Delay Seconds",
             "type": "integer"
+          },
+          "dispatch_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dispatch Certificate Serial",
+            "type": "string"
           },
           "expected_retry_attempt": {
             "const": 4,
@@ -8558,6 +8571,7 @@
           "source_attempt",
           "source_fence",
           "source_certificate_serial",
+          "dispatch_certificate_serial",
           "expected_retry_attempt",
           "authority_revision",
           "upgrade_payload_sha256",

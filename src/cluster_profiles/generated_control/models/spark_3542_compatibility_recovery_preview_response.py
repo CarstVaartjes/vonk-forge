@@ -31,6 +31,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             authority_revision (str):
             compatibility_recovery_id (Literal['spark3542-a122-scheduled-reboot-v1']):
             delay_seconds (Literal[60]):
+            dispatch_certificate_serial (str):
             expected_retry_attempt (Literal[4]):
             job_id (Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']):
             node_id (Literal['spk_2818d189042b4c77aefa7796f4befd23']):
@@ -50,6 +51,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
     authority_revision: str
     compatibility_recovery_id: Literal['spark3542-a122-scheduled-reboot-v1']
     delay_seconds: Literal[60]
+    dispatch_certificate_serial: str
     expected_retry_attempt: Literal[4]
     job_id: Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']
     node_id: Literal['spk_2818d189042b4c77aefa7796f4befd23']
@@ -78,6 +80,8 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
         compatibility_recovery_id = self.compatibility_recovery_id
 
         delay_seconds = self.delay_seconds
+
+        dispatch_certificate_serial = self.dispatch_certificate_serial
 
         expected_retry_attempt = self.expected_retry_attempt
 
@@ -113,6 +117,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             "authority_revision": authority_revision,
             "compatibility_recovery_id": compatibility_recovery_id,
             "delay_seconds": delay_seconds,
+            "dispatch_certificate_serial": dispatch_certificate_serial,
             "expected_retry_attempt": expected_retry_attempt,
             "job_id": job_id,
             "node_id": node_id,
@@ -150,6 +155,8 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
         delay_seconds = cast(Literal[60] , d.pop("delay_seconds"))
         if delay_seconds != 60:
             raise ValueError(f"delay_seconds must match const 60, got '{delay_seconds}'")
+
+        dispatch_certificate_serial = d.pop("dispatch_certificate_serial")
 
         expected_retry_attempt = cast(Literal[4] , d.pop("expected_retry_attempt"))
         if expected_retry_attempt != 4:
@@ -203,6 +210,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             authority_revision=authority_revision,
             compatibility_recovery_id=compatibility_recovery_id,
             delay_seconds=delay_seconds,
+            dispatch_certificate_serial=dispatch_certificate_serial,
             expected_retry_attempt=expected_retry_attempt,
             job_id=job_id,
             node_id=node_id,

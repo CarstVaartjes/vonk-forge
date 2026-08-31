@@ -14,11 +14,13 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.compat_recovery import (
     CONFIRMATION,
+    DISPATCH_CERTIFICATE_SERIAL,
     JOB_ID,
     NODE_ID,
     OPERATION_ID,
     RECOVERY_ID,
     SOURCE_ATTEMPT,
+    SOURCE_ATTEMPT_CERTIFICATE_SERIAL,
     SOURCE_BINARY_DIGEST,
     SOURCE_BUILD_DIGEST,
     SOURCE_SEMANTIC_VERSION,
@@ -47,7 +49,8 @@ from vonk_control.models import (
 NOW = datetime(2026, 8, 29, 15, 0, tzinfo=UTC)
 SOURCE_FENCE = "10000000-0000-4000-8000-000000000001"
 RETRY_FENCE = "20000000-0000-4000-8000-000000000002"
-SOURCE_CERTIFICATE = "dev335-certificate"
+SOURCE_CERTIFICATE = DISPATCH_CERTIFICATE_SERIAL
+SOURCE_ATTEMPT_CERTIFICATE = SOURCE_ATTEMPT_CERTIFICATE_SERIAL
 PACKAGE_SIGNATURE = "a" * 128
 AUTHORITY_REVISION = "b" * 64
 PACKAGE = {
@@ -100,11 +103,24 @@ def seeded_services(tmp_path, *, engine=None):
         session.flush()
         session.add(
             AgentCertificate(
+                serial=SOURCE_ATTEMPT_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(days=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="source-attempt-fingerprint",
+                state="revoked",
+                generation=1,
+                revoked_at=NOW - timedelta(minutes=1),
+            )
+        )
+        session.add(
+            AgentCertificate(
                 serial=SOURCE_CERTIFICATE,
                 node_id=NODE_ID,
                 not_before=NOW - timedelta(days=1),
                 not_after=NOW + timedelta(days=1),
-                fingerprint="source-fingerprint",
+                fingerprint="dispatch-fingerprint",
+                generation=2,
             )
         )
         session.flush()
@@ -151,7 +167,7 @@ def seeded_services(tmp_path, *, engine=None):
                 attempt=SOURCE_ATTEMPT,
                 fence=SOURCE_FENCE,
                 lease_deadline=NOW - timedelta(minutes=5),
-                agent_certificate_serial=SOURCE_CERTIFICATE,
+                agent_certificate_serial=SOURCE_ATTEMPT_CERTIFICATE,
                 state="failed",
                 result={"reason": "agent upgrade request is invalid"},
             )
@@ -239,6 +255,8 @@ def test_preview_and_apply_bind_exact_failed_attempt_and_arm_only_its_retry(tmp_
 
     plan = service.preview()
     assert plan.document["source_fence"] == SOURCE_FENCE
+    assert plan.document["source_certificate_serial"] == SOURCE_ATTEMPT_CERTIFICATE
+    assert plan.document["dispatch_certificate_serial"] == SOURCE_CERTIFICATE
     assert plan.document["expected_retry_attempt"] == 4
     assert plan.document["target"]["package_sha256"] == TARGET_PACKAGE_SHA256
     with pytest.raises(CompatibilityRecoveryConflict, match="confirmation"):
@@ -280,6 +298,43 @@ def test_preview_and_apply_bind_exact_failed_attempt_and_arm_only_its_retry(tmp_
     )
     assert replay.state == "armed"
     assert notifications == [True]
+
+
+def test_preview_accepts_only_the_pinned_post_attempt_certificate_rotation(tmp_path):
+    sessions, service, _ = seeded_services(tmp_path)
+
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_ID)
+        source = session.get(AgentCertificate, SOURCE_ATTEMPT_CERTIFICATE)
+        dispatch = session.get(AgentCertificate, SOURCE_CERTIFICATE)
+        assert node is not None and source is not None and dispatch is not None
+        assert source.state == "revoked"
+        assert node.contact_certificate_serial == dispatch.serial
+        assert source.serial != dispatch.serial
+
+    plan = service.preview()
+    assert plan.document["source_certificate_serial"] == source.serial
+    assert plan.document["dispatch_certificate_serial"] == dispatch.serial
+
+    with sessions.begin() as session:
+        source = session.get(AgentCertificate, SOURCE_ATTEMPT_CERTIFICATE)
+        assert source is not None
+        source.revoked_at = NOW - timedelta(minutes=10)
+    with pytest.raises(CompatibilityRecoveryConflict, match="exact live dev335"):
+        service.preview()
+
+
+def test_preview_rejects_inactive_pinned_dispatch_certificate(tmp_path):
+    sessions, service, _ = seeded_services(tmp_path)
+
+    with sessions.begin() as session:
+        dispatch = session.get(AgentCertificate, SOURCE_CERTIFICATE)
+        assert dispatch is not None
+        dispatch.state = "revoked"
+        dispatch.revoked_at = NOW
+
+    with pytest.raises(CompatibilityRecoveryConflict, match="exact live dev335"):
+        service.preview()
 
 
 def test_database_rejects_issued_state_without_one_shot_grant_fields(tmp_path):
@@ -1018,7 +1073,7 @@ def test_identity_only_terminal_reconciliation_rejects_every_inexact_contact(
                     not_before=NOW - timedelta(days=1),
                     not_after=NOW + timedelta(days=1),
                     fingerprint="other-active-fingerprint",
-                    generation=2,
+                    generation=3,
                 )
             )
         elif drift == "payload":
