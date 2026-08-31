@@ -998,6 +998,18 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "'0:0:755'" in crash_window
     assert "'0:0:600:1'" in crash_window
     assert '"$safe_sync_target" -ne 1' in crash_window
+    for exact_preinst_gate in (
+        'helper_pid_exe" == /usr/bin/dash',
+        '"${#helper_pid_argv[@]}" -eq 5',
+        '"${helper_pid_argv[0]}" == /bin/sh',
+        '"${helper_pid_argv[1]}" == /var/lib/dpkg/tmp.ci/preinst',
+        '"${helper_pid_argv[2]}" == upgrade',
+        '"${helper_pid_argv[3]}" == "$baseline_version"',
+        '"${helper_pid_argv[4]}" == "$version"',
+        "== '0:0:755:1'",
+    ):
+        assert exact_preinst_gate in crash_window
+    assert '"$safe_d_state" -ne 1' in crash_window
     assert 'case "$dpkg_pid_state" in T|t)' in crash_window
     assert "captured helper pid=%s state=%s exe=%q argv=" in crash_window
     assert (
