@@ -392,7 +392,10 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
 
     gemma = registry.service_recipes["vonk-forge/gemma-4-26b-a4b-vllm028-single"]
     lfm = registry.service_recipes["vonk-forge/lfm2-5-vl-3b-vllm028-single"]
-    glm = registry.service_recipes["vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual"]
+    glm_nvfp4 = registry.service_recipes["vonk-forge/glm-5-3-flash-nvfp4-vllm-dual"]
+    glm_exl3 = registry.service_recipes[
+        "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual"
+    ]
     assert (gemma.content_sha256, gemma.alias) == (
         "078047fc8139b5ed42da608e6d131df791b45ee74b2eedccea45c50f22d39469",
         "gemma-4-26b-a4b-it-vllm028",
@@ -401,16 +404,38 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
         "26d475b2b589cf655d461729de3bc16944e6ca9e8a1e605347946258a032b2b7",
         "lfm2-5-vl-3b-vllm028",
     )
-    assert (glm.content_sha256, glm.alias) == (
-        "43d54e87682fb898beddd4fcca8b8da7829ad9130e82409f9d6a8600dff44357",
+    assert (glm_nvfp4.content_sha256, glm_nvfp4.alias) == (
+        "97e28bf3ebff5e672b8c11945628a78ee891d88945f13b5343e27ff81385d1a1",
+        "glm-5.3-flash",
+    )
+    assert glm_nvfp4.higher_tiers["stress"] == (
+        "32K long-context repetition regression and bounded concurrency canaries",
+    )
+    assert (glm_exl3.content_sha256, glm_exl3.alias) == (
+        "cff8d29ca0ec6cd3b233c424b5f7c2155d1701a7ac5e1819fb8a3538bf5496c3",
         "glm-5.3-flash-exl3",
+    )
+    assert glm_exl3.higher_tiers["stress"] == (
+        "8K, 16K, 100K, 256K, and 300K cold-prefill ladder plus bounded concurrency canaries",
     )
 
     expected_artifacts = {
+        "vonk-forge/flux-2-klein-4b-comfyui-single": "eea5ea1b7d83e13fc609d05fd6fbbcdc90e75ba48268a9d80841a356282bc0cd",
+        "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": "dc2f424a7b33cbd80e4ef21cc4d44b4be60c98c8cf9e6825d4bd401431ebbe6b",
+        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "aa04af6689b07c224aca55cbb3cd163e5126a553e636cc230c631f428bb33f23",
+        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "b458ed9412c5c8036ba79f2210dead04f0843dae56fcf1e6bd1bd4baef6576a5",
+        "vonk-forge/ltx-2-19b-distilled-diffusers-single": "8e923fc076b95429ba212faa8023261b467c3becfc27d626427c793cd5eb081e",
+        "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "4a897b5f628f176f4c22069dbdaae694fc953186640391bdadf87c494ae438a4",
+        "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "08e3c9c5b9f7336ada4200e29f1ab107eb6e70cd87d04527af11d44ce56f4921",
         "vonk-forge/minimax-h3-fl2va-diffusers-single": "405bfbcf878ee3eb8f6c8e627652541074901be2433306ace7d73fd63fbc0f55",
-        "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "1706afd5a3322729a3e1bf817447601928b12bdfa97ed1187d672283ee2f058c",
-        "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": "51ab53220c7a8710a6d420bac595e797b6259b7282163c991a6aaae610eb6fdb",
-        "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": "2d3bbe3b5d52de3d889ca0abd692ed874c109e4dbf9ea3d4c86770e3b41a8e77",
+        "vonk-forge/qwen-image-2512-comfyui-single": "5951289d2234b9fc7e2796cbc15f2ca5cadc5fde9769574ec1b316c27a5ff3f5",
+        "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "bfde8c32a2adb166815a10306a8bcd09e44c03414ef40261004b1b4c0ee13782",
+        "vonk-forge/qwen-image-edit-2511-comfyui-single": "a06709b85f4362f0734a29df913f23c193695e46f76e5f9790474cd553dff364",
+        "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": "0469503d348283f45d0cb22013f63749420eaf1cf4f981f38c0103736eb867f4",
+        "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": "fee0c2880a89bf639e8e6d6b257825a07cd52e972dfb9809e1f920fd53c02627",
+        "vonk-forge/wan-2-2-i2v-14b-comfyui-single": "c63caaecd2e059b5cfa84c3cec749900d30be966172a2ace8b4cfe490ac1848d",
+        "vonk-forge/wan-2-2-t2v-14b-comfyui-single": "697037cf44b33a7abc4f7e460d18cc1e311385d79b41b5863538f34488a0ac0b",
+        "vonk-forge/wan-2-2-ti2v-5b-comfyui-single": "41d7a92f932efa7362bf880cd0b44c37a6e24f3f222677c27b9321bb3cf85bf4",
     }
     assert {
         key: registry.recipes[key].content_sha256 for key in expected_artifacts
