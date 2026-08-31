@@ -76,7 +76,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             acl adduser build-essential ca-certificates init-system-helpers \
-            openssl shellcheck systemd util-linux
+            fuse-overlayfs iproute2 iptables openssl podman shellcheck \
+            slirp4netns systemd uidmap util-linux
       - name: Validate and exercise the exact legacy recovery lifecycle
         shell: bash
         run: |
