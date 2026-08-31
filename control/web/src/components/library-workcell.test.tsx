@@ -85,7 +85,8 @@ test("keeps custom recipes isolated from managed updates while exposing the auto
 
   expect(await screen.findByText("Update available · v1.0.0 → v1.2.0")).toBeVisible();
   await waitFor(() => expect(syncManagedRecipeCatalog).toHaveBeenCalledTimes(1));
-  expect(await screen.findByText("Last sync: 1 imported · 2 updated · 3 withdrawn")).toBeVisible();
+  expect(await screen.findByText("Last sync: 1 imported · 2 updated")).toBeVisible();
+  expect(screen.queryByText(/installed recipes? (?:is|are) withdrawn upstream/i)).not.toBeInTheDocument();
   const sync = screen.getByRole("button", {name: "Sync now"});
   expect(sync).toBeEnabled();
 
@@ -95,6 +96,50 @@ test("keeps custom recipes isolated from managed updates while exposing the auto
   expect(workSurface).toHaveTextContent("Custom Runtime");
   expect(workSurface).not.toHaveTextContent("Qwen Chat");
   expect(screen.getByRole("region", {name: "Models"})).toHaveTextContent("Unlinked");
+});
+
+test("surfaces upstream withdrawal only for managed recipes installed on a Spark", async () => {
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const syncManagedRecipeCatalog = vi.fn().mockResolvedValue({
+    state: "current",
+    withdrawn_count: 3,
+    withdrawn_recipes: [
+      {recipe_id: "recipe-chat", recipe_uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${"a".repeat(64)}`},
+      {recipe_id: "recipe-code", recipe_uri: `vonk://catalog/vonk-forge/qwen-code@sha256:${"b".repeat(64)}`},
+      {recipe_id: "catalog-only", recipe_uri: `vonk://catalog/vonk-forge/catalog-only@sha256:${"c".repeat(64)}`},
+    ],
+  });
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => fullLibraryDetail,
+    listPublicRecipes: async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "c".repeat(40), recipes: []}),
+    syncManagedRecipeCatalog,
+    visualFleet: async () => fleet([fleetNode({installed: [{recipe_id: "recipe-chat", rank_state: "installed"}] as VisualFleetNode["installed"]})]),
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByText("1 installed recipe is withdrawn upstream. Installed content remains pinned until you review its removal.")).toBeVisible();
+  const models = screen.getByRole("region", {name: "Models"});
+  expect(within(models).getByText("Installed recipe withdrawn upstream")).toBeVisible();
+
+  const chat = screen.getByRole("link", {name: /^Qwen ChatQwen Chat description/}).closest("article")!;
+  const code = screen.getByRole("link", {name: /^Qwen CodeQwen Code description/}).closest("article")!;
+  expect(within(chat).getByText("Withdrawn upstream · installed")).toBeVisible();
+  expect(within(chat).getByText("Catalog updates unavailable")).toBeVisible();
+  expect(within(code).getByText("Managed")).toBeVisible();
+  expect(within(code).queryByText(/Withdrawn upstream/i)).not.toBeInTheDocument();
+
+  const sparks = screen.getByRole("complementary", {name: "Sparks"});
+  expect(within(sparks).getByText("Withdrawn upstream")).toBeVisible();
+  expect(within(sparks).getByText("Installed content is withdrawn upstream")).toBeVisible();
+
+  await user.click(screen.getByText("Recipe filters"));
+  await user.selectOptions(screen.getByRole("combobox", {name: "Local status"}), "withdrawn");
+  const recipes = screen.getByRole("region", {name: /Recipes for/});
+  expect(recipes).toHaveTextContent("Qwen Chat");
+  expect(recipes).not.toHaveTextContent("Qwen Code");
+  expect(recipes).not.toHaveTextContent("Catalog Only");
 });
 
 test("opens the exact install preview from the keyboard placement path and drag-and-drop", async () => {
@@ -134,6 +179,7 @@ test("projects running, update, incompatible, and offline Spark states without f
   const installed = {recipe_id: "recipe-chat", rank_state: "installed"};
   const loaded = {recipe_id: "recipe-chat"};
   expect(sparkPlacementState(fleetNode({installed: [installed] as VisualFleetNode["installed"]}), [record])).toBe("update");
+  expect(sparkPlacementState(fleetNode({installed: [installed] as VisualFleetNode["installed"]}), [{...record, withdrawnInstalled: true}])).toBe("withdrawn");
   expect(sparkPlacementState(fleetNode({loaded: [loaded] as VisualFleetNode["loaded"]}), [record])).toBe("running");
   expect(sparkPlacementState(fleetNode({id: "node-outside"}), [record], fullLibraryDetail)).toBe("incompatible");
   expect(sparkPlacementState(fleetNode({connection: {...fleetNode().connection, online_state: "offline", offline_reason: "stale"}}), [record], fullLibraryDetail)).toBe("offline");

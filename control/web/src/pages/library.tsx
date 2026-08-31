@@ -3,6 +3,7 @@ import type {MouseEvent} from "react";
 import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, VisualFleetSnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
+import type {ManagedCatalogSyncSummary} from "../components/library-workcell";
 import {nodeDisplayName} from "../lib/fleet";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
@@ -15,10 +16,8 @@ type RouteParent =
   | {kind: "model"; model: Omit<LibraryModel, "recipes">; recipe: LibraryRecipeSummary}
   | {kind: "unlinked"; recipe: LibraryRecipeSummary};
 
-export type ManagedCatalogSyncResult = {state: string; imported_count?: number; updated_count?: number; withdrawn_count?: number};
-
 type ManagedCatalogSyncApi = {
-  syncManagedRecipeCatalog?(signal?: AbortSignal): Promise<ManagedCatalogSyncResult>;
+  syncManagedRecipeCatalog?(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
 };
 
 function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
@@ -147,7 +146,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [syncSummary, setSyncSummary] = useState<ManagedCatalogSyncResult>();
+  const [syncSummary, setSyncSummary] = useState<ManagedCatalogSyncSummary>();
   const automaticSyncAttempted = useRef(false);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());

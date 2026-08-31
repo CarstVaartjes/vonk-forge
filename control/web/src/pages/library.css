@@ -2334,6 +2334,19 @@
   color: var(--titanium);
 }
 
+.library-workcell-recipe-signals .is-withdrawn,
+.library-withdrawn-label {
+  background: #2a1d0d;
+  border: 1px solid #9f7738;
+  border-radius: 999px;
+  color: var(--warning);
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 0.25rem 0.45rem;
+  width: fit-content;
+}
+
 .library-workcell-recipe-actions {
   align-items: center;
   display: flex;
@@ -2432,6 +2445,7 @@
 .library-spark-target > header span,
 .library-spark-target dl,
 .library-atomic-placement,
+.library-withdrawn-impact,
 .library-removal-impact {
   color: var(--text-muted);
   font-size: 0.68rem;
@@ -2458,6 +2472,12 @@
 
 .library-spark-state.state-update {
   border-color: #8c6f2d;
+  color: var(--warning);
+}
+
+.library-spark-state.state-withdrawn {
+  background: #2a1d0d;
+  border-color: #9f7738;
   color: var(--warning);
 }
 
@@ -2491,6 +2511,7 @@
 }
 
 .library-atomic-placement,
+.library-withdrawn-impact,
 .library-removal-impact {
   border-top: 1px solid var(--border);
   display: grid;
@@ -2500,8 +2521,14 @@
 }
 
 .library-atomic-placement strong,
+.library-withdrawn-impact strong,
 .library-removal-impact strong {
   color: var(--text);
+}
+
+.library-withdrawn-impact {
+  border-color: #9f7738;
+  color: var(--warning);
 }
 
 .library-place-target,
