@@ -88,7 +88,25 @@ def _recipe(slug: str) -> dict[str, object]:
         "content_sha256": "c" * 64,
         "release_version": "1.0.0",
         "node_count": 1,
+        "topology_roles": [
+            {
+                "name": "entrypoint",
+                "count": 1,
+                "endpoint_owner": True,
+                "disk": {
+                    "image_bytes": 1,
+                    "artifact_bytes": 1,
+                    "staging_bytes": 1,
+                    "cache_bytes": 1,
+                    "rollback_bytes": 0,
+                    "safety_margin_bytes": 1,
+                },
+            }
+        ],
         "expected_download_bytes": 10,
+        "artifact_count": 0,
+        "artifact_identities": [],
+        "temporary_build_bytes_per_node": 0,
         "maximum_installed_bytes_per_node": 20,
         "maximum_runtime_memory_bytes_per_node": 30,
         "execution_readiness": "executable",

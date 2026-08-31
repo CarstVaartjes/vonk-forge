@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -263,10 +264,28 @@ class PublicRecipeLocalState(StrictModel):
     release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
 
 
+class PublicRecipeDiskRequirements(StrictModel):
+    image_bytes: int = Field(ge=0)
+    artifact_bytes: int = Field(ge=0)
+    staging_bytes: int = Field(ge=0)
+    cache_bytes: int = Field(ge=0)
+    rollback_bytes: int = Field(ge=0)
+    safety_margin_bytes: int = Field(ge=0)
+
+
+class PublicRecipeArtifactIdentity(StrictModel):
+    artifact_id: str = Field(pattern=_NAME)
+    identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    download_bytes: int = Field(gt=0)
+    installed_bytes: int = Field(gt=0)
+    roles: list[str] = Field(max_length=32)
+
+
 class PublicRecipeTopologyRole(StrictModel):
     name: str = Field(pattern=_NAME)
     count: int = Field(ge=1)
     endpoint_owner: bool
+    disk: PublicRecipeDiskRequirements
 
 
 class PublicRecipeFabric(StrictModel):
@@ -303,6 +322,7 @@ class PublicRecipeListItem(StrictModel):
     runtime_distribution: str = Field(pattern=_SLUG)
     source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     artifact_count: int = Field(ge=0, le=32)
+    artifact_identities: list[PublicRecipeArtifactIdentity] = Field(max_length=32)
     topology_name: str = Field(min_length=1, max_length=64)
     topology_mode: str = Field(min_length=1, max_length=32)
     node_count: int = Field(ge=1)
@@ -310,6 +330,7 @@ class PublicRecipeListItem(StrictModel):
     fabric: PublicRecipeFabric
     expected_download_bytes: int = Field(ge=1)
     maximum_installed_bytes_per_node: int = Field(ge=1)
+    temporary_build_bytes_per_node: int = Field(ge=0)
     maximum_runtime_memory_bytes_per_node: int = Field(ge=1)
     release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
     release_released_at: str | None = Field(default=None, min_length=10, max_length=10)
@@ -594,15 +615,62 @@ def _public_recipe_metadata(
     topology = topology if isinstance(topology, Mapping) else {}
     raw_roles = topology.get("roles")
     raw_roles = raw_roles if isinstance(raw_roles, list) else []
-    topology_roles = [
-        {
-            "name": str(role.get("name", "")),
-            "count": int(role.get("count", 0)),
-            "endpoint_owner": bool(role.get("endpoint_owner", False)),
+    topology_roles = []
+    for role in raw_roles:
+        if not isinstance(role, Mapping):
+            continue
+        resources = role.get("resources")
+        disk = resources.get("disk") if isinstance(resources, Mapping) else None
+        topology_roles.append(
+            {
+                "name": str(role.get("name", "")),
+                "count": int(role.get("count", 0)),
+                "endpoint_owner": bool(role.get("endpoint_owner", False)),
+                "disk": (
+                    {
+                        field: disk.get(field)
+                        for field in (
+                            "image_bytes",
+                            "artifact_bytes",
+                            "staging_bytes",
+                            "cache_bytes",
+                            "rollback_bytes",
+                            "safety_margin_bytes",
+                        )
+                    }
+                    if isinstance(disk, Mapping)
+                    else None
+                ),
+            }
+        )
+    raw_artifacts = document.get("artifacts")
+    raw_artifacts = raw_artifacts if isinstance(raw_artifacts, list) else []
+    artifact_identities = []
+    for artifact in raw_artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        include_paths = artifact.get("include_paths", [])
+        include_paths = include_paths if isinstance(include_paths, list) else []
+        identity = {
+            "kind": artifact.get("kind"),
+            "repository": artifact.get("repository"),
+            "revision": artifact.get("revision"),
+            "include_paths": sorted(set(include_paths)),
         }
-        for role in raw_roles
-        if isinstance(role, Mapping)
-    ]
+        artifact_identities.append(
+            {
+                "artifact_id": artifact.get("id"),
+                "identity_sha256": hashlib.sha256(
+                    json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+                "download_bytes": artifact.get("download_bytes"),
+                "installed_bytes": artifact.get("installed_bytes"),
+                "roles": sorted(set(artifact.get("roles", []))),
+            }
+        )
+    artifact_identities.sort(key=lambda item: str(item["identity_sha256"]))
+    build = document.get("build")
+    build_resources = build.get("resources") if isinstance(build, Mapping) else None
     raw_fabric = topology.get("fabric")
     raw_fabric = raw_fabric if isinstance(raw_fabric, Mapping) else {}
     return {
@@ -628,6 +696,12 @@ def _public_recipe_metadata(
         "precision": precision,
         "quantizations": quantizations,
         "topology_roles": topology_roles,
+        "artifact_identities": artifact_identities,
+        "temporary_build_bytes_per_node": (
+            build_resources.get("temporary_bytes")
+            if isinstance(build_resources, Mapping)
+            else None
+        ),
         "fabric": {
             "connectivity": raw_fabric.get("connectivity", "none"),
             "minimum_bandwidth_mbps": raw_fabric.get(

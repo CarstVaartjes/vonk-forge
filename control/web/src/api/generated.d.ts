@@ -3321,6 +3321,19 @@ export interface components {
             /** Uri */
             uri: string;
         };
+        /** PublicRecipeArtifactIdentity */
+        PublicRecipeArtifactIdentity: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Download Bytes */
+            download_bytes: number;
+            /** Identity Sha256 */
+            identity_sha256: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Roles */
+            roles: string[];
+        };
         /** PublicRecipeChange */
         PublicRecipeChange: {
             /** Details */
@@ -3334,6 +3347,21 @@ export interface components {
             references: string[];
             /** Summary */
             summary: string;
+        };
+        /** PublicRecipeDiskRequirements */
+        PublicRecipeDiskRequirements: {
+            /** Artifact Bytes */
+            artifact_bytes: number;
+            /** Cache Bytes */
+            cache_bytes: number;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Rollback Bytes */
+            rollback_bytes: number;
+            /** Safety Margin Bytes */
+            safety_margin_bytes: number;
+            /** Staging Bytes */
+            staging_bytes: number;
         };
         /** PublicRecipeFabric */
         PublicRecipeFabric: {
@@ -3349,6 +3377,8 @@ export interface components {
         PublicRecipeListItem: {
             /** Artifact Count */
             artifact_count: number;
+            /** Artifact Identities */
+            artifact_identities: components["schemas"]["PublicRecipeArtifactIdentity"][];
             /** Capabilities */
             capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
             /** Content Sha256 */
@@ -3425,6 +3455,8 @@ export interface components {
             source_repository?: string | null;
             /** Tags */
             tags: string[];
+            /** Temporary Build Bytes Per Node */
+            temporary_build_bytes_per_node: number;
             /** Title */
             title: string;
             /** Topology Mode */
@@ -3465,6 +3497,8 @@ export interface components {
         PublicRecipePreviewResponse: {
             /** Artifact Count */
             artifact_count: number;
+            /** Artifact Identities */
+            artifact_identities: components["schemas"]["PublicRecipeArtifactIdentity"][];
             /** Capabilities */
             capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
             /** Changes Since Local */
@@ -3548,6 +3582,8 @@ export interface components {
             source_repository?: string | null;
             /** Tags */
             tags: string[];
+            /** Temporary Build Bytes Per Node */
+            temporary_build_bytes_per_node: number;
             /** Title */
             title: string;
             /** Topology Mode */
@@ -3579,6 +3615,7 @@ export interface components {
         PublicRecipeTopologyRole: {
             /** Count */
             count: number;
+            disk: components["schemas"]["PublicRecipeDiskRequirements"];
             /** Endpoint Owner */
             endpoint_owner: boolean;
             /** Name */

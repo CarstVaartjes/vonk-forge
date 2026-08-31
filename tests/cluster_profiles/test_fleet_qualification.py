@@ -17,6 +17,8 @@ from cluster_profiles.fleet_qualification import (
     QualificationRunner,
     RunnerOptions,
     ServiceSmokeAdapter,
+    _artifact_identities,
+    _temporary_build_bytes,
     build_plan,
     legal_blockers,
     load_policy,
@@ -79,7 +81,18 @@ def _recipe(slug: str, *, nodes: int = 1, local: object = None) -> dict[str, obj
         "content_sha256": "c" * 64,
         "release_version": "1.0.0",
         "node_count": nodes,
+        "topology_roles": [
+            {
+                "name": "solo",
+                "count": nodes,
+                "endpoint_owner": True,
+                "disk": _role_disk()["solo"],
+            }
+        ],
         "expected_download_bytes": 10,
+        "artifact_count": 0,
+        "artifact_identities": [],
+        "temporary_build_bytes_per_node": 0,
         "maximum_installed_bytes_per_node": 20,
         "maximum_runtime_memory_bytes_per_node": 30,
         "execution_readiness": "executable",
@@ -123,6 +136,13 @@ def _campaign_plan(
                 "content_sha256": item.get("content_sha256"),
                 "release_version": item.get("release_version"),
                 "node_count": item.get("node_count"),
+                "temporary_build_bytes_per_node": item.get(
+                    "temporary_build_bytes_per_node"
+                ),
+                "disk_requirements_by_role": item.get(
+                    "disk_requirements_by_role"
+                ),
+                "artifact_identities": item.get("artifact_identities"),
                 "immutable_blockers": [
                     blocker
                     for blocker in blockers
@@ -166,6 +186,43 @@ def _campaign_plan(
         "fleet": {"online_node_ids": []},
         "recipes": recipes,
     }
+
+
+def test_exact_capacity_projection_accepts_full_immutable_artifacts() -> None:
+    artifact = {
+        "id": "weights",
+        "kind": "huggingface.snapshot",
+        "repository": "owner/model",
+        "revision": "a" * 40,
+        "download_bytes": 10,
+        "installed_bytes": 20,
+        "roles": ["entrypoint"],
+    }
+    document = {
+        "visual_recipe": {},
+        "artifacts": [artifact],
+        "build": {"resources": {"temporary_bytes": 30}},
+    }
+    identity = {
+        "kind": artifact["kind"],
+        "repository": artifact["repository"],
+        "revision": artifact["revision"],
+        "include_paths": [],
+    }
+    expected_sha256 = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    assert _artifact_identities(document) == [
+        {
+            "artifact_id": "weights",
+            "identity_sha256": expected_sha256,
+            "download_bytes": 10,
+            "installed_bytes": 20,
+            "roles": ["entrypoint"],
+        }
+    ]
+    assert _temporary_build_bytes(document) == 30
 
 
 def test_ledger_is_hash_chained_durable_and_resumable(tmp_path: Path) -> None:
@@ -213,6 +270,17 @@ def test_ledger_rejects_tampering_and_partial_records(tmp_path: Path) -> None:
 
 def test_plan_previews_import_and_classifies_wide_and_policy_blockers() -> None:
     supported = _recipe("tiny")
+    supported["artifact_count"] = 1
+    supported["artifact_identities"] = [
+        {
+            "artifact_id": "weights",
+            "identity_sha256": "d" * 64,
+            "download_bytes": 10,
+            "installed_bytes": 20,
+            "roles": ["solo"],
+        }
+    ]
+    supported["temporary_build_bytes_per_node"] = 30
     wide = _recipe("eight", nodes=8)
     denied = _recipe("denied")
     client = _Client(
@@ -245,6 +313,8 @@ def test_plan_previews_import_and_classifies_wide_and_policy_blockers() -> None:
     assert RunnerOptions().cleanup == "stop"
     assert "warm-redeploy-smoke" in recipes["vonk/tiny"]["planned_actions"]
     assert "retain-installation" in recipes["vonk/tiny"]["planned_actions"]
+    assert recipes["vonk/tiny"]["artifact_identities"] == supported["artifact_identities"]
+    assert recipes["vonk/tiny"]["temporary_build_bytes_per_node"] == 30
     assert recipes["vonk/eight"]["blockers"][0]["classification"] == "topology"
     assert recipes["vonk/denied"]["blockers"][0]["classification"] == "license"
     assert [call[:2] for call in client.calls].count(
@@ -253,6 +323,133 @@ def test_plan_previews_import_and_classifies_wide_and_policy_blockers() -> None:
     assert all(
         call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
     )
+
+
+def test_plan_rejects_import_preview_with_wrong_disk_role_before_digest() -> None:
+    recipe = _recipe("flux-2-klein-4b-nvfp4-comfyui-single")
+    recipe["topology_roles"] = [
+        {
+            "name": "entrypoint",
+            "count": 1,
+            "endpoint_owner": True,
+            "disk": _role_disk(image=5_000_000_000)["solo"],
+        }
+    ]
+    preview = json.loads(json.dumps(recipe))
+    preview["topology_roles"] = [
+        {
+            "name": "worker",
+            "count": 1,
+            "endpoint_owner": False,
+            "disk": _role_disk(image=5_000_000_000)["solo"],
+        }
+    ]
+    client = _Client(
+        {
+            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/v1/catalog/public-recipes"): {
+                "repository": "CarstVaartjes/vonk-forge-recipes",
+                "commit": "b" * 40,
+                "recipes": [recipe],
+            },
+            ("POST", "/api/v1/catalog/imports/public/preview"): preview,
+        }
+    )
+
+    with pytest.raises(
+        QualificationError,
+        match="lacks exact disk requirements for every topology role: missing 'entrypoint'",
+    ):
+        build_plan(client, RunnerOptions(jurisdiction="NL"), {})
+
+    assert all(
+        call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
+    )
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected"),
+    [
+        ("artifacts", "artifact identities changed during planning"),
+        ("temporary", "temporary build bytes changed during planning"),
+    ],
+)
+def test_plan_rejects_empty_first_import_capacity_projection(
+    drift: str, expected: str
+) -> None:
+    recipe = _recipe("first-import")
+    recipe["artifact_count"] = 1
+    recipe["artifact_identities"] = [
+        {
+            "artifact_id": "weights",
+            "identity_sha256": "d" * 64,
+            "download_bytes": 10,
+            "installed_bytes": 20,
+            "roles": ["solo"],
+        }
+    ]
+    recipe["temporary_build_bytes_per_node"] = 30
+    preview = json.loads(json.dumps(recipe))
+    if drift == "artifacts":
+        preview["artifact_identities"] = []
+    else:
+        preview["temporary_build_bytes_per_node"] = 0
+    client = _Client(
+        {
+            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/v1/catalog/public-recipes"): {
+                "repository": "CarstVaartjes/vonk-forge-recipes",
+                "commit": "b" * 40,
+                "recipes": [recipe],
+            },
+            ("POST", "/api/v1/catalog/imports/public/preview"): preview,
+        }
+    )
+
+    with pytest.raises(QualificationError, match=expected):
+        build_plan(client, RunnerOptions(jurisdiction="NL"), {})
+
+
+def test_plan_reads_exact_role_disk_from_top_level_library_topology() -> None:
+    recipe_id = "00000000-0000-4000-8000-000000000001"
+    revision_id = "00000000-0000-4000-8000-000000000002"
+    disk = _role_disk(image=5, artifacts=7, staging=11, safety=13)["solo"]
+    recipe = _recipe(
+        "current",
+        local={
+            "status": "current",
+            "recipe_id": recipe_id,
+            "revision_number": 2,
+            "content_sha256": "c" * 64,
+        },
+    )
+    recipe["topology_roles"] = [
+        {"name": "entrypoint", "count": 1, "endpoint_owner": True, "disk": disk}
+    ]
+    client = _Client(
+        {
+            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/v1/catalog/public-recipes"): {
+                "repository": "CarstVaartjes/vonk-forge-recipes",
+                "commit": "b" * 40,
+                "recipes": [recipe],
+            },
+            ("GET", f"/api/v1/library/recipes/{recipe_id}"): {
+                "selected_revision": {
+                    "id": revision_id,
+                    "content_sha256": "c" * 64,
+                },
+                "visual_recipe": {"artifacts": []},
+                "topology": {
+                    "roles": [{"name": "entrypoint", "disk": disk}],
+                },
+            },
+        }
+    )
+
+    plan = build_plan(client, RunnerOptions(jurisdiction="NL"), {})
+
+    assert plan["recipes"][0]["disk_requirements_by_role"] == {"entrypoint": disk}
 
 
 def test_intent_digest_ignores_observed_fleet_drift_but_evidence_snapshot_changes() -> (
@@ -478,11 +675,19 @@ def test_apply_rejects_actionable_plan_tampering_and_option_drift(
     plan = _campaign_plan([item], options)
     tampered = json.loads(json.dumps(plan))
     tampered["recipes"][0]["content_sha256"] = "e" * 64
+    tampered_capacity = json.loads(json.dumps(plan))
+    tampered_capacity["recipes"][0]["disk_requirements_by_role"] = _role_disk(
+        image=1
+    )
 
     with pytest.raises(QualificationError, match="actionable recipe rows"):
         QualificationRunner(
             _Client({}), EvidenceLedger(tmp_path / "tamper.jsonl"), options
         ).apply(tampered, str(plan["plan_digest"]))
+    with pytest.raises(QualificationError, match="actionable recipe rows"):
+        QualificationRunner(
+            _Client({}), EvidenceLedger(tmp_path / "capacity-tamper.jsonl"), options
+        ).apply(tampered_capacity, str(plan["plan_digest"]))
     with pytest.raises(QualificationError, match="runner options"):
         QualificationRunner(
             _Client({}),

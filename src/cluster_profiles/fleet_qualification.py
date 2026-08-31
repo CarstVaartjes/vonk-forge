@@ -616,8 +616,51 @@ def _local_recipe_id(recipe: Mapping[str, object]) -> str | None:
 def _artifact_identities(value: Mapping[str, object] | None) -> list[dict[str, object]]:
     if value is None:
         return []
+    projected = value.get("artifact_identities")
+    if isinstance(projected, list):
+        result: list[dict[str, object]] = []
+        for raw in projected:
+            artifact = _object(raw, "recipe artifact identity")
+            artifact_id = artifact.get("artifact_id")
+            identity_sha256 = artifact.get("identity_sha256")
+            download_bytes = artifact.get("download_bytes")
+            installed_bytes = artifact.get("installed_bytes")
+            roles = artifact.get("roles")
+            if (
+                not isinstance(artifact_id, str)
+                or not artifact_id
+                or not isinstance(identity_sha256, str)
+                or len(identity_sha256) != 64
+                or any(value not in "0123456789abcdef" for value in identity_sha256)
+                or not isinstance(download_bytes, int)
+                or isinstance(download_bytes, bool)
+                or download_bytes <= 0
+                or not isinstance(installed_bytes, int)
+                or isinstance(installed_bytes, bool)
+                or installed_bytes <= 0
+                or not isinstance(roles, list)
+                or any(not isinstance(role, str) for role in roles)
+            ):
+                raise QualificationError("recipe artifact identity projection is invalid")
+            result.append(
+                {
+                    "artifact_id": artifact_id,
+                    "identity_sha256": identity_sha256,
+                    "download_bytes": download_bytes,
+                    "installed_bytes": installed_bytes,
+                    "roles": sorted(set(roles)),
+                }
+            )
+        identities = [str(item["identity_sha256"]) for item in result]
+        if len(identities) != len(set(identities)):
+            raise QualificationError("recipe artifact identities are not unique")
+        return sorted(result, key=lambda item: str(item["identity_sha256"]))
     visual = value.get("visual_recipe")
-    document = visual if isinstance(visual, Mapping) else value
+    document = (
+        visual
+        if isinstance(visual, Mapping) and isinstance(visual.get("artifacts"), list)
+        else value
+    )
     artifacts = document.get("artifacts")
     if not isinstance(artifacts, list):
         return []
@@ -625,7 +668,7 @@ def _artifact_identities(value: Mapping[str, object] | None) -> list[dict[str, o
     for raw in artifacts:
         if not isinstance(raw, Mapping):
             raise QualificationError("recipe artifact projection is invalid")
-        include_paths = raw.get("include_paths")
+        include_paths = raw.get("include_paths", [])
         if (
             not isinstance(raw.get("id"), str)
             or not isinstance(raw.get("kind"), str)
@@ -672,8 +715,21 @@ def _artifact_identities(value: Mapping[str, object] | None) -> list[dict[str, o
 def _temporary_build_bytes(value: Mapping[str, object] | None) -> int:
     if value is None:
         return 0
+    projected = value.get("temporary_build_bytes_per_node")
+    if projected is not None:
+        if (
+            not isinstance(projected, int)
+            or isinstance(projected, bool)
+            or projected < 0
+        ):
+            raise QualificationError("recipe temporary build bytes are invalid")
+        return projected
     visual = value.get("visual_recipe")
-    document = visual if isinstance(visual, Mapping) else value
+    document = (
+        visual
+        if isinstance(visual, Mapping) and isinstance(visual.get("build"), Mapping)
+        else value
+    )
     build = document.get("build")
     resources_value = build.get("resources") if isinstance(build, Mapping) else None
     temporary = (
@@ -681,11 +737,9 @@ def _temporary_build_bytes(value: Mapping[str, object] | None) -> int:
         if isinstance(resources_value, Mapping)
         else None
     )
-    return (
-        temporary
-        if isinstance(temporary, int) and not isinstance(temporary, bool)
-        else 0
-    )
+    if not isinstance(temporary, int) or isinstance(temporary, bool) or temporary < 0:
+        return 0
+    return temporary
 
 
 def _disk_requirements_by_role(
@@ -693,10 +747,10 @@ def _disk_requirements_by_role(
 ) -> dict[str, dict[str, int]]:
     if value is None:
         return {}
-    visual = value.get("visual_recipe")
-    document = visual if isinstance(visual, Mapping) else value
-    topology = document.get("topology")
+    topology = value.get("topology")
     roles = topology.get("roles") if isinstance(topology, Mapping) else None
+    if not isinstance(roles, list):
+        roles = value.get("topology_roles")
     if not isinstance(roles, list):
         return {}
     fields = (
@@ -712,7 +766,9 @@ def _disk_requirements_by_role(
         role = _object(raw_role, "recipe role")
         name = role.get("name")
         resources = role.get("resources")
-        disk = resources.get("disk") if isinstance(resources, Mapping) else None
+        disk = role.get("disk")
+        if not isinstance(disk, Mapping):
+            disk = resources.get("disk") if isinstance(resources, Mapping) else None
         if not isinstance(name, str) or not isinstance(disk, Mapping):
             raise QualificationError("recipe role lacks exact disk requirements")
         normalized: dict[str, int] = {}
@@ -727,6 +783,39 @@ def _disk_requirements_by_role(
             raise QualificationError(f"duplicate recipe role disk requirements: {name}")
         result[name] = normalized
     return result
+
+
+def _validate_role_disk_requirements(
+    key: str,
+    recipe: Mapping[str, object],
+    requirements: Mapping[str, Mapping[str, int]],
+) -> None:
+    roles = _list(recipe.get("topology_roles"), "public recipe topology roles")
+    expected: dict[str, int] = {}
+    for raw_role in roles:
+        role = _object(raw_role, "public recipe topology role")
+        name = role.get("name")
+        count = role.get("count")
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or count < 1
+            or name in expected
+        ):
+            raise QualificationError(f"{key} has invalid topology role metadata")
+        expected[name] = count
+    node_count = recipe.get("node_count")
+    if not expected or sum(expected.values()) != node_count:
+        raise QualificationError(f"{key} has invalid topology role counts")
+    if set(requirements) != set(expected):
+        missing = sorted(set(expected) - set(requirements))
+        extra = sorted(set(requirements) - set(expected))
+        detail = f"missing {missing[0]!r}" if missing else f"undeclared {extra[0]!r}"
+        raise QualificationError(
+            f"{key} lacks exact disk requirements for every topology role: {detail}"
+        )
 
 
 def build_plan(
@@ -928,6 +1017,32 @@ def build_plan(
                 )
             blockers.extend(legal_blockers(import_preview, options.jurisdiction))
             recipe_document = import_preview
+        disk_requirements = _disk_requirements_by_role(recipe)
+        _validate_role_disk_requirements(key, recipe, disk_requirements)
+        artifact_identities = _artifact_identities(recipe)
+        artifact_count = recipe.get("artifact_count")
+        if (
+            not isinstance(artifact_count, int)
+            or isinstance(artifact_count, bool)
+            or artifact_count != len(artifact_identities)
+        ):
+            raise QualificationError(f"{key} artifact identity projection is incomplete")
+        temporary_build_bytes = _temporary_build_bytes(recipe)
+        if not blockers:
+            preview_disk_requirements = _disk_requirements_by_role(recipe_document)
+            _validate_role_disk_requirements(key, recipe, preview_disk_requirements)
+            if preview_disk_requirements != disk_requirements:
+                raise QualificationError(
+                    f"{key} exact disk requirements changed during planning"
+                )
+            if _artifact_identities(recipe_document) != artifact_identities:
+                raise QualificationError(
+                    f"{key} artifact identities changed during planning"
+                )
+            if _temporary_build_bytes(recipe_document) != temporary_build_bytes:
+                raise QualificationError(
+                    f"{key} temporary build bytes changed during planning"
+                )
         items.append(
             {
                 "key": key,
@@ -941,14 +1056,9 @@ def build_plan(
                 "maximum_installed_bytes_per_node": recipe.get(
                     "maximum_installed_bytes_per_node"
                 ),
-                "temporary_build_bytes_per_node": recipe.get(
-                    "temporary_build_bytes_per_node",
-                    _temporary_build_bytes(recipe_document),
-                ),
-                "disk_requirements_by_role": _disk_requirements_by_role(
-                    recipe_document
-                ),
-                "artifact_identities": _artifact_identities(recipe_document),
+                "temporary_build_bytes_per_node": temporary_build_bytes,
+                "disk_requirements_by_role": disk_requirements,
+                "artifact_identities": artifact_identities,
                 "maximum_runtime_memory_bytes_per_node": recipe.get(
                     "maximum_runtime_memory_bytes_per_node"
                 ),
@@ -1037,6 +1147,11 @@ def build_plan(
                 "content_sha256": item["content_sha256"],
                 "release_version": item["release_version"],
                 "node_count": item["node_count"],
+                "temporary_build_bytes_per_node": item[
+                    "temporary_build_bytes_per_node"
+                ],
+                "disk_requirements_by_role": item["disk_requirements_by_role"],
+                "artifact_identities": item["artifact_identities"],
                 "immutable_blockers": [
                     blocker
                     for blocker in item["blockers"]
@@ -2957,6 +3072,13 @@ class QualificationRunner:
                     "content_sha256": item.get("content_sha256"),
                     "release_version": item.get("release_version"),
                     "node_count": item.get("node_count"),
+                    "temporary_build_bytes_per_node": item.get(
+                        "temporary_build_bytes_per_node"
+                    ),
+                    "disk_requirements_by_role": item.get(
+                        "disk_requirements_by_role"
+                    ),
+                    "artifact_identities": item.get("artifact_identities"),
                     "immutable_blockers": [
                         blocker
                         for blocker in blockers

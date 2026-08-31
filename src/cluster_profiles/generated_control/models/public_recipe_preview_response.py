@@ -25,9 +25,10 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
-  from ..models.public_recipe_fabric import PublicRecipeFabric
+  from ..models.public_recipe_artifact_identity import PublicRecipeArtifactIdentity
   from ..models.public_recipe_local_state import PublicRecipeLocalState
   from ..models.public_recipe_release import PublicRecipeRelease
+  from ..models.public_recipe_fabric import PublicRecipeFabric
 
 
 
@@ -42,6 +43,7 @@ class PublicRecipePreviewResponse:
     """
         Attributes:
             artifact_count (int):
+            artifact_identities (list['PublicRecipeArtifactIdentity']):
             capabilities (list[PublicRecipePreviewResponseCapabilitiesItem]):
             changes_since_local (list['PublicRecipeRelease']):
             content_sha256 (str):
@@ -72,6 +74,7 @@ class PublicRecipePreviewResponse:
             source (PublicRecipePreviewResponseSource):
             source_bundle_sha256 (str):
             tags (list[str]):
+            temporary_build_bytes_per_node (int):
             title (str):
             topology_mode (str):
             topology_name (str):
@@ -85,6 +88,7 @@ class PublicRecipePreviewResponse:
      """
 
     artifact_count: int
+    artifact_identities: list['PublicRecipeArtifactIdentity']
     capabilities: list[PublicRecipePreviewResponseCapabilitiesItem]
     changes_since_local: list['PublicRecipeRelease']
     content_sha256: str
@@ -115,6 +119,7 @@ class PublicRecipePreviewResponse:
     source: PublicRecipePreviewResponseSource
     source_bundle_sha256: str
     tags: list[str]
+    temporary_build_bytes_per_node: int
     title: str
     topology_mode: str
     topology_name: str
@@ -132,10 +137,18 @@ class PublicRecipePreviewResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
-        from ..models.public_recipe_fabric import PublicRecipeFabric
+        from ..models.public_recipe_artifact_identity import PublicRecipeArtifactIdentity
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         from ..models.public_recipe_release import PublicRecipeRelease
+        from ..models.public_recipe_fabric import PublicRecipeFabric
         artifact_count = self.artifact_count
+
+        artifact_identities = []
+        for artifact_identities_item_data in self.artifact_identities:
+            artifact_identities_item = artifact_identities_item_data.to_dict()
+            artifact_identities.append(artifact_identities_item)
+
+
 
         capabilities = []
         for capabilities_item_data in self.capabilities:
@@ -211,6 +224,8 @@ class PublicRecipePreviewResponse:
 
 
 
+        temporary_build_bytes_per_node = self.temporary_build_bytes_per_node
+
         title = self.title
 
         topology_mode = self.topology_mode
@@ -261,6 +276,7 @@ class PublicRecipePreviewResponse:
 
         field_dict.update({
             "artifact_count": artifact_count,
+            "artifact_identities": artifact_identities,
             "capabilities": capabilities,
             "changes_since_local": changes_since_local,
             "content_sha256": content_sha256,
@@ -291,6 +307,7 @@ class PublicRecipePreviewResponse:
             "source": source,
             "source_bundle_sha256": source_bundle_sha256,
             "tags": tags,
+            "temporary_build_bytes_per_node": temporary_build_bytes_per_node,
             "title": title,
             "topology_mode": topology_mode,
             "topology_name": topology_name,
@@ -315,11 +332,22 @@ class PublicRecipePreviewResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
-        from ..models.public_recipe_fabric import PublicRecipeFabric
+        from ..models.public_recipe_artifact_identity import PublicRecipeArtifactIdentity
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         from ..models.public_recipe_release import PublicRecipeRelease
+        from ..models.public_recipe_fabric import PublicRecipeFabric
         d = dict(src_dict)
         artifact_count = d.pop("artifact_count")
+
+        artifact_identities = []
+        _artifact_identities = d.pop("artifact_identities")
+        for artifact_identities_item_data in (_artifact_identities):
+            artifact_identities_item = PublicRecipeArtifactIdentity.from_dict(artifact_identities_item_data)
+
+
+
+            artifact_identities.append(artifact_identities_item)
+
 
         capabilities = []
         _capabilities = d.pop("capabilities")
@@ -420,6 +448,8 @@ class PublicRecipePreviewResponse:
         tags = cast(list[str], d.pop("tags"))
 
 
+        temporary_build_bytes_per_node = d.pop("temporary_build_bytes_per_node")
+
         title = d.pop("title")
 
         topology_mode = d.pop("topology_mode")
@@ -490,6 +520,7 @@ class PublicRecipePreviewResponse:
 
         public_recipe_preview_response = cls(
             artifact_count=artifact_count,
+            artifact_identities=artifact_identities,
             capabilities=capabilities,
             changes_since_local=changes_since_local,
             content_sha256=content_sha256,
@@ -520,6 +551,7 @@ class PublicRecipePreviewResponse:
             source=source,
             source_bundle_sha256=source_bundle_sha256,
             tags=tags,
+            temporary_build_bytes_per_node=temporary_build_bytes_per_node,
             title=title,
             topology_mode=topology_mode,
             topology_name=topology_name,
