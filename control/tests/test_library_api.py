@@ -160,12 +160,18 @@ def test_library_maps_cursor_missing_and_unavailable_failures_without_mutations(
     }
     assert set(paths) == {
         "/api/v1/library",
+        "/api/v1/library/model-deletion-plans/preview",
+        "/api/v1/library/models/{model_version_sha256}/delete",
         "/api/v1/library/placements",
         "/api/v1/library/placements/preview",
         "/api/v1/library/placements/{placement_id}",
         "/api/v1/library/recipes/{recipe_id}",
     }
     assert set(paths["/api/v1/library"]) == {"get"}
+    assert set(paths["/api/v1/library/model-deletion-plans/preview"]) == {"post"}
+    assert set(paths["/api/v1/library/models/{model_version_sha256}/delete"]) == {
+        "post"
+    }
     assert set(paths["/api/v1/library/recipes/{recipe_id}"]) == {"get"}
     assert set(paths["/api/v1/library/placements"]) == {"post"}
     assert set(paths["/api/v1/library/placements/preview"]) == {"post"}

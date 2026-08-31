@@ -1787,6 +1787,10 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
     assert first.consequences.catalog_retained is True
     assert first.consequences.automatic_stop is False
     assert first.consequences.reinstall_required is True
+    assert first.model_impact.effect == "recipe-and-unused-model"
+    assert first.model_impact.dependent_recipe_ids == ()
+    assert first.model_impact.cleanup_node_ids == nodes
+    assert first.model_impact.retained_node_ids == ()
     with sessions() as session:
         stored = session.get(RecipeInstallation, installation.owner_id)
         assert stored is not None
@@ -1804,6 +1808,247 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
     assert service.preview_uninstall(installation.owner_id).plan_digest != (
         first.plan_digest
     )
+
+
+def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    first = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "1"
+    )
+    second = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "2"
+    )
+
+    preview = service.preview_uninstall(first.owner_id)
+
+    assert preview.model_impact.effect == "recipe-only"
+    assert preview.model_impact.dependent_recipe_ids == (
+        preview.recipe_id,
+    )
+    assert preview.model_impact.cleanup_node_ids == ()
+    assert preview.model_impact.retained_node_ids == nodes
+    operation = service.uninstall(
+        first.owner_id,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="8" * 35 + "3",
+    )
+    with sessions() as session:
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == operation.id)
+        )
+        assert child is not None
+        assert child.payload["cleanup_model_version_sha256"] is None
+
+    service.record_node_result(
+        operation.id,
+        nodes[0],
+        succeeded=True,
+        evidence={"removed": True},
+    )
+    final_dependent = service.preview_uninstall(second.owner_id)
+    assert final_dependent.model_impact.effect == "recipe-and-unused-model"
+    assert final_dependent.model_impact.dependent_recipe_ids == ()
+    assert final_dependent.model_impact.cleanup_node_ids == nodes
+    assert final_dependent.model_impact.retained_node_ids == ()
+
+
+def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    target = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "4"
+    )
+    retained = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "5"
+    )
+    with sessions.begin() as session:
+        no_longer_installed = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == retained.owner_id,
+                InstallationNode.node_id == nodes[1],
+            )
+        )
+        assert no_longer_installed is not None
+        no_longer_installed.state = "uninstalled"
+
+    preview = service.preview_uninstall(target.owner_id)
+
+    assert preview.model_impact.effect == "recipe-and-partial-model-cleanup"
+    assert preview.model_impact.dependent_recipe_ids == (preview.recipe_id,)
+    assert preview.model_impact.retained_node_ids == (nodes[0],)
+    assert preview.model_impact.cleanup_node_ids == (nodes[1],)
+    operation = service.uninstall(
+        target.owner_id,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="8" * 35 + "6",
+    )
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+    assert [child.payload["cleanup_model_version_sha256"] for child in children] == [
+        None,
+        preview.model_impact.model_version_sha256,
+    ]
+
+
+def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="d" * 36
+    )
+    second_installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="d" * 35 + "1"
+    )
+    uninstall = service.preview_uninstall(installation.owner_id)
+    model_digest = uninstall.model_impact.model_version_sha256
+
+    preview = service.preview_model_deletion(model_digest)
+
+    assert preview.allowed is True
+    assert preview.model_version_sha256 == model_digest
+    assert preview.shared_cache_policy == "remove-unreferenced-model-artifacts-only"
+    assert preview.bytes_removed == 480
+    assert [item.installation_id for item in preview.installations] == sorted(
+        [installation.owner_id, second_installation.owner_id]
+    )
+    expected_installation_ids = tuple(
+        sorted([installation.owner_id, second_installation.owner_id])
+    )
+    assert [(item.node_id, item.installation_ids) for item in preview.nodes] == [
+        (nodes[0], expected_installation_ids),
+        (nodes[1], expected_installation_ids),
+    ]
+    assert [warning.code for warning in preview.warnings] == [
+        "model-delete.shared_cache_protected"
+    ]
+
+    operation = service.delete_model(
+        model_digest,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="e" * 36,
+    )
+    replay = service.delete_model(
+        model_digest,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="e" * 36,
+    )
+    assert replay == operation
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        assert [child.node_id for child in children] == list(nodes)
+        assert {child.kind for child in children} == {"recipe.model-uninstall.v1"}
+        expected_content_digests = {
+            item.installation_id: item.recipe_content_sha256
+            for item in preview.installations
+        }
+        expected_payload = {
+            "schema_version": 1,
+            "model_version_sha256": model_digest,
+            "plan_digest": preview.plan_digest,
+            "installations": [
+                {
+                    "installation_id": installation_id,
+                    "recipe_content_sha256": expected_content_digests[
+                        installation_id
+                    ],
+                }
+                for installation_id in sorted(
+                    [installation.owner_id, second_installation.owner_id]
+                )
+            ],
+        }
+        assert {child.payload_digest for child in children} == {
+            hashlib.sha256(canonical_message(expected_payload)).hexdigest()
+        }
+        assert all(child.payload == expected_payload for child in children)
+    progress = service.record_node_result(
+        operation.id,
+        nodes[0],
+        succeeded=True,
+        evidence={"uninstalled_installations": 2, "removed_model_bytes": 70},
+    )
+    assert progress.state == "running"
+    assert progress.result is not None
+    assert set(progress.result["node_evidence"]) == {nodes[0]}
+    service.record_node_result(
+        operation.id,
+        nodes[1],
+        succeeded=True,
+        evidence={"uninstalled_installations": 2, "removed_model_bytes": 70},
+    )
+    with sessions() as session:
+        stored = session.get(RecipeInstallation, installation.owner_id)
+        second_stored = session.get(
+            RecipeInstallation, second_installation.owner_id
+        )
+        assert stored is not None and stored.state == "uninstalled"
+        assert second_stored is not None and second_stored.state == "uninstalled"
+        assert not list(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id.in_(
+                        [installation.owner_id, second_installation.owner_id]
+                    ),
+                    ResourceReservation.state == "active",
+                )
+            )
+        )
+
+
+def test_model_deletion_requires_explicit_stop_for_every_active_run(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="f" * 36
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="1" * 35 + "f",
+    )
+    model_digest = service.preview_uninstall(
+        installation.owner_id
+    ).model_impact.model_version_sha256
+
+    preview = service.preview_model_deletion(model_digest)
+
+    assert preview.allowed is False
+    assert [item.code for item in preview.blockers] == ["model-delete.active_run"]
+    assert [item.run_id for item in preview.active_runs] == [run.owner_id]
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.delete_model(
+            model_digest,
+            plan_digest=preview.plan_digest,
+            actor="admin",
+            request_id="2" * 35 + "f",
+        )
 
 
 def test_uninstall_unknown_bytes_and_active_runs_block_without_implicit_stop(

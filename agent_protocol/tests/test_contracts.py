@@ -529,6 +529,7 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.model-uninstall.v1",
     }
 
 

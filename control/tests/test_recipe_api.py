@@ -11,9 +11,13 @@ from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappin
 from vonk_control.install_admission import AdmissionReason, InstallNodePlan, InstallPlan
 from vonk_control.recipe_action_plans import (
     ActionReason,
+    ModelDeletionInstallationImpact,
+    ModelDeletionNodeImpact,
+    ModelDeletionPlan,
     StopNodeImpact,
     StopPlan,
     UninstallConsequences,
+    UninstallModelImpact,
     UninstallNodeImpact,
     UninstallPlan,
 )
@@ -147,7 +151,50 @@ class Recipes:
             blockers=(),
             warnings=(),
             consequences=UninstallConsequences(),
+            model_impact=UninstallModelImpact(
+                model_version_sha256="f" * 64,
+                model_title="publisher/model",
+                effect="recipe-and-unused-model",
+                dependent_recipe_ids=(),
+                cleanup_node_ids=(NODE,),
+                retained_node_ids=(),
+            ),
             plan_digest="5" * 64,
+        )
+        self.model_deletion_plan = ModelDeletionPlan(
+            model_version_sha256="f" * 64,
+            model_title="publisher/model",
+            allowed=True,
+            installations=(
+                ModelDeletionInstallationImpact(
+                    INSTALLATION,
+                    "00000000-0000-4000-8000-000000000007",
+                    REVISION,
+                    "a" * 64,
+                    (NODE,),
+                    120,
+                ),
+            ),
+            nodes=(
+                ModelDeletionNodeImpact(
+                    NODE,
+                    (INSTALLATION,),
+                    ("00000000-0000-4000-8000-000000000007",),
+                    120,
+                ),
+            ),
+            bytes_removed=120,
+            active_runs=(),
+            active_run_count=0,
+            blockers=(),
+            warnings=(
+                ActionReason(
+                    "model-delete.shared_cache_protected",
+                    "Unrelated immutable caches remain protected.",
+                ),
+            ),
+            shared_cache_policy="remove-unreferenced-model-artifacts-only",
+            plan_digest="6" * 64,
         )
         self.calls: list[tuple[str, object]] = []
         self.started_run: tuple[RecipeOperationView, str, str, str] | None = None
@@ -324,6 +371,22 @@ class Recipes:
     def preview_uninstall(self, installation_id):
         self.calls.append(("preview_uninstall", installation_id))
         return self.uninstall_plan
+
+    def preview_model_deletion(self, model_version_sha256):
+        self.calls.append(("preview_model_deletion", model_version_sha256))
+        return self.model_deletion_plan
+
+    def delete_model(self, model_version_sha256, **kwargs):
+        self.calls.append(("delete_model", (model_version_sha256, kwargs)))
+        return RecipeOperationView(
+            OPERATION,
+            "recipe.model-uninstall.v1",
+            model_version_sha256,
+            "running",
+            "6" * 64,
+            (NODE,),
+            None,
+        )
 
     def retry(self, operation_id, **kwargs):
         self.calls.append(("retry", (operation_id, kwargs)))
@@ -618,6 +681,49 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
         == "previewRecipeUninstall"
     )
+
+
+def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None:
+    client, headers, recipes, audits = setup()
+    model_digest = "f" * 64
+    denied = client.post(
+        "/api/v1/library/model-deletion-plans/preview",
+        headers=headers("operator"),
+        json={"model_version_sha256": model_digest},
+    )
+    preview = client.post(
+        "/api/v1/library/model-deletion-plans/preview",
+        headers=headers(),
+        json={"model_version_sha256": model_digest},
+    )
+    request_id = "20000000-0000-4000-8000-000000000099"
+    applied = client.post(
+        f"/api/v1/library/models/{model_digest}/delete",
+        headers={**headers(), "x-request-id": request_id},
+        json={
+            "plan_digest": "6" * 64,
+            "request_key": "10000000-0000-4000-8000-000000000099",
+        },
+    )
+
+    assert denied.status_code == 403
+    assert preview.status_code == 200
+    assert preview.json()["shared_cache_policy"] == (
+        "remove-unreferenced-model-artifacts-only"
+    )
+    assert preview.json()["nodes"][0]["installation_ids"] == [INSTALLATION]
+    assert applied.status_code == 202
+    assert applied.json()["kind"] == "recipe.model-uninstall.v1"
+    assert recipes.calls[-1][0] == "delete_model"
+    assert audits.for_request(request_id).action == "model.delete"
+
+    paths = client.get("/openapi.json").json()["paths"]
+    assert paths["/api/v1/library/model-deletion-plans/preview"]["post"][
+        "operationId"
+    ] == "previewLibraryModelDeletion"
+    assert paths[
+        "/api/v1/library/models/{model_version_sha256}/delete"
+    ]["post"]["operationId"] == "deleteLibraryModel"
 
 
 def test_identical_start_api_replay_audits_without_repreview_or_mutation() -> None:

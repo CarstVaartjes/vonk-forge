@@ -91,6 +91,7 @@ impl AgentClaim {
                 | "recipe.start"
                 | "recipe.stop"
                 | "recipe.uninstall"
+                | "recipe.model-uninstall.v1"
         ) {
             return Err(ProtocolError::Identity("claim operation"));
         }
@@ -277,6 +278,7 @@ pub enum RecipeOperationRequest {
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
+    ModelUninstall(RecipeModelUninstallRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -541,9 +543,27 @@ pub struct RecipeStopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeUninstallRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup_model_version_sha256: Option<String>,
     pub installation_id: Uuid,
     pub plan_digest: String,
     pub recipe_content_sha256: String,
+    pub schema_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeModelUninstallInstallation {
+    pub installation_id: Uuid,
+    pub recipe_content_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeModelUninstallRequest {
+    pub installations: Vec<RecipeModelUninstallInstallation>,
+    pub model_version_sha256: String,
+    pub plan_digest: String,
     pub schema_version: u8,
 }
 
@@ -566,6 +586,9 @@ impl RecipeOperationRequest {
             "recipe.start" => Self::Start(serde_json::from_value(claim.payload.clone())?),
             "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
             "recipe.uninstall" => Self::Uninstall(serde_json::from_value(claim.payload.clone())?),
+            "recipe.model-uninstall.v1" => {
+                Self::ModelUninstall(serde_json::from_value(claim.payload.clone())?)
+            }
             _ => return Err(ProtocolError::Identity("recipe operation")),
         };
         request.validate()?;
@@ -625,6 +648,27 @@ impl RecipeOperationRequest {
             Self::Uninstall(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
                     && lower_hex(&value.recipe_content_sha256, 64)
+                    && value
+                        .cleanup_model_version_sha256
+                        .as_ref()
+                        .is_none_or(|digest| lower_hex(digest, 64))
+            }
+            Self::ModelUninstall(value) => {
+                valid_common(value.schema_version, &value.plan_digest)
+                    && lower_hex(&value.model_version_sha256, 64)
+                    && !value.installations.is_empty()
+                    && value.installations.len() <= 512
+                    && value
+                        .installations
+                        .iter()
+                        .map(|installation| installation.installation_id)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        == value.installations.len()
+                    && value
+                        .installations
+                        .iter()
+                        .all(|installation| lower_hex(&installation.recipe_content_sha256, 64))
             }
         };
         if valid {

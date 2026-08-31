@@ -191,6 +191,7 @@ async fn run_control_lane(
         "recipe.start",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.model-uninstall.v1",
     ];
     let mut failures = 0_u32;
     let mut observation_failures = 0_u32;

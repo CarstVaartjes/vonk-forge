@@ -51,6 +51,14 @@ RECIPE_OPERATION_IDS = {
         "post",
         "/api/v1/recipes/installations/{installation_id}/uninstall",
     ): "uninstallRecipe",
+    (
+        "post",
+        "/api/v1/library/model-deletion-plans/preview",
+    ): "previewLibraryModelDeletion",
+    (
+        "post",
+        "/api/v1/library/models/{model_version_sha256}/delete",
+    ): "deleteLibraryModel",
 }
 
 
@@ -232,6 +240,17 @@ class UninstallConsequencesResponse(StrictModel):
     reinstall_required: bool
 
 
+class UninstallModelImpactResponse(StrictModel):
+    model_version_sha256: str = Field(pattern=_DIGEST)
+    model_title: str = Field(min_length=1, max_length=256)
+    effect: str = Field(
+        pattern=r"^(recipe-only|recipe-and-unused-model|recipe-and-partial-model-cleanup)$"
+    )
+    dependent_recipe_ids: list[str] = Field(max_length=512)
+    cleanup_node_ids: list[str] = Field(max_length=1024)
+    retained_node_ids: list[str] = Field(max_length=1024)
+
+
 class UninstallPlanResponse(StrictModel):
     installation_id: str = Field(pattern=_UUID)
     recipe_id: str = Field(pattern=_UUID)
@@ -250,6 +269,42 @@ class UninstallPlanResponse(StrictModel):
     blockers: list[PlanReason] = Field(max_length=32)
     warnings: list[PlanReason] = Field(max_length=32)
     consequences: UninstallConsequencesResponse
+    model_impact: UninstallModelImpactResponse
+    plan_digest: str = Field(pattern=_DIGEST)
+
+
+class ModelDeletionInstallationImpactResponse(StrictModel):
+    installation_id: str = Field(pattern=_UUID)
+    recipe_id: str = Field(pattern=_UUID)
+    recipe_revision_id: str = Field(pattern=_UUID)
+    recipe_content_sha256: str = Field(pattern=_DIGEST)
+    node_ids: list[str] = Field(min_length=1, max_length=1024)
+    installed_bytes: int = Field(ge=0)
+
+
+class ModelDeletionNodeImpactResponse(StrictModel):
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    installation_ids: list[str] = Field(min_length=1, max_length=512)
+    recipe_ids: list[str] = Field(min_length=1, max_length=512)
+    installed_bytes: int = Field(ge=0)
+
+
+class ModelDeletionPlanResponse(StrictModel):
+    model_version_sha256: str = Field(pattern=_DIGEST)
+    model_title: str = Field(min_length=1, max_length=256)
+    allowed: bool
+    installations: list[ModelDeletionInstallationImpactResponse] = Field(
+        max_length=512
+    )
+    nodes: list[ModelDeletionNodeImpactResponse] = Field(max_length=1024)
+    bytes_removed: int = Field(ge=0)
+    active_runs: list[UninstallActiveRunResponse] = Field(max_length=128)
+    active_run_count: int = Field(ge=0)
+    blockers: list[PlanReason] = Field(max_length=32)
+    warnings: list[PlanReason] = Field(max_length=32)
+    shared_cache_policy: str = Field(
+        pattern=r"^remove-unreferenced-model-artifacts-only$"
+    )
     plan_digest: str = Field(pattern=_DIGEST)
 
 
@@ -349,6 +404,10 @@ class StopRequest(StrictModel):
 
 class UninstallPreviewRequest(StrictModel):
     installation_id: str = Field(pattern=_UUID)
+
+
+class ModelDeletionPreviewRequest(StrictModel):
+    model_version_sha256: str = Field(pattern=_DIGEST)
 
 
 class UninstallRequest(StrictModel):
@@ -646,6 +705,22 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
+        "/api/v1/library/model-deletion-plans/preview",
+        response_model=ModelDeletionPlanResponse,
+        operation_id="previewLibraryModelDeletion",
+    )
+    def preview_model_deletion(
+        body: ModelDeletionPreviewRequest, actor: Actor = authenticated
+    ):
+        administrator(actor)
+        try:
+            return asdict(
+                recipes().preview_model_deletion(body.model_version_sha256)
+            )
+        except RecipeOperationConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+
+    @app.post(
         "/api/v1/recipes/job-runs",
         response_model=OperationResponse,
         status_code=status.HTTP_201_CREATED,
@@ -836,6 +911,39 @@ def install_recipe_operation_routes(
                 "recipe.uninstall",
                 None,
                 (installation_id, value.plan_digest, *value.nodes),
+            )
+        )
+        return operation(value)
+
+    @app.post(
+        "/api/v1/library/models/{model_version_sha256}/delete",
+        response_model=OperationResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="deleteLibraryModel",
+    )
+    def delete_model(
+        body: UninstallRequest,
+        request: Request,
+        model_version_sha256: str = Path(pattern=_DIGEST),
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            value = recipes().delete_model(
+                model_version_sha256,
+                plan_digest=body.plan_digest,
+                actor=actor.subject,
+                request_id=body.request_key,
+            )
+        except RecipeOperationConflict as error:
+            return conflict(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "model.delete",
+                None,
+                (model_version_sha256, value.plan_digest, *value.nodes),
             )
         )
         return operation(value)

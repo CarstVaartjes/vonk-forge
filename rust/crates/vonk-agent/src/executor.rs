@@ -973,17 +973,52 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                if self
-                    .runtime
-                    .uninstall(&installation_id, &request.recipe_content_sha256)
-                    .is_err()
-                {
+                let removed_model_bytes = match request.cleanup_model_version_sha256 {
+                    Some(model_version_sha256) => self.runtime.uninstall_with_model_cleanup(
+                        &installation_id,
+                        &request.recipe_content_sha256,
+                        &model_version_sha256,
+                    ),
+                    None => self
+                        .runtime
+                        .uninstall(&installation_id, &request.recipe_content_sha256)
+                        .map(|()| 0),
+                };
+                if removed_model_bytes.is_err() {
                     failed("installed recipe could not be safely removed")
                 } else {
                     ExecutionResult {
                         state: "succeeded",
-                        body: json!({"uninstalled": true}),
+                        body: json!({
+                            "uninstalled": true,
+                            "removed_model_bytes": removed_model_bytes.unwrap_or(0),
+                        }),
                     }
+                }
+            }
+            RecipeOperationRequest::ModelUninstall(request) => {
+                let installations = request
+                    .installations
+                    .into_iter()
+                    .map(|installation| {
+                        (
+                            installation.installation_id.to_string(),
+                            installation.recipe_content_sha256,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                match self
+                    .runtime
+                    .uninstall_model(&installations, &request.model_version_sha256)
+                {
+                    Ok(removed_model_bytes) => ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "uninstalled_installations": installations.len(),
+                            "removed_model_bytes": removed_model_bytes,
+                        }),
+                    },
+                    Err(_) => failed("model dependencies could not be safely removed"),
                 }
             }
         }
@@ -1400,6 +1435,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         "recipe.start" => "recipe_start_failed",
         "recipe.stop" => "recipe_stop_failed",
         "recipe.uninstall" => "recipe_uninstall_failed",
+        "recipe.model-uninstall.v1" => "recipe_model_uninstall_failed",
         _ => "operation_failed",
     };
     let mut body = json!({

@@ -2102,6 +2102,10 @@ class RecipeInstallation(Base):
             "state IN ('planned','installing','installed','partial','failed','uninstalled')",
             name="ck_recipe_installations_state",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("model_version_sha256", 64),
+            name="ck_recipe_installations_model_version_sha256",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2110,6 +2114,12 @@ class RecipeInstallation(Base):
         ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+    # Persist the exact primary model identity accepted with the immutable
+    # recipe revision.  This makes model-to-installation ownership explicit
+    # without attempting to infer it from mutable catalog display metadata.
+    model_version_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
     )
     mapping_id: Mapped[str] = mapped_column(
         ForeignKey("cluster_mappings.id", ondelete="RESTRICT"),

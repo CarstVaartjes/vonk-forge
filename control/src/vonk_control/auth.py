@@ -117,6 +117,12 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/v1/recipes/stop-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/uninstall-plans/preview"): frozenset({"administrator"}),
+    ("POST", "/api/v1/library/model-deletion-plans/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/library/models/{model_version_sha256}/delete"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),

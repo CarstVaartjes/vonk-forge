@@ -20,6 +20,7 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
         "recipe.start",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.model-uninstall.v1",
     ):
         assert f'"{capability}"' in main
     assert '"package.prepare"' not in main

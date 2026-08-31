@@ -632,6 +632,7 @@ test("previews Stop and Remove consequences without implying released capacity o
     active_run_count: 1, active_runs: [{alias: "qwen-chat", route_state: "published", run_id: "run-chat", state: "running"}], active_runs_truncated: false,
     allowed: false, blockers: [{code: "uninstall.active_runs", detail: "Stop the complete active run before removing this installation."}, {code: "uninstall.bytes_unknown", detail: "Exact removable bytes are unknown."}], bytes_removed: null,
     consequences: {automatic_stop: false, catalog_retained: true, reinstall_required: true}, installation_authority_digest: "install-authority", installation_id: "installation-chat", installation_state: "installed",
+    model_impact: {cleanup_node_ids: ["node-alpha", "node-beta"], dependent_recipe_ids: [], effect: "recipe-and-unused-model", model_title: "Vonk Forge/Qwen", model_version_sha256: "2".repeat(64), retained_node_ids: []},
     nodes: [{installed_bytes: null, node_id: "node-alpha", rank: 0, role: "leader", state: "installed"}, {installed_bytes: 60 * GIB, node_id: "node-beta", rank: 1, role: "worker", state: "installed"}],
     original_plan_digest: "install-plan", plan_digest: "uninstall-plan", recipe_content: {}, recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", warnings: [],
   };

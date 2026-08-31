@@ -167,6 +167,10 @@ from .mapping_preview_target import MappingPreviewTarget
 from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
+from .model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
+from .model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
+from .model_deletion_plan_response import ModelDeletionPlanResponse
+from .model_deletion_preview_request import ModelDeletionPreviewRequest
 from .model_version_identity import ModelVersionIdentity
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
@@ -322,6 +326,7 @@ from .test_report_request_report import TestReportRequestReport
 from .topology_placement import TopologyPlacement
 from .uninstall_active_run_response import UninstallActiveRunResponse
 from .uninstall_consequences_response import UninstallConsequencesResponse
+from .uninstall_model_impact_response import UninstallModelImpactResponse
 from .uninstall_node_impact_response import UninstallNodeImpactResponse
 from .uninstall_plan_response import UninstallPlanResponse
 from .uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
@@ -522,6 +527,10 @@ __all__ = (
     "MappingRequest",
     "MappingRequestParameters",
     "MappingResponse",
+    "ModelDeletionInstallationImpactResponse",
+    "ModelDeletionNodeImpactResponse",
+    "ModelDeletionPlanResponse",
+    "ModelDeletionPreviewRequest",
     "ModelVersionIdentity",
     "NodeConnection",
     "NodeConnectionAgentState",
@@ -677,6 +686,7 @@ __all__ = (
     "TopologyPlacement",
     "UninstallActiveRunResponse",
     "UninstallConsequencesResponse",
+    "UninstallModelImpactResponse",
     "UninstallNodeImpactResponse",
     "UninstallPlanResponse",
     "UninstallPlanResponseRecipeContent",

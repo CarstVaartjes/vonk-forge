@@ -86,6 +86,7 @@ class AgentOperation(StrEnum):
     RECIPE_JOB_RUN = "recipe.job.run.v1"
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
+    RECIPE_MODEL_UNINSTALL = "recipe.model-uninstall.v1"
 
 
 PROTOCOL_FORMAT_CHECKER = FormatChecker()

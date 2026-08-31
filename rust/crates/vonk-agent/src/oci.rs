@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     net::{IpAddr, ToSocketAddrs},
@@ -921,6 +921,139 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         fs::remove_dir_all(installation)?;
         File::open(self.data_root.join("installations"))?.sync_all()?;
         Ok(())
+    }
+
+    pub fn uninstall_with_model_cleanup(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+        model_version_sha256: &str,
+    ) -> Result<u64, OciError> {
+        let (_, persisted) = self.load_persisted_spec(installation_id)?;
+        if self.recipe_digest(installation_id)? != expected_recipe_digest
+            || !spec_references_model(&persisted, model_version_sha256)
+        {
+            return Err(OciError::Artifact);
+        }
+        let candidate_keys = persisted
+            .artifacts
+            .iter()
+            .map(artifact_key)
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let remaining = self.installed_specs_except(&[installation_id])?;
+        if remaining
+            .iter()
+            .any(|(_, spec)| spec_references_model(spec, model_version_sha256))
+        {
+            return Err(OciError::Artifact);
+        }
+        self.uninstall(installation_id, expected_recipe_digest)?;
+        self.remove_unreferenced_artifacts(&candidate_keys)
+    }
+
+    pub fn uninstall_model(
+        &self,
+        installations: &[(String, String)],
+        model_version_sha256: &str,
+    ) -> Result<u64, OciError> {
+        if installations.is_empty() {
+            return Err(OciError::Artifact);
+        }
+        let target_ids = installations
+            .iter()
+            .map(|(installation_id, _)| installation_id.as_str())
+            .collect::<BTreeSet<_>>();
+        if target_ids.len() != installations.len() {
+            return Err(OciError::Artifact);
+        }
+        let mut candidate_keys = BTreeSet::new();
+        for (installation_id, expected_recipe_digest) in installations {
+            let (_, persisted) = self.load_persisted_spec(installation_id)?;
+            if self.recipe_digest(installation_id)? != *expected_recipe_digest
+                || !spec_references_model(&persisted, model_version_sha256)
+            {
+                return Err(OciError::Artifact);
+            }
+            for artifact in &persisted.artifacts {
+                candidate_keys.insert(artifact_key(artifact)?);
+            }
+        }
+        let excluded = target_ids.iter().copied().collect::<Vec<_>>();
+        let remaining = self.installed_specs_except(&excluded)?;
+        if remaining
+            .iter()
+            .any(|(_, spec)| spec_references_model(spec, model_version_sha256))
+        {
+            return Err(OciError::Artifact);
+        }
+        for (installation_id, expected_recipe_digest) in installations {
+            self.uninstall(installation_id, expected_recipe_digest)?;
+        }
+        self.remove_unreferenced_artifacts(&candidate_keys)
+    }
+
+    fn installed_specs_except(
+        &self,
+        excluded: &[&str],
+    ) -> Result<Vec<(String, WorkloadSpec)>, OciError> {
+        let root = self.data_root.join("installations");
+        let mut entries = fs::read_dir(&root)?.collect::<Result<Vec<_>, _>>()?;
+        if entries.len() > MAX_RUN_DIRECTORY_ENTRIES {
+            return Err(OciError::Artifact);
+        }
+        entries.sort_by_key(fs::DirEntry::file_name);
+        let excluded = excluded.iter().copied().collect::<BTreeSet<_>>();
+        let mut result = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| OciError::Artifact)?;
+            if excluded.contains(name.as_str()) {
+                continue;
+            }
+            let metadata = entry.file_type()?;
+            if !metadata.is_dir() || metadata.is_symlink() {
+                return Err(OciError::Artifact);
+            }
+            let (_, persisted) = self.load_persisted_spec(&name)?;
+            result.push((name, persisted));
+        }
+        Ok(result)
+    }
+
+    fn remove_unreferenced_artifacts(
+        &self,
+        candidate_keys: &BTreeSet<String>,
+    ) -> Result<u64, OciError> {
+        let referenced = self
+            .installed_specs_except(&[])?
+            .into_iter()
+            .flat_map(|(_, spec)| spec.artifacts)
+            .map(|artifact| artifact_key(&artifact))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let root = self.data_root.join("models").join("sha256");
+        let mut removed_bytes = 0_u64;
+        for key in candidate_keys.difference(&referenced) {
+            if !lower_hex(key, 64) {
+                return Err(OciError::Artifact);
+            }
+            let path = root.join(key);
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(OciError::Artifact);
+            }
+            removed_bytes = removed_bytes
+                .checked_add(read_manifest(&path)?.total_bytes)
+                .ok_or(OciError::Artifact)?;
+            fs::remove_dir_all(&path)?;
+        }
+        File::open(&root)?.sync_all()?;
+        Ok(removed_bytes)
     }
 
     pub fn load_spec(&self, installation_id: &str) -> Result<WorkloadSpec, OciError> {
@@ -1883,6 +2016,14 @@ fn lower_hex(value: &str, length: usize) -> bool {
 
 fn artifact_key(artifact: &crate::workloads::ArtifactSpec) -> Result<String, OciError> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(artifact)?)))
+}
+
+fn spec_references_model(spec: &WorkloadSpec, model_version_sha256: &str) -> bool {
+    spec.identity.model_version_sha256 == model_version_sha256
+        || spec
+            .model_dependencies
+            .iter()
+            .any(|dependency| dependency.content_sha256 == model_version_sha256)
 }
 
 fn create_manifest(root: &Path) -> Result<ArtifactManifest, OciError> {
