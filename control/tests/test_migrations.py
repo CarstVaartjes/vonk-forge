@@ -162,6 +162,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0005_repair_fleet_profile_tables.py",
         "0006_spark3542_compat_recovery.py",
         "0007_compat_recovery_rearm_certificates.py",
+        "0008_compat_recovery_abandon.py",
     ]
 
 
@@ -253,6 +254,29 @@ def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraint
         connection.execute(
             issue_grant, {"retry_certificate_serial": "dispatch-certificate"}
         )
+        connection.execute(
+            text(
+                "UPDATE agent_upgrade_compatibility_recoveries "
+                "SET state = 'operator-blocked', blocked_at = '2026-08-31 12:15:00' "
+                "WHERE id = 'recovery'"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE agent_upgrade_compatibility_recoveries "
+                "SET state = 'abandoned', completed_at = '2026-08-31 12:16:00' "
+                "WHERE id = 'recovery'"
+            )
+        )
+
+    command.downgrade(config, "0007_compat_rearm_certificates")
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT state, completed_at FROM "
+                "agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
+            )
+        ).one() == ("operator-blocked", None)
 
 
 def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
@@ -284,7 +308,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0007_compat_rearm_certificates"
+            == "0008_compat_recovery_abandon"
         )
 
 
@@ -371,7 +395,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0007_compat_rearm_certificates"
+            == "0008_compat_recovery_abandon"
         )
 
 

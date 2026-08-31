@@ -1377,6 +1377,56 @@ def test_spark3542_compatibility_recovery_requires_typed_preview_and_apply() -> 
         },
     )
 
+    client.responses[("GET", f"{endpoint}/abandon/preview")] = {"plan_digest": "a" * 64}
+    result, abandon_preview = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "abandon-preview",
+    )
+    assert result == 0
+    assert abandon_preview["plan_digest"] == "a" * 64
+
+    result, abandon_plan = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "abandon",
+        "--plan-digest",
+        "a" * 64,
+        "--confirm",
+        "abandon-expired-spark3542-a122-recovery",
+    )
+    assert result == 0
+    assert abandon_plan["mode"] == "plan"
+
+    result, _abandoned = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "abandon",
+        "--plan-digest",
+        "a" * 64,
+        "--confirm",
+        "abandon-expired-spark3542-a122-recovery",
+        "--apply",
+    )
+    assert result == 0
+    assert client.calls[-1][:3] == (
+        "POST",
+        f"{endpoint}/abandon",
+        {
+            "plan_digest": "a" * 64,
+            "confirmation": "abandon-expired-spark3542-a122-recovery",
+        },
+    )
+
 
 @pytest.mark.parametrize(
     "argv",

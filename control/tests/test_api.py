@@ -149,6 +149,7 @@ class RepairPreviewUpgrades:
 class CompatibilityRecovery:
     def __init__(self) -> None:
         self.applied: list[dict[str, str]] = []
+        self.abandoned: list[dict[str, str]] = []
 
     @staticmethod
     def preview():
@@ -204,6 +205,46 @@ class CompatibilityRecovery:
     def apply(self, **values):
         self.applied.append(values)
         return self.preview()
+
+    @staticmethod
+    def preview_abandon():
+        from vonk_control.compat_recovery import (
+            JOB_ID,
+            NODE_ID,
+            OPERATION_ID,
+            RECOVERY_ID,
+            SOURCE_BINARY_DIGEST,
+            SOURCE_BUILD_DIGEST,
+            SOURCE_SEMANTIC_VERSION,
+            CompatibilityRecoveryPlan,
+        )
+
+        return CompatibilityRecoveryPlan(
+            plan_digest="a" * 64,
+            document={
+                "action": "abandon-recovery",
+                "compatibility_recovery_id": RECOVERY_ID,
+                "node_id": NODE_ID,
+                "job_id": JOB_ID,
+                "operation_id": OPERATION_ID,
+                "retry_attempt": 4,
+                "blocked_at": "2026-08-31T16:23:44+00:00",
+                "identity_deadline": "2026-08-31T16:23:44+00:00",
+                "contact_certificate_serial": "current-dev335-certificate",
+                "source_identity": {
+                    "semantic_version": SOURCE_SEMANTIC_VERSION,
+                    "binary_digest": SOURCE_BINARY_DIGEST,
+                    "build_digest": SOURCE_BUILD_DIGEST,
+                },
+                "queued_mutations": [],
+            },
+            state="preview",
+        )
+
+    def abandon(self, **values):
+        self.abandoned.append(values)
+        preview = self.preview_abandon()
+        return type(preview)(preview.plan_digest, preview.document, "abandoned")
 
 
 def repair_preview_document() -> dict[str, object]:
@@ -521,6 +562,27 @@ def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
     assert audits.list()[0].action == (
         "agent.compatibility-recovery.spark3542-a122.apply"
     )
+
+    abandon_preview = client.get(f"{endpoint}/abandon/preview", headers=headers)
+    assert abandon_preview.status_code == 200
+    assert abandon_preview.json()["plan_digest"] == "a" * 64
+    assert abandon_preview.json()["required_confirmation"] == (
+        "abandon-expired-spark3542-a122-recovery"
+    )
+    abandoned = client.post(
+        f"{endpoint}/abandon",
+        headers=headers,
+        json={
+            "plan_digest": "a" * 64,
+            "confirmation": "abandon-expired-spark3542-a122-recovery",
+        },
+    )
+    assert abandoned.status_code == 202
+    assert abandoned.json()["state"] == "abandoned"
+    assert recovery.abandoned[-1]["actor"] == "administrator"
+    assert {audit.action for audit in audits.list()} >= {
+        "agent.compatibility-recovery.spark3542-a122.abandon"
+    }
 
     operator_client, operator_headers, *_ = _client(
         "operator", compatibility_recovery=CompatibilityRecovery()
