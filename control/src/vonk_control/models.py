@@ -992,7 +992,7 @@ class AgentUpgradeCompatibilityRecovery(Base):
             "(state = 'operator-blocked' AND blocked_at IS NOT NULL "
             "AND completed_at IS NULL) OR "
             "(state = 'abandoned' AND blocked_at IS NOT NULL "
-            "AND completed_at IS NOT NULL))",
+            "AND completed_at IS NOT NULL AND abandoned_at IS NOT NULL))",
             name="ck_agent_upgrade_compatibility_recoveries_state_fields",
         ),
         CheckConstraint(
@@ -1067,6 +1067,7 @@ class AgentUpgradeCompatibilityRecovery(Base):
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RecipeSourceBundle(Base):
