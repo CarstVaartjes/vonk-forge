@@ -5,6 +5,52 @@ Tailscale dependency. Human control, inference, Grafana, and Hermes enter only
 through named Tailscale Services. The sole LAN listener is Caddy's restricted
 GPU node backend at the reserved NAS address.
 
+## Names and environments: do not mix them
+
+An operator tailnet contains only the canonical, unsuffixed Service names:
+
+- `svc:vonk-forge` for every installation;
+- `svc:hermes-api` only when Hermes is enabled; and
+- `svc:hermes-dashboard` only when Hermes is enabled.
+
+Never define or advertise any other Service names, add test-only tags, or merge
+acceptance grants, tests, auto-approvers, or destinations into an operator
+tailnet. Automated full-tailnet acceptance belongs in a separate disposable
+test tailnet with separate OAuth credentials. The acceptance executable refuses
+to start unless that environment identifies itself as
+`isolated-disposable-test`. After a run, remove its gateway nodes, Service
+definitions, grants/tests, auto-approvers, OAuth client, and any other test-only
+policy. Repository and local checks that do not need a tailnet run with
+Tailscale disabled.
+
+Development and stable releases use the same canonical names. The enabled
+feature set, not the release channel, determines whether one or three Services
+are present.
+
+## Fresh-install preflight
+
+Complete this checklist before running the NAS installer. The installer repeats
+it before asking for the OAuth client ID or secret, but it cannot inspect the
+admin console for you.
+
+- In **DNS**, enable MagicDNS and HTTPS certificates, and copy the tailnet DNS
+  suffix exactly as displayed.
+- In **Services**, define `svc:vonk-forge` with endpoint `tcp:443`. If Hermes
+  will be enabled, also define `svc:hermes-api` and
+  `svc:hermes-dashboard`, each with endpoint `tcp:443`.
+- Merge the reviewed parts of
+  `deploy/compose/tailscale/grants.example.hujson` into policy. Replace the
+  GitHub-login placeholder with the exact identity from **Users**.
+- Confirm `tag:vonk-gateway` owns only the exact Service auto-approvals and has
+  TCP 443 self-access to every Service it hosts. Do not use `svc:*`, an
+  allow-all ACL, Funnel, or an acceptance tag.
+- Under **Trust credentials → Credential → OAuth**, create a machine OAuth
+  client with only `auth_keys` write scope and only `tag:vonk-gateway`. Keep its
+  raw ID and secret ready; do not add query parameters.
+- When asked for the control hostname, enter
+  `vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net` exactly. Do not use an acceptance
+  hostname or a hosts-file alias.
+
 ## Identity and access policy
 
 GitHub login authenticates people to Tailscale. Use the exact
@@ -14,14 +60,12 @@ no repository credential. Tailnet reachability and Vonk Forge application
 authentication are independent gates: an authorized tailnet user must still
 complete the application administrator login at `svc:vonk-forge`.
 
-Before creating credentials or policy, enable **MagicDNS** and **HTTPS
-certificates** under the Tailscale admin console's DNS settings. Then use
-**Services → Advertise → Define a Service** to define these exact Services and
-endpoints:
+Use **Services → Advertise → Define a Service** to define the Services selected
+in the preflight with these exact endpoints:
 
 - `svc:vonk-forge`, endpoint `tcp:443`;
-- `svc:hermes-dashboard`, endpoint `tcp:443`; and
-- `svc:hermes-api`, endpoint `tcp:443`.
+- `svc:hermes-dashboard`, endpoint `tcp:443` when Hermes is enabled; and
+- `svc:hermes-api`, endpoint `tcp:443` when Hermes is enabled.
 
 The gateway never receives a GitHub token. After the Services exist, use
 **Trust credentials → Credential → OAuth** to create a separate machine OAuth
@@ -38,9 +82,9 @@ already-connected proxy no backend access it does not already have, while
 allowing Tailscale to assign the Service TailVIP `PrimaryRoutes`. Without it,
 the console can show an approved online host while clients still report
 `no matching peer`. Never use `svc:*` or an allow-all ACL.
-Development uses only `svc:vonk-forge`; the two Hermes Services belong to the
-full production graph. In both graphs, Tailscale Funnel is forbidden and no
-human-facing LAN port is a fallback.
+Hermes-disabled installations use only `svc:vonk-forge`; Hermes-enabled
+installations use all three. In both cases, Tailscale Funnel is forbidden and
+no human-facing LAN port is a fallback.
 
 The Services page must show at least one connected host for every Service in
 use. A defined Service showing `0 hosts` has no active ingress. Allow the
@@ -114,10 +158,9 @@ This is HTTPS-only Serve. Funnel is never enabled.
 ## Stable browser URL and application login
 
 The `svc:vonk-forge` Service has the stable Service URL
-`https://vonk-forge.<TAILNET_NAME>.ts.net/`. The development
-`tailscale-configurator` logs the exact non-secret URL as `Vonk Forge browser
-URL: ...`; production exposes the same Service through the installed
-maintenance status boundary. Use the reported suffix instead of inventing one.
+`https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/`. Copy the suffix from the
+Tailscale DNS page; do not invent it. This is also the exact control hostname
+entered during bundle preparation.
 
 Open that URL from an authorized Tailscale-connected browser, then complete the
 separate Vonk Forge application administrator login. No SSH or PowerShell
@@ -144,6 +187,17 @@ and Tailscale HTTPS own that name and certificate.
 
 ## Verification
 
+From the NAS project directory, first verify containers and collect bounded,
+non-secret diagnostics:
+
+```bash
+docker compose ps --all
+docker compose logs --no-color --tail 100 tailscale-gateway tailscale-configurator
+```
+
+Both Tailscale containers must be running and healthy. Then inspect the
+tailnet-facing state:
+
 ```bash
 docker compose exec tailscale-gateway tailscale status --json
 docker compose exec tailscale-gateway tailscale serve status --json
@@ -154,14 +208,59 @@ docker compose logs --since 30m tailscale-configurator
 `/128`. An approved `service-host` mapping without those routes is fail-closed,
 not ready.
 
-Development must report exactly one Service: `svc:vonk-forge` with `HTTPS:
-true`, never `HTTP: true`, and only the `http://caddy:8080` upstream. Production
-must report exactly three Services, each with `HTTPS: true`, never `HTTP: true`,
-and exactly the three upstreams above. In production, test dashboard and API
-reachability as an authorized GitHub-backed user, then confirm a user outside
-`group:hermes-users` is denied. Even an authorized user must supply the
-separate Hermes key to invoke the API. Confirm an ordinary LAN client cannot
-reach either Hermes endpoint.
+From a separate authorized Tailscale-connected workstation, verify MagicDNS,
+the Service route, TLS, and the application health endpoint:
+
+```bash
+tailscale dns status
+tailscale ping vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net
+curl --fail --show-error --silent \
+  https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/healthz \
+  --output /dev/null
+```
+
+Then open the same HTTPS origin in a browser and complete the separate Vonk
+Forge administrator login. A same-host container probe does not replace this
+independent client check.
+
+If the name does not resolve but the Services page shows an online host, use
+its displayed TailVIP only to isolate the fault:
+
+```bash
+curl --fail --show-error --silent \
+  --resolve vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net:443:<DISPLAYED_TAILVIP> \
+  https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/healthz \
+  --output /dev/null
+```
+
+If this succeeds, repair the workstation's Tailscale client or DNS integration;
+do not change Caddy, the certificate, Service identity, or NAS ports.
+
+Hermes-disabled installs must report exactly `svc:vonk-forge` with `HTTPS:
+true`, never `HTTP: true`, and only the `http://caddy:8080` upstream.
+Hermes-enabled installs must report exactly all three Services, each with
+`HTTPS: true`, never `HTTP: true`, and exactly the three upstreams above. Test
+the control URL from an authorized Tailscale-connected client. With Hermes
+enabled, also test dashboard and API reachability as an authorized
+GitHub-backed user, then confirm a user outside `group:hermes-users` is denied.
+Even an authorized user must supply the separate Hermes key to invoke the API.
+Confirm an ordinary LAN client cannot reach either Hermes endpoint.
+
+## Diagnosis by symptom
+
+| Symptom | Meaning | Action |
+| --- | --- | --- |
+| Service shows `0 hosts` | The definition exists, but no gateway currently advertises it. | Confirm the gateway is online, the Service name is exact and unsuffixed, and the configurator is healthy. Do not create a second similarly named Service. |
+| Gateway advertisement is pending | Policy did not auto-approve this exact tag/Service pair. | Fix `autoApprovers.services` or approve that one advertisement, then repair policy so recovery is unattended. |
+| Client reports `no matching peer` | DNS returned a TailVIP, but no active gateway owns its primary route. | Inspect `Self.PrimaryRoutes`; add the exact `tag:vonk-gateway` TCP 443 self-access grant and wait for reconciliation. |
+| `service-host` exists but `PrimaryRoutes` is empty or incomplete | Approval exists, but routing is fail-closed. | Check the self-access grant for every hosted Service; do not recreate the node or enable Funnel. |
+| Service hostname does not resolve | MagicDNS is off, the Service is undefined, the suffix/hostname is mistyped, or the client is not connected to the tailnet. | Recheck DNS settings, the exact Service definition, the copied tailnet suffix, and client Tailscale status. Never add a hosts-file entry. |
+| HTTPS returns `421` | The installer control hostname does not equal the canonical Service FQDN. | Regenerate or repair the bundle with `vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net`; do not weaken Caddy host checks. |
+| The wrong login or backend answers | Another gateway is advertising the same canonical Service. | Find and drain the stale gateway, confirm one intended online host, and recheck `PrimaryRoutes`; do not create another Service name. |
+| Gateway remains unhealthy before any Service appears | Enrollment failed before advertisement. | Check that the OAuth values are raw, current, limited to `auth_keys` write, and tagged only `tag:vonk-gateway`; then inspect the bounded gateway/configurator logs above. |
+
+Do not solve any of these states by creating another Service in the operator
+tailnet. That creates a second identity rather than repairing the canonical one.
 
 ## Drain, revocation, and recovery
 

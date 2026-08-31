@@ -6,6 +6,11 @@ ports, synthetic deployment behavior, repository mounts, or a separate PKI.
 
 ## Prepare the NAS upload
 
+First complete the
+[Tailscale fresh-install preflight](tailscale.md#fresh-install-preflight).
+Development and stable use the same canonical Services; test-only names and
+policy never belong in an operator tailnet.
+
 On a Linux or macOS workstation, run:
 
 ```sh

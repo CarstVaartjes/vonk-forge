@@ -15,6 +15,7 @@ require routine SSH.
 | Operate Fleet, Library, profiles, and workloads | [Control-plane operations](runbooks/control-plane-operations.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
+| Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
 | Understand identities and trust | [Security threat model](security/threat-model.md) |
 | Contribute or verify changes | [Testing and CI](testing-and-ci.md) |
 
@@ -43,6 +44,7 @@ flowchart LR
 
 - [Fresh development installation](runbooks/fresh-development-install.md)
 - [Controller bootstrap](runbooks/control-plane-bootstrap.md)
+- [Tailscale ingress and fresh-install preflight](runbooks/tailscale.md)
 - [Controller operations](runbooks/control-plane-operations.md)
 - [`vonkctl` controller CLI](runbooks/vonkctl.md)
 - [Fleet recipe qualification](runbooks/fleet-recipe-qualification.md)

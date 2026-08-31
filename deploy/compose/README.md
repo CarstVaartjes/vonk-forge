@@ -2,7 +2,12 @@
 
 The supported controller installation starts on an ordinary Linux or macOS
 workstation. The eventual controller host can be this same laptop or any local
-NAS or server that runs Docker Compose. Run one command as your normal user:
+NAS or server that runs Docker Compose. Before the first run, complete the
+[Tailscale fresh-install preflight](../../docs/runbooks/tailscale.md#fresh-install-preflight).
+It covers the canonical unsuffixed names, MagicDNS/HTTPS, exact grants and
+auto-approvals, gateway self-access, and the scoped OAuth client.
+
+Then run one command as your normal user:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh
@@ -55,6 +60,11 @@ docker compose pull
 docker compose up -d --wait --remove-orphans
 docker compose ps
 ```
+
+Complete the runbook's
+[post-install verification](../../docs/runbooks/tailscale.md#verification),
+including `Self.PrimaryRoutes` and a browser test from an authorized
+Tailscale-connected client.
 
 Do not add host-path overrides. Persistent data belongs to the named Docker
 volumes declared by the generated project. Only Caddy publishes a host port;

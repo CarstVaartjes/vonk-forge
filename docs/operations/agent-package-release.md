@@ -31,7 +31,7 @@ signing, and promotion. Create each environment for both `dev` and `stable`:
 | Environment | Variables | Secrets |
 | --- | --- | --- |
 | `installer-candidate-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
-| `installer-canary-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX` | `VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` |
+| `installer-canary-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX`, `VONK_ACCEPTANCE_TAILNET_KIND=isolated-disposable-test` | `VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` |
 | `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
 | `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
@@ -43,10 +43,16 @@ runtime secrets into CI. Prefer workload identity if the selected object-store
 client supports it. The R2 S3 publication path requires an access key, so keep
 that exception bucket-scoped and rotate it deliberately.
 
-Canary credentials must be disposable and limited to the acceptance tailnet
-and external test provider. The Tailscale OAuth client needs only the capability
-to create tagged acceptance nodes. Tailnet policy separately owns Service
-definition, grants, and Service-host auto-approval.
+The canary environment must point to a dedicated disposable test tailnet, never
+an operator tailnet. `VONK_ACCEPTANCE_TAILNET_KIND` is a fail-closed attestation;
+the executable rejects full Tailscale acceptance when it is absent or has any
+other value. Use separate disposable OAuth credentials with only `auth_keys`
+write scope and only `tag:vonk-gateway`. The test tailnet separately owns its
+Service definitions, exact self-access grants, tests, and Service-host
+auto-approval. After each acceptance campaign, confirm no CI gateway remains;
+when retiring the tailnet, remove its nodes, Service definitions, grants/tests,
+auto-approvers, OAuth client, and external provider credentials. Never copy any
+of those resources into an operator tailnet.
 
 Generate separate RSA-3072 release and acceptance keys on an administrative
 workstation. Record each SHA-256 fingerprint from its DER-encoded public key:

@@ -60,6 +60,7 @@ SAFE_DNS_SUFFIX = re.compile(
 )
 TAILSCALE_SERVICE = re.compile(r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 TAILSCALE_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+ISOLATED_TAILNET_KIND = "isolated-disposable-test"
 PINNED_IMAGE = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 MUTABLE_IMAGE_TAG = re.compile(r":(?:latest|dev|main|edge)@sha256:")
 
@@ -109,6 +110,20 @@ def tailscale_acceptance_credentials(mode: str) -> tuple[str, str]:
             "Tailscale-disabled acceptance must not receive client or OAuth inputs"
         )
     return ("tailscale-disabled-client", "tailscale-disabled-secret")
+
+
+def assert_tailscale_acceptance_boundary(
+    mode: str,
+) -> None:
+    tailnet_kind = os.environ.get("VONK_ACCEPTANCE_TAILNET_KIND")
+    if mode == "full" and tailnet_kind != ISOLATED_TAILNET_KIND:
+        raise AcceptanceError(
+            "full Tailscale acceptance requires an isolated disposable test tailnet"
+        )
+    if mode == "disabled" and tailnet_kind is not None:
+        raise AcceptanceError(
+            "Tailscale-disabled acceptance must not select a tailnet kind"
+        )
 
 
 def host_ipv4() -> str:
@@ -185,7 +200,7 @@ def nas_responses(
         hermes_dashboard_service, tailnet_suffix
     )
     hostnames = {
-        "Control hostname": control_hostname,
+        "Control hostname (vonk-forge.<tailnet>.ts.net)": control_hostname,
         "Agent enrollment hostname": f"enroll.acceptance.{tailnet_suffix}",
         "Agent controller hostname": f"agents.acceptance.{tailnet_suffix}",
         "Registry hostname": f"registry.acceptance.{tailnet_suffix}",
@@ -1495,6 +1510,7 @@ def main() -> None:
         raise AcceptanceError("acceptance Tailscale Service names are invalid")
     control_hostname = tailscale_service_hostname(services["control"], tailnet_suffix)
     tailscale_mode = tailscale_acceptance_mode()
+    assert_tailscale_acceptance_boundary(tailscale_mode)
     gateway_hostname = os.environ.get("VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME", "")
     if (
         tailscale_mode == "full"

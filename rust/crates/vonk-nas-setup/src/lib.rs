@@ -75,6 +75,8 @@ pub struct CanonicalTemplatePayload {
     schema_version: u8,
     docker_compose_yaml: String,
     #[serde(default)]
+    preflight: Vec<String>,
+    #[serde(default)]
     internal_values: Vec<InternalValue>,
     #[serde(default)]
     required_values: Vec<RequiredValuePrompt>,
@@ -244,6 +246,15 @@ impl CanonicalTemplatePayload {
         if self.docker_compose_yaml.is_empty() || self.docker_compose_yaml.contains('\0') {
             return Err(SetupError::InvalidPayload(
                 "docker compose payload is empty or malformed".to_owned(),
+            ));
+        }
+        if self.preflight.len() > 32
+            || self.preflight.iter().any(|item| {
+                item.trim().is_empty() || item.len() > 512 || item.contains(['\0', '\r', '\n'])
+            })
+        {
+            return Err(SetupError::InvalidPayload(
+                "preflight checklist is malformed".to_owned(),
             ));
         }
 
@@ -676,6 +687,19 @@ impl<R, W, S> PromptIo<R, W, S> {
 }
 
 impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
+    fn preflight(&mut self, items: &[String]) -> Result<(), SetupError> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        writeln!(self.writer, "Before continuing, complete this preflight:")?;
+        for item in items {
+            writeln!(self.writer, "  [ ] {item}")?;
+        }
+        writeln!(self.writer)?;
+        self.writer.flush()?;
+        Ok(())
+    }
+
     fn line(&mut self, label: &str) -> Result<String, SetupError> {
         write!(self.writer, "{label}: ")?;
         self.writer.flush()?;
@@ -946,6 +970,7 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let staging = create_staging_directory(bundle.parent().expect("bundle has output parent"))?;
     let result = (|| {
+        prompt.preflight(&payload.preflight)?;
         let mut environment = payload
             .internal_values
             .iter()

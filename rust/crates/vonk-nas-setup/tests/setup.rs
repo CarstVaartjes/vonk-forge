@@ -34,6 +34,7 @@ fn payload() -> CanonicalTemplatePayload {
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:abc\n",
+          "preflight": ["Complete the Tailscale prerequisites."],
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
           ],
@@ -131,6 +132,66 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
             0o600
         );
     }
+}
+
+#[test]
+fn fresh_install_prints_preflight_before_the_first_prompt() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "preflight": [
+            "Enable MagicDNS and HTTPS certificates.",
+            "Define only the unsuffixed production Services."
+          ],
+          "required_values": [
+            {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
+          ],
+          "secrets": [
+            {"file": "tailscale-oauth-client-id", "prompt": "Tailscale OAuth client ID", "generate_bytes": null}
+          ]
+        }"#,
+    )
+    .expect("valid preflight payload");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(
+        Cursor::new(b"forge.example.test\noauth-client-id\n".to_vec()),
+        &mut output,
+    );
+
+    prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle prepared");
+
+    let output = String::from_utf8(output).expect("UTF-8 prompts");
+    let preflight = output
+        .find("Before continuing, complete this preflight:")
+        .expect("preflight is shown");
+    let oauth = output
+        .find("Tailscale OAuth client ID: ")
+        .expect("OAuth prompt is shown");
+    assert!(preflight < oauth);
+    assert!(output.contains("  [ ] Enable MagicDNS and HTTPS certificates."));
+    assert!(output.contains("  [ ] Define only the unsuffixed production Services."));
+}
+
+#[test]
+fn payload_rejects_multiline_preflight_items() {
+    let payload = serde_json::json!({
+        "schema_version": 2,
+        "docker_compose_yaml": "services: {}\n",
+        "preflight": ["safe", "not\na checklist item"],
+        "required_values": [],
+        "secrets": []
+    });
+
+    CanonicalTemplatePayload::from_json(&serde_json::to_vec(&payload).expect("payload JSON"))
+        .expect_err("multiline checklist rejected");
 }
 
 fn runtime_file_payload(compose: &str, content: &str, mode: u32) -> CanonicalTemplatePayload {
