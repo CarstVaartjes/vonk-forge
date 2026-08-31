@@ -1030,6 +1030,10 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert lifecycle.index("rustup toolchain install 1.97.1") < lifecycle.index(
         "actions/download-artifact@"
     )
+    assert 'compatibility_cargo_dir=$(dirname "$(command -v cargo)")' in lifecycle
+    assert 'compatibility_rustup_home=$(rustup show home)' in lifecycle
+    assert 'CARGO_HOME="$compatibility_cargo_home"' in lifecycle
+    assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
     assert lifecycle.count("actions/download-artifact@") == 2
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
