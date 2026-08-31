@@ -1041,6 +1041,22 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert 'compatibility_rustup_home=$(rustup show home)' in lifecycle
     assert 'CARGO_HOME="$compatibility_cargo_home"' in lifecycle
     assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
+    assert "RUSTFLAGS='-C target-feature=+crt-static'" in lifecycle
+    assert "cargo build --locked --release --package vonk-build-egress" in lifecycle
+    assert lifecycle.count('BUILD_EGRESS_BINARY="$build_egress"') == 4
+    recovery_invocations = re.findall(
+        r"sudo env (?P<environment>.*?)\n\s+"
+        r"tests/nodes/test_agent_upgrade_recovery_systemd\.sh",
+        lifecycle,
+        re.DOTALL,
+    )
+    assert len(recovery_invocations) == 4
+    assert all(
+        'BUILD_EGRESS_BINARY="$build_egress"' in environment
+        for environment in recovery_invocations
+    )
+    assert 'sudo install -o root -g root -m 0755' in lifecycle
+    assert 'test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1' in lifecycle
     assert lifecycle.count("actions/download-artifact@") == 2
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
