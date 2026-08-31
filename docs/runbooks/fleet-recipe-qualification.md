@@ -53,12 +53,12 @@ exactly one lane, and no other recipe is accepted. The two lane names, exact
 `spk_...` node IDs, ledgers, and plan outputs must all be distinct. Unknown
 fields and duplicate JSON keys fail closed.
 
-The current `nl-single-spark-f8d43aac` authority is bound to jurisdiction `NL`,
-merged recipe-library commit `f8d43aacbaa16c016697be684bf688ef3b81932a`, and
+The current `nl-single-spark-9a6c7516` authority is bound to jurisdiction `NL`,
+merged recipe-library commit `9a6c75167dbe6b66fd211cc5e37aaecdae175d00`, and
 catalog-index SHA-256
-`88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca`.
+`0697cc15026fd9789d00ba6289b9895e13ff1d68001c175c37981ecaa93f91b8`.
 The canonical authority SHA-256 is
-`8b2b362a83175146f49c936415b3238f232e827aafff6212897df8361cfc8efd`.
+`e6609a4dcac0525ff2fc7dab84b3484c0a7f07233d0c05b6a74aedada7c77408`.
 Its reviewed 82-recipe closure classifies every recipe exactly once: 57
 actionable single-Spark recipes, five single-Spark recipes retained as original
 above-envelope controls, nine single-Spark recipes blocked in NL, seven
@@ -66,7 +66,8 @@ dual-Spark recipes, and four recipes wider than the present fleet. The v2
 authority names every non-actionable key, so an omission or overlap fails
 closed instead of disappearing behind aggregate counts. The NL legal set
 includes Hunyuan3D-Omni, HunyuanOCR, the five Hunyuan video/Foley recipes, and
-both MiniMax H3 variants. The historical `nl-single-spark-d24bc1c8`,
+both MiniMax H3 variants. The historical `nl-single-spark-f8d43aac`,
+`nl-single-spark-d24bc1c8`,
 `nl-single-spark-745a42b5`, `nl-single-spark-02ae8bb5`, and
 `nl-single-spark-e996f025` authorities remain immutable for existing evidence;
 do not use them against the refreshed catalog.
@@ -77,14 +78,14 @@ rejects catalog repository or commit drift before publishing plans or applying
 work.
 
 The executable reviewed partition is
-`config/qualification/nl-single-spark-f8d43aac.json`: 29 recipes on Spark3542
+`config/qualification/nl-single-spark-9a6c7516.json`: 29 recipes on Spark3542
 and 28 on Spark2297. It excludes every v2 legal- and capacity-blocked key while
 keeping shared artifact families together. Lower-cost controls precede their
 larger variants, MOVA 360p precedes 720p, and Step1X geometry precedes labeled
 geometry and texture. Both lanes retain stopped installations and caches, but
 the apply-time capacity plan remains authoritative for current disk fit.
 The canonical manifest SHA-256 is
-`f6dbe17d8b399ccb0df78ce6193a6cc18e1401d2e7fb2f0efe3dcb672183826e`.
+`ef4b919216d98849ebb453e8fbe74711010d675d8111e4d214083d32a3a8c684`.
 
 Obtain the exact node identities with `vonkctl fleet list --json`, then create a
 manifest. Relative ledger and plan paths are resolved from the manifest's
@@ -94,7 +95,7 @@ with an explicitly reviewed partition of every key in the named authority:
 ```jsonc
 {
   "schema_version": 1,
-  "qualification_authority": "nl-single-spark-f8d43aac",
+  "qualification_authority": "nl-single-spark-9a6c7516",
   "options": {
     "jurisdiction": "NL",
     "cleanup": "stop",
@@ -128,7 +129,7 @@ Preview both lane plans in one operation:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-f8d43aac.json \
+  --manifest config/qualification/nl-single-spark-9a6c7516.json \
   > campaign-preview.json
 ```
 
@@ -139,7 +140,7 @@ single `campaign_digest` from the preview:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-f8d43aac.json \
+  --manifest config/qualification/nl-single-spark-9a6c7516.json \
   --campaign-digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --apply
 ```
