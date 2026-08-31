@@ -1025,6 +1025,11 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "Revalidate exact current main ARM64 acceptance source" in lifecycle
     assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
+    assert "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
+    assert "rustup toolchain install 1.97.1" in lifecycle
+    assert lifecycle.index("rustup toolchain install 1.97.1") < lifecycle.index(
+        "actions/download-artifact@"
+    )
     assert lifecycle.count("actions/download-artifact@") == 2
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
