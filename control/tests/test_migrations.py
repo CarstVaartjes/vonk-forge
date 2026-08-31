@@ -168,7 +168,28 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0008_compat_recovery_abandon.py",
         "0009_compat_abandoned_at.py",
         "0010_managed_recipe_catalog_sync.py",
+        "0011_recipe_model_identity.py",
     ]
+
+
+def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'model-identity-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0010_managed_recipe_catalog_sync")
+    engine = create_engine(url)
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    columns = {
+        column["name"]: column for column in inspector.get_columns("recipe_installations")
+    }
+    assert columns["model_version_sha256"]["nullable"] is True
+    assert "ix_recipe_installations_model_version_sha256" in {
+        index["name"] for index in inspector.get_indexes("recipe_installations")
+    }
 
 
 def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraints(
@@ -373,7 +394,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0010_managed_recipe_catalog_sync"
+            == "0011_recipe_model_identity"
         )
 
 
@@ -460,7 +481,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0010_managed_recipe_catalog_sync"
+            == "0011_recipe_model_identity"
         )
 
 

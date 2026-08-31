@@ -11,7 +11,7 @@
     "attempt": {"type": "integer", "minimum": 1},
     "fence": {"type": "string", "format": "uuid"},
     "node_id": {"type": "string", "pattern": "^spk_[0-9a-f]{32}$"},
-    "operation": {"enum": ["agent.upgrade.v1", "node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.job.run.v1", "recipe.stop", "recipe.uninstall"]},
+    "operation": {"enum": ["agent.upgrade.v1", "node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.job.run.v1", "recipe.stop", "recipe.uninstall", "recipe.model-uninstall.v1"]},
     "authority_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload": {"anyOf": [{"$ref": "#/$defs/safe-object"}, {"$ref": "#/$defs/agent-upgrade"}]},

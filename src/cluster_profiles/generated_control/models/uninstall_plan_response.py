@@ -16,6 +16,7 @@ if TYPE_CHECKING:
   from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
   from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
   from ..models.uninstall_active_run_response import UninstallActiveRunResponse
+  from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
   from ..models.uninstall_consequences_response import UninstallConsequencesResponse
 
 
@@ -39,6 +40,7 @@ class UninstallPlanResponse:
             installation_authority_digest (str):
             installation_id (str):
             installation_state (str):
+            model_impact (UninstallModelImpactResponse):
             nodes (list['UninstallNodeImpactResponse']):
             original_plan_digest (str):
             plan_digest (str):
@@ -59,6 +61,7 @@ class UninstallPlanResponse:
     installation_authority_digest: str
     installation_id: str
     installation_state: str
+    model_impact: 'UninstallModelImpactResponse'
     nodes: list['UninstallNodeImpactResponse']
     original_plan_digest: str
     plan_digest: str
@@ -78,6 +81,7 @@ class UninstallPlanResponse:
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
         from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
+        from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
         from ..models.uninstall_consequences_response import UninstallConsequencesResponse
         active_run_count = self.active_run_count
 
@@ -106,6 +110,8 @@ class UninstallPlanResponse:
         installation_id = self.installation_id
 
         installation_state = self.installation_state
+
+        model_impact = self.model_impact.to_dict()
 
         nodes = []
         for nodes_item_data in self.nodes:
@@ -152,6 +158,7 @@ class UninstallPlanResponse:
             "installation_authority_digest": installation_authority_digest,
             "installation_id": installation_id,
             "installation_state": installation_state,
+            "model_impact": model_impact,
             "nodes": nodes,
             "original_plan_digest": original_plan_digest,
             "plan_digest": plan_digest,
@@ -174,6 +181,7 @@ class UninstallPlanResponse:
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
         from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
+        from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
         from ..models.uninstall_consequences_response import UninstallConsequencesResponse
         d = dict(src_dict)
         active_run_count = d.pop("active_run_count")
@@ -212,6 +220,11 @@ class UninstallPlanResponse:
         installation_id = d.pop("installation_id")
 
         installation_state = d.pop("installation_state")
+
+        model_impact = UninstallModelImpactResponse.from_dict(d.pop("model_impact"))
+
+
+
 
         nodes = []
         _nodes = d.pop("nodes")
@@ -268,6 +281,7 @@ class UninstallPlanResponse:
             installation_authority_digest=installation_authority_digest,
             installation_id=installation_id,
             installation_state=installation_state,
+            model_impact=model_impact,
             nodes=nodes,
             original_plan_digest=original_plan_digest,
             plan_digest=plan_digest,

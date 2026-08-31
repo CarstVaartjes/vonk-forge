@@ -53,6 +53,17 @@ UNINSTALL = {
     "recipe_content_sha256": INSTALL["recipe_content_sha256"],
     "plan_digest": INSTALL["plan_digest"],
 }
+MODEL_UNINSTALL = {
+    "schema_version": 1,
+    "model_version_sha256": "f" * 64,
+    "plan_digest": INSTALL["plan_digest"],
+    "installations": [
+        {
+            "installation_id": INSTALL["installation_id"],
+            "recipe_content_sha256": INSTALL["recipe_content_sha256"],
+        }
+    ],
+}
 
 
 def test_recipe_operation_vocabulary_is_closed() -> None:
@@ -68,6 +79,7 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
         "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.model-uninstall.v1",
     }
 
 
@@ -78,6 +90,7 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
         (AgentOperation.RECIPE_START, START),
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
+        (AgentOperation.RECIPE_MODEL_UNINSTALL, MODEL_UNINSTALL),
     ],
 )
 def test_recipe_operation_payloads_are_typed_and_digest_bound(

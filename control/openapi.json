@@ -5287,6 +5287,207 @@
         "title": "MappingResponse",
         "type": "object"
       },
+      "ModelDeletionInstallationImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "minimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_id",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "node_ids",
+          "installed_bytes"
+        ],
+        "title": "ModelDeletionInstallationImpactResponse",
+        "type": "object"
+      },
+      "ModelDeletionNodeImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 512,
+            "minItems": 1,
+            "title": "Installation Ids",
+            "type": "array"
+          },
+          "installed_bytes": {
+            "minimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "recipe_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 512,
+            "minItems": 1,
+            "title": "Recipe Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "installation_ids",
+          "recipe_ids",
+          "installed_bytes"
+        ],
+        "title": "ModelDeletionNodeImpactResponse",
+        "type": "object"
+      },
+      "ModelDeletionPlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_run_count": {
+            "minimum": 0.0,
+            "title": "Active Run Count",
+            "type": "integer"
+          },
+          "active_runs": {
+            "items": {
+              "$ref": "#/components/schemas/UninstallActiveRunResponse"
+            },
+            "maxItems": 128,
+            "title": "Active Runs",
+            "type": "array"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "bytes_removed": {
+            "minimum": 0.0,
+            "title": "Bytes Removed",
+            "type": "integer"
+          },
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/ModelDeletionInstallationImpactResponse"
+            },
+            "maxItems": 512,
+            "title": "Installations",
+            "type": "array"
+          },
+          "model_title": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model Title",
+            "type": "string"
+          },
+          "model_version_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Version Sha256",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelDeletionNodeImpactResponse"
+            },
+            "maxItems": 1024,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "shared_cache_policy": {
+            "pattern": "^remove-unreferenced-model-artifacts-only$",
+            "title": "Shared Cache Policy",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_version_sha256",
+          "model_title",
+          "allowed",
+          "installations",
+          "nodes",
+          "bytes_removed",
+          "active_runs",
+          "active_run_count",
+          "blockers",
+          "warnings",
+          "shared_cache_policy",
+          "plan_digest"
+        ],
+        "title": "ModelDeletionPlanResponse",
+        "type": "object"
+      },
+      "ModelDeletionPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "model_version_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Version Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_version_sha256"
+        ],
+        "title": "ModelDeletionPreviewRequest",
+        "type": "object"
+      },
       "ModelVersionIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -10901,6 +11102,61 @@
         "title": "UninstallConsequencesResponse",
         "type": "object"
       },
+      "UninstallModelImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "title": "Cleanup Node Ids",
+            "type": "array"
+          },
+          "dependent_recipe_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 512,
+            "title": "Dependent Recipe Ids",
+            "type": "array"
+          },
+          "effect": {
+            "pattern": "^(recipe-only|recipe-and-unused-model|recipe-and-partial-model-cleanup)$",
+            "title": "Effect",
+            "type": "string"
+          },
+          "model_title": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model Title",
+            "type": "string"
+          },
+          "model_version_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Version Sha256",
+            "type": "string"
+          },
+          "retained_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "title": "Retained Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_version_sha256",
+          "model_title",
+          "effect",
+          "dependent_recipe_ids",
+          "cleanup_node_ids",
+          "retained_node_ids"
+        ],
+        "title": "UninstallModelImpactResponse",
+        "type": "object"
+      },
       "UninstallNodeImpactResponse": {
         "additionalProperties": false,
         "properties": {
@@ -11011,6 +11267,9 @@
             "title": "Installation State",
             "type": "string"
           },
+          "model_impact": {
+            "$ref": "#/components/schemas/UninstallModelImpactResponse"
+          },
           "nodes": {
             "items": {
               "$ref": "#/components/schemas/UninstallNodeImpactResponse"
@@ -11075,6 +11334,7 @@
           "blockers",
           "warnings",
           "consequences",
+          "model_impact",
           "plan_digest"
         ],
         "title": "UninstallPlanResponse",
@@ -16650,6 +16910,104 @@
           }
         ],
         "summary": "List Library"
+      }
+    },
+    "/api/v1/library/model-deletion-plans/preview": {
+      "post": {
+        "operationId": "previewLibraryModelDeletion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDeletionPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDeletionPlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Model Deletion"
+      }
+    },
+    "/api/v1/library/models/{model_version_sha256}/delete": {
+      "post": {
+        "operationId": "deleteLibraryModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_version_sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Model Version Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UninstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Model"
       }
     },
     "/api/v1/library/placements": {

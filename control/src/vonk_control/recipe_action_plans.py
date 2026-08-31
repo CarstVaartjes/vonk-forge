@@ -71,6 +71,16 @@ class UninstallConsequences:
 
 
 @dataclass(frozen=True, slots=True)
+class UninstallModelImpact:
+    model_version_sha256: str
+    model_title: str
+    effect: str
+    dependent_recipe_ids: tuple[str, ...]
+    cleanup_node_ids: tuple[str, ...]
+    retained_node_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class UninstallPlan:
     installation_id: str
     recipe_id: str
@@ -89,6 +99,41 @@ class UninstallPlan:
     blockers: tuple[ActionReason, ...]
     warnings: tuple[ActionReason, ...]
     consequences: UninstallConsequences
+    model_impact: UninstallModelImpact
+    plan_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDeletionInstallationImpact:
+    installation_id: str
+    recipe_id: str
+    recipe_revision_id: str
+    recipe_content_sha256: str
+    node_ids: tuple[str, ...]
+    installed_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDeletionNodeImpact:
+    node_id: str
+    installation_ids: tuple[str, ...]
+    recipe_ids: tuple[str, ...]
+    installed_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDeletionPlan:
+    model_version_sha256: str
+    model_title: str
+    allowed: bool
+    installations: tuple[ModelDeletionInstallationImpact, ...]
+    nodes: tuple[ModelDeletionNodeImpact, ...]
+    bytes_removed: int
+    active_runs: tuple[UninstallActiveRun, ...]
+    active_run_count: int
+    blockers: tuple[ActionReason, ...]
+    warnings: tuple[ActionReason, ...]
+    shared_cache_policy: str
     plan_digest: str
 
 
@@ -209,11 +254,43 @@ def uninstall_plan(
     active_run_count: int,
     active_runs_truncated: bool,
     active_operation: bool,
+    model_version_sha256: str,
+    model_title: str,
+    dependent_recipe_ids_by_node: Mapping[str, Sequence[str]],
 ) -> UninstallPlan:
     """Build one uninstall impact plan with fail-closed byte semantics."""
 
     ordered_nodes = tuple(sorted(nodes, key=lambda item: (item.rank, item.node_id)))
     ordered_runs = tuple(sorted(active_runs, key=lambda item: item.run_id))
+    node_ids = {node.node_id for node in ordered_nodes}
+    if set(dependent_recipe_ids_by_node) != node_ids:
+        raise ValueError("model dependency evidence must cover every uninstall node")
+    dependents_by_node = {
+        node_id: tuple(sorted(set(dependent_recipe_ids_by_node[node_id])))
+        for node_id in sorted(node_ids)
+    }
+    ordered_dependents = tuple(
+        sorted(
+            {
+                recipe_id
+                for recipe_ids in dependents_by_node.values()
+                for recipe_id in recipe_ids
+            }
+        )
+    )
+    cleanup_node_ids = tuple(
+        node_id for node_id, recipe_ids in dependents_by_node.items() if not recipe_ids
+    )
+    retained_node_ids = tuple(
+        node_id for node_id, recipe_ids in dependents_by_node.items() if recipe_ids
+    )
+    model_effect = (
+        "recipe-and-unused-model"
+        if len(cleanup_node_ids) == len(ordered_nodes)
+        else "recipe-and-partial-model-cleanup"
+        if cleanup_node_ids
+        else "recipe-only"
+    )
     canonical_content = json.loads(canonical_message(recipe_content))
     bytes_known = (
         installation_state == "installed"
@@ -308,6 +385,14 @@ def uninstall_plan(
         "active_run_count": active_run_count,
         "active_runs_truncated": active_runs_truncated,
         "active_operation": active_operation,
+        "model_impact": {
+            "model_version_sha256": model_version_sha256,
+            "effect": model_effect,
+            "dependent_recipe_ids": list(ordered_dependents),
+            "dependent_recipe_ids_by_node": dependents_by_node,
+            "cleanup_node_ids": list(cleanup_node_ids),
+            "retained_node_ids": list(retained_node_ids),
+        },
     }
     digest = hashlib.sha256(canonical_message(identity)).hexdigest()
     return UninstallPlan(
@@ -328,18 +413,146 @@ def uninstall_plan(
         blockers=tuple(blockers),
         warnings=(),
         consequences=UninstallConsequences(),
+        model_impact=UninstallModelImpact(
+            model_version_sha256=model_version_sha256,
+            model_title=model_title,
+            effect=model_effect,
+            dependent_recipe_ids=ordered_dependents,
+            cleanup_node_ids=cleanup_node_ids,
+            retained_node_ids=retained_node_ids,
+        ),
+        plan_digest=digest,
+    )
+
+
+def model_deletion_plan(
+    *,
+    model_version_sha256: str,
+    model_title: str,
+    installations: Sequence[ModelDeletionInstallationImpact],
+    nodes: Sequence[ModelDeletionNodeImpact],
+    active_runs: Sequence[UninstallActiveRun],
+    active_run_count: int,
+    active_runs_truncated: bool,
+    active_operation: bool,
+    evidence_exact: bool,
+) -> ModelDeletionPlan:
+    """Build an exact, fleet-wide cascade plan for one model version."""
+
+    ordered_installations = tuple(
+        sorted(installations, key=lambda item: item.installation_id)
+    )
+    ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
+    ordered_runs = tuple(sorted(active_runs, key=lambda item: item.run_id))
+    blockers: list[ActionReason] = []
+    if not ordered_installations:
+        blockers.append(
+            ActionReason(
+                "model-delete.not_installed",
+                "The exact model version has no installed recipe dependencies.",
+            )
+        )
+    if not evidence_exact:
+        blockers.append(
+            ActionReason(
+                "model-delete.installation_evidence_inexact",
+                "Every dependent installation and installed byte count must be exact before deletion.",
+            )
+        )
+    if active_run_count:
+        blockers.append(
+            ActionReason(
+                "model-delete.active_run",
+                f"{active_run_count} active run(s) must be stopped explicitly first.",
+            )
+        )
+    if active_runs_truncated:
+        blockers.append(
+            ActionReason(
+                "model-delete.active_runs_truncated",
+                "The bounded active-run evidence is incomplete; deletion remains blocked.",
+            )
+        )
+    if active_operation:
+        blockers.append(
+            ActionReason(
+                "model-delete.operation_active",
+                "This exact model version already has an active deletion operation.",
+            )
+        )
+    identity = {
+        "schema_version": 1,
+        "action": "model.delete",
+        "model_version_sha256": model_version_sha256,
+        "installations": [
+            {
+                "installation_id": item.installation_id,
+                "recipe_id": item.recipe_id,
+                "recipe_revision_id": item.recipe_revision_id,
+                "recipe_content_sha256": item.recipe_content_sha256,
+                "node_ids": list(item.node_ids),
+                "installed_bytes": item.installed_bytes,
+            }
+            for item in ordered_installations
+        ],
+        "nodes": [
+            {
+                "node_id": item.node_id,
+                "installation_ids": list(item.installation_ids),
+                "recipe_ids": list(item.recipe_ids),
+                "installed_bytes": item.installed_bytes,
+            }
+            for item in ordered_nodes
+        ],
+        "active_runs": [
+            {
+                "run_id": item.run_id,
+                "state": item.state,
+                "route_state": item.route_state,
+            }
+            for item in ordered_runs
+        ],
+        "active_run_count": active_run_count,
+        "active_runs_truncated": active_runs_truncated,
+        "active_operation": active_operation,
+        "evidence_exact": evidence_exact,
+        "shared_cache_policy": "remove-unreferenced-model-artifacts-only",
+    }
+    digest = hashlib.sha256(canonical_message(identity)).hexdigest()
+    return ModelDeletionPlan(
+        model_version_sha256=model_version_sha256,
+        model_title=model_title,
+        allowed=not blockers,
+        installations=ordered_installations,
+        nodes=ordered_nodes,
+        bytes_removed=sum(item.installed_bytes for item in ordered_nodes),
+        active_runs=ordered_runs,
+        active_run_count=active_run_count,
+        blockers=tuple(blockers),
+        warnings=(
+            ActionReason(
+                "model-delete.shared_cache_protected",
+                "Only exact artifact directories unreferenced by remaining installations are removed; unrelated immutable caches remain protected.",
+            ),
+        ),
+        shared_cache_policy="remove-unreferenced-model-artifacts-only",
         plan_digest=digest,
     )
 
 
 __all__ = [
     "ActionReason",
+    "ModelDeletionInstallationImpact",
+    "ModelDeletionNodeImpact",
+    "ModelDeletionPlan",
     "StopNodeImpact",
     "StopPlan",
     "UninstallActiveRun",
     "UninstallConsequences",
+    "UninstallModelImpact",
     "UninstallNodeImpact",
     "UninstallPlan",
+    "model_deletion_plan",
     "stop_plan",
     "uninstall_plan",
 ]

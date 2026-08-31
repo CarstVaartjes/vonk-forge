@@ -479,6 +479,7 @@ class InstallAdmissionService:
             raise InstallPlanConflict("install.topology_stale") from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
+            model_version_sha256=_primary_model_sha256(revision.document),
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
             recipe_build_id=plan.recipe_build_id,
@@ -557,6 +558,18 @@ class InstallAdmissionService:
                 )
             )
         return installation.id
+
+
+def _primary_model_sha256(document: Mapping[str, object]) -> str:
+    model = document.get("model")
+    digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise InstallPlanConflict("install.model_identity_unavailable")
+    return digest
 
 
 def _node_document(node: InstallNodePlan) -> dict[str, object]:

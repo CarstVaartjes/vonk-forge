@@ -87,6 +87,7 @@ _NEXT_AGENT_CAPABILITIES = _REQUIRED_AGENT_CAPABILITIES | frozenset(
         "recipe.start",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.model-uninstall.v1",
     }
 )
 _ACTIVE_CANCELLATION_STATES = frozenset(

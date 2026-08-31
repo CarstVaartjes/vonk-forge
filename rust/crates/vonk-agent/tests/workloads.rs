@@ -1729,6 +1729,110 @@ fn uninstall_removes_matching_metadata_without_rehashing_model_artifacts() {
     assert!(runner.calls.borrow().is_empty());
 }
 
+fn persist_installation(root: &Path, installation_id: &str, value: &WorkloadSpec) {
+    let installation = root.join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(value).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        installation.join("recipe-content.sha256"),
+        &value.identity.recipe_revision_sha256,
+    )
+    .unwrap();
+}
+
+fn persist_model_artifact(root: &Path, artifact: &ArtifactSpec) -> std::path::PathBuf {
+    let key = hex::encode(Sha256::digest(serde_json::to_vec(artifact).unwrap()));
+    let path = root.join("models").join("sha256").join(key);
+    fs::create_dir_all(&path).unwrap();
+    fs::write(
+        path.join(".vonk-manifest.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "files": {},
+            "total_bytes": artifact.installed_bytes,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn model_uninstall_cascades_installations_and_removes_only_unreferenced_artifacts() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let first = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let second = "cb555393-764b-4eb6-8f15-b416d2894290";
+    let value = spec();
+    persist_installation(directory.path(), first, &value);
+    persist_installation(directory.path(), second, &value);
+    let artifact = persist_model_artifact(directory.path(), &value.artifacts[0]);
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    let removed = runtime
+        .uninstall_model(
+            &[
+                (first.to_owned(), DIGEST.to_owned()),
+                (second.to_owned(), DIGEST.to_owned()),
+            ],
+            DIGEST,
+        )
+        .unwrap();
+
+    assert_eq!(removed, value.artifacts[0].installed_bytes);
+    assert!(!directory.path().join("installations").join(first).exists());
+    assert!(!directory.path().join("installations").join(second).exists());
+    assert!(!artifact.exists());
+}
+
+#[test]
+fn model_uninstall_protects_an_exact_artifact_referenced_by_another_model() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let target = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let retained = "cb555393-764b-4eb6-8f15-b416d2894290";
+    let value = spec();
+    let mut other_model = value.clone();
+    other_model.identity.model_version_sha256 = "b".repeat(64);
+    persist_installation(directory.path(), target, &value);
+    persist_installation(directory.path(), retained, &other_model);
+    let artifact = persist_model_artifact(directory.path(), &value.artifacts[0]);
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    let removed = runtime
+        .uninstall_model(&[(target.to_owned(), DIGEST.to_owned())], DIGEST)
+        .unwrap();
+
+    assert_eq!(removed, 0);
+    assert!(!directory.path().join("installations").join(target).exists());
+    assert!(
+        directory
+            .path()
+            .join("installations")
+            .join(retained)
+            .exists()
+    );
+    assert!(artifact.exists());
+}
+
 #[test]
 fn uninstall_preserves_metadata_when_recipe_identity_does_not_match() {
     let runner = FakeRunner {

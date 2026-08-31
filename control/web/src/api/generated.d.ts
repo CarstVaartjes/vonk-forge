@@ -1047,6 +1047,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/model-deletion-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Model Deletion */
+        post: operations["previewLibraryModelDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/models/{model_version_sha256}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete Model */
+        post: operations["deleteLibraryModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/placements": {
         parameters: {
             query?: never;
@@ -3249,6 +3283,64 @@ export interface components {
             /** Placement Digest */
             placement_digest: string;
         };
+        /** ModelDeletionInstallationImpactResponse */
+        ModelDeletionInstallationImpactResponse: {
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Node Ids */
+            node_ids: string[];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+        };
+        /** ModelDeletionNodeImpactResponse */
+        ModelDeletionNodeImpactResponse: {
+            /** Installation Ids */
+            installation_ids: string[];
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Node Id */
+            node_id: string;
+            /** Recipe Ids */
+            recipe_ids: string[];
+        };
+        /** ModelDeletionPlanResponse */
+        ModelDeletionPlanResponse: {
+            /** Active Run Count */
+            active_run_count: number;
+            /** Active Runs */
+            active_runs: components["schemas"]["UninstallActiveRunResponse"][];
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["PlanReason"][];
+            /** Bytes Removed */
+            bytes_removed: number;
+            /** Installations */
+            installations: components["schemas"]["ModelDeletionInstallationImpactResponse"][];
+            /** Model Title */
+            model_title: string;
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Nodes */
+            nodes: components["schemas"]["ModelDeletionNodeImpactResponse"][];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Shared Cache Policy */
+            shared_cache_policy: string;
+            /** Warnings */
+            warnings: components["schemas"]["PlanReason"][];
+        };
+        /** ModelDeletionPreviewRequest */
+        ModelDeletionPreviewRequest: {
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+        };
         /** ModelVersionIdentity */
         ModelVersionIdentity: {
             /** Content Sha256 */
@@ -5116,6 +5208,21 @@ export interface components {
             /** Reinstall Required */
             reinstall_required: boolean;
         };
+        /** UninstallModelImpactResponse */
+        UninstallModelImpactResponse: {
+            /** Cleanup Node Ids */
+            cleanup_node_ids: string[];
+            /** Dependent Recipe Ids */
+            dependent_recipe_ids: string[];
+            /** Effect */
+            effect: string;
+            /** Model Title */
+            model_title: string;
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Retained Node Ids */
+            retained_node_ids: string[];
+        };
         /** UninstallNodeImpactResponse */
         UninstallNodeImpactResponse: {
             /** Installed Bytes */
@@ -5150,6 +5257,7 @@ export interface components {
             installation_id: string;
             /** Installation State */
             installation_state: string;
+            model_impact: components["schemas"]["UninstallModelImpactResponse"];
             /** Nodes */
             nodes: components["schemas"]["UninstallNodeImpactResponse"][];
             /** Original Plan Digest */
@@ -8587,6 +8695,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewLibraryModelDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDeletionPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelDeletionPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteLibraryModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_version_sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UninstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

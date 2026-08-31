@@ -22,6 +22,7 @@ RECIPE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_START,
         AgentOperation.RECIPE_STOP,
         AgentOperation.RECIPE_UNINSTALL,
+        AgentOperation.RECIPE_MODEL_UNINSTALL,
     }
 )
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -71,6 +72,9 @@ class RecipeOperationRequest:
     local_address: str | None = None
     master_address: str | None = None
     master_port: int | None = None
+    cleanup_model_version_sha256: str | None = None
+    model_version_sha256: str | None = None
+    installations: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def parse(cls, operation: AgentOperation, payload: Any) -> RecipeOperationRequest:
@@ -113,8 +117,12 @@ class RecipeOperationRequest:
             }
         elif operation is AgentOperation.RECIPE_STOP:
             required = common | {"run_id"}
+        elif operation is AgentOperation.RECIPE_MODEL_UNINSTALL:
+            required = common | {"model_version_sha256", "installations"}
         else:
             required = common | {"installation_id", "recipe_content_sha256"}
+            if "cleanup_model_version_sha256" in value:
+                required.add("cleanup_model_version_sha256")
         _fields(value, required=required)
         schema_version = _version(value["schema_version"])
         plan_digest = _digest(value["plan_digest"], "plan_digest")
@@ -133,6 +141,46 @@ class RecipeOperationRequest:
             if "recipe_content_sha256" in value
             else None
         )
+        cleanup_model_digest = (
+            _digest(
+                value["cleanup_model_version_sha256"],
+                "cleanup_model_version_sha256",
+            )
+            if value.get("cleanup_model_version_sha256") is not None
+            else None
+        )
+        model_digest = (
+            _digest(value["model_version_sha256"], "model_version_sha256")
+            if "model_version_sha256" in value
+            else None
+        )
+        installations: tuple[tuple[str, str], ...] = ()
+        if operation is AgentOperation.RECIPE_MODEL_UNINSTALL:
+            raw_installations = value["installations"]
+            if (
+                not isinstance(raw_installations, list)
+                or not 1 <= len(raw_installations) <= 512
+            ):
+                raise AgentProtocolError("model uninstall installations are invalid")
+            parsed_installations: list[tuple[str, str]] = []
+            for raw_installation in raw_installations:
+                item = _mapping(raw_installation)
+                _fields(
+                    item,
+                    required={"installation_id", "recipe_content_sha256"},
+                )
+                parsed_installations.append(
+                    (
+                        _uuid(item["installation_id"], name="installation_id"),
+                        _digest(
+                            item["recipe_content_sha256"],
+                            "recipe_content_sha256",
+                        ),
+                    )
+                )
+            installations = tuple(parsed_installations)
+            if len({item[0] for item in installations}) != len(installations):
+                raise AgentProtocolError("model uninstall installations are duplicated")
         expected_bytes = (
             _bytes(value["expected_bytes"], "expected_bytes")
             if "expected_bytes" in value
@@ -277,6 +325,9 @@ class RecipeOperationRequest:
             local_address=local_address if isinstance(local_address, str) else None,
             master_address=master_address if isinstance(master_address, str) else None,
             master_port=master_port if isinstance(master_port, int) else None,
+            cleanup_model_version_sha256=cleanup_model_digest,
+            model_version_sha256=model_digest,
+            installations=installations,
         )
 
 
