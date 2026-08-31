@@ -27,14 +27,23 @@ from vonk_agent_protocol.host_helper import (
 )
 
 from .compat_recovery import (
+    _GRANTLESS_RETRY_FAILURE as COMPAT_GRANTLESS_RETRY_FAILURE,
+)
+from .compat_recovery import (
     DISPATCH_CERTIFICATE_SERIAL as COMPAT_DISPATCH_CERTIFICATE_SERIAL,
 )
+from .compat_recovery import (
+    GRANTLESS_RETRY_CERTIFICATE_SERIAL as COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL,
+)
+from .compat_recovery import JOB_ID as COMPAT_JOB_ID
 from .compat_recovery import (
     NODE_ID as COMPAT_NODE_ID,
 )
 from .compat_recovery import (
     OPERATION_ID as COMPAT_OPERATION_ID,
 )
+from .compat_recovery import RECOVERY_ID as COMPAT_RECOVERY_ID
+from .compat_recovery import RETRY_ATTEMPT as COMPAT_RETRY_ATTEMPT
 from .compat_recovery import (
     SOURCE_BINARY_DIGEST as COMPAT_SOURCE_BINARY_DIGEST,
 )
@@ -290,6 +299,34 @@ class HostRuntimeAuthorityService:
                 if current.lease_deadline.tzinfo is not None
                 else current.lease_deadline.replace(tzinfo=UTC)
             )
+            recovery = session.scalar(
+                select(AgentUpgradeCompatibilityRecovery)
+                .where(AgentUpgradeCompatibilityRecovery.operation_id == operation_id)
+                .with_for_update(of=AgentUpgradeCompatibilityRecovery)
+            )
+            certificate_matches = bool(
+                current is not None
+                and (
+                    current.agent_certificate_serial == certificate_serial
+                    or (
+                        recovery is not None
+                        and recovery.id == COMPAT_RECOVERY_ID
+                        and recovery.node_id == COMPAT_NODE_ID == node_id
+                        and recovery.job_id == COMPAT_JOB_ID == job_id
+                        and recovery.operation_id
+                        == COMPAT_OPERATION_ID
+                        == operation_id
+                        and recovery.expected_retry_attempt
+                        == COMPAT_RETRY_ATTEMPT
+                        == attempt
+                        and current.fence == fence
+                        and current.agent_certificate_serial
+                        == COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL
+                        and certificate_serial
+                        == COMPAT_DISPATCH_CERTIFICATE_SERIAL
+                    )
+                )
+            )
             if (
                 operation is None
                 or current is None
@@ -302,16 +339,11 @@ class HostRuntimeAuthorityService:
                 or operation.current_attempt != attempt
                 or current.state != "running"
                 or current.fence != fence
-                or current.agent_certificate_serial != certificate_serial
+                or not certificate_matches
                 or lease_deadline is None
                 or lease_deadline <= now
             ):
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
-            recovery = session.scalar(
-                select(AgentUpgradeCompatibilityRecovery)
-                .where(AgentUpgradeCompatibilityRecovery.operation_id == operation_id)
-                .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-            )
             if recovery is not None:
                 return self._issue_compatibility_recovery_grant(
                     session=session,
@@ -385,7 +417,14 @@ class HostRuntimeAuthorityService:
             and recovery.expected_retry_attempt == attempt
             and current.attempt == attempt
             and current.fence == fence
-            and current.agent_certificate_serial == certificate_serial
+            and (
+                current.agent_certificate_serial == certificate_serial
+                or (
+                    current.agent_certificate_serial
+                    == COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL
+                    and current.result == COMPAT_GRANTLESS_RETRY_FAILURE
+                )
+            )
             and source is not None
             and source.attempt == recovery.source_attempt
             and source.fence == recovery.source_fence

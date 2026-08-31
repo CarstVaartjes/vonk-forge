@@ -655,6 +655,7 @@ class AgentJobService:
         from .compat_recovery import (
             _GRANTLESS_RETRY_FAILURE,
             DISPATCH_CERTIFICATE_SERIAL,
+            GRANTLESS_RETRY_CERTIFICATE_SERIAL,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
@@ -784,8 +785,8 @@ class AgentJobService:
             and retry.state == "running"
             and retry.result == _GRANTLESS_RETRY_FAILURE
             and retry.agent_certificate_serial
-            == certificate_serial
-            == DISPATCH_CERTIFICATE_SERIAL
+            == GRANTLESS_RETRY_CERTIFICATE_SERIAL
+            and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
             and _aware(retry.lease_deadline) > _aware(now)
             and protocol_version == 3
             and capabilities is not None
@@ -952,6 +953,7 @@ class AgentJobService:
 
         from .compat_recovery import (
             DISPATCH_CERTIFICATE_SERIAL,
+            GRANTLESS_RETRY_CERTIFICATE_SERIAL,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
@@ -1136,6 +1138,9 @@ class AgentJobService:
             != (
                 recovery.source_certificate_serial
                 if before_dispatch
+                else GRANTLESS_RETRY_CERTIFICATE_SERIAL
+                if attempt.agent_certificate_serial
+                == GRANTLESS_RETRY_CERTIFICATE_SERIAL
                 else recovery.retry_certificate_serial
             )
             or attempt.state
