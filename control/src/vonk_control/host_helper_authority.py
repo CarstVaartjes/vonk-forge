@@ -30,10 +30,10 @@ from .compat_recovery import (
     _GRANTLESS_RETRY_FAILURE as COMPAT_GRANTLESS_RETRY_FAILURE,
 )
 from .compat_recovery import (
-    DISPATCH_CERTIFICATE_SERIAL as COMPAT_DISPATCH_CERTIFICATE_SERIAL,
+    GRANTLESS_RETRY_CERTIFICATE_SERIAL as COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL,
 )
 from .compat_recovery import (
-    GRANTLESS_RETRY_CERTIFICATE_SERIAL as COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL,
+    GRANTLESS_RETRY_FENCE as COMPAT_GRANTLESS_RETRY_FENCE,
 )
 from .compat_recovery import JOB_ID as COMPAT_JOB_ID
 from .compat_recovery import (
@@ -65,11 +65,20 @@ from .compat_recovery import (
 from .compat_recovery import (
     TARGET_PACKAGE_VERSION as COMPAT_TARGET_PACKAGE_VERSION,
 )
-from .models import AgentNode, AgentOperationAttempt, AgentUpgradeCompatibilityRecovery
+from .models import (
+    AgentCertificate,
+    AgentNode,
+    AgentOperationAttempt,
+    AgentUpgradeCompatibilityRecovery,
+)
 from .models import AgentOperation as StoredAgentOperation
 from .workload_helper_authority import _load_private_key
 
 logger = logging.getLogger(__name__)
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class HostHelperAuthorityError(RuntimeError):
@@ -313,17 +322,18 @@ class HostRuntimeAuthorityService:
                         and recovery.id == COMPAT_RECOVERY_ID
                         and recovery.node_id == COMPAT_NODE_ID == node_id
                         and recovery.job_id == COMPAT_JOB_ID == job_id
-                        and recovery.operation_id
-                        == COMPAT_OPERATION_ID
-                        == operation_id
+                        and recovery.operation_id == COMPAT_OPERATION_ID == operation_id
                         and recovery.expected_retry_attempt
                         == COMPAT_RETRY_ATTEMPT
                         == attempt
                         and current.fence == fence
+                        and current.fence == COMPAT_GRANTLESS_RETRY_FENCE
                         and current.agent_certificate_serial
                         == COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL
+                        and current.agent_certificate_serial
+                        == recovery.rearm_attempt_certificate_serial
                         and certificate_serial
-                        == COMPAT_DISPATCH_CERTIFICATE_SERIAL
+                        == recovery.rearm_dispatch_certificate_serial
                     )
                 )
             )
@@ -401,6 +411,7 @@ class HostRuntimeAuthorityService:
         """Issue or replay the sole scheduled-reboot grant; never fall through."""
 
         node = session.get(AgentNode, node_id)
+        request_certificate = session.get(AgentCertificate, certificate_serial)
         source = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation_id,
@@ -418,6 +429,10 @@ class HostRuntimeAuthorityService:
             and current.attempt == attempt
             and current.fence == fence
             and (
+                current.result != COMPAT_GRANTLESS_RETRY_FAILURE
+                or current.fence == COMPAT_GRANTLESS_RETRY_FENCE
+            )
+            and (
                 current.agent_certificate_serial == certificate_serial
                 or (
                     current.agent_certificate_serial
@@ -431,8 +446,16 @@ class HostRuntimeAuthorityService:
             and source.agent_certificate_serial == recovery.source_certificate_serial
             and node is not None
             and node.contact_certificate_serial
-            == COMPAT_DISPATCH_CERTIFICATE_SERIAL
+            == recovery.rearm_dispatch_certificate_serial
             == certificate_serial
+            and request_certificate is not None
+            and request_certificate.serial == certificate_serial
+            and request_certificate.node_id == node_id
+            and request_certificate.state == "active"
+            and request_certificate.revoked_at is None
+            and request_certificate.ca_revoked_at is None
+            and _aware(request_certificate.not_before) <= _aware(now)
+            and _aware(request_certificate.not_after) > _aware(now)
             and node.semantic_version
             == recovery.source_semantic_version
             == COMPAT_SOURCE_SEMANTIC_VERSION
@@ -460,6 +483,14 @@ class HostRuntimeAuthorityService:
             and recovery.target_build_digest
             == package.get("target_build_digest")
             == COMPAT_TARGET_BUILD_DIGEST
+            and recovery.rearm_attempt_certificate_serial
+            == current.agent_certificate_serial
+            and (
+                current.result != COMPAT_GRANTLESS_RETRY_FAILURE
+                or current.agent_certificate_serial
+                == COMPAT_GRANTLESS_RETRY_CERTIFICATE_SERIAL
+            )
+            and recovery.rearm_dispatch_certificate_serial == certificate_serial
         )
         if not exact:
             self._log_compatibility_rejection(

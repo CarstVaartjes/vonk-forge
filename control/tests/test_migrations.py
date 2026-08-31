@@ -109,6 +109,10 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     }
     assert compatibility_columns["state"]["type"].length == 32
     assert compatibility_columns["identity_deadline"]["nullable"] is True
+    assert compatibility_columns["rearm_attempt_certificate_serial"]["nullable"] is True
+    assert (
+        compatibility_columns["rearm_dispatch_certificate_serial"]["nullable"] is True
+    )
     compatibility_checks = {
         constraint["name"]
         for constraint in inspect(engine).get_check_constraints(
@@ -117,6 +121,8 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     }
     assert {
         "ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
+        "ck_agent_upgrade_compatibility_recoveries_rearm_certs_paired",
+        "ck_agent_upgrade_compatibility_recoveries_retry_matches_rearm",
         "ck_agent_upgrade_compatibility_recoveries_state_fields",
     } <= compatibility_checks
     with engine.connect() as connection:
@@ -155,7 +161,98 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0004_artifact_jobs.py",
         "0005_repair_fleet_profile_tables.py",
         "0006_spark3542_compat_recovery.py",
+        "0007_compat_recovery_rearm_certificates.py",
     ]
+
+
+def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraints(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'compatibility-rearm-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0006_spark3542_compat_recovery")
+    engine = create_engine(url)
+    insert_recovery = text(
+        """
+        INSERT INTO agent_upgrade_compatibility_recoveries
+          (id, node_id, job_id, operation_id, source_attempt, source_fence,
+           source_certificate_serial, expected_retry_attempt,
+           source_semantic_version, source_build_digest, source_binary_digest,
+           upgrade_payload_sha256, package_sha256, target_package_version,
+           target_build_digest, target_binary_digest, authority_revision,
+           plan_digest, state, actor, request_id, created_at)
+        VALUES
+          ('recovery', 'node', 'job', 'operation', 3, 'source-fence',
+           'source-certificate', 4, '0.1.0', :source_build_digest,
+           :source_binary_digest, :upgrade_payload_sha256, :package_sha256,
+           '0.1.0~dev.381', :target_build_digest, :target_binary_digest,
+           'authority', :plan_digest, 'armed', 'admin', 'request',
+           '2026-08-31 12:00:00')
+        """
+    )
+    digests = {
+        "source_build_digest": f"sha256:{'a' * 64}",
+        "source_binary_digest": "b" * 64,
+        "upgrade_payload_sha256": "c" * 64,
+        "package_sha256": "d" * 64,
+        "target_build_digest": f"sha256:{'e' * 64}",
+        "target_binary_digest": "f" * 64,
+        "plan_digest": "0" * 64,
+    }
+    with engine.begin() as connection:
+        connection.execute(insert_recovery, digests)
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT rearm_attempt_certificate_serial, "
+                "rearm_dispatch_certificate_serial "
+                "FROM agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
+            )
+        ).one() == (None, None)
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE agent_upgrade_compatibility_recoveries "
+                "SET rearm_attempt_certificate_serial = 'attempt-certificate' "
+                "WHERE id = 'recovery'"
+            )
+        )
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE agent_upgrade_compatibility_recoveries "
+                "SET rearm_attempt_certificate_serial = 'attempt-certificate', "
+                "rearm_dispatch_certificate_serial = 'dispatch-certificate' "
+                "WHERE id = 'recovery'"
+            )
+        )
+
+    issue_grant = text(
+        """
+        UPDATE agent_upgrade_compatibility_recoveries
+        SET state = 'issued', retry_fence = 'retry-fence',
+            retry_certificate_serial = :retry_certificate_serial,
+            signed_grant = '{}', grant_request_id = 'grant-request',
+            grant_expires_at = '2026-08-31 12:00:10',
+            identity_deadline = '2026-08-31 12:15:00',
+            issued_at = '2026-08-31 12:00:00'
+        WHERE id = 'recovery'
+        """
+    )
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            issue_grant, {"retry_certificate_serial": "other-certificate"}
+        )
+
+    with engine.begin() as connection:
+        connection.execute(
+            issue_grant, {"retry_certificate_serial": "dispatch-certificate"}
+        )
 
 
 def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
@@ -187,7 +284,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0006_spark3542_compat_recovery"
+            == "0007_compat_rearm_certificates"
         )
 
 
@@ -274,7 +371,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0006_spark3542_compat_recovery"
+            == "0007_compat_rearm_certificates"
         )
 
 

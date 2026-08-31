@@ -121,6 +121,36 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _active_current_certificate(
+    session: Session,
+    *,
+    node_id: str,
+    certificate_serial: str,
+    now: datetime,
+) -> bool:
+    node = session.scalar(
+        select(AgentNode)
+        .where(AgentNode.node_id == node_id)
+        .with_for_update(of=AgentNode)
+    )
+    certificate = session.scalar(
+        select(AgentCertificate)
+        .where(AgentCertificate.serial == certificate_serial)
+        .with_for_update(of=AgentCertificate)
+    )
+    return bool(
+        node is not None
+        and node.contact_certificate_serial == certificate_serial
+        and certificate is not None
+        and certificate.node_id == node_id
+        and certificate.state == "active"
+        and certificate.revoked_at is None
+        and certificate.ca_revoked_at is None
+        and _aware(certificate.not_before) <= _aware(now)
+        and _aware(certificate.not_after) > _aware(now)
+    )
+
+
 def _document(value: Mapping[str, object]) -> dict[str, object]:
     """Return the protocol's validated, deterministic JSON representation."""
     return json.loads(canonical_message(value))
@@ -522,11 +552,16 @@ class AgentJobService:
                 # contacts cannot accidentally create attempt 4 or reach the
                 # one-shot grant issuer.
                 from .compat_recovery import (
-                    DISPATCH_CERTIFICATE_SERIAL,
+                    ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
                     SOURCE_ATTEMPT,
                     SOURCE_BINARY_DIGEST,
                     SOURCE_BUILD_DIGEST,
                     SOURCE_SEMANTIC_VERSION,
+                )
+
+                expected_dispatch_certificate = (
+                    operation_compatibility_recovery.rearm_dispatch_certificate_serial
+                    or ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
                 )
 
                 if not (
@@ -538,7 +573,13 @@ class AgentJobService:
                     and operation.current_attempt == SOURCE_ATTEMPT
                     and operation.retry_disposition == _RETRY_DISPOSITION
                     and operation.retry_disposition_attempt == SOURCE_ATTEMPT
-                    and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+                    and expected_dispatch_certificate == certificate_serial
+                    and _active_current_certificate(
+                        session,
+                        node_id=node_id,
+                        certificate_serial=certificate_serial,
+                        now=now,
+                    )
                     and runtime_identity.get("architecture") == "linux-arm64"
                     and runtime_identity.get("semantic_version")
                     == SOURCE_SEMANTIC_VERSION
@@ -618,6 +659,19 @@ class AgentJobService:
                 agent_certificate_serial=certificate_serial,
                 state="running",
             )
+            if (
+                operation_compatibility_recovery is not None
+                and operation_compatibility_recovery.rearm_attempt_certificate_serial
+                is None
+                and operation_compatibility_recovery.rearm_dispatch_certificate_serial
+                is None
+            ):
+                operation_compatibility_recovery.rearm_attempt_certificate_serial = (
+                    certificate_serial
+                )
+                operation_compatibility_recovery.rearm_dispatch_certificate_serial = (
+                    certificate_serial
+                )
             session.add(attempt)
             return AgentClaim(
                 schema_version=1,
@@ -654,8 +708,8 @@ class AgentJobService:
 
         from .compat_recovery import (
             _GRANTLESS_RETRY_FAILURE,
-            DISPATCH_CERTIFICATE_SERIAL,
             GRANTLESS_RETRY_CERTIFICATE_SERIAL,
+            GRANTLESS_RETRY_FENCE,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
@@ -727,6 +781,15 @@ class AgentJobService:
                 Spark3542CompatibilityRecoveryService._stored_document(recovery)
             )
         ).hexdigest()
+        dispatch_certificate_is_exact = bool(
+            recovery.rearm_dispatch_certificate_serial == certificate_serial
+            and _active_current_certificate(
+                session,
+                node_id=node_id,
+                certificate_serial=certificate_serial,
+                now=now,
+            )
+        )
         if not (
             recovery.state == "armed"
             and recovery.blocked_at is None
@@ -782,11 +845,13 @@ class AgentJobService:
             and source.agent_certificate_serial == recovery.source_certificate_serial
             and source.state in {"expired", "failed", "waiting-for-operator"}
             and retry.attempt == RETRY_ATTEMPT
+            and retry.fence == GRANTLESS_RETRY_FENCE
             and retry.state == "running"
             and retry.result == _GRANTLESS_RETRY_FAILURE
-            and retry.agent_certificate_serial
-            == GRANTLESS_RETRY_CERTIFICATE_SERIAL
-            and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+            and retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE_SERIAL
+            and recovery.rearm_attempt_certificate_serial
+            == retry.agent_certificate_serial
+            and dispatch_certificate_is_exact
             and _aware(retry.lease_deadline) > _aware(now)
             and protocol_version == 3
             and capabilities is not None
@@ -952,11 +1017,12 @@ class AgentJobService:
         from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 
         from .compat_recovery import (
-            DISPATCH_CERTIFICATE_SERIAL,
             GRANTLESS_RETRY_CERTIFICATE_SERIAL,
+            GRANTLESS_RETRY_FENCE,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
+            ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
             RECOVERY_ID,
             SOURCE_ATTEMPT,
             SOURCE_BINARY_DIGEST,
@@ -980,6 +1046,30 @@ class AgentJobService:
         # 4.  Grant presence, not the terminal timeout state name, is the
         # durable distinction between pre- and post-dispatch reconciliation.
         before_dispatch = recovery.issued_at is None
+        rearm_is_bound = bool(
+            recovery.rearm_attempt_certificate_serial is not None
+            and recovery.rearm_dispatch_certificate_serial is not None
+        )
+        authenticated_certificate_is_bound = bool(
+            rearm_is_bound
+            and recovery.rearm_dispatch_certificate_serial == certificate_serial
+            and _active_current_certificate(
+                session,
+                node_id=recovery.node_id,
+                certificate_serial=certificate_serial,
+                now=now,
+            )
+        )
+        original_dispatch_certificate_is_exact = bool(
+            not rearm_is_bound
+            and certificate_serial == ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
+            and _active_current_certificate(
+                session,
+                node_id=recovery.node_id,
+                certificate_serial=certificate_serial,
+                now=now,
+            )
+        )
         persisted_grant_is_exact = before_dispatch
         if not before_dispatch and recovery.signed_grant is not None:
             try:
@@ -1083,23 +1173,49 @@ class AgentJobService:
                     and recovery.grant_expires_at is None
                     and recovery.identity_deadline is None
                     and recovery.issued_at is None
-                    and operation.current_attempt == recovery.source_attempt
                     and (
                         (
-                            recovery.state == "armed"
-                            and recovery.blocked_at is None
-                            and operation.retry_disposition == "retry"
-                            and operation.retry_disposition_attempt
-                            == recovery.source_attempt
-                        )
-                        or (
-                            recovery.state == "operator-blocked"
-                            and recovery.blocked_at is not None
+                            rearm_is_bound
+                            and authenticated_certificate_is_bound
+                            and operation.current_attempt
+                            == recovery.expected_retry_attempt
                             and operation.retry_disposition is None
                             and operation.retry_disposition_attempt is None
+                            and (
+                                (
+                                    recovery.state == "armed"
+                                    and recovery.blocked_at is None
+                                    and operation.state == "running"
+                                )
+                                or (
+                                    recovery.state == "operator-blocked"
+                                    and recovery.blocked_at is not None
+                                    and operation.state == "waiting-for-operator"
+                                )
+                            )
+                        )
+                        or (
+                            not rearm_is_bound
+                            and original_dispatch_certificate_is_exact
+                            and operation.current_attempt == recovery.source_attempt
+                            and (
+                                (
+                                    recovery.state == "armed"
+                                    and recovery.blocked_at is None
+                                    and operation.retry_disposition == "retry"
+                                    and operation.retry_disposition_attempt
+                                    == recovery.source_attempt
+                                )
+                                or (
+                                    recovery.state == "operator-blocked"
+                                    and recovery.blocked_at is not None
+                                    and operation.state == "waiting-for-operator"
+                                    and operation.retry_disposition is None
+                                    and operation.retry_disposition_attempt is None
+                                )
+                            )
                         )
                     )
-                    and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
                 )
                 or (
                     not before_dispatch
@@ -1112,15 +1228,18 @@ class AgentJobService:
                     and recovery.identity_deadline is not None
                     and recovery.issued_at is not None
                     and operation.current_attempt == recovery.expected_retry_attempt
-                    and certificate_serial == recovery.retry_certificate_serial
+                    and authenticated_certificate_is_bound
+                    and certificate_serial
+                    == recovery.retry_certificate_serial
+                    == recovery.rearm_dispatch_certificate_serial
                 )
             )
         ):
             return
         expected_attempt = (
-            recovery.source_attempt
-            if before_dispatch
-            else recovery.expected_retry_attempt
+            recovery.expected_retry_attempt
+            if rearm_is_bound
+            else recovery.source_attempt
         )
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -1132,16 +1251,23 @@ class AgentJobService:
         )
         if (
             attempt is None
-            or attempt.fence
-            != (recovery.source_fence if before_dispatch else recovery.retry_fence)
+            or (
+                rearm_is_bound
+                and before_dispatch
+                and attempt.fence != GRANTLESS_RETRY_FENCE
+            )
+            or (not before_dispatch and attempt.fence != recovery.retry_fence)
             or attempt.agent_certificate_serial
             != (
-                recovery.source_certificate_serial
-                if before_dispatch
-                else GRANTLESS_RETRY_CERTIFICATE_SERIAL
-                if attempt.agent_certificate_serial
-                == GRANTLESS_RETRY_CERTIFICATE_SERIAL
-                else recovery.retry_certificate_serial
+                recovery.rearm_attempt_certificate_serial
+                if rearm_is_bound
+                else recovery.source_certificate_serial
+            )
+            or (
+                rearm_is_bound
+                and before_dispatch
+                and attempt.agent_certificate_serial
+                != GRANTLESS_RETRY_CERTIFICATE_SERIAL
             )
             or attempt.state
             not in {"running", "waiting-for-operator", "expired", "failed"}

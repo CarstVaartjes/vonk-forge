@@ -968,6 +968,19 @@ class AgentUpgradeCompatibilityRecovery(Base):
             name="ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
         ),
         CheckConstraint(
+            "((rearm_attempt_certificate_serial IS NULL "
+            "AND rearm_dispatch_certificate_serial IS NULL) OR "
+            "(rearm_attempt_certificate_serial IS NOT NULL "
+            "AND rearm_dispatch_certificate_serial IS NOT NULL))",
+            name="ck_agent_upgrade_compatibility_recoveries_rearm_certs_paired",
+        ),
+        CheckConstraint(
+            "(rearm_dispatch_certificate_serial IS NULL "
+            "OR retry_certificate_serial IS NULL "
+            "OR retry_certificate_serial = rearm_dispatch_certificate_serial)",
+            name="ck_agent_upgrade_compatibility_recoveries_retry_matches_rearm",
+        ),
+        CheckConstraint(
             "((state = 'armed' AND issued_at IS NULL AND completed_at IS NULL "
             "AND blocked_at IS NULL) OR "
             "(state IN ('issued','awaiting-identity') AND issued_at IS NOT NULL "
@@ -1025,6 +1038,8 @@ class AgentUpgradeCompatibilityRecovery(Base):
     expected_retry_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     retry_fence: Mapped[str | None] = mapped_column(String(36), unique=True)
     retry_certificate_serial: Mapped[str | None] = mapped_column(String(128))
+    rearm_attempt_certificate_serial: Mapped[str | None] = mapped_column(String(128))
+    rearm_dispatch_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     source_semantic_version: Mapped[str] = mapped_column(String(32), nullable=False)
     source_build_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     source_binary_digest: Mapped[str] = mapped_column(String(64), nullable=False)
