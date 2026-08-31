@@ -1175,7 +1175,7 @@ def test_vllm_projects_a_verified_ray_adapter_contract() -> None:
                 "tensor": 3,
                 "pipeline": 1,
                 "data": 1,
-                "backend": "mp",
+                "backend": "ray",
             },
             "fabric": {
                 "connectivity": "connected",
@@ -1244,6 +1244,37 @@ def test_vllm_projects_a_verified_ray_adapter_contract() -> None:
     backend = projection.command.index("--distributed-executor-backend")
     assert projection.command[backend + 1] == "ray"
     assert "--headless" in projection.command
+
+    recipe["topology"]["parallelism"]["backend"] = "mp"
+    with pytest.raises(
+        HarnessCompileError,
+        match="verified distributed vLLM distribution",
+    ):
+        VllmHarnessCompiler().compile(
+            recipe,
+            distribution,
+            {},
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
+
+    recipe["topology"]["parallelism"]["backend"] = "ray"
+    distribution["capabilities"]["distributed_vllm"]["mechanism"] = "vllm-mp"
+    with pytest.raises(
+        HarnessCompileError,
+        match="verified distributed vLLM distribution",
+    ):
+        VllmHarnessCompiler().compile(
+            recipe,
+            distribution,
+            {},
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
 
 
 def test_sglang_projects_verified_native_distributed_inkling_contract() -> None:

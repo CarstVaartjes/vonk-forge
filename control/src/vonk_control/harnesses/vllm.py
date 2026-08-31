@@ -256,7 +256,8 @@ class VllmHarnessCompiler:
                 or implementation.get("worker_role") != "worker"
                 or implementation.get("rank_loss_withdraws_endpoint") is not True
                 or implementation.get("fabric") != "nccl-roce"
-                or parallelism.get("backend") != "mp"
+                or parallelism.get("backend")
+                != ("ray" if mechanism == "vllm-ray" else "mp")
             ):
                 raise HarnessCompileError(
                     "vLLM distributed topology requires a verified distributed vLLM distribution"
