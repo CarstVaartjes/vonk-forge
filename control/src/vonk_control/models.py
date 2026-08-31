@@ -944,8 +944,8 @@ class AgentUpgradeCompatibilityRecovery(Base):
 
     This is deliberately not a general upgrade mode.  The sole row records the
     exact failed attempt that an administrator inspected, and the exact retry
-    grant issued through the legacy agent.  Persisting the signed grant makes a
-    transport retry a replay of one authorization rather than a second root
+    grant issued through the legacy agent. Persisting the signed grant makes a
+    transport retry a replay of one authorization rather than a second package
     action.
     """
 

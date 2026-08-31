@@ -21,7 +21,6 @@ from vonk_agent_protocol.host_helper import (
     HostHelperOperation,
     HostHelperSignature,
     HostOperationKind,
-    RestartUnit,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -318,6 +317,7 @@ class HostRuntimeAuthorityService:
                     attempt=attempt,
                     fence=fence,
                     package_sha256=package_sha256,
+                    package_signature=package_signature,
                     certificate_serial=certificate_serial,
                     expires_in_seconds=expires_in_seconds,
                     now=now,
@@ -353,11 +353,12 @@ class HostRuntimeAuthorityService:
         attempt: int,
         fence: str,
         package_sha256: str,
+        package_signature: str,
         certificate_serial: str,
         expires_in_seconds: int,
         now: datetime,
     ) -> SignedHostHelperGrant:
-        """Issue or replay the sole helper-restart grant; never fall through."""
+        """Issue or replay the sole exact a122 package grant; never fall through."""
 
         node = session.get(AgentNode, node_id)
         source = session.scalar(
@@ -399,6 +400,7 @@ class HostRuntimeAuthorityService:
             == package_sha256
             == package.get("package_sha256")
             == COMPAT_TARGET_PACKAGE_SHA256
+            and package_signature == package.get("package_signature")
             and recovery.upgrade_payload_sha256
             == operation.payload_digest
             == hashlib.sha256(canonical_message(dict(package))).hexdigest()
@@ -444,7 +446,11 @@ class HostRuntimeAuthorityService:
                 replay.claims.request_id != recovery.grant_request_id
                 or replay.claims.node_id != COMPAT_NODE_ID
                 or replay.claims.operation.to_mapping()
-                != {"type": "restart-vonk-unit", "unit": "helper"}
+                != {
+                    "type": "install-vonk-deb",
+                    "package_sha256": COMPAT_TARGET_PACKAGE_SHA256,
+                    "package_signature": package_signature,
+                }
             ):
                 raise HostHelperAuthorityError(
                     "Spark3542 compatibility recovery grant is invalid"
@@ -457,8 +463,11 @@ class HostRuntimeAuthorityService:
         grant = self._issuer.issue_grant(
             node_id=node_id,
             operation=HostHelperOperation(
-                HostOperationKind.RESTART_VONK_UNIT,
-                {"unit": RestartUnit.HELPER.value},
+                HostOperationKind.INSTALL_VONK_DEB,
+                {
+                    "package_sha256": package_sha256,
+                    "package_signature": package_signature,
+                },
             ),
             expires_in_seconds=expires_in_seconds,
         )

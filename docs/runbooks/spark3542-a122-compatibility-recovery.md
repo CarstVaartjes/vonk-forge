@@ -4,10 +4,11 @@ This runbook covers the one-shot Controller bridge for the pinned Spark3542
 dev335 to a122 incident. It is not a general agent-upgrade mechanism and must
 not be used for another node, package, job, or operation.
 
-The bridge does not authorize a package install or reboot. It retries the
-existing failed a122 operation and may issue only the exact
-`restart-vonk-unit(helper)` grant required to resume the package recovery that
-is already staged on Spark3542.
+The bridge does not authorize a reboot or a different package. It retries the
+existing failed a122 operation and may issue only its exact digest-bound a122
+`install-vonk-deb` grant. The already-staged a122 `preinst` recognizes the
+immutable recovery intent, starts the recovery owner, and refuses a competing
+package transaction before unpack.
 
 ## Preconditions
 
@@ -39,7 +40,7 @@ First render the exact mutation without sending it:
 ```console
 bin/vonkctl fleet upgrade recover-spark3542 apply \
   --plan-digest '<digest-from-the-immediately-preceding-preview>' \
-  --confirm restart-staged-a122-recovery-on-spark3542 \
+  --confirm retry-exact-staged-a122-package-on-spark3542 \
   --json
 ```
 
@@ -48,7 +49,7 @@ Then repeat with `--apply`:
 ```console
 bin/vonkctl fleet upgrade recover-spark3542 apply \
   --plan-digest '<digest-from-the-immediately-preceding-preview>' \
-  --confirm restart-staged-a122-recovery-on-spark3542 \
+  --confirm retry-exact-staged-a122-package-on-spark3542 \
   --apply \
   --json
 ```
@@ -67,7 +68,8 @@ Completion requires the exact authenticated a122 certificate, protocol,
 capabilities, payload, binary/build digests, and successful self-test. Five
 minutes without dispatch or fifteen minutes without the exact post-grant
 identity transitions to `operator-blocked`; the Controller does not issue a
-replacement grant.
+replacement grant. Identity-only completion from `armed` or `operator-blocked`
+never issues or re-enables a grant.
 
 Only after a122 completion:
 

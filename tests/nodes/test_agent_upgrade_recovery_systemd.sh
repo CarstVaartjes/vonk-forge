@@ -252,6 +252,8 @@ package=$(find "$test_root/target-dist" -maxdepth 1 -type f -name '*.deb')
 baseline_package=$(find "$test_root/baseline-dist" -maxdepth 1 -type f \
   -name '*.deb')
 package_digest=$(sha256sum "$package" | cut -d' ' -f1)
+package_signature=$(tr -d '\n' < "${package}.host.sig")
+[[ "$package_signature" =~ ^[0-9a-f]{128}$ ]]
 agent_digest=$(sha256sum "$test_root/target-bin/vonk-agent" | cut -d' ' -f1)
 helper_digest=$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -d' ' -f1)
 baseline_agent_digest=$(sha256sum "$test_root/baseline-bin/vonk-agent" \
@@ -774,8 +776,9 @@ if [[ "$crash_mode" == full-cgroup ]]; then
 
     # Run the exact dev335 helper binary against the active production-shaped
     # socket, while leaving the fully staged target payload on disk for the
-    # root recovery owner. The fixed Rust fixture signs only
-    # RestartVonkUnit(helper), drops its response, then replays that same grant.
+    # root recovery owner. The fixed Rust fixture signs only the exact target
+    # InstallVonkDeb request, drops its response, then replays that same grant.
+    # The staged target preinst starts recovery and refuses the competing dpkg.
     install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper/requests
     install -d -o root -g root -m 0755 /etc/vonk-forge-agent
     printf '%s\n' \
@@ -831,74 +834,23 @@ if [[ "$crash_mode" == full-cgroup ]]; then
     systemctl --system daemon-reload
     vonk_agent_gid=$(getent group vonk-agent | cut -d: -f3)
 
-    # A pre-existing transient name must make the exact dev335 helper reject
-    # its consumed request without restarting the helper or falling back to a
-    # direct systemctl action.
-    systemd-run --quiet --collect \
-      --unit=vonk-forge-helper-restart.service /bin/sleep 30
-    CARGO_TARGET_DIR=$test_root/compat-target \
-      VONK_SPARK3542_COMPAT_FIXTURE=1 \
-      setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
-      cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
-        -p vonk-agent-helper --test spark3542_compat_restart_fixture \
-        transient_unit_collision_fails_closed_for_the_second_pinned_request \
-        -- --ignored --exact
-    test "$(systemctl --system show --property=MainPID --value \
-      "$helper_unit")" = "$compat_helper_pid"
-    test "$(systemctl --system show --property=ActiveState --value \
-      "$recovery_unit")" != active
-    systemctl --system stop vonk-forge-helper-restart.service
-    systemctl --system reset-failed vonk-forge-helper-restart.service \
-      >/dev/null 2>&1 || true
-
-    # Deliver while the old agent is still active. Hold dpkg's native advisory
-    # lock so the recovery wake must stop that agent before its temporary exit
-    # (75); the unit's bounded restart then converges after lock release.
+    # Deliver while the old agent is still active. The exact retry is allowed to
+    # enter a122's already-staged preinst, which wakes the immutable recovery
+    # owner and rejects the second package transaction before it can unpack.
     test "$(systemctl --system show --property=ActiveState --value \
       "$agent_unit")" = active
     delivered_agent_pid=$(systemctl --system show --property=MainPID --value \
       "$agent_unit")
     test "$delivered_agent_pid" = "$old_agent_pid"
-    python3 - "$test_root/dpkg-lock-ready" \
-      "$test_root/release-dpkg-lock" <<'PY' &
-import fcntl
-import pathlib
-import sys
-import time
-
-ready = pathlib.Path(sys.argv[1])
-release = pathlib.Path(sys.argv[2])
-with pathlib.Path("/var/lib/dpkg/lock").open("r+") as lock:
-    fcntl.lockf(lock, fcntl.LOCK_EX)
-    ready.touch()
-    while not release.exists():
-        time.sleep(0.05)
-PY
-    dpkg_lock_pid=$!
-    for _ in {1..200}; do
-      [[ -f "$test_root/dpkg-lock-ready" ]] && break
-      sleep 0.05
-    done
-    test -f "$test_root/dpkg-lock-ready"
     CARGO_TARGET_DIR=$test_root/compat-target \
       VONK_SPARK3542_COMPAT_FIXTURE=1 \
+      VONK_SPARK3542_COMPAT_PACKAGE_SHA256="$package_digest" \
+      VONK_SPARK3542_COMPAT_PACKAGE_SIGNATURE="$package_signature" \
       setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
       cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
-        -p vonk-agent-helper --test spark3542_compat_restart_fixture \
-        sends_only_one_pinned_helper_restart_and_replay_is_rejected \
+        -p vonk-agent-helper --test spark3542_compat_package_retry_fixture \
+        sends_only_one_pinned_exact_package_retry_and_replay_is_rejected \
         -- --ignored --exact
-    for _ in {1..150}; do
-      recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
-        "$recovery_unit")
-      [[ "$recovery_exit" == 75 ]] && break
-      sleep 0.1
-    done
-    test "$recovery_exit" = 75
-    test "$(systemctl --system show --property=ActiveState --value \
-      "$agent_unit")" = inactive
-    touch "$test_root/release-dpkg-lock"
-    wait "$dpkg_lock_pid"
-    dpkg_lock_pid=
   else
     systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
     test "$(systemctl --system show --property=ActiveState --value \

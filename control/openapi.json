@@ -8323,7 +8323,7 @@
         "additionalProperties": false,
         "properties": {
           "confirmation": {
-            "const": "restart-staged-a122-recovery-on-spark3542",
+            "const": "retry-exact-staged-a122-package-on-spark3542",
             "title": "Confirmation",
             "type": "string"
           },
@@ -8344,7 +8344,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "const": "restart-vonk-unit",
+            "const": "retry-exact-package-install",
             "title": "Action",
             "type": "string"
           },
@@ -8355,7 +8355,7 @@
             "type": "string"
           },
           "compatibility_recovery_id": {
-            "const": "spark3542-a122-helper-restart-v1",
+            "const": "spark3542-a122-exact-package-retry-v1",
             "title": "Compatibility Recovery Id",
             "type": "string"
           },
@@ -8385,7 +8385,7 @@
             "type": "string"
           },
           "required_confirmation": {
-            "const": "restart-staged-a122-recovery-on-spark3542",
+            "const": "retry-exact-staged-a122-package-on-spark3542",
             "title": "Required Confirmation",
             "type": "string"
           },
@@ -8424,11 +8424,6 @@
           "target": {
             "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryTarget"
           },
-          "unit": {
-            "const": "helper",
-            "title": "Unit",
-            "type": "string"
-          },
           "upgrade_payload_sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Upgrade Payload Sha256",
@@ -8437,7 +8432,6 @@
         },
         "required": [
           "action",
-          "unit",
           "compatibility_recovery_id",
           "node_id",
           "source_identity",
@@ -8461,7 +8455,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "const": "restart-vonk-unit",
+            "const": "retry-exact-package-install",
             "title": "Action",
             "type": "string"
           },
@@ -8472,7 +8466,7 @@
             "type": "string"
           },
           "compatibility_recovery_id": {
-            "const": "spark3542-a122-helper-restart-v1",
+            "const": "spark3542-a122-exact-package-retry-v1",
             "title": "Compatibility Recovery Id",
             "type": "string"
           },
@@ -8536,11 +8530,6 @@
           "target": {
             "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryTarget"
           },
-          "unit": {
-            "const": "helper",
-            "title": "Unit",
-            "type": "string"
-          },
           "upgrade_payload_sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Upgrade Payload Sha256",
@@ -8549,7 +8538,6 @@
         },
         "required": [
           "action",
-          "unit",
           "compatibility_recovery_id",
           "node_id",
           "source_identity",

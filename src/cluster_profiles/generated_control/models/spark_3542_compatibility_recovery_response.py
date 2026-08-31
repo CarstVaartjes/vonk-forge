@@ -27,9 +27,9 @@ T = TypeVar("T", bound="Spark3542CompatibilityRecoveryResponse")
 class Spark3542CompatibilityRecoveryResponse:
     """
         Attributes:
-            action (Literal['restart-vonk-unit']):
+            action (Literal['retry-exact-package-install']):
             authority_revision (str):
-            compatibility_recovery_id (Literal['spark3542-a122-helper-restart-v1']):
+            compatibility_recovery_id (Literal['spark3542-a122-exact-package-retry-v1']):
             expected_retry_attempt (Literal[4]):
             job_id (Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']):
             node_id (Literal['spk_2818d189042b4c77aefa7796f4befd23']):
@@ -41,13 +41,12 @@ class Spark3542CompatibilityRecoveryResponse:
             source_identity (Spark3542CompatibilityRecoverySourceIdentity):
             state (Spark3542CompatibilityRecoveryResponseState):
             target (Spark3542CompatibilityRecoveryTarget):
-            unit (Literal['helper']):
             upgrade_payload_sha256 (str):
      """
 
-    action: Literal['restart-vonk-unit']
+    action: Literal['retry-exact-package-install']
     authority_revision: str
-    compatibility_recovery_id: Literal['spark3542-a122-helper-restart-v1']
+    compatibility_recovery_id: Literal['spark3542-a122-exact-package-retry-v1']
     expected_retry_attempt: Literal[4]
     job_id: Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']
     node_id: Literal['spk_2818d189042b4c77aefa7796f4befd23']
@@ -59,7 +58,6 @@ class Spark3542CompatibilityRecoveryResponse:
     source_identity: 'Spark3542CompatibilityRecoverySourceIdentity'
     state: Spark3542CompatibilityRecoveryResponseState
     target: 'Spark3542CompatibilityRecoveryTarget'
-    unit: Literal['helper']
     upgrade_payload_sha256: str
 
 
@@ -97,8 +95,6 @@ class Spark3542CompatibilityRecoveryResponse:
 
         target = self.target.to_dict()
 
-        unit = self.unit
-
         upgrade_payload_sha256 = self.upgrade_payload_sha256
 
 
@@ -119,7 +115,6 @@ class Spark3542CompatibilityRecoveryResponse:
             "source_identity": source_identity,
             "state": state,
             "target": target,
-            "unit": unit,
             "upgrade_payload_sha256": upgrade_payload_sha256,
         })
 
@@ -132,15 +127,15 @@ class Spark3542CompatibilityRecoveryResponse:
         from ..models.spark_3542_compatibility_recovery_source_identity import Spark3542CompatibilityRecoverySourceIdentity
         from ..models.spark_3542_compatibility_recovery_target import Spark3542CompatibilityRecoveryTarget
         d = dict(src_dict)
-        action = cast(Literal['restart-vonk-unit'] , d.pop("action"))
-        if action != 'restart-vonk-unit':
-            raise ValueError(f"action must match const 'restart-vonk-unit', got '{action}'")
+        action = cast(Literal['retry-exact-package-install'] , d.pop("action"))
+        if action != 'retry-exact-package-install':
+            raise ValueError(f"action must match const 'retry-exact-package-install', got '{action}'")
 
         authority_revision = d.pop("authority_revision")
 
-        compatibility_recovery_id = cast(Literal['spark3542-a122-helper-restart-v1'] , d.pop("compatibility_recovery_id"))
-        if compatibility_recovery_id != 'spark3542-a122-helper-restart-v1':
-            raise ValueError(f"compatibility_recovery_id must match const 'spark3542-a122-helper-restart-v1', got '{compatibility_recovery_id}'")
+        compatibility_recovery_id = cast(Literal['spark3542-a122-exact-package-retry-v1'] , d.pop("compatibility_recovery_id"))
+        if compatibility_recovery_id != 'spark3542-a122-exact-package-retry-v1':
+            raise ValueError(f"compatibility_recovery_id must match const 'spark3542-a122-exact-package-retry-v1', got '{compatibility_recovery_id}'")
 
         expected_retry_attempt = cast(Literal[4] , d.pop("expected_retry_attempt"))
         if expected_retry_attempt != 4:
@@ -183,10 +178,6 @@ class Spark3542CompatibilityRecoveryResponse:
 
 
 
-        unit = cast(Literal['helper'] , d.pop("unit"))
-        if unit != 'helper':
-            raise ValueError(f"unit must match const 'helper', got '{unit}'")
-
         upgrade_payload_sha256 = d.pop("upgrade_payload_sha256")
 
         spark_3542_compatibility_recovery_response = cls(
@@ -204,7 +195,6 @@ class Spark3542CompatibilityRecoveryResponse:
             source_identity=source_identity,
             state=state,
             target=target,
-            unit=unit,
             upgrade_payload_sha256=upgrade_payload_sha256,
         )
 

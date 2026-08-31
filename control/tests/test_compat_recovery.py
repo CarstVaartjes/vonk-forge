@@ -213,7 +213,7 @@ def test_postgres_accepts_awaiting_identity_and_enforces_grant_shape(
     with sessions.begin() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None
         recovery.state = "awaiting-identity"
@@ -221,14 +221,14 @@ def test_postgres_accepts_awaiting_identity_and_enforces_grant_shape(
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None and recovery.state == "awaiting-identity"
 
     with pytest.raises(IntegrityError), sessions.begin() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None
         recovery.signed_grant = None
@@ -295,7 +295,7 @@ def test_database_rejects_issued_state_without_one_shot_grant_fields(tmp_path):
     with pytest.raises(IntegrityError), sessions.begin() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None
         recovery.state = "issued"
@@ -414,12 +414,13 @@ def test_grant_is_one_persisted_helper_restart_and_never_an_install(tmp_path):
 
     assert first.to_mapping() == replay.to_mapping()
     assert first.claims.operation.to_mapping() == {
-        "type": "restart-vonk-unit",
-        "unit": "helper",
+        "type": "install-vonk-deb",
+        "package_sha256": TARGET_PACKAGE_SHA256,
+        "package_signature": PACKAGE_SIGNATURE,
     }
     with sessions() as session:
         recovery = session.get(
-            AgentUpgradeCompatibilityRecovery, "spark3542-a122-helper-restart-v1"
+            AgentUpgradeCompatibilityRecovery, "spark3542-a122-exact-package-retry-v1"
         )
         assert recovery is not None and recovery.state == "issued"
         assert recovery.retry_fence == RETRY_FENCE
@@ -457,7 +458,7 @@ def test_grant_is_one_persisted_helper_restart_and_never_an_install(tmp_path):
         operation = session.get(AgentOperation, OPERATION_ID)
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert operation is not None and operation.state == "waiting-for-operator"
         assert operation.retry_disposition is None
@@ -545,7 +546,7 @@ def test_grant_is_one_persisted_helper_restart_and_never_an_install(tmp_path):
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None and recovery.state == "awaiting-identity"
 
@@ -569,7 +570,7 @@ def test_grant_is_one_persisted_helper_restart_and_never_an_install(tmp_path):
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None and recovery.state == "awaiting-identity"
 
@@ -595,7 +596,7 @@ def test_grant_is_one_persisted_helper_restart_and_never_an_install(tmp_path):
         job = session.get(Job, JOB_ID)
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert operation is not None and operation.state == "succeeded"
         assert job is not None and job.state == "succeeded"
@@ -656,7 +657,7 @@ def test_lost_response_or_agent_death_times_out_operator_blocked(tmp_path):
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None and recovery.state == "issued"
         assert recovery.identity_deadline is not None
@@ -670,7 +671,7 @@ def test_lost_response_or_agent_death_times_out_operator_blocked(tmp_path):
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         operation = session.get(AgentOperation, OPERATION_ID)
         job = session.get(Job, JOB_ID)
@@ -765,7 +766,7 @@ def test_lost_response_or_agent_death_times_out_operator_blocked(tmp_path):
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         operation = session.get(AgentOperation, OPERATION_ID)
         job = session.get(Job, JOB_ID)
@@ -818,7 +819,7 @@ def test_exact_target_contact_completes_armed_recovery_before_retry_dispatch(
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         operation = session.get(AgentOperation, OPERATION_ID)
         job = session.get(Job, JOB_ID)
@@ -861,7 +862,7 @@ def test_exact_target_contact_completes_grantless_operator_blocked_recovery(
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         assert recovery is not None and recovery.state == "operator-blocked"
         assert recovery.blocked_at is not None
@@ -889,7 +890,7 @@ def test_exact_target_contact_completes_grantless_operator_blocked_recovery(
     with sessions() as session:
         recovery = session.get(
             AgentUpgradeCompatibilityRecovery,
-            "spark3542-a122-helper-restart-v1",
+            "spark3542-a122-exact-package-retry-v1",
         )
         operation = session.get(AgentOperation, OPERATION_ID)
         job = session.get(Job, JOB_ID)
