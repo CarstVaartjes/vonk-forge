@@ -17,6 +17,10 @@ target_agent_unit_sha256='@TARGET_AGENT_UNIT_SHA256@'
 target_helper_unit_sha256='@TARGET_HELPER_UNIT_SHA256@'
 target_helper_socket_sha256='@TARGET_HELPER_SOCKET_SHA256@'
 repair_probe_sha256='@REPAIR_PROBE_SHA256@'
+source_capsule_expected='@SOURCE_CAPSULE_V2@'
+source_capsule_unit_sha256_expected='@SOURCE_CAPSULE_UNIT_SHA256@'
+source_capsule_gate_sha256_expected='@SOURCE_CAPSULE_GATE_SHA256@'
+source_capsule_suppression_sha256_expected='@SOURCE_CAPSULE_SUPPRESSION_SHA256@'
 
 state_parent=/var/lib/vonk-forge
 source_state=$state_parent/package-upgrade
@@ -24,11 +28,37 @@ source_intent=$source_state/intent
 source_lock=$source_state/lock
 source_blocker=$source_state/agent-blocked
 source_pending=$state_parent/helper-upgrade.pending
-source_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_package_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_runner=$source_package_runner
 source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_unit_name=vonk-forge-package-upgrade-recover.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
+source_capsule_dir=$source_state/recovery-capsule
+source_capsule_manifest=$source_capsule_dir/manifest
+source_capsule_runner=$source_capsule_dir/runner
+source_capsule_unit_name=vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_unit=/lib/systemd/system/$source_capsule_unit_name
+source_capsule_wants_dir=/lib/systemd/system/multi-user.target.wants
+source_capsule_enablement=$source_capsule_wants_dir/$source_capsule_unit_name
+source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression=/lib/systemd/system/$source_unit_name.d/10-capsule-owner.conf
+source_capsule_admin_root=/etc/systemd/system
+source_capsule_runtime_root=/run/systemd/system
+source_schema=1
+source_active_runner=$source_package_runner
+source_active_unit_name=$source_unit_name
+if [ "$source_capsule_expected" = 1 ]; then
+    source_schema=2
+    source_active_runner=$source_capsule_runner
+    source_active_unit_name=$source_capsule_unit_name
+    source_capsule_unit_sha256=$source_capsule_unit_sha256_expected
+    source_capsule_gate_sha256=$source_capsule_gate_sha256_expected
+    source_capsule_suppression_sha256=$source_capsule_suppression_sha256_expected
+elif [ "$source_capsule_expected" != 0 ]; then
+    echo 'vonk-forge-agent: repair state is unsafe: embedded source schema' >&2
+    exit 78
+fi
 
 repair_state=$source_state/repair
 repair_ready=$source_state/.repair-ready
@@ -883,10 +913,40 @@ read_candidate_from_dpkg() {
 read_source_intent() {
     safe_root_directory "$source_state" 700 \
         && safe_root_file "$source_intent" 600 \
-        && canonical_line_file "$source_intent" 14 \
-        && /usr/bin/sed -n '1p' "$source_intent" | grep -Fxq 'schema_version=1' \
         && /usr/bin/sed -n '2p' "$source_intent" | grep -Fxq "package=$package_name" \
         || return 1
+    source_schema=$(/usr/bin/sed -n '1s/^schema_version=//p' "$source_intent")
+    case "$source_schema" in
+        1)
+            [ "$source_capsule_expected" = 0 ] || return 1
+            canonical_line_file "$source_intent" 14 || return 1
+            source_active_runner=$source_package_runner
+            source_active_unit_name=$source_unit_name
+            ;;
+        2)
+            [ "$source_capsule_expected" = 1 ] || return 1
+            canonical_line_file "$source_intent" 17 || return 1
+            source_active_runner=$source_capsule_runner
+            source_active_unit_name=$source_capsule_unit_name
+            source_capsule_unit_sha256=$(/usr/bin/sed -n \
+                '15s/^capsule_unit_sha256=//p' "$source_intent")
+            source_capsule_gate_sha256=$(/usr/bin/sed -n \
+                '16s/^capsule_gate_sha256=//p' "$source_intent")
+            source_capsule_suppression_sha256=$(/usr/bin/sed -n \
+                '17s/^capsule_suppression_sha256=//p' "$source_intent")
+            valid_digest "$source_capsule_unit_sha256" \
+                && valid_digest "$source_capsule_gate_sha256" \
+                && valid_digest "$source_capsule_suppression_sha256" \
+                && [ "$source_capsule_unit_sha256" \
+                    = "$source_capsule_unit_sha256_expected" ] \
+                && [ "$source_capsule_gate_sha256" \
+                    = "$source_capsule_gate_sha256_expected" ] \
+                && [ "$source_capsule_suppression_sha256" \
+                    = "$source_capsule_suppression_sha256_expected" ] \
+                || return 1
+            ;;
+        *) return 1 ;;
+    esac
     source_target_version=$(/usr/bin/sed -n '3s/^target_version=//p' "$source_intent")
     source_architecture=$(/usr/bin/sed -n '4s/^architecture=//p' "$source_intent")
     source_package_sha256=$(/usr/bin/sed -n '5s/^package_sha256=//p' "$source_intent")
@@ -911,11 +971,65 @@ read_source_intent() {
         && valid_digest "$source_nonce"
 }
 
+source_capsule_enablement_safe() {
+    [ -L "$source_capsule_enablement" ] \
+        && [ "$(/usr/bin/readlink "$source_capsule_enablement")" \
+            = "../$source_capsule_unit_name" ]
+}
+
+source_capsule_shadows_absent() {
+    for systemd_root in "$source_capsule_admin_root" \
+        "$source_capsule_runtime_root"; do
+        for shadow_path in \
+            "$systemd_root/$source_capsule_unit_name" \
+            "$systemd_root/$source_capsule_unit_name.d" \
+            "$systemd_root/multi-user.target.wants/$source_capsule_unit_name" \
+            "$systemd_root/vonk-forge-agent.service.d" \
+            "$systemd_root/$source_unit_name.d"; do
+            [ ! -e "$shadow_path" ] && [ ! -L "$shadow_path" ] || return 1
+        done
+    done
+}
+
+source_capsule_exact() {
+    capsule_expected_runner=${1:-$source_runner_sha256}
+    [ "$source_schema" = 2 ] \
+        && source_capsule_shadows_absent \
+        && safe_root_directory "$source_capsule_dir" 700 \
+        && safe_root_file "$source_capsule_manifest" 600 \
+        && safe_root_file "$source_capsule_runner" 555 \
+        && safe_root_file "$source_capsule_unit" 644 \
+        && safe_root_file "$source_capsule_gate" 644 \
+        && safe_root_file "$source_capsule_suppression" 644 \
+        && source_capsule_enablement_safe \
+        && [ "$(/usr/bin/wc -l < "$source_capsule_manifest")" -eq 5 ] \
+        && /usr/bin/sed -n '1p' "$source_capsule_manifest" \
+            | grep -Fxq 'schema_version=1' \
+        && /usr/bin/sed -n '2p' "$source_capsule_manifest" \
+            | grep -Fxq "runner_sha256=$source_runner_sha256" \
+        && /usr/bin/sed -n '3p' "$source_capsule_manifest" \
+            | grep -Fxq "unit_sha256=$source_capsule_unit_sha256" \
+        && /usr/bin/sed -n '4p' "$source_capsule_manifest" \
+            | grep -Fxq "gate_sha256=$source_capsule_gate_sha256" \
+        && /usr/bin/sed -n '5p' "$source_capsule_manifest" \
+            | grep -Fxq \
+                "suppression_sha256=$source_capsule_suppression_sha256" \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$capsule_expected_runner" ] \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_unit" \
+            | /usr/bin/cut -d' ' -f1)" = "$source_capsule_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_gate" \
+            | /usr/bin/cut -d' ' -f1)" = "$source_capsule_gate_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_suppression" \
+            | /usr/bin/cut -d' ' -f1)" \
+            = "$source_capsule_suppression_sha256" ]
+}
+
 source_state_core_exact() {
     source_cache=$source_state/$source_package_sha256.deb
     safe_root_file "$source_lock" 600 \
         && safe_root_file "$source_cache" 600 \
-        && safe_root_file "$source_runner" 555 \
+        && safe_root_file "$source_package_runner" 555 \
         && safe_root_file "$source_unit" 644 \
         && safe_root_file "$source_gate" 644 \
         && safe_root_file "$source_dropin" 644 \
@@ -932,6 +1046,8 @@ source_state_core_exact() {
         && [ "$source_package_sha256" = "$authority_source_package_sha256" ] \
         && [ "$source_agent_sha256" = "$authority_source_agent_sha256" ] \
         && [ "$source_helper_sha256" = "$authority_source_helper_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$source_package_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$authority_source_runner_sha256" ] \
         && [ "$source_runner_sha256" = "$authority_source_runner_sha256" ] \
         && [ "$source_unit_sha256" = "$authority_source_unit_sha256" ] \
         && [ "$(/usr/bin/stat -c %s "$source_cache")" = "$source_package_bytes" ] \
@@ -939,7 +1055,8 @@ source_state_core_exact() {
         && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Version)" \
             = "$authority_source_target_version" ] \
         && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Architecture)" \
-            = "$authority_source_architecture" ]
+            = "$authority_source_architecture" ] \
+        && { [ "$source_schema" = 1 ] || source_capsule_exact; }
 }
 
 source_file_exact_or_absent() {
@@ -976,8 +1093,9 @@ source_volatile_state_matches_phase() {
 
 source_runner_is() {
     expected_runner=$1
-    safe_root_file "$source_runner" 555 \
-        && [ "$(/usr/bin/sha256sum "$source_runner" | /usr/bin/cut -d' ' -f1)" \
+    safe_root_file "$source_active_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$source_active_runner" \
+            | /usr/bin/cut -d' ' -f1)" \
             = "$expected_runner" ]
 }
 
@@ -1159,9 +1277,9 @@ unit_is_stopped_and_empty() {
 }
 
 stop_and_quiesce_source_recovery() {
-    /usr/bin/systemctl --system stop "$source_unit_name" >/dev/null \
+    /usr/bin/systemctl --system stop "$source_active_unit_name" >/dev/null \
         || return 1
-    unit_is_stopped_and_empty "$source_unit_name"
+    unit_is_stopped_and_empty "$source_active_unit_name"
 }
 
 public_repair_entries_absent() {
@@ -1338,7 +1456,8 @@ wait_for_dispatch_dpkg() {
 
 recursive_dpkg_binding() {
     [ "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" = "$repair_nonce" ] \
-        && grep -Fxq "0::/system.slice/$source_unit_name" /proc/self/cgroup \
+        && grep -Fxq "0::/system.slice/$source_active_unit_name" \
+            /proc/self/cgroup \
         || return 1
     valid_pid "$PPID" && [ "$PPID" -gt 1 ] || return 1
     command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-recursive.XXXXXX) \
@@ -1365,7 +1484,7 @@ target_payload_installed() {
         && [ "$package_version" = "$target_version" ] \
         && safe_root_file "$agent_binary" 555 \
         && safe_root_file "$helper_binary" 555 \
-        && safe_root_file "$source_runner" 555 \
+        && safe_root_file "$source_package_runner" 555 \
         && safe_root_file "$standard_runner" 555 \
         && safe_root_file "$agent_unit_file" 644 \
         && safe_root_file "$helper_unit_file" 644 \
@@ -1374,8 +1493,12 @@ target_payload_installed() {
             = "$target_agent_sha256" ] \
         && [ "$(/usr/bin/sha256sum "$helper_binary" | /usr/bin/cut -d' ' -f1)" \
             = "$target_helper_sha256" ] \
-        && [ "$(/usr/bin/sha256sum "$source_runner" | /usr/bin/cut -d' ' -f1)" \
-            = "$repair_runner_sha" ] \
+        && package_runner_sha=$(/usr/bin/sha256sum "$source_package_runner" \
+            | /usr/bin/cut -d' ' -f1) \
+        && case "$source_schema:$package_runner_sha" in \
+            "1:$repair_runner_sha"|"2:$standard_runner_sha256") true ;; \
+            *) false ;; \
+        esac \
         && [ "$(/usr/bin/sha256sum "$standard_runner" | /usr/bin/cut -d' ' -f1)" \
             = "$standard_runner_sha256" ] \
         && [ "$(/usr/bin/sha256sum "$agent_unit_file" | /usr/bin/cut -d' ' -f1)" \
@@ -1383,7 +1506,9 @@ target_payload_installed() {
         && [ "$(/usr/bin/sha256sum "$helper_unit_file" | /usr/bin/cut -d' ' -f1)" \
             = "$target_helper_unit_sha256" ] \
         && [ "$(/usr/bin/sha256sum "$helper_socket_file" | /usr/bin/cut -d' ' -f1)" \
-            = "$target_helper_socket_sha256" ]
+            = "$target_helper_socket_sha256" ] \
+        && { [ "$source_schema" = 1 ] \
+            || source_runner_is "$repair_runner_sha"; }
 }
 
 write_helper_receipt() {
@@ -1608,6 +1733,7 @@ retired_state_safe() (
     fi
     if [ "$retired_intent" -eq 1 ]; then
         read_repair_intent \
+            && { [ -e "$source_intent" ] || source_nonce=$repair_source_nonce; } \
             && [ "$repair_intent_authority" = "$authority_sha256" ] \
             && [ "$repair_node" = "$authority_node_id" ] \
             && [ "$repair_source_intent_sha" = "$source_intent_snapshot" ] \
@@ -1662,6 +1788,36 @@ final_state_shape_safe() {
     fi
 }
 
+retire_source_capsule() {
+    [ "$source_schema" = 2 ] || return 0
+    [ ! -e "$source_intent" ] && [ ! -L "$source_intent" ] || return 1
+    source_capsule_exact "$repair_runner_sha" || return 1
+    safe_root_file "$source_package_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$source_package_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$standard_runner_sha256" ] \
+        || return 1
+    /usr/bin/rm -- "$source_capsule_enablement" || return 1
+    /usr/bin/sync -f "$source_capsule_wants_dir" || return 1
+    /usr/bin/rm -- "$source_capsule_gate" || return 1
+    /usr/bin/sync -f "$(/usr/bin/dirname "$source_capsule_gate")" || return 1
+    /usr/bin/rm -- "$source_capsule_suppression" || return 1
+    /usr/bin/sync -f "$(/usr/bin/dirname "$source_capsule_suppression")" \
+        || return 1
+    /usr/bin/rm -- "$source_capsule_unit" || return 1
+    /usr/bin/sync -f /lib/systemd/system || return 1
+    /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+    package_fragment=$(/usr/bin/systemctl --system show \
+        --property=FragmentPath --value "$source_unit_name" 2>/dev/null || true)
+    [ "$(/usr/bin/readlink -f "$package_fragment" 2>/dev/null || true)" \
+        = "$(/usr/bin/readlink -f "$source_unit")" ] || return 1
+    /usr/bin/rm -- "$source_capsule_runner" || return 1
+    /usr/bin/sync -f "$source_capsule_dir" || return 1
+    /usr/bin/rm -- "$source_capsule_manifest" || return 1
+    /usr/bin/sync -f "$source_capsule_dir" || return 1
+    /usr/bin/rmdir "$source_capsule_dir" || return 1
+    /usr/bin/sync -f "$source_state"
+}
+
 retire_source_state() {
     if [ -d "$repair_state" ] && [ ! -L "$repair_state" ]; then
         active_final_state_safe || return 1
@@ -1677,18 +1833,28 @@ retire_source_state() {
     remove_exact_file "$source_dropin" "$authority_source_socket_dropin_sha256" 644 \
         || return 1
     /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+    remove_exact_file "$source_intent" "$source_intent_snapshot" 600 \
+        || return 1
+    retire_source_capsule || return 1
     if [ -d "$repair_retired" ] && [ ! -L "$repair_retired" ]; then
         cleanup_retired_state || return 1
     fi
-    remove_exact_file "$source_intent" "$source_intent_snapshot" 600
 }
 
 dispatch_recovery() {
     /usr/bin/systemctl --system daemon-reload >/dev/null \
         || temporary_failure 'systemd reload failed'
-    /usr/bin/systemctl --system reset-failed "$source_unit_name" \
+    dispatch_fragment=$(/usr/bin/systemctl --system show \
+        --property=FragmentPath --value "$source_active_unit_name" \
+        2>/dev/null || true)
+    if [ "$source_schema" = 2 ]; then
+        [ "$(/usr/bin/readlink -f "$dispatch_fragment" 2>/dev/null || true)" \
+            = "$(/usr/bin/readlink -f "$source_capsule_unit")" ] \
+            || temporary_failure 'capsule recovery unit ownership changed'
+    fi
+    /usr/bin/systemctl --system reset-failed "$source_active_unit_name" \
         >/dev/null 2>&1 || true
-    /usr/bin/systemctl --system --no-block start "$source_unit_name" \
+    /usr/bin/systemctl --system --no-block start "$source_active_unit_name" \
         >/dev/null || temporary_failure 'recovery dispatch failed'
     temporary_failure 'node-bound repair handed off to durable recovery'
 }
@@ -1884,7 +2050,7 @@ agent_sha256=$target_agent_sha256
         && source_runner_is "$authority_source_runner_sha256" \
         && standard_runner_ready \
         || unsafe_state 'hidden repair pre-handoff revalidation'
-    atomic_install "$0" "$source_runner" 555 \
+    atomic_install "$0" "$source_active_runner" 555 \
         || temporary_failure 'fail-closed unified runner handoff failed'
     source_runner_is "$repair_runner_sha" \
         || unsafe_state 'fail-closed unified runner identity'
@@ -1964,8 +2130,51 @@ finalize_from_receipt() {
     retire_source_state || temporary_failure 'final repair state retirement failed'
 }
 
+terminal_repair_safe() {
+    [ ! -e "$source_intent" ] && [ ! -L "$source_intent" ] \
+        && load_authority \
+        && safe_node_identity \
+        && safe_root_file "$source_lock" 600 \
+        && safe_root_file "$repair_receipt" 600 \
+        && canonical_line_file "$repair_receipt" 16 \
+        || return 1
+    source_intent_snapshot=$(/usr/bin/sed -n \
+        '5s/^source_intent_sha256=//p' "$repair_receipt")
+    valid_digest "$source_intent_snapshot" || return 1
+    final_receipt_safe || return 1
+    repair_runner_sha=$receipt_runner_sha
+    repair_nonce=$receipt_nonce
+    repair_candidate_sha=$receipt_candidate_sha
+    helper_receipt_and_live_safe \
+        && [ ! -e "$source_blocker" ] && [ ! -L "$source_blocker" ] \
+        && [ ! -e "$source_pending" ] && [ ! -L "$source_pending" ] \
+        && final_state_shape_safe \
+        && target_payload_installed \
+        && { [ "$source_schema" = 1 ] \
+            || source_capsule_exact "$repair_runner_sha"; } \
+        || return 1
+    agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
+    agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
+    prove_running_unit "$helper_unit" "$helper_binary" \
+        "$target_helper_sha256" 0 0 >/dev/null \
+        && prove_running_unit "$agent_unit" "$agent_binary" \
+            "$target_agent_sha256" "$agent_uid" "$agent_gid" >/dev/null
+}
+
+finish_terminal_cleanup() {
+    terminal_repair_safe || return 1
+    retire_source_capsule || return 1
+    if [ -d "$repair_retired" ] && [ ! -L "$repair_retired" ]; then
+        cleanup_retired_state || return 1
+    fi
+}
+
 allow_agent_start() {
     if [ ! -e "$source_intent" ] && [ ! -L "$source_intent" ]; then
+        if [ -e "$repair_receipt" ] || [ -L "$repair_receipt" ]; then
+            terminal_repair_safe
+            return $?
+        fi
         [ ! -e "$repair_state" ] && [ ! -L "$repair_state" ] \
             && [ ! -e "$repair_ready" ] && [ ! -L "$repair_ready" ] \
             && [ ! -e "$repair_retired" ] && [ ! -L "$repair_retired" ] \
@@ -2008,6 +2217,11 @@ recover_repair() {
     safe_root_file "$source_lock" 600 || unsafe_state 'source recovery lock'
     exec 9>> "$source_lock"
     /usr/bin/flock -n -x 9 || temporary_failure 'source recovery lock is busy'
+    if [ ! -e "$source_intent" ] && [ ! -L "$source_intent" ]; then
+        finish_terminal_cleanup \
+            || unsafe_state 'terminal repair cleanup after intent retirement'
+        return
+    fi
     if [ -e "$repair_receipt" ] || [ -L "$repair_receipt" ]; then
         finalize_from_receipt
         return

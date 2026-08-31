@@ -69,15 +69,15 @@ def _assert_frozen_runtime_and_old_runner() -> None:
     # capsules continue to omit that new binary because legacy repair authority
     # does not authenticate it.
     expected = {
-        ROOT / "packaging/debian/preinst-repair": (
-            "046feb4448695d945dee13f3751674cbcf5824a4de4efadf026306a4122a9c60"
-        ),
-        ROOT / "packaging/debian/postinst-repair": (
-            "13ab2b8f03503b826c28f34d4c6128b3da2496a4cb3dafc749bdf49d40e3ea18"
-        ),
-        ROOT / "scripts/build-agent-deb": (
-            "17a540f1e35d43ef0a0347a5fcb46282dd38e7a89c8793e626040139f57e1b44"
-        ),
+            ROOT / "packaging/debian/preinst-repair": (
+                "72d271b2862b1d0bda5fd32ef622351c3b600fbc94abce08c32f2140748dc500"
+            ),
+            ROOT / "packaging/debian/postinst-repair": (
+                "f4bb3071071c9a5dbc618539370841d6cad655fd5a1e6b57e28d363cb0636833"
+            ),
+            ROOT / "scripts/build-agent-deb": (
+                "41b2573022156dd8e9231b8862df19cf1d6c7408a422d4fa0fe1d9512e064f5e"
+            ),
     }
     for path, digest in expected.items():
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest

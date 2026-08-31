@@ -98,15 +98,21 @@ durable_intent_is_safe() {
         && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
             = 0:0:600:1 ] \
-        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 14 ] \
+        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 17 ] \
         && /usr/bin/sed -n '1p' "$upgrade_intent" \
-            | grep -Fxq 'schema_version=1' \
+            | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$upgrade_intent" \
             | grep -Fxq 'package=vonk-forge-agent' \
         && /usr/bin/sed -n '3p' "$upgrade_intent" \
             | grep -Fxq "target_version=$package_version" \
         && /usr/bin/sed -n '14p' "$upgrade_intent" \
-            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$'
+            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '15p' "$upgrade_intent" \
+            | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '16p' "$upgrade_intent" \
+            | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '17p' "$upgrade_intent" \
+            | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$'
 }
 
 write_helper_pending() {

@@ -180,10 +180,19 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                     state: "waiting-for-operator",
                     body: json!({"reason": "agent upgrade did not restart the service"}),
                 },
-                Err(error) => ExecutionResult {
-                    state: "failed",
-                    body: json!({"reason": error.to_string()}),
-                },
+                Err(error) => {
+                    let mut body = json!({"reason": error.to_string()});
+                    if let Some((code, exit_code)) = error.helper_diagnostics() {
+                        body["helper_error_code"] = json!(code);
+                        if let Some(exit_code) = exit_code {
+                            body["helper_exit_code"] = json!(exit_code);
+                        }
+                    }
+                    ExecutionResult {
+                        state: "failed",
+                        body,
+                    }
+                }
             };
         }
         self.recipes
@@ -1880,6 +1889,33 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             body[field] = Value::String(value.to_owned());
         }
     }
+    if claim.operation == "agent.upgrade.v1" {
+        if let Some(code) = executed
+            .body
+            .get("helper_error_code")
+            .and_then(Value::as_str)
+            .filter(|code| {
+                matches!(
+                    *code,
+                    "package_verification_failed"
+                        | "package_metadata_failed"
+                        | "package_custody_failed"
+                        | "package_install_failed"
+                )
+            })
+        {
+            body["helper_error_code"] = Value::String(code.to_owned());
+        }
+        if body.get("helper_error_code").and_then(Value::as_str) == Some("package_install_failed")
+            && let Some(exit_code) = executed
+                .body
+                .get("helper_exit_code")
+                .and_then(Value::as_i64)
+                .filter(|code| (0..=255).contains(code))
+        {
+            body["helper_exit_code"] = Value::from(exit_code);
+        }
+    }
     ExecutionResult {
         state: "failed",
         body,
@@ -2503,6 +2539,49 @@ mod tests {
                 "status": "failed"
             })
         );
+    }
+
+    #[test]
+    fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
+        let mut upgrade_claim = claim();
+        upgrade_claim.operation = "agent.upgrade.v1".to_owned();
+        let result = normalize_execution_result(
+            &upgrade_claim,
+            ExecutionResult {
+                state: "failed",
+                body: json!({
+                    "reason": "agent upgrade helper rejected the request: package_install_failed",
+                    "helper_error_code": "package_install_failed",
+                    "helper_exit_code": 75,
+                    "untrusted_detail": "must not cross the controller boundary",
+                }),
+            },
+        );
+
+        assert_eq!(
+            result.body,
+            json!({
+                "error_code": "agent_upgrade_failed",
+                "reason": "agent upgrade helper rejected the request: package_install_failed",
+                "status": "failed",
+                "helper_error_code": "package_install_failed",
+                "helper_exit_code": 75,
+            })
+        );
+
+        let rejected = normalize_execution_result(
+            &upgrade_claim,
+            ExecutionResult {
+                state: "failed",
+                body: json!({
+                    "reason": "agent upgrade failed",
+                    "helper_error_code": "arbitrary_host_detail",
+                    "helper_exit_code": 512,
+                }),
+            },
+        );
+        assert!(rejected.body.get("helper_error_code").is_none());
+        assert!(rejected.body.get("helper_exit_code").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

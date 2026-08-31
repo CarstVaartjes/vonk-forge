@@ -15,10 +15,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustix::net::sockopt::socket_peercred;
 use serde::Serialize;
-use vonk_agent_helper::operations::{ManagedRoots, OperationExecutor, ProcessCommandRunner};
+use vonk_agent_helper::operations::{
+    ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
+};
 use vonk_agent_helper::protocol::{
-    GrantVerifier, HelperError, PeerIdentity, parse_request, read_frame, sign_observation_receipt,
-    write_frame,
+    GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_request, read_frame,
+    sign_observation_receipt, write_frame,
 };
 use vonk_agent_protocol::RecipeRunObservationReceipt;
 
@@ -70,6 +72,7 @@ struct HelperResponse<'a> {
 struct HelperRejection {
     request_id: Option<String>,
     error_code: &'static str,
+    exit_code: Option<i32>,
     detail: String,
 }
 
@@ -78,6 +81,7 @@ impl HelperRejection {
         Self {
             request_id: None,
             error_code,
+            exit_code: None,
             detail: detail.into(),
         }
     }
@@ -90,7 +94,38 @@ impl HelperRejection {
         Self {
             request_id: Some(request_id.into()),
             error_code,
+            exit_code: None,
             detail: detail.into(),
+        }
+    }
+
+    fn for_operation(
+        request_id: impl Into<String>,
+        operation: &HostOperation,
+        error: OperationError,
+    ) -> Self {
+        let package_install = matches!(operation, HostOperation::InstallVonkDeb { .. });
+        let (error_code, exit_code) = match error {
+            OperationError::InvalidArtifact if package_install => {
+                ("package_verification_failed", None)
+            }
+            OperationError::PackageMetadataInvalid if package_install => {
+                ("package_metadata_failed", None)
+            }
+            OperationError::PackageInstallFailed { exit_code } if package_install => (
+                "package_install_failed",
+                exit_code.filter(|code| (0..=255).contains(code)),
+            ),
+            OperationError::UnsafePath | OperationError::Io(_) if package_install => {
+                ("package_custody_failed", None)
+            }
+            _ => ("operation_failed", None),
+        };
+        Self {
+            request_id: Some(request_id.into()),
+            error_code,
+            exit_code,
+            detail: error.to_string(),
         }
     }
 }
@@ -190,7 +225,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         request_id: error.request_id.clone(),
         status: "rejected",
         evidence_sha256: None,
-        exit_code: None,
+        exit_code: error.exit_code,
         error_code: Some(error.error_code),
         observation_receipt: None,
     };
@@ -244,7 +279,7 @@ fn handle(
     let outcome = executor
         .execute_for_node(&request.claims.operation, Some(node_id))
         .map_err(|error| {
-            HelperRejection::for_request(&request_id, "operation_failed", display(error))
+            HelperRejection::for_operation(&request_id, &request.claims.operation, error)
         })?;
     let observation_receipt = match (&request.claims.operation, outcome.recipe_run_observation) {
         (
@@ -501,6 +536,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use vonk_agent_helper::{operations::OperationError, protocol::HostOperation};
 
     #[test]
     fn helper_request_concurrency_is_bounded_and_reusable() {
@@ -559,5 +595,39 @@ mod tests {
         let after_authorization =
             HelperRejection::for_request("request-1", "operation_failed", "dpkg failed");
         assert_eq!(after_authorization.request_id.as_deref(), Some("request-1"));
+    }
+
+    #[test]
+    fn package_failures_are_stage_specific_and_exit_codes_are_bounded() {
+        let operation = HostOperation::InstallVonkDeb {
+            package_sha256: "a".repeat(64),
+            package_signature: "b".repeat(128),
+        };
+        let install = HelperRejection::for_operation(
+            "request-1",
+            &operation,
+            OperationError::PackageInstallFailed {
+                exit_code: Some(75),
+            },
+        );
+        assert_eq!(install.error_code, "package_install_failed");
+        assert_eq!(install.exit_code, Some(75));
+
+        let unbounded = HelperRejection::for_operation(
+            "request-1",
+            &operation,
+            OperationError::PackageInstallFailed {
+                exit_code: Some(512),
+            },
+        );
+        assert_eq!(unbounded.error_code, "package_install_failed");
+        assert_eq!(unbounded.exit_code, None);
+
+        let metadata = HelperRejection::for_operation(
+            "request-1",
+            &operation,
+            OperationError::PackageMetadataInvalid,
+        );
+        assert_eq!(metadata.error_code, "package_metadata_failed");
     }
 }

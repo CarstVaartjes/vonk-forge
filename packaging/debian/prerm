@@ -3,6 +3,48 @@ set -eu
 
 pending=/var/lib/vonk-forge/helper-upgrade.pending
 receipt=/var/lib/vonk-forge/helper-upgrade.receipt
+upgrade_intent=/var/lib/vonk-forge/package-upgrade/intent
+recovery_unit=vonk-forge-package-upgrade-recover.service
+recovery_capsule_unit=vonk-forge-package-upgrade-recover-capsule.service
+
+recovery_remove_binding() {
+    [ "${1:-}" = remove ] \
+        && [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ] \
+        && [ -d /var/lib/vonk-forge/package-upgrade ] \
+        && [ ! -L /var/lib/vonk-forge/package-upgrade ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a \
+            /var/lib/vonk-forge/package-upgrade)" = 0:0:700 ] \
+        && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
+            = 0:0:600:1 ] \
+        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 17 ] \
+        && /usr/bin/sed -n '1p' "$upgrade_intent" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '2p' "$upgrade_intent" \
+            | grep -Fxq 'package=vonk-forge-agent' \
+        && /usr/bin/sed -n '14p' "$upgrade_intent" \
+            | grep -Fxq "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" \
+        && grep -Fxq "0::/system.slice/$recovery_capsule_unit" \
+            /proc/self/cgroup \
+        || return 1
+    case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    command_file=$(/usr/bin/mktemp /tmp/.vonk-recovery-remove.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file" \
+        || return 1
+    [ "$(/usr/bin/wc -l < "$command_file")" -eq 4 ] \
+        && /usr/bin/sed -n '1p' "$command_file" | grep -Fxq /usr/bin/dpkg \
+        && /usr/bin/sed -n '2p' "$command_file" | grep -Fxq -- --remove \
+        && /usr/bin/sed -n '3p' "$command_file" \
+            | grep -Fxq -- --force-remove-reinstreq \
+        && /usr/bin/sed -n '4p' "$command_file" \
+            | grep -Fxq vonk-forge-agent
+    result=$?
+    /usr/bin/rm -f -- "$command_file"
+    trap - EXIT HUP INT TERM
+    return "$result"
+}
 
 safe_pending() {
     [ -f "$pending" ] && [ ! -L "$pending" ] \
@@ -69,15 +111,19 @@ safe_receipt() {
 }
 
 if [ "${1:-}" = remove ]; then
-    if [ -e /var/lib/vonk-forge/package-upgrade/intent ] \
-        || [ -L /var/lib/vonk-forge/package-upgrade/intent ]; then
+    recovery_remove=0
+    if recovery_remove_binding "$1"; then
+        recovery_remove=1
+    elif [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
         echo 'vonk-forge-agent: cannot remove package during durable upgrade recovery' >&2
         exit 1
     fi
     /usr/bin/systemctl --system stop \
         vonk-forge-package-helper-upgrade-finish.service >/dev/null 2>&1 || true
-    /usr/bin/systemctl --system stop \
-        vonk-forge-package-upgrade-recover.service >/dev/null 2>&1 || true
+    if [ "$recovery_remove" -ne 1 ]; then
+        /usr/bin/systemctl --system stop \
+            "$recovery_unit" "$recovery_capsule_unit" >/dev/null 2>&1 || true
+    fi
     deb-systemd-invoke stop vonk-forge-agent.service >/dev/null || true
     deb-systemd-invoke stop vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-invoke stop vonk-forge-package-helper.service >/dev/null || true
@@ -93,6 +139,12 @@ if [ "${1:-}" = remove ]; then
             echo 'vonk-forge-agent: helper upgrade receipt is unsafe' >&2
             exit 1
         }
+    fi
+    if [ "$recovery_remove" -eq 1 ]; then
+        # The exact signed package is reinstalled immediately by the durable
+        # recovery unit. Preserve its gates, service enablement, node config,
+        # certificate, and root-owned package cache across this narrow remove.
+        exit 0
     fi
     /usr/bin/rm -f -- "$pending" "$receipt"
     if [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ]; then

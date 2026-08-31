@@ -28,8 +28,8 @@ installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
 source_version=0.1.0~dev.381+ga122909feaa3
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.382+g0123456789ab
-binary_revision=a122909feaa3b64d7b15371285e727965c3d7e9a
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
+binary_revision=$packaging_revision
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -83,9 +83,16 @@ source_intent=$source_state/intent
 source_lock=$source_state/lock
 source_blocker=$source_state/agent-blocked
 source_pending=/var/lib/vonk-forge/helper-upgrade.pending
-source_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_package_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_capsule_dir=$source_state/recovery-capsule
+source_capsule_manifest=$source_capsule_dir/manifest
+source_runner=$source_capsule_dir/runner
 standard_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard
 source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
+source_capsule_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression=/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
+source_capsule_enablement=/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
 repair_state=$source_state/repair
@@ -95,7 +102,7 @@ helper_receipt=/var/lib/vonk-forge/package-repair-helper.receipt
 agent_unit=vonk-forge-agent.service
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
-recovery_unit=vonk-forge-package-upgrade-recover.service
+recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 firewall_name=vonk-forge-docker-firewall.service
 lock_holder=
 wrong_cgroup=
@@ -218,6 +225,11 @@ cleanup() {
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.service.d
+  rm -f -- "$source_capsule_enablement" "$source_capsule_unit" \
+    "$source_capsule_gate" "$source_capsule_suppression"
+  rmdir --ignore-fail-on-non-empty \
+    "${source_capsule_gate%/*}" "${source_capsule_suppression%/*}" \
+    >/dev/null 2>&1 || true
   rm -rf -- /run/vonk-forge-package-helper
   rm -f -- "$standard_runner"
   case "$fault" in
@@ -703,25 +715,52 @@ source_helper_sha="$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -
 source_runner_file=$source_payload/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
 source_unit_file=$source_payload/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_gate_file=$source_payload/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+source_capsule_unit_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_gate_file=$repo_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
 source_runner_sha="$(sha256sum "$source_runner_file" | cut -d' ' -f1)"
 source_unit_sha="$(sha256sum "$source_unit_file" | cut -d' ' -f1)"
 source_gate_sha="$(sha256sum "$source_gate_file" | cut -d' ' -f1)"
+source_capsule_unit_sha="$(sha256sum "$source_capsule_unit_file" | cut -d' ' -f1)"
+source_capsule_gate_sha="$(sha256sum "$source_capsule_gate_file" | cut -d' ' -f1)"
+source_capsule_suppression_sha="$(sha256sum "$source_capsule_suppression_file" | cut -d' ' -f1)"
 
 install -d -o root -g root -m 0700 "$source_state"
 install -o root -g root -m 0600 /dev/null "$source_lock"
 install -o root -g root -m 0600 "$source_package" \
   "$source_state/$source_package_sha.deb"
-install -o root -g root -m 0555 "$source_runner_file" "$source_runner"
+install -o root -g root -m 0555 "$source_runner_file" "$source_package_runner"
 install -o root -g root -m 0644 "$source_unit_file" "$source_unit"
 install -d -o root -g root -m 0755 "${source_gate%/*}" "${source_dropin%/*}"
 install -o root -g root -m 0644 "$source_gate_file" "$source_gate"
+install -d -o root -g root -m 0700 "$source_capsule_dir"
+install -o root -g root -m 0555 "$source_runner_file" "$source_runner"
+printf '%s\n' \
+  'schema_version=1' \
+  "runner_sha256=$source_runner_sha" \
+  "unit_sha256=$source_capsule_unit_sha" \
+  "gate_sha256=$source_capsule_gate_sha" \
+  "suppression_sha256=$source_capsule_suppression_sha" \
+  > "$source_capsule_manifest"
+chown root:root "$source_capsule_manifest"
+chmod 0600 "$source_capsule_manifest"
+install -o root -g root -m 0644 "$source_capsule_unit_file" \
+  "$source_capsule_unit"
+install -o root -g root -m 0644 "$source_capsule_gate_file" \
+  "$source_capsule_gate"
+install -d -o root -g root -m 0755 "${source_capsule_suppression%/*}" \
+  "${source_capsule_enablement%/*}"
+install -o root -g root -m 0644 "$source_capsule_suppression_file" \
+  "$source_capsule_suppression"
+ln -s ../vonk-forge-package-upgrade-recover-capsule.service \
+  "$source_capsule_enablement"
 printf '%s\n' '[Unit]' 'Wants=vonk-forge-package-upgrade-recover.service' \
   > "$source_dropin"
 chown root:root "$source_dropin"
 chmod 0644 "$source_dropin"
 source_dropin_sha="$(sha256sum "$source_dropin" | cut -d' ' -f1)"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "target_version=$source_version" \
   "helper_sha256=$source_helper_sha" \
   "agent_sha256=$source_agent_sha" > "$source_blocker"
@@ -751,10 +790,18 @@ printf '%s\n' \
   "request_boot_id=$boot_id" \
   'dpkg_pid=999999' \
   'dpkg_start_time=1' \
-  "recovery_nonce=$source_nonce" > "$source_intent"
+  "recovery_nonce=$source_nonce" \
+  "capsule_unit_sha256=$source_capsule_unit_sha" \
+  "capsule_gate_sha256=$source_capsule_gate_sha" \
+  "capsule_suppression_sha256=$source_capsule_suppression_sha" \
+  > "$source_intent"
 chown root:root "$source_intent"
 chmod 0600 "$source_intent"
 source_intent_sha="$(sha256sum "$source_intent" | cut -d' ' -f1)"
+systemctl --system daemon-reload
+test "$(systemctl --system show --property=FragmentPath --value \
+  "$recovery_unit")" = "$source_capsule_unit"
+systemctl --system is-enabled --quiet "$recovery_unit"
 
 setpriv_sha="$(sha256sum /usr/bin/setpriv | cut -d' ' -f1)"
 repair_probe_sha="$(sha256sum "$repair_probe_binary" | cut -d' ' -f1)"

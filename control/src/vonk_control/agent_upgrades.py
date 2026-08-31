@@ -32,7 +32,11 @@ _AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=240)
 _TARGET_PROTOCOL_VERSION = 3
 _RECOVERABLE_HELPER_BRIDGE_FAILURES = RECOVERABLE_AGENT_UPGRADE_REASONS
 _RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
-    "agent upgrade did not restart the service"
+    "agent upgrade did not restart the service",
+    "agent upgrade helper rejected the request: package_verification_failed",
+    "agent upgrade helper rejected the request: package_metadata_failed",
+    "agent upgrade helper rejected the request: package_custody_failed",
+    "agent upgrade helper rejected the request: package_install_failed",
 }
 
 

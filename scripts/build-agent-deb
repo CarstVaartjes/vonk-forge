@@ -157,9 +157,13 @@ def repair_standard_runner(
         binary_source_revision,
         "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
     )
+    source_preinst = source_at_revision(
+        binary_source_revision, "packaging/debian/preinst"
+    )
     runner = (
-        source_at_revision(binary_source_revision, "packaging/debian/preinst")
-        .replace(b"@VERSION@", authority["source_target_version"].encode())
+        source_preinst.replace(
+            b"@VERSION@", authority["source_target_version"].encode()
+        )
         .replace(b"@ARCHITECTURE@", authority["source_architecture"].encode())
         .replace(b"@AGENT_SHA256@", authority["source_agent_sha256"].encode())
         .replace(b"@HELPER_SHA256@", authority["source_helper_sha256"].encode())
@@ -174,6 +178,46 @@ def repair_standard_runner(
         )
         .replace(b"@AGENT_GATE_BASE64@", base64.b64encode(source_agent_gate))
     )
+    if b"@RECOVERY_CAPSULE_UNIT_SHA256@" in source_preinst:
+        source_recovery_capsule_unit = source_at_revision(
+            binary_source_revision,
+            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
+        )
+        runner = runner.replace(
+            b"@RECOVERY_CAPSULE_UNIT_SHA256@",
+            hashlib.sha256(source_recovery_capsule_unit).hexdigest().encode(),
+        ).replace(
+            b"@RECOVERY_CAPSULE_UNIT_BASE64@",
+            base64.b64encode(source_recovery_capsule_unit),
+        )
+        source_recovery_capsule_gate = source_at_revision(
+            binary_source_revision,
+            "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
+        )
+        source_recovery_capsule_suppression = source_at_revision(
+            binary_source_revision,
+            "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
+        )
+        runner = (
+            runner.replace(
+                b"@RECOVERY_CAPSULE_GATE_SHA256@",
+                hashlib.sha256(source_recovery_capsule_gate).hexdigest().encode(),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_GATE_BASE64@",
+                base64.b64encode(source_recovery_capsule_gate),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+                hashlib.sha256(source_recovery_capsule_suppression)
+                .hexdigest()
+                .encode(),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+                base64.b64encode(source_recovery_capsule_suppression),
+            )
+        )
     if (
         hashlib.sha256(source_recovery_unit).hexdigest()
         != authority["source_unit_sha256"]
@@ -261,9 +305,7 @@ def read_release_binary(
             or program_count < 1
             or program_offset + program_size * program_count > len(raw)
             or any(
-                struct.unpack_from(
-                    "<I", raw, program_offset + index * program_size
-                )[0]
+                struct.unpack_from("<I", raw, program_offset + index * program_size)[0]
                 == 3
                 for index in range(program_count)
             )
@@ -351,9 +393,7 @@ def read_repair_authority(
             re.fullmatch(r"[0-9a-f]{64}", document.get(field, "")) is None
             for field in digest_fields
         )
-        or re.fullmatch(
-            r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", "")
-        )
+        or re.fullmatch(r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", ""))
         is None
     ):
         raise BuildError("repair authority is invalid")
@@ -988,6 +1028,23 @@ def build(
         )
         recovery_unit_digest = hashlib.sha256(recovery_unit).hexdigest()
         recovery_unit_base64 = base64.b64encode(recovery_unit)
+        recovery_capsule_unit = source(
+            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service"
+        )
+        recovery_capsule_unit_digest = hashlib.sha256(recovery_capsule_unit).hexdigest()
+        recovery_capsule_unit_base64 = base64.b64encode(recovery_capsule_unit)
+        recovery_capsule_gate = source(
+            "packaging/systemd/vonk-forge-agent.service.d/"
+            "10-package-upgrade-capsule.conf"
+        )
+        recovery_capsule_gate_digest = hashlib.sha256(recovery_capsule_gate).hexdigest()
+        recovery_capsule_suppression = source(
+            "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/"
+            "10-capsule-owner.conf"
+        )
+        recovery_capsule_suppression_digest = hashlib.sha256(
+            recovery_capsule_suppression
+        ).hexdigest()
         agent_gate = source(
             "packaging/systemd/vonk-forge-agent.service.d/"
             "20-package-upgrade-recovery.conf"
@@ -1002,6 +1059,27 @@ def build(
             .replace(b"@HELPER_SHA256@", helper_digest.encode())
             .replace(b"@RECOVERY_UNIT_SHA256@", recovery_unit_digest.encode())
             .replace(b"@RECOVERY_UNIT_BASE64@", recovery_unit_base64)
+            .replace(
+                b"@RECOVERY_CAPSULE_UNIT_SHA256@",
+                recovery_capsule_unit_digest.encode(),
+            )
+            .replace(b"@RECOVERY_CAPSULE_UNIT_BASE64@", recovery_capsule_unit_base64)
+            .replace(
+                b"@RECOVERY_CAPSULE_GATE_SHA256@",
+                recovery_capsule_gate_digest.encode(),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_GATE_BASE64@",
+                base64.b64encode(recovery_capsule_gate),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+                recovery_capsule_suppression_digest.encode(),
+            )
+            .replace(
+                b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+                base64.b64encode(recovery_capsule_suppression),
+            )
             .replace(b"@AGENT_GATE_SHA256@", agent_gate_digest.encode())
             .replace(b"@AGENT_GATE_BASE64@", agent_gate_base64)
         )
@@ -1009,6 +1087,33 @@ def build(
         repair_preinst = None
         repair_postinst = None
         if repair_authority_raw is not None:
+            repair_uses_capsule = (
+                b"@RECOVERY_CAPSULE_UNIT_SHA256@"
+                in source_at_revision(binary_source_revision, "packaging/debian/preinst")
+            )
+            if repair_uses_capsule:
+                source_capsule_unit_digest = hashlib.sha256(
+                    source_at_revision(
+                        binary_source_revision,
+                        "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
+                    )
+                ).hexdigest()
+                source_capsule_gate_digest = hashlib.sha256(
+                    source_at_revision(
+                        binary_source_revision,
+                        "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
+                    )
+                ).hexdigest()
+                source_capsule_suppression_digest = hashlib.sha256(
+                    source_at_revision(
+                        binary_source_revision,
+                        "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
+                    )
+                ).hexdigest()
+            else:
+                source_capsule_unit_digest = "0" * 64
+                source_capsule_gate_digest = "0" * 64
+                source_capsule_suppression_digest = "0" * 64
             standard_runner = repair_standard_runner(
                 binary_source_revision, repair_document
             )
@@ -1054,6 +1159,21 @@ def build(
                     b"@REPAIR_PROBE_SHA256@",
                     hashlib.sha256(repair_probe).hexdigest().encode(),
                 )
+                .replace(
+                    b"@SOURCE_CAPSULE_V2@", b"1" if repair_uses_capsule else b"0"
+                )
+                .replace(
+                    b"@SOURCE_CAPSULE_UNIT_SHA256@",
+                    source_capsule_unit_digest.encode(),
+                )
+                .replace(
+                    b"@SOURCE_CAPSULE_GATE_SHA256@",
+                    source_capsule_gate_digest.encode(),
+                )
+                .replace(
+                    b"@SOURCE_CAPSULE_SUPPRESSION_SHA256@",
+                    source_capsule_suppression_digest.encode(),
+                )
             )
             if (
                 REPAIR_DISPATCH_MARKER not in repair_preinst
@@ -1079,7 +1199,13 @@ def build(
         install_file(
             stage,
             "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
-            repair_preinst if repair_preinst is not None else preinst,
+            (
+                standard_runner
+                if repair_preinst is not None and repair_uses_capsule
+                else repair_preinst
+                if repair_preinst is not None
+                else preinst
+            ),
             0o555,
         )
         if repair_preinst is not None:
@@ -1121,7 +1247,9 @@ def build(
             "vonk-forge-package-upgrade-recover": preinst,
         }
         if repair_preinst is not None:
-            evidence_binaries["vonk-forge-package-upgrade-recover"] = repair_preinst
+            evidence_binaries["vonk-forge-package-upgrade-recover"] = (
+                standard_runner if repair_uses_capsule else repair_preinst
+            )
             evidence_binaries["vonk-forge-package-upgrade-recover.standard"] = (
                 standard_runner
             )

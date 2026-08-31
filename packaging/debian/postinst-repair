@@ -128,8 +128,22 @@ recursive_binding() {
         && safe_root_file "$repair_candidate" 600 \
         && safe_root_file "$repair_authority" 644 \
         || return 1
-    canonical_line_file "$source_intent" 14 \
-        && canonical_line_file "$repair_intent" 17 \
+    source_schema=$(/usr/bin/sed -n '1s/^schema_version=//p' "$source_intent")
+    case "$source_schema" in
+        1) canonical_line_file "$source_intent" 14 || return 1 ;;
+        2)
+            canonical_line_file "$source_intent" 17 \
+                && /usr/bin/sed -n '15p' "$source_intent" \
+                    | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+                && /usr/bin/sed -n '16p' "$source_intent" \
+                    | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+                && /usr/bin/sed -n '17p' "$source_intent" \
+                    | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$' \
+                || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    canonical_line_file "$repair_intent" 17 \
         && canonical_line_file "$repair_phase" 3 \
         || return 1
     source_snapshot=$(/usr/bin/sha256sum "$source_intent" \
