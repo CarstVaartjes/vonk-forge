@@ -8323,7 +8323,7 @@
         "additionalProperties": false,
         "properties": {
           "confirmation": {
-            "const": "retry-exact-staged-a122-package-on-spark3542",
+            "const": "reboot-spark3542-to-resume-staged-a122-recovery",
             "title": "Confirmation",
             "type": "string"
           },
@@ -8344,7 +8344,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "const": "retry-exact-package-install",
+            "const": "schedule-reboot",
             "title": "Action",
             "type": "string"
           },
@@ -8355,9 +8355,14 @@
             "type": "string"
           },
           "compatibility_recovery_id": {
-            "const": "spark3542-a122-exact-package-retry-v1",
+            "const": "spark3542-a122-scheduled-reboot-v1",
             "title": "Compatibility Recovery Id",
             "type": "string"
+          },
+          "delay_seconds": {
+            "const": 60,
+            "title": "Delay Seconds",
+            "type": "integer"
           },
           "expected_retry_attempt": {
             "const": 4,
@@ -8385,7 +8390,7 @@
             "type": "string"
           },
           "required_confirmation": {
-            "const": "retry-exact-staged-a122-package-on-spark3542",
+            "const": "reboot-spark3542-to-resume-staged-a122-recovery",
             "title": "Required Confirmation",
             "type": "string"
           },
@@ -8432,6 +8437,7 @@
         },
         "required": [
           "action",
+          "delay_seconds",
           "compatibility_recovery_id",
           "node_id",
           "source_identity",
@@ -8455,7 +8461,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "const": "retry-exact-package-install",
+            "const": "schedule-reboot",
             "title": "Action",
             "type": "string"
           },
@@ -8466,9 +8472,14 @@
             "type": "string"
           },
           "compatibility_recovery_id": {
-            "const": "spark3542-a122-exact-package-retry-v1",
+            "const": "spark3542-a122-scheduled-reboot-v1",
             "title": "Compatibility Recovery Id",
             "type": "string"
+          },
+          "delay_seconds": {
+            "const": 60,
+            "title": "Delay Seconds",
+            "type": "integer"
           },
           "expected_retry_attempt": {
             "const": 4,
@@ -8538,6 +8549,7 @@
         },
         "required": [
           "action",
+          "delay_seconds",
           "compatibility_recovery_id",
           "node_id",
           "source_identity",

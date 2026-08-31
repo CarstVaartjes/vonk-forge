@@ -4,11 +4,12 @@ This runbook covers the one-shot Controller bridge for the pinned Spark3542
 dev335 to a122 incident. It is not a general agent-upgrade mechanism and must
 not be used for another node, package, job, or operation.
 
-The bridge does not authorize a reboot or a different package. It retries the
-existing failed a122 operation and may issue only its exact digest-bound a122
-`install-vonk-deb` grant. The already-staged a122 `preinst` recognizes the
-immutable recovery intent, starts the recovery owner, and refuses a competing
-package transaction before unpack.
+The bridge does not authorize a package install or an arbitrary reboot. It
+retries the existing failed a122 operation and may issue only one fixed
+60-second scheduled reboot. At boot, the enabled helper socket pulls in the
+package recovery already staged on Spark3542. Issuance remains bound to the
+exact original payload, package, source identity, certificate, retry fence, and
+target digests.
 
 ## Preconditions
 
@@ -40,7 +41,7 @@ First render the exact mutation without sending it:
 ```console
 bin/vonkctl fleet upgrade recover-spark3542 apply \
   --plan-digest '<digest-from-the-immediately-preceding-preview>' \
-  --confirm retry-exact-staged-a122-package-on-spark3542 \
+  --confirm reboot-spark3542-to-resume-staged-a122-recovery \
   --json
 ```
 
@@ -49,14 +50,15 @@ Then repeat with `--apply`:
 ```console
 bin/vonkctl fleet upgrade recover-spark3542 apply \
   --plan-digest '<digest-from-the-immediately-preceding-preview>' \
-  --confirm retry-exact-staged-a122-package-on-spark3542 \
+  --confirm reboot-spark3542-to-resume-staged-a122-recovery \
   --apply \
   --json
 ```
 
 Apply is idempotent for the same plan digest. A different digest is rejected.
 Once armed, the recovery is deliberately fail-closed and cannot be cancelled
-or retargeted through this API.
+or retargeted through this API. The Spark will reboot approximately 60 seconds
+after the legacy agent accepts the grant.
 
 ## Observe and finish
 

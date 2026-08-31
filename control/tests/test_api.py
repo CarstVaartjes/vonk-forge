@@ -170,7 +170,8 @@ class CompatibilityRecovery:
         return CompatibilityRecoveryPlan(
             plan_digest="d" * 64,
             document={
-                "action": "retry-exact-package-install",
+                "action": "schedule-reboot",
+                "delay_seconds": 60,
                 "compatibility_recovery_id": RECOVERY_ID,
                 "authority_revision": "c" * 64,
                 "node_id": NODE_ID,
@@ -493,7 +494,7 @@ def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
     assert preview.json()["plan_digest"] == "d" * 64
     assert (
         preview.json()["required_confirmation"]
-        == "retry-exact-staged-a122-package-on-spark3542"
+        == "reboot-spark3542-to-resume-staged-a122-recovery"
     )
 
     invalid = client.post(
@@ -508,7 +509,7 @@ def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
         headers=headers,
         json={
             "plan_digest": "d" * 64,
-            "confirmation": "retry-exact-staged-a122-package-on-spark3542",
+            "confirmation": "reboot-spark3542-to-resume-staged-a122-recovery",
         },
     )
     assert applied.status_code == 202

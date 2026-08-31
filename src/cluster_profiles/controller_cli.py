@@ -357,7 +357,7 @@ def add_controller_commands(
     compatibility_recovery_apply.add_argument(
         "--confirm",
         required=True,
-        choices=("retry-exact-staged-a122-package-on-spark3542",),
+        choices=("reboot-spark3542-to-resume-staged-a122-recovery",),
     )
     _apply(compatibility_recovery_apply)
     _add_json(compatibility_recovery_apply)

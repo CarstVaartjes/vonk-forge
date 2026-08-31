@@ -48,15 +48,22 @@ started=$test_root/start
 crash_observed=$test_root/crash-observed
 # The simulated old helper can write only its declared ReadWritePaths.
 upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename "$test_root")
+compat_request_ledger=/var/lib/vonk-forge/helper/requests/35420000-0000-4000-8000-000000000001
+compat_collision_ledger=/var/lib/vonk-forge/helper/requests/35420000-0000-4000-8000-000000000002
+compat_reboot_service=vonk-forge-reboot.service
+compat_reboot_timer=vonk-forge-reboot.timer
+compat_agent_config=/etc/vonk-forge-agent/agent.toml
+compat_authority_key=/etc/vonk-forge-agent/host-helper-authority.pub
 
 dump_failure_diagnostics() {
   printf '%s\n' '--- agent upgrade recovery fixture diagnostics ---' >&2
   systemctl --system --no-pager --full status \
     "$helper_unit" "$socket_unit" "$recovery_unit" "$agent_unit" \
-    "$firewall_unit" >&2 || true
+    "$firewall_unit" "$compat_reboot_service" "$compat_reboot_timer" \
+    >&2 || true
   journalctl --system --no-pager -n 200 \
     -u "$helper_unit" -u "$socket_unit" -u "$recovery_unit" -u "$agent_unit" \
-    -u "$firewall_unit" \
+    -u "$firewall_unit" -u "$compat_reboot_service" -u "$compat_reboot_timer" \
     >&2 || true
   dpkg-query -W -f='${db:Status-Abbrev} ${Version}\n' vonk-forge-agent \
     >&2 || true
@@ -83,12 +90,19 @@ cleanup() {
   fi
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
   systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
-    "$socket_unit" "$firewall_unit" >/dev/null 2>&1 || true
+    "$socket_unit" "$firewall_unit" "$compat_reboot_service" \
+    "$compat_reboot_timer" \
+    >/dev/null 2>&1 || true
   systemctl --system reset-failed "$recovery_unit" "$agent_unit" \
-    "$helper_unit" "$socket_unit" "$firewall_unit" >/dev/null 2>&1 || true
+    "$helper_unit" "$socket_unit" "$firewall_unit" "$compat_reboot_service" \
+    "$compat_reboot_timer" \
+    >/dev/null 2>&1 || true
   rm -rf -- /var/lib/vonk-forge/package-upgrade
   rm -f -- /var/lib/vonk-forge/helper-upgrade.pending \
     /var/lib/vonk-forge/helper-upgrade.receipt
+  rm -f -- "$compat_request_ledger" "$compat_collision_ledger"
+  rmdir --ignore-fail-on-non-empty /var/lib/vonk-forge/helper/requests \
+    /var/lib/vonk-forge/helper >/dev/null 2>&1 || true
   if dpkg-query --show vonk-forge-agent >/dev/null 2>&1; then
     SYSTEMD_OFFLINE=1 dpkg --purge --force-remove-reinstreq \
       vonk-forge-agent >/dev/null 2>&1 || cleanup_status=1
@@ -97,11 +111,23 @@ cleanup() {
     cleanup_status=1
   fi
   rm -rf -- /var/lib/vonk-forge-agent
+  rm -f -- "$compat_agent_config" "$compat_authority_key"
+  rmdir --ignore-fail-on-non-empty /etc/vonk-forge-agent \
+    >/dev/null 2>&1 || true
   rm -f -- "$upgrade_invocations"
   rm -f -- "$old_helper_unit" "$old_socket_unit"
   rm -f -- "$firewall_fixture"
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   systemctl --system daemon-reload >/dev/null 2>&1 || true
+  for _ in {1..100}; do
+    reboot_service_load=$(systemctl --system show --property=LoadState --value \
+      "$compat_reboot_service" 2>/dev/null || true)
+    reboot_timer_load=$(systemctl --system show --property=LoadState --value \
+      "$compat_reboot_timer" 2>/dev/null || true)
+    [[ "$reboot_service_load" == not-found \
+      && "$reboot_timer_load" == not-found ]] && break
+    sleep 0.05
+  done
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- "$test_root"
   trap - EXIT
@@ -127,6 +153,13 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /var/lib/vonk-forge/helper-upgrade.pending ]] \
   || [[ -e /var/lib/vonk-forge/helper-upgrade.receipt \
     || -L /var/lib/vonk-forge/helper-upgrade.receipt ]] \
+  || [[ -e "$compat_request_ledger" || -L "$compat_request_ledger" \
+    || -e "$compat_collision_ledger" || -L "$compat_collision_ledger" ]] \
+  || [[ -e /etc/vonk-forge-agent || -L /etc/vonk-forge-agent ]] \
+  || [[ "$(systemctl --system show --property=LoadState --value \
+    "$compat_reboot_service" 2>/dev/null || true)" != not-found ]] \
+  || [[ "$(systemctl --system show --property=LoadState --value \
+    "$compat_reboot_timer" 2>/dev/null || true)" != not-found ]] \
   || [[ -e /lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf \
     || -L /lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf ]] \
   || [[ -e /lib/systemd/system/vonk-forge-package-helper.socket.d \
@@ -252,8 +285,6 @@ package=$(find "$test_root/target-dist" -maxdepth 1 -type f -name '*.deb')
 baseline_package=$(find "$test_root/baseline-dist" -maxdepth 1 -type f \
   -name '*.deb')
 package_digest=$(sha256sum "$package" | cut -d' ' -f1)
-package_signature=$(tr -d '\n' < "${package}.host.sig")
-[[ "$package_signature" =~ ^[0-9a-f]{128}$ ]]
 target_recovery_runner=$test_root/target-package-upgrade-recover
 dpkg-deb --fsys-tarfile "$package" \
   | tar -xOf - ./usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
@@ -508,12 +539,15 @@ printf '%s\n' \
             "$helper_unit")
           helper_control_group=$(systemctl --system show \
             --property=ControlGroup --value "$helper_unit")
-          case "$helper_control_group" in
-            /system.slice/*) ;;
-            *) exit 1 ;;
-          esac
+          test "${helper_control_group:0:1}" = /
+          test "${helper_control_group##*/}" = "$helper_unit"
+          helper_cgroup_parent=${helper_control_group%/*}
+          [[ "$helper_cgroup_parent" == /system.slice \
+            || "$helper_cgroup_parent" == */system.slice ]]
+          helper_cgroup=/sys/fs/cgroup$helper_control_group
+          test -f "$helper_cgroup/cgroup.procs"
           mapfile -t helper_pids \
-            < "/sys/fs/cgroup$helper_control_group/cgroup.procs"
+            < "$helper_cgroup/cgroup.procs"
           test "${#helper_pids[@]}" -ge 2
           printf '%s\n' "${helper_pids[@]}" | grep -Fxq "$helper_main_pid"
           printf '%s\n' "${helper_pids[@]}" | grep -Fxq "$dpkg_pid"
@@ -785,9 +819,8 @@ if [[ "$crash_mode" == full-cgroup ]]; then
 
     # Run the exact dev335 helper binary against the active production-shaped
     # socket, while leaving the fully staged target payload on disk for the
-    # root recovery owner. The fixed Rust fixture signs only the exact target
-    # InstallVonkDeb request, drops its response, then replays that same grant.
-    # The staged target preinst starts recovery and refuses the competing dpkg.
+    # root recovery owner. The fixed Rust fixture signs only a 60-second
+    # ScheduleReboot grant, proves the response, then replays that same grant.
     install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper/requests
     install -d -o root -g root -m 0755 /etc/vonk-forge-agent
     printf '%s\n' \
@@ -853,23 +886,101 @@ if [[ "$crash_mode" == full-cgroup ]]; then
     systemctl --system daemon-reload
     vonk_agent_gid=$(getent group vonk-agent | cut -d: -f3)
 
-    # Deliver while the old agent is still active. The exact retry is allowed to
-    # enter a122's already-staged preinst, which wakes the immutable recovery
-    # owner and rejects the second package transaction before it can unpack.
+    # A pre-existing transient name must make the exact dev335 helper reject
+    # its consumed request without scheduling a reboot or falling back to a
+    # direct systemctl action.
+    systemd-run --quiet --collect \
+      --unit=vonk-forge-reboot.service /bin/sleep 30
+    CARGO_TARGET_DIR=$test_root/compat-target \
+      VONK_SPARK3542_COMPAT_FIXTURE=1 \
+      setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
+      cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
+        -p vonk-agent-helper --test spark3542_compat_reboot_fixture \
+        transient_reboot_unit_collision_fails_closed_for_the_second_pinned_request \
+        -- --ignored --exact
+    test "$(systemctl --system show --property=MainPID --value \
+      "$helper_unit")" = "$compat_helper_pid"
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$recovery_unit")" != active
+    systemctl --system stop vonk-forge-reboot.service
+    systemctl --system reset-failed vonk-forge-reboot.service \
+      >/dev/null 2>&1 || true
+    for _ in {1..100}; do
+      [[ "$(systemctl --system show --property=LoadState --value \
+        "$compat_reboot_service" 2>/dev/null || true)" == not-found ]] && break
+      sleep 0.05
+    done
+    test "$(systemctl --system show --property=LoadState --value \
+      "$compat_reboot_service")" = not-found
+    rm -f -- "$compat_collision_ledger"
+
+    # Deliver while the old agent is still active. Hold dpkg's native advisory
+    # lock, cancel the actual transient reboot, then model its boot transaction.
+    # Starting the enabled socket must pull recovery, first exit 75 under the
+    # held lock, and then converge after lock release.
     test "$(systemctl --system show --property=ActiveState --value \
       "$agent_unit")" = active
     delivered_agent_pid=$(systemctl --system show --property=MainPID --value \
       "$agent_unit")
     test "$delivered_agent_pid" = "$old_agent_pid"
+    python3 - "$test_root/dpkg-lock-ready" \
+      "$test_root/release-dpkg-lock" <<'PY' &
+import fcntl
+import pathlib
+import sys
+import time
+
+ready = pathlib.Path(sys.argv[1])
+release = pathlib.Path(sys.argv[2])
+with pathlib.Path("/var/lib/dpkg/lock").open("r+") as lock:
+    fcntl.lockf(lock, fcntl.LOCK_EX)
+    ready.touch()
+    while not release.exists():
+        time.sleep(0.05)
+PY
+    dpkg_lock_pid=$!
+    for _ in {1..200}; do
+      [[ -f "$test_root/dpkg-lock-ready" ]] && break
+      sleep 0.05
+    done
+    test -f "$test_root/dpkg-lock-ready"
     CARGO_TARGET_DIR=$test_root/compat-target \
       VONK_SPARK3542_COMPAT_FIXTURE=1 \
-      VONK_SPARK3542_COMPAT_PACKAGE_SHA256="$package_digest" \
-      VONK_SPARK3542_COMPAT_PACKAGE_SIGNATURE="$package_signature" \
       setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
       cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
-        -p vonk-agent-helper --test spark3542_compat_package_retry_fixture \
-        sends_only_one_pinned_exact_package_retry_and_replay_is_rejected \
+        -p vonk-agent-helper --test spark3542_compat_reboot_fixture \
+        sends_only_one_pinned_reboot_and_replay_is_rejected \
         -- --ignored --exact
+    test "$(stat -c '%U:%G:%a:%h' "$compat_request_ledger")" = root:root:600:1
+    cmp -s <(printf 'pending\n') "$compat_request_ledger"
+    test ! -e "$compat_collision_ledger"
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$compat_reboot_timer")" = active
+    systemctl --system stop "$compat_reboot_timer" "$compat_reboot_service" \
+      >/dev/null 2>&1 || true
+    systemctl --system reset-failed \
+      "$compat_reboot_timer" "$compat_reboot_service" \
+      >/dev/null 2>&1 || true
+    systemctl --system stop \
+      "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
+      >/dev/null 2>&1 || true
+    systemctl --system daemon-reload
+    systemctl --system reset-failed \
+      "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
+      >/dev/null 2>&1 || true
+    systemctl --system start "$socket_unit"
+    for _ in {1..150}; do
+      recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
+        "$recovery_unit")
+      [[ "$recovery_exit" == 75 ]] && break
+      sleep 0.1
+    done
+    test "$recovery_exit" = 75
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" = inactive
+    touch "$test_root/release-dpkg-lock"
+    wait "$dpkg_lock_pid"
+    dpkg_lock_pid=
   else
     systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
     test "$(systemctl --system show --property=ActiveState --value \
@@ -908,6 +1019,21 @@ agent_pid=$(systemctl --system show --property=MainPID --value "$agent_unit")
 test "$(sha256sum "/proc/$helper_pid/exe" | cut -d' ' -f1)" = "$helper_digest"
 test "$(sha256sum "/proc/$agent_pid/exe" | cut -d' ' -f1)" = "$agent_digest"
 test "$(stat -c %U "/proc/$agent_pid")" = vonk-agent
+if (( compatibility_trigger == 1 )); then
+  for _ in {1..100}; do
+    reboot_service_load=$(systemctl --system show --property=LoadState --value \
+      "$compat_reboot_service" 2>/dev/null || true)
+    reboot_timer_load=$(systemctl --system show --property=LoadState --value \
+      "$compat_reboot_timer" 2>/dev/null || true)
+    [[ "$reboot_service_load" == not-found \
+      && "$reboot_timer_load" == not-found ]] && break
+    sleep 0.05
+  done
+  test "$(systemctl --system show --property=LoadState --value \
+    "$compat_reboot_service")" = not-found
+  test "$(systemctl --system show --property=LoadState --value \
+    "$compat_reboot_timer")" = not-found
+fi
 
 # A subsequent ordinary live reinstall must accept and replace the durable v2
 # receipt. Package removal must then accept the normal v1 receipt.
