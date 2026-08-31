@@ -4109,6 +4109,8 @@ export interface components {
              * @constant
              */
             delay_seconds: 60;
+            /** Dispatch Certificate Serial */
+            dispatch_certificate_serial: string;
             /**
              * Expected Retry Attempt
              * @constant
@@ -4174,6 +4176,8 @@ export interface components {
              * @constant
              */
             delay_seconds: 60;
+            /** Dispatch Certificate Serial */
+            dispatch_certificate_serial: string;
             /**
              * Expected Retry Attempt
              * @constant

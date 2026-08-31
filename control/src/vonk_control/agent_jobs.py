@@ -511,6 +511,7 @@ class AgentJobService:
                 # contacts cannot accidentally create attempt 4 or reach the
                 # one-shot grant issuer.
                 from .compat_recovery import (
+                    DISPATCH_CERTIFICATE_SERIAL,
                     SOURCE_ATTEMPT,
                     SOURCE_BINARY_DIGEST,
                     SOURCE_BUILD_DIGEST,
@@ -526,8 +527,7 @@ class AgentJobService:
                     and operation.current_attempt == SOURCE_ATTEMPT
                     and operation.retry_disposition == _RETRY_DISPOSITION
                     and operation.retry_disposition_attempt == SOURCE_ATTEMPT
-                    and certificate_serial
-                    == operation_compatibility_recovery.source_certificate_serial
+                    and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
                     and runtime_identity.get("architecture") == "linux-arm64"
                     and runtime_identity.get("semantic_version")
                     == SOURCE_SEMANTIC_VERSION
@@ -760,6 +760,7 @@ class AgentJobService:
         from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 
         from .compat_recovery import (
+            DISPATCH_CERTIFICATE_SERIAL,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
@@ -905,7 +906,7 @@ class AgentJobService:
                             and operation.retry_disposition_attempt is None
                         )
                     )
-                    and certificate_serial == recovery.source_certificate_serial
+                    and certificate_serial == DISPATCH_CERTIFICATE_SERIAL
                 )
                 or (
                     not before_dispatch

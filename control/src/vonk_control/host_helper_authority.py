@@ -26,6 +26,9 @@ from vonk_agent_protocol.host_helper import (
 )
 
 from .compat_recovery import (
+    DISPATCH_CERTIFICATE_SERIAL as COMPAT_DISPATCH_CERTIFICATE_SERIAL,
+)
+from .compat_recovery import (
     NODE_ID as COMPAT_NODE_ID,
 )
 from .compat_recovery import (
@@ -384,7 +387,7 @@ class HostRuntimeAuthorityService:
             and source.agent_certificate_serial == recovery.source_certificate_serial
             and node is not None
             and node.contact_certificate_serial
-            == recovery.source_certificate_serial
+            == COMPAT_DISPATCH_CERTIFICATE_SERIAL
             == certificate_serial
             and node.semantic_version
             == recovery.source_semantic_version

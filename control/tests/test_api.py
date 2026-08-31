@@ -185,6 +185,7 @@ class CompatibilityRecovery:
                 "source_attempt": 3,
                 "source_fence": "10000000-0000-4000-8000-000000000001",
                 "source_certificate_serial": "dev335-certificate",
+                "dispatch_certificate_serial": "current-dev335-certificate",
                 "expected_retry_attempt": 4,
                 "upgrade_payload_sha256": "e" * 64,
                 "target": {
