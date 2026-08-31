@@ -424,11 +424,26 @@ class Spark3542CompatibilityRecoveryService:
         package = operation.payload
         payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
         stored_document = self._stored_document(recovery)
-        if not (
-            recovery.state == "operator-blocked"
-            and recovery.blocked_at is not None
-            and recovery.completed_at is None
-            and recovery.issued_at is not None
+        certificate_binding_exact = bool(
+            (
+                recovery.rearm_attempt_certificate_serial is None
+                and recovery.rearm_dispatch_certificate_serial is None
+                and certificate.serial == ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
+            )
+            or (
+                recovery.rearm_attempt_certificate_serial
+                == retry.agent_certificate_serial
+                and recovery.rearm_dispatch_certificate_serial == certificate.serial
+            )
+        )
+        grantless_terminal = bool(
+            self._grantless_rearm_candidate(recovery)
+            and recovery.rearm_attempt_certificate_serial
+            == retry.agent_certificate_serial
+            and recovery.rearm_dispatch_certificate_serial == certificate.serial
+        )
+        issued_terminal = bool(
+            recovery.issued_at is not None
             and recovery.retry_fence is not None
             and recovery.retry_certificate_serial is not None
             and recovery.signed_grant is not None
@@ -436,6 +451,13 @@ class Spark3542CompatibilityRecoveryService:
             and recovery.grant_expires_at is not None
             and recovery.identity_deadline is not None
             and _aware(recovery.identity_deadline) <= _aware(now)
+        )
+        if not (
+            recovery.state == "operator-blocked"
+            and recovery.blocked_at is not None
+            and recovery.completed_at is None
+            and (grantless_terminal or issued_terminal)
+            and certificate_binding_exact
             and recovery.plan_digest
             == hashlib.sha256(canonical_message(stored_document)).hexdigest()
             and recovery.node_id == NODE_ID
@@ -534,7 +556,14 @@ class Spark3542CompatibilityRecoveryService:
             "operation_id": OPERATION_ID,
             "retry_attempt": RETRY_ATTEMPT,
             "blocked_at": _aware(recovery.blocked_at).isoformat(),
-            "identity_deadline": _aware(recovery.identity_deadline).isoformat(),
+            "identity_deadline": (
+                _aware(recovery.identity_deadline).isoformat()
+                if recovery.identity_deadline is not None
+                else None
+            ),
+            "grant_disposition": (
+                "never-issued" if grantless_terminal else "issued-and-expired"
+            ),
             "contact_certificate_serial": certificate.serial,
             "source_identity": {
                 "semantic_version": node.semantic_version,

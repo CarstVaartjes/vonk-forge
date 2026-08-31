@@ -230,6 +230,7 @@ class CompatibilityRecovery:
                 "retry_attempt": 4,
                 "blocked_at": "2026-08-31T16:23:44+00:00",
                 "identity_deadline": "2026-08-31T16:23:44+00:00",
+                "grant_disposition": "issued-and-expired",
                 "contact_certificate_serial": "current-dev335-certificate",
                 "source_identity": {
                     "semantic_version": SOURCE_SEMANTIC_VERSION,

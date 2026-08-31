@@ -335,6 +335,90 @@ def test_expired_recovery_abandonment_releases_only_queued_mutation(tmp_path):
         assert queued_operation is not None and queued_operation.state == "queued"
 
 
+def test_grantless_terminal_abandonment_preserves_no_grant_and_exact_rearm_certs(
+    tmp_path,
+):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert node is not None and recovery is not None and retry is not None
+        session.add(
+            AgentCertificate(
+                serial=ROTATED_DISPATCH_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(minutes=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="rotated-dispatch-fingerprint",
+                generation=4,
+            )
+        )
+        node.contact_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        recovery.rearm_attempt_certificate_serial = GRANTLESS_RETRY_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        retry.state = "waiting-for-operator"
+
+    preview = service.preview_abandon()
+    assert preview.document["grant_disposition"] == "never-issued"
+    assert preview.document["identity_deadline"] is None
+    assert (
+        preview.document["contact_certificate_serial"] == ROTATED_DISPATCH_CERTIFICATE
+    )
+    abandoned = service.abandon(
+        plan_digest=preview.plan_digest,
+        confirmation=ABANDON_CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    assert abandoned.state == "abandoned"
+    assert notifications == [True, True]
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None and recovery.state == "abandoned"
+        assert recovery.signed_grant is None
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.issued_at is None
+        assert recovery.identity_deadline is None
+
+
+def test_grantless_terminal_abandonment_rejects_inexact_dispatch_certificate(
+    tmp_path,
+):
+    sessions, service, _ = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    with sessions.begin() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None
+        recovery.rearm_attempt_certificate_serial = GRANTLESS_RETRY_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+
+    with pytest.raises(CompatibilityRecoveryConflict, match="cannot be abandoned"):
+        service.preview_abandon()
+
+
 def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, caplog):
     sessions, service, notifications = seeded_services(tmp_path)
     original = service.preview()
