@@ -414,6 +414,17 @@ class AgentJobService:
                 capabilities,
                 runtime_identity,
             )
+            replay = self._replay_grantless_compatibility_claim(
+                session,
+                node_id=node_id,
+                certificate_serial=certificate.serial,
+                now=now,
+                protocol_version=protocol_version,
+                capabilities=capabilities,
+                runtime_identity=runtime_identity,
+            )
+            if replay is not None:
+                return replay
             expired_attempt = (
                 select(AgentOperationAttempt.id)
                 .where(
@@ -621,6 +632,186 @@ class AgentJobService:
                 payload=operation.payload,
                 deadline=deadline,
             )
+
+    @staticmethod
+    def _replay_grantless_compatibility_claim(
+        session: Session,
+        *,
+        node_id: str,
+        certificate_serial: str,
+        now: datetime,
+        protocol_version: int | None,
+        capabilities: tuple[str, ...] | None,
+        runtime_identity: Mapping[str, object],
+    ) -> AgentClaim | None:
+        """Replay only the exact grantless dev335 attempt-4 claim.
+
+        The administrator re-arm transition has already reopened this durable
+        attempt. This path creates no attempt, fence, or grant; it merely
+        returns the same claim until its first exact helper request persists
+        the one allowed signed grant.
+        """
+
+        from .compat_recovery import (
+            _GRANTLESS_RETRY_FAILURE,
+            DISPATCH_CERTIFICATE_SERIAL,
+            JOB_ID,
+            NODE_ID,
+            OPERATION_ID,
+            RECOVERY_ID,
+            RETRY_ATTEMPT,
+            SOURCE_ATTEMPT,
+            SOURCE_ATTEMPT_CERTIFICATE_SERIAL,
+            SOURCE_BINARY_DIGEST,
+            SOURCE_BUILD_DIGEST,
+            SOURCE_SEMANTIC_VERSION,
+            TARGET_BINARY_DIGEST,
+            TARGET_BUILD_DIGEST,
+            TARGET_PACKAGE_SHA256,
+            TARGET_PACKAGE_VERSION,
+            Spark3542CompatibilityRecoveryService,
+        )
+
+        if node_id != NODE_ID:
+            return None
+        recovery = session.scalar(
+            select(AgentUpgradeCompatibilityRecovery)
+            .where(AgentUpgradeCompatibilityRecovery.id == RECOVERY_ID)
+            .with_for_update(of=AgentUpgradeCompatibilityRecovery)
+        )
+        if recovery is None:
+            return None
+        operation = session.scalar(
+            select(StoredOperation)
+            .where(StoredOperation.id == OPERATION_ID)
+            .with_for_update(of=StoredOperation)
+        )
+        parent = session.scalar(
+            select(Job).where(Job.id == JOB_ID).with_for_update(of=Job)
+        )
+        source = session.scalar(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
+            )
+            .with_for_update(of=AgentOperationAttempt)
+        )
+        retry = session.scalar(
+            select(AgentOperationAttempt)
+            .where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+            .with_for_update(of=AgentOperationAttempt)
+        )
+        if operation is None or parent is None or source is None or retry is None:
+            return None
+        package = operation.payload
+        payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
+        parent_package = (
+            parent.payload.get("package") if isinstance(parent.payload, dict) else None
+        )
+        parent_digest = (
+            Spark3542CompatibilityRecoveryService._job_plan_digest(
+                authority_revision=parent.authority_revision,
+                node_ids=[NODE_ID],
+                package=parent_package,
+            )
+            if isinstance(parent_package, dict)
+            else None
+        )
+        recovery_digest = hashlib.sha256(
+            canonical_message(
+                Spark3542CompatibilityRecoveryService._stored_document(recovery)
+            )
+        ).hexdigest()
+        if not (
+            recovery.state == "armed"
+            and recovery.blocked_at is None
+            and recovery.completed_at is None
+            and recovery.retry_fence is None
+            and recovery.retry_certificate_serial is None
+            and recovery.signed_grant is None
+            and recovery.grant_request_id is None
+            and recovery.grant_expires_at is None
+            and recovery.identity_deadline is None
+            and recovery.issued_at is None
+            and recovery.node_id == NODE_ID
+            and recovery.job_id == JOB_ID
+            and recovery.operation_id == OPERATION_ID
+            and recovery.source_attempt == SOURCE_ATTEMPT
+            and recovery.expected_retry_attempt == RETRY_ATTEMPT
+            and recovery.source_fence == source.fence
+            and recovery.source_certificate_serial
+            == source.agent_certificate_serial
+            == SOURCE_ATTEMPT_CERTIFICATE_SERIAL
+            and recovery.source_semantic_version == SOURCE_SEMANTIC_VERSION
+            and recovery.source_binary_digest == SOURCE_BINARY_DIGEST
+            and recovery.source_build_digest == SOURCE_BUILD_DIGEST
+            and recovery.package_sha256 == TARGET_PACKAGE_SHA256
+            and recovery.target_package_version == TARGET_PACKAGE_VERSION
+            and recovery.target_binary_digest == TARGET_BINARY_DIGEST
+            and recovery.target_build_digest == TARGET_BUILD_DIGEST
+            and recovery.plan_digest == recovery_digest
+            and recovery.upgrade_payload_sha256 == payload_digest
+            and operation.id == OPERATION_ID
+            and operation.parent_job_id == JOB_ID
+            and operation.node_id == NODE_ID
+            and operation.kind == AgentOperation.AGENT_UPGRADE.value
+            and operation.state == "running"
+            and operation.current_attempt == RETRY_ATTEMPT
+            and operation.retry_disposition is None
+            and operation.retry_disposition_attempt is None
+            and operation.authority_revision == recovery.authority_revision
+            and operation.payload_digest == payload_digest
+            and Spark3542CompatibilityRecoveryService._exact_target(package)
+            and parent.id == JOB_ID
+            and parent.kind == "agent-upgrade"
+            and parent.state == "running"
+            and parent.targets == [NODE_ID]
+            and parent.authority_revision == recovery.authority_revision
+            and set(parent.payload) == {"node_order", "package", "strategy"}
+            and parent.payload.get("node_order") == [NODE_ID]
+            and parent.payload.get("strategy") == "one-at-a-time"
+            and parent_package == package
+            and parent.payload_digest == parent_digest
+            and source.attempt == SOURCE_ATTEMPT
+            and source.fence == recovery.source_fence
+            and source.agent_certificate_serial == recovery.source_certificate_serial
+            and source.state in {"expired", "failed", "waiting-for-operator"}
+            and retry.attempt == RETRY_ATTEMPT
+            and retry.state == "running"
+            and retry.result == _GRANTLESS_RETRY_FAILURE
+            and retry.agent_certificate_serial
+            == certificate_serial
+            == DISPATCH_CERTIFICATE_SERIAL
+            and _aware(retry.lease_deadline) > _aware(now)
+            and protocol_version == 3
+            and capabilities is not None
+            and {"agent.runtime.rust.v1", AgentOperation.AGENT_UPGRADE.value}.issubset(
+                capabilities
+            )
+            and runtime_identity.get("architecture") == "linux-arm64"
+            and runtime_identity.get("semantic_version") == SOURCE_SEMANTIC_VERSION
+            and runtime_identity.get("build_digest") == SOURCE_BUILD_DIGEST
+            and runtime_identity.get("binary_digest") == SOURCE_BINARY_DIGEST
+            and runtime_identity.get("self_test_passed") is True
+        ):
+            return None
+        return AgentClaim(
+            schema_version=1,
+            job_id=operation.parent_job_id,
+            operation_id=operation.id,
+            attempt=retry.attempt,
+            fence=retry.fence,
+            node_id=operation.node_id,
+            operation=AgentOperation(operation.kind),
+            authority_revision=operation.authority_revision,
+            payload_digest=operation.payload_digest,
+            payload=operation.payload,
+            deadline=_aware(retry.lease_deadline),
+        )
 
     def _reconcile_agent_upgrade(
         self,
@@ -1448,7 +1639,12 @@ class AgentJobService:
             deadline = (
                 _aware(recovery.identity_deadline)
                 if recovery.identity_deadline is not None
-                else _aware(recovery.created_at) + _COMPATIBILITY_ARM_TIMEOUT
+                else _aware(
+                    operation.updated_at
+                    if operation is not None
+                    else recovery.created_at
+                )
+                + _COMPATIBILITY_ARM_TIMEOUT
             )
             if _aware(now) < deadline:
                 return False

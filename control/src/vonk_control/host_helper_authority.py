@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -58,6 +59,8 @@ from .compat_recovery import (
 from .models import AgentNode, AgentOperationAttempt, AgentUpgradeCompatibilityRecovery
 from .models import AgentOperation as StoredAgentOperation
 from .workload_helper_authority import _load_private_key
+
+logger = logging.getLogger(__name__)
 
 
 class HostHelperAuthorityError(RuntimeError):
@@ -187,7 +190,9 @@ class HostRuntimeAuthorityService:
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
     }
-    _COMPATIBILITY_GRANT_SECONDS: ClassVar[int] = 30
+    # dev335 and the staged a122 recovery both request this exact TTL. Keep
+    # equality below: this is a compatibility value, not a range or default.
+    _COMPATIBILITY_GRANT_SECONDS: ClassVar[int] = 10
     _COMPATIBILITY_IDENTITY_WINDOW: ClassVar[timedelta] = timedelta(minutes=15)
 
     def __init__(
@@ -416,9 +421,18 @@ class HostRuntimeAuthorityService:
             and recovery.target_build_digest
             == package.get("target_build_digest")
             == COMPAT_TARGET_BUILD_DIGEST
-            and expires_in_seconds == self._COMPATIBILITY_GRANT_SECONDS
         )
         if not exact:
+            self._log_compatibility_rejection(
+                recovery, attempt=attempt, category="authority_mismatch"
+            )
+            raise HostHelperAuthorityError(
+                "Spark3542 compatibility recovery authority is stale"
+            )
+        if expires_in_seconds != self._COMPATIBILITY_GRANT_SECONDS:
+            self._log_compatibility_rejection(
+                recovery, attempt=attempt, category="ttl_mismatch"
+            )
             raise HostHelperAuthorityError(
                 "Spark3542 compatibility recovery authority is stale"
             )
@@ -456,6 +470,9 @@ class HostRuntimeAuthorityService:
                 )
             return replay
         if recovery.state != "armed" or recovery.signed_grant is not None:
+            self._log_compatibility_rejection(
+                recovery, attempt=attempt, category="grant_unavailable"
+            )
             raise HostHelperAuthorityError(
                 "Spark3542 compatibility recovery grant is unavailable"
             )
@@ -482,6 +499,23 @@ class HostRuntimeAuthorityService:
         recovery.identity_deadline = now + self._COMPATIBILITY_IDENTITY_WINDOW
         recovery.issued_at = now
         return grant
+
+    @staticmethod
+    def _log_compatibility_rejection(
+        recovery: AgentUpgradeCompatibilityRecovery,
+        *,
+        attempt: int,
+        category: str,
+    ) -> None:
+        logger.warning(
+            "compatibility host-helper grant rejected",
+            extra={
+                "compatibility_recovery_id": recovery.id,
+                "operation_id": recovery.operation_id,
+                "attempt": attempt,
+                "rejection_category": category,
+            },
+        )
 
     def _check_attempt(
         self,
