@@ -289,7 +289,7 @@
   },
   "recipes": {
     "vonk-forge/flux-2-klein-4b-comfyui-single": {
-      "content_sha256": "eea5ea1b7d83e13fc609d05fd6fbbcdc90e75ba48268a9d80841a356282bc0cd",
+      "content_sha256": "2169cae98b93ef16b8ea63c508b0319a32736fb309191a0e4b0e3c73743898f6",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -343,7 +343,7 @@
       ]
     },
     "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": {
-      "content_sha256": "dc2f424a7b33cbd80e4ef21cc4d44b4be60c98c8cf9e6825d4bd401431ebbe6b",
+      "content_sha256": "d7b92ff1327c7cd0b92970556bd17ea66ec3af95291c1a8890ccb7c200cd5d5e",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -397,7 +397,7 @@
       ]
     },
     "vonk-forge/nvidia-qwen-image-flash-diffusers-single": {
-      "content_sha256": "84846b238017fdfcf005bff4b47c2926affb301d84bce1540a78a418c700fa93",
+      "content_sha256": "de66ff6463978fada6d20b367acbbceee202d4628c28fd1eef7c9daaf3e4cbce",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -451,7 +451,7 @@
       ]
     },
     "vonk-forge/qwen-image-2512-comfyui-single": {
-      "content_sha256": "5951289d2234b9fc7e2796cbc15f2ca5cadc5fde9769574ec1b316c27a5ff3f5",
+      "content_sha256": "681b33b3c55a91597692ace91c35b099b9278d4eebef597456f5709e0e228190",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -505,7 +505,7 @@
       ]
     },
     "vonk-forge/qwen-image-2512-diffusers-single": {
-      "content_sha256": "e974c866fda586348ccef9dc878b61453b97af8be4658238f1bf41427c505792",
+      "content_sha256": "69b791d247068de33f5c16e36ee510ca703e7c35252f422d88b8d64e4a89c730",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -559,7 +559,7 @@
       ]
     },
     "vonk-forge/qwen-image-2512-lightning-diffusers-single": {
-      "content_sha256": "509c571e6a560695a61573c3088a13ffb71b6b0236efe8cb35c290e68f5cc189",
+      "content_sha256": "1d6f9477651ecda6d99d39d6397e363d11dfc43f3ad556f46f0a1db48694e6ff",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -613,7 +613,7 @@
       ]
     },
     "vonk-forge/qwen-image-edit-2511-comfyui-single": {
-      "content_sha256": "a06709b85f4362f0734a29df913f23c193695e46f76e5f9790474cd553dff364",
+      "content_sha256": "7c8c441c009ad0d644db586098e08e1aef0da7ac98faaf83564ef30170827136",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -681,7 +681,7 @@
       ]
     },
     "vonk-forge/qwen-image-edit-2511-diffusers-single": {
-      "content_sha256": "5fead827cba6522bf7ca6ab09aa78085e9693d74dee078bb8b89ae7d4debf4dd",
+      "content_sha256": "398f83975b1bd4f48c94ba64b3172b6ad7da8a6e668c24ffca9d147cecf2e164",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -749,7 +749,7 @@
       ]
     },
     "vonk-forge/qwen-image-edit-2511-lightning-diffusers-single": {
-      "content_sha256": "859cfe5d8784590595834a494dcd81cbdee5f2122a8e147789b7a60640ee49c4",
+      "content_sha256": "264343639a21a240b46d8b46e98832dc545505de16ac05a345f978410f918b40",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -817,7 +817,7 @@
       ]
     },
     "vonk-forge/qwen-image-layered-diffusers-single": {
-      "content_sha256": "243331d70f2da290c2a15d0a7fcb71467f2a8e9ca7e1079ec9e478a098bdb3dc",
+      "content_sha256": "747988f1dc95f93aac153597f221bbb45686892e27399e2af0e2749550f1532b",
       "interface": "artifact-job",
       "parameters": {},
       "inputs": [
@@ -874,7 +874,7 @@
       ]
     },
     "vonk-forge/hunyuan3d-omni-pytorch-single": {
-      "content_sha256": "efca27d07ffeb067256c428242fd281bbd915bbf9ac6b9bb57de71b3d98928df",
+      "content_sha256": "8d7af5d163132b8b2d65c46fea8540176606eeab2e5f8544b2049eb9b0dbdd9d",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -966,7 +966,7 @@
       ]
     },
     "vonk-forge/skintokens-pytorch-single": {
-      "content_sha256": "c9195fb2bfd95242491df225153750b2d1aa5a00198ddd5dadaaabf6c47ef704",
+      "content_sha256": "1078fec55c9d6b58ecdb2c94ed0e515912e0a2bac08379fb7d7f21c98ab6283a",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -1018,7 +1018,7 @@
       ]
     },
     "vonk-forge/step1x-3d-geometry-pytorch-single": {
-      "content_sha256": "034e0c4aad9a43e02160f833fbff0962e8bdd184b2bb86c4cbe1341fd84572d0",
+      "content_sha256": "adb5968933e13f826e81da1ad928146fa96edfb6f23a01b5478c9cb6cad4392b",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -1064,7 +1064,7 @@
       ]
     },
     "vonk-forge/step1x-3d-label-geometry-pytorch-single": {
-      "content_sha256": "734b2734e64bfde1cac2024e80de53c98495789e0d6a7d4820932ebe46fbca47",
+      "content_sha256": "5579e710b65141aaf17c1bd207710dc6e278f914ea5297dcf4ceb71eacfef847",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -1110,7 +1110,7 @@
       ]
     },
     "vonk-forge/step1x-3d-texture-pytorch-single": {
-      "content_sha256": "3595f1a0a92ea0dcf0fbed63ab8e2a240ab4aa39976c734c8350447cf9351adf",
+      "content_sha256": "2ec3e3e53d7cbe51410301dc32bd8e5cfe82cb6222bf1db1b8adceb8b8fabf5c",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -1212,7 +1212,7 @@
       ]
     },
     "vonk-forge/triposg-pytorch-single": {
-      "content_sha256": "63e052fa5a49575c1f39b2131294e1031f4a1b3d0dc74677d6f87571d59cf547",
+      "content_sha256": "2b4335af5197968c34ba6182e78aa8d5d663fa35fadb7e13db7708f58f74b297",
       "interface": "mesh-job",
       "parameters": {},
       "inputs": [
@@ -1258,7 +1258,7 @@
       ]
     },
     "vonk-forge/mova-360p-diffusers-single": {
-      "content_sha256": "66f28da24cc2420ad8c1805d737202788a5cd087f0ad3d705cee9b6af76c56d6",
+      "content_sha256": "e41a11631e0d26b32a10cfd5682c41ac66b8a68642382da7d4bbc1b9b5fbac43",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1326,7 +1326,7 @@
       ]
     },
     "vonk-forge/mova-720p-diffusers-single": {
-      "content_sha256": "b52595b5efa9b9996327a9c29a0c9203e1ddc7ca6b8e50b3bf7a970c69665819",
+      "content_sha256": "aed23720acc1e5bb7f960a9974e2b5c53c735fed41b72d363924eaa961c88f56",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1394,7 +1394,7 @@
       ]
     },
     "vonk-forge/wan-2-2-i2v-14b-comfyui-single": {
-      "content_sha256": "c63caaecd2e059b5cfa84c3cec749900d30be966172a2ace8b4cfe490ac1848d",
+      "content_sha256": "373a948d4a6163e29e5b41d5f6971057cb1e4bbb5ed3803e0292a94320d3cbf0",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1452,7 +1452,7 @@
       ]
     },
     "vonk-forge/wan-2-2-t2v-14b-comfyui-single": {
-      "content_sha256": "697037cf44b33a7abc4f7e460d18cc1e311385d79b41b5863538f34488a0ac0b",
+      "content_sha256": "63da00c0906859479ecf251b4366219853752228fc8f7bfb12f033e2a6caa021",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1506,7 +1506,7 @@
       ]
     },
     "vonk-forge/wan-2-2-ti2v-5b-comfyui-single": {
-      "content_sha256": "41d7a92f932efa7362bf880cd0b44c37a6e24f3f222677c27b9321bb3cf85bf4",
+      "content_sha256": "4c12f075c0afccabbc0fa6b21b0bbabc6fdb14596ec46c4c50358cab32073d5d",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1724,7 +1724,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": {
-      "content_sha256": "a8f88e67bdb9846f378ccca6afe8f6e3dccf724360d61ce4ed68a85f9a07db9b",
+      "content_sha256": "960b825735a830becc2e42f01fc92ff0edf4b6f2f7a812a0f6c706810f8614da",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1791,7 +1791,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": {
-      "content_sha256": "06b3a57766d29b92544870a51879b9fc7f22a09784b0402d7f31a9182ce99c03",
+      "content_sha256": "32f866c8eb41e0de62f3c18ce9d9ba6107c9c2ca8846402ac45c4cd5e62999a4",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1858,7 +1858,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-distilled-diffusers-single": {
-      "content_sha256": "8e923fc076b95429ba212faa8023261b467c3becfc27d626427c793cd5eb081e",
+      "content_sha256": "2402dd923e0544ccfba4f0e8d147233ecaa00ea38d192c6309029af15dfdcf75",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1925,7 +1925,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": {
-      "content_sha256": "4a897b5f628f176f4c22069dbdaae694fc953186640391bdadf87c494ae438a4",
+      "content_sha256": "3838c0f398c42785137619fa4d3b8e18cef6f66bc8811e554647a1e150e42c8f",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1992,7 +1992,7 @@
       ]
     },
     "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": {
-      "content_sha256": "08e3c9c5b9f7336ada4200e29f1ab107eb6e70cd87d04527af11d44ce56f4921",
+      "content_sha256": "1850c1240b7028522631d23cd1438bc930db199fcdbddca3606263081ace6b42",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -2059,7 +2059,7 @@
       ]
     },
     "vonk-forge/minimax-h3-diffusers-single": {
-      "content_sha256": "4fcd4bf996ffe224d6b877aead4b64ff2c62d1bb86ac7bbf291639067ad6d150",
+      "content_sha256": "ccc7622d875d7afc1171e66faa1bb20bf98cd10c80e25e7de2709502bde9bb4f",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -2126,7 +2126,7 @@
       ]
     },
     "vonk-forge/ltx-2-5-22b-distilled-bf16-diffusers-single": {
-      "content_sha256": "feaf3dfc1cd57dc58ebaa63cfb76dadf8bb18bf6901dd4abdc1fb9bbc69afac2",
+      "content_sha256": "889ca27825623bac876490e6bd83492437ae64dbd64327d69757c92e1bc1f470",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -2220,7 +2220,7 @@
       ]
     },
     "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single": {
-      "content_sha256": "412f01ef4bc380b409b73eab9a340a9b37464cd119028111903ed57b39bb1edc",
+      "content_sha256": "0b26a789538751b9c7cd899e1ef4d60dec4f1bf215b75cc83b705abf88c77c7c",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -2660,7 +2660,7 @@
       ]
     },
     "vonk-forge/moss-vl-realtime-11b-pytorch-single": {
-      "content_sha256": "8e463bad03d9479b59f9d964af4692160559b29978f8dcc42cb1cfb1abed6102",
+      "content_sha256": "6b3f3802322e6edb47490705d96329ef0473a14d95d04e1af7d4da24d9f39bdf",
       "interface": "artifact-job",
       "parameters": {},
       "inputs": [
@@ -2761,7 +2761,7 @@
       ]
     },
     "vonk-forge/minimax-h3-fl2va-diffusers-single": {
-      "content_sha256": "405bfbcf878ee3eb8f6c8e627652541074901be2433306ace7d73fd63fbc0f55",
+      "content_sha256": "3d0cc380ae32b9c19e9b0cf2da5a8dd5522dd63690d166c65f41604ca106f1e6",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -2847,7 +2847,7 @@
       ]
     },
     "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": {
-      "content_sha256": "bfde8c32a2adb166815a10306a8bcd09e44c03414ef40261004b1b4c0ee13782",
+      "content_sha256": "b7ffa44be4ae99feb10716ee5b46ba68a48632c47072579311f0bcc0b7ee2eab",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -2901,7 +2901,7 @@
       ]
     },
     "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": {
-      "content_sha256": "0469503d348283f45d0cb22013f63749420eaf1cf4f981f38c0103736eb867f4",
+      "content_sha256": "8f70cbe740ca7cd2a4a40161395530fe1f9d86b5a1aeab5a57d92423a347b309",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -2969,7 +2969,7 @@
       ]
     },
     "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": {
-      "content_sha256": "fee0c2880a89bf639e8e6d6b257825a07cd52e972dfb9809e1f920fd53c02627",
+      "content_sha256": "61fda0a7c2ad58e699f5e1bff52dc592f53d518b2cdeea6c74be801e79b30e97",
       "interface": "image-job",
       "parameters": {},
       "inputs": [
@@ -3763,7 +3763,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual": {
-      "content_sha256": "97e28bf3ebff5e672b8c11945628a78ee891d88945f13b5343e27ff81385d1a1",
+      "content_sha256": "44678c6c6a86bca5a70dd10144278d98e1e9e9f8dd56bfcec3dc16df52bd2351",
       "alias": "glm-5.3-flash",
       "smoke_cases": [
         "M0",
@@ -3799,7 +3799,7 @@
       }
     },
     "vonk-forge/qwen3-8-flash-next-nvfp4-sglang-dual": {
-      "content_sha256": "e784fed74099b500700538c0cb31cfee4425315370dc5c3571fd5d7affb2f15e",
+      "content_sha256": "b7463dc64dcabb93f16810e3396c0a507b809c1bc93a9cafd7165ef702ba1e76",
       "alias": "qwen3.8-flash-next",
       "smoke_cases": [
         "M0",
@@ -3817,7 +3817,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual": {
-      "content_sha256": "a576566f96a875157aae37d5db76de071580e427855ab1950bb0644675e5c47b",
+      "content_sha256": "9892cf5b96978bdbb736b96ab7f7b2b97b47552138182adccfea2b9c95358694",
       "alias": "glm-5.3-flash-nvfp4",
       "smoke_cases": [
         "M0",
@@ -4183,7 +4183,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual": {
-      "content_sha256": "cff8d29ca0ec6cd3b233c424b5f7c2155d1701a7ac5e1819fb8a3538bf5496c3",
+      "content_sha256": "a068d343ca6c2962f1df66146280a245dd136c6c6cd28556e7b5f0da08853a04",
       "alias": "glm-5.3-flash-exl3",
       "smoke_cases": [
         "M0",
