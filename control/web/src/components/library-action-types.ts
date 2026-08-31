@@ -8,7 +8,7 @@ export type LibraryActionTarget =
   | {kind: "stop"; runId: string}
   | {kind: "uninstall"; installationId: string};
 
-export type LibraryActionName = "Build" | "Mapping" | "Distribute" | "Install" | "Load" | "Stop" | "Remove";
+export type LibraryActionName = "Build" | "Mapping" | "Distribute" | "Install" | "Load" | "Stop" | "Remove" | "Delete model";
 
 export type LibraryActionReview = {
   evidence?: LibraryPlacementGroup;

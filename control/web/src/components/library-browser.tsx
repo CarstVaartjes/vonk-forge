@@ -1,12 +1,14 @@
 import {useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {LibraryApi, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe} from "../api/types";
+import type {LibraryApi, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import type {LibraryRoute} from "../lib/library-route";
-import {modelLibraryPath, modelVersionKey, recipeLibraryPath, unlinkedLibraryPath} from "../lib/library-route";
+import {modelVersionKey, recipeLibraryPath} from "../lib/library-route";
 import {LibraryComparison} from "./library-comparison";
 import {LibraryRecipeAuthority} from "./library-recipe-detail";
 import {friendlyModelName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
+import type {ManagedCatalogSyncSummary} from "../api/types";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type LibraryViewMode = "browse" | "compact" | "compare";
@@ -27,10 +29,6 @@ function initialViewMode(): LibraryViewMode {
     // Storage can be unavailable in locked-down browsers. Browse remains safe.
   }
   return "browse";
-}
-
-function countLabel(count: number, windowed: boolean): string {
-  return `${count} recipe${count === 1 ? "" : "s"}${windowed ? " shown" : ""}`;
 }
 
 function modelLabel(model: LibrarySnapshot["models"][number]): string {
@@ -83,40 +81,6 @@ function CompareControl({disabled, recipe, selected, onToggle}: {
   </label>;
 }
 
-function RecipeEntry({active, catalogRecipe, onNavigate, onToggle, recipe, selected, selectionFull}: {
-  active: boolean;
-  catalogRecipe?: PublicRecipe;
-  onNavigate: Navigate;
-  onToggle(recipeId: string): void;
-  recipe: LibraryRecipeSummary;
-  selected: boolean;
-  selectionFull: boolean;
-}) {
-  return <article className="library-row-shell">
-    <a
-      href={recipeLibraryPath(recipe.recipe_id)}
-      className="library-row"
-      aria-current={active ? "page" : undefined}
-      onClick={event => onNavigate(event, recipeLibraryPath(recipe.recipe_id))}
-    >
-      <strong>{recipe.title}</strong>
-      <span>{recipe.description}</span>
-      <small>{recipe.topology_name ? `${humanizeIdentifier(recipe.topology_name)} topology` : "No valid topology"} · {recipeStatus(recipe)}</small>
-      {catalogRecipe && <small className="library-catalog-scan"><QualificationBadge recipe={catalogRecipe}/><span className={`library-release-label status-${catalogRecipe.local.status}`}>{releaseContextLabel(catalogRecipe)}</span></small>}
-    </a>
-    <div className="library-row-tools">
-      {catalogRecipe?.local.status === "update-available" && <a aria-label={`Review update for ${recipe.title}`} className="library-release-link" href={releaseReviewPath(catalogRecipe)} onClick={event => onNavigate(event, releaseReviewPath(catalogRecipe))}>Review update</a>}
-      <CompareControl disabled={selectionFull} recipe={recipe} selected={selected} onToggle={onToggle}/>
-      <TechnicalDetails compact items={[
-        {label: "Recipe ID", value: recipe.recipe_id},
-        {label: "Recipe slug", value: recipe.slug},
-        {label: "Revision ID", value: recipe.selected_revision?.id ?? ""},
-        {label: "Content digest", value: recipe.selected_revision?.content_sha256 ?? ""},
-      ]}/>
-    </div>
-  </article>;
-}
-
 function RecipeReleaseContext({onNavigate, recipe}: {onNavigate: Navigate; recipe: PublicRecipe}) {
   const update = recipe.local.status === "update-available";
   const needsReview = ["different-revision", "local-ahead", "conflict"].includes(recipe.local.status);
@@ -128,18 +92,6 @@ function RecipeReleaseContext({onNavigate, recipe}: {onNavigate: Navigate; recip
     {recipe.local.status === "current" && <p>This local digest matches the current catalog release.</p>}
     {(update || needsReview) && <a className="button secondary" href={releaseReviewPath(recipe)} onClick={event => onNavigate(event, releaseReviewPath(recipe))}>{update ? "Review changelog and update" : "Review catalog relationship"}</a>}
   </section>;
-}
-
-function selectedModel(snapshot: LibrarySnapshot, route: LibraryRoute) {
-  if (route.kind === "model" && !route.unlinked) return snapshot.models.find(model => modelVersionKey(model.model) === route.modelKey);
-  if (route.kind !== "recipe") return undefined;
-  return snapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === route.recipeId));
-}
-
-function selectedRecipe(snapshot: LibrarySnapshot, route: LibraryRoute): LibraryRecipeSummary | undefined {
-  if (route.kind !== "recipe") return undefined;
-  return snapshot.models.flatMap(model => model.recipes).concat(snapshot.unlinked_recipes)
-    .find(recipe => recipe.recipe_id === route.recipeId);
 }
 
 function searchableModel(model: LibrarySnapshot["models"][number]): string {
@@ -178,40 +130,42 @@ function flattenedRecipes(snapshot: LibrarySnapshot): RecipeWithModel[] {
   ];
 }
 
-export function LibraryBrowser({api, catalogError, catalogLoading, detail, detailError, detailLoading, onBusyChange, onClearSearch, onNavigate, onRefresh, onRetryCatalog, onRetryDetail, preferredNodeId, publicRecipes, query, route, snapshot, windowed}: {
+export function LibraryBrowser({api, catalogCommit, catalogError, catalogLoading, catalogRepository, detail, detailError, detailLoading, fleet, fleetError, onBusyChange, onClearSearch, onNavigate, onRefresh, onRetryCatalog, onRetryDetail, onRetryFleet, onSyncNow, preferredNodeId, publicRecipes, query, route, snapshot, syncAvailable, syncError, syncing, syncSummary, windowed}: {
   api: LibraryApi;
+  catalogCommit?: string;
   catalogError: string;
   catalogLoading: boolean;
+  catalogRepository?: string;
   detail?: LibraryRecipeDetail;
   detailError: string;
   detailLoading: boolean;
+  fleet?: VisualFleetSnapshot;
+  fleetError: string;
   onBusyChange?(busy: boolean): void;
   onClearSearch(): void;
   onNavigate: Navigate;
   onRefresh(signal: AbortSignal): Promise<void>;
   onRetryCatalog(): void;
   onRetryDetail(): void;
+  onRetryFleet(): void;
+  onSyncNow(): void;
   preferredNodeId?: string;
   publicRecipes: PublicRecipe[];
   query: string;
   route: LibraryRoute;
   snapshot: LibrarySnapshot;
+  syncAvailable: boolean;
+  syncError: string;
+  syncing: boolean;
+  syncSummary?: ManagedCatalogSyncSummary;
   windowed: boolean;
 }) {
   const [viewMode, setViewMode] = useState<LibraryViewMode>(initialViewMode);
   const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [workcellFilters, setWorkcellFilters] = useState(EMPTY_LIBRARY_WORKCELL_FILTERS);
   const visibleSnapshot = filteredSnapshot(snapshot, query, route);
   const allRecipes = useMemo(() => flattenedRecipes(snapshot), [snapshot]);
   const visibleFlatRecipes = useMemo(() => flattenedRecipes(visibleSnapshot), [visibleSnapshot]);
-  const model = selectedModel(visibleSnapshot, route);
-  const recipe = selectedRecipe(visibleSnapshot, route);
-  const unlinked = route.kind === "model"
-    ? route.unlinked
-    : route.kind === "recipe" && !model && visibleSnapshot.unlinked_recipes.some(item => item.recipe_id === route.recipeId);
-  const visibleRecipes = unlinked
-    ? visibleSnapshot.unlinked_recipes
-    : model?.recipes ?? visibleFlatRecipes.map(item => item.recipe);
-  const modelPath = model ? modelLibraryPath(modelVersionKey(model.model)) : unlinked ? unlinkedLibraryPath() : "/library";
   const selectionFull = compareIds.length >= 3;
   const publicByLocalRecipe = useMemo(() => new Map(publicRecipes.flatMap(item => item.local.recipe_id ? [[item.local.recipe_id, item] as const] : [])), [publicRecipes]);
   const catalogUpdateCount = new Set(publicRecipes.flatMap(item => item.local.status === "update-available" && item.local.recipe_id ? [item.local.recipe_id] : [])).size;
@@ -249,58 +203,37 @@ export function LibraryBrowser({api, catalogError, catalogLoading, detail, detai
       <button type="button" className="button secondary" onClick={onClearSearch}>Clear Library search</button>
     </section>}
 
-    {viewMode === "browse" && (!hasSearch || hasVisibleResults) && <div className={`library-browser route-${route.kind}${detail?.visual_recipe?.interfaces.some(item => item.adapter !== "openai") ? " has-artifact-workspace" : ""}`}>
-      <section className="library-pane library-models" aria-label="Models">
-        <div className="library-pane-heading"><div><p className="library-step">1</p><h3>Models</h3></div><small>Derived from recipes</small></div>
-        <div className="library-list">
-          {visibleSnapshot.models.map(item => <article className="library-row-shell library-model-row" key={modelVersionKey(item.model)}>
-            <a
-              href={modelLibraryPath(modelVersionKey(item.model))}
-              className="library-row"
-              aria-current={model && modelVersionKey(model.model) === modelVersionKey(item.model) ? "page" : undefined}
-              onClick={event => onNavigate(event, modelLibraryPath(modelVersionKey(item.model)))}
-            ><strong>{modelLabel(item)}</strong><span>Model family</span><small>{countLabel(item.recipes.length, windowed)}</small></a>
-            <div className="library-row-tools"><TechnicalDetails compact items={[
-              {label: "Publisher", value: item.model.publisher},
-              {label: "Model slug", value: item.model.slug},
-              {label: "Model digest", value: item.model.content_sha256},
-            ]}/></div>
-          </article>)}
-          {visibleSnapshot.unlinked_recipes.length > 0 && <a
-            href={unlinkedLibraryPath()}
-            className="library-row library-unlinked"
-            aria-current={unlinked ? "page" : undefined}
-            onClick={event => onNavigate(event, unlinkedLibraryPath())
-          }><strong>Unlinked</strong><span>Recipes without a valid exact model version</span><small>{countLabel(snapshot.unlinked_recipes.length, windowed)}</small></a>}
-        </div>
-      </section>
-
-      <section className="library-pane library-recipes" aria-label={model ? `Recipes for ${modelLabel(model)}` : unlinked ? "Unlinked recipes" : "Recipe inventory"}>
-        <a className="library-back" href="/library" onClick={event => onNavigate(event, "/library")}>Back to Models</a>
-        <div className="library-pane-heading"><div><p className="library-step">2</p><h3>{model ? modelLabel(model) : (unlinked ? "Unlinked" : "Recipe inventory")}</h3></div><small>{countLabel(visibleRecipes.length, windowed)}</small></div>
-        {visibleRecipes ? <div className="library-list">{visibleRecipes.length > 0 ? visibleRecipes.map(item => <RecipeEntry active={item.recipe_id === recipe?.recipe_id} catalogRecipe={publicByLocalRecipe.get(item.recipe_id)} key={item.recipe_id} onNavigate={onNavigate} onToggle={toggleCompare} recipe={item} selected={compareIds.includes(item.recipe_id)} selectionFull={selectionFull}/>) : <p className="library-placeholder">No recipes match this search.</p>}</div> : <p className="library-placeholder">Select a model to see all of its recipes.</p>}
-      </section>
-
-      <section className="library-pane library-detail" aria-label="Recipe detail">
-        {route.kind === "recipe" && <a className="library-back" href={modelPath} onClick={event => onNavigate(event, modelPath)}>Back to {model ? `${modelLabel(model)} recipes` : unlinked ? "Unlinked recipes" : "Models"}</a>}
-        {route.kind !== "recipe" && <p className="library-placeholder">Select a recipe to inspect its exact topology and authority.</p>}
-        {route.kind === "recipe" && <>
-          <div className="library-pane-heading"><div><p className="library-step">3</p><h3>{detail?.recipe.title ?? recipe?.title ?? "Recipe"}</h3></div></div>
-          {detailLoading && <p role="status">Loading exact recipe authority…</p>}
-          {detailError && <div className="fleet-error" role="alert"><p>{detailError}</p><button type="button" onClick={onRetryDetail}>Retry recipe detail</button></div>}
-          {detail && publicByLocalRecipe.get(detail.recipe.recipe_id) && <RecipeReleaseContext onNavigate={onNavigate} recipe={publicByLocalRecipe.get(detail.recipe.recipe_id)!}/>}
-          {detail && <LibraryRecipeAuthority
-            api={api}
-            catalogRecipe={publicByLocalRecipe.get(detail.recipe.recipe_id)}
-            detail={detail}
-            onBusyChange={onBusyChange}
-            onRefresh={onRefresh}
-            policy={snapshot.freshness_policy}
-            preferredNodeId={preferredNodeId}
-          />}
-        </>}
-      </section>
-    </div>}
+    {viewMode === "browse" && (!hasSearch || hasVisibleResults) && <LibraryWorkcell
+      api={api}
+      catalogCommit={catalogCommit}
+      catalogRepository={catalogRepository}
+      detail={detail}
+      detailContent={route.kind === "recipe" && detail ? <>
+        {publicByLocalRecipe.get(detail.recipe.recipe_id) && <RecipeReleaseContext onNavigate={onNavigate} recipe={publicByLocalRecipe.get(detail.recipe.recipe_id)!}/>}
+        <LibraryRecipeAuthority api={api} catalogRecipe={publicByLocalRecipe.get(detail.recipe.recipe_id)} detail={detail} onBusyChange={onBusyChange} onRefresh={onRefresh} policy={snapshot.freshness_policy} preferredNodeId={preferredNodeId}/>
+      </> : undefined}
+      detailError={detailError}
+      detailLoading={detailLoading}
+      fleet={fleet}
+      fleetError={fleetError}
+      filters={workcellFilters}
+      onBusyChange={onBusyChange}
+      onFiltersChange={setWorkcellFilters}
+      onNavigate={onNavigate}
+      onRefresh={onRefresh}
+      onRetryDetail={onRetryDetail}
+      onRetryFleet={onRetryFleet}
+      onSyncNow={onSyncNow}
+      publicRecipes={publicRecipes}
+      query={query}
+      route={route}
+      snapshot={snapshot}
+      syncAvailable={syncAvailable}
+      syncError={syncError}
+      syncing={syncing}
+      syncSummary={syncSummary}
+      windowed={windowed}
+    />}
 
     {viewMode === "compact" && <section className="library-compact" aria-label="Compact recipe list">
       <div className="library-compact-heading"><div><p className="fleet-kicker">Loaded window</p><h3>All recipes</h3></div><span>{visibleFlatRecipes.length} shown</span></div>

@@ -17,6 +17,17 @@ import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details"
 
 export type LibraryActionPlan = LibraryBuildPlan | LibraryMappingPlan | LibraryImageDistributionPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
 
+type LibraryUninstallModelImpact = {
+  model_impact?: {
+    cleanup_node_ids?: string[];
+    dependent_recipe_ids?: string[];
+    effect: "recipe-only" | "recipe-and-unused-model" | "recipe-and-partial-model-cleanup";
+    model_version_sha256?: string;
+    model_title?: string;
+    retained_node_ids?: string[];
+  };
+};
+
 export function BuildPreview({plan}: {plan: LibraryBuildPlan}) {
   const nodeName = useLibraryNodeName();
   return <div className="action-preview">
@@ -159,8 +170,18 @@ export function StopPreview({plan}: {plan: LibraryStopPlan}) {
 
 export function UninstallPreview({plan}: {plan: LibraryUninstallPlan}) {
   const nodeName = useLibraryNodeName();
+  const modelImpact = (plan as LibraryUninstallPlan & LibraryUninstallModelImpact).model_impact;
+  const cleanupNodeIds = modelImpact?.cleanup_node_ids ?? [];
+  const retainedNodeIds = modelImpact?.retained_node_ids ?? [];
   return <div className="action-preview">
     <p>{plan.bytes_removed == null ? "Exact removable bytes are unknown." : `${formatBytes(plan.bytes_removed)} will be removed.`}</p>
+    {modelImpact?.effect === "recipe-only" && <section aria-label="Model impact"><h4>Recipe only</h4><p>{modelImpact.model_title ?? "The shared model"} stays installed on every Spark because another installed recipe still uses it.</p></section>}
+    {modelImpact?.effect === "recipe-and-unused-model" && <section aria-label="Model impact"><h4>Recipe and unused model</h4><p>{modelImpact.model_title ?? "The model"} has no other dependent recipes and will be removed with this recipe.</p><p>Its files are removed from every affected Spark.</p></section>}
+    {modelImpact?.effect === "recipe-and-partial-model-cleanup" && <section aria-label="Model impact"><h4>Recipe and partial model cleanup</h4><p>The recipe is removed from the complete placement. {modelImpact.model_title ?? "The model"} is deleted only where this is the last installed recipe that uses it.</p></section>}
+    {modelImpact && cleanupNodeIds.length > 0 && <section aria-label="Model cleanup locations"><h4>Model files removed</h4><ul>{cleanupNodeIds.map(nodeId => <li key={nodeId}>{nodeName(nodeId)}<TechnicalDetails compact items={[{label: "Node ID", value: nodeId}]}/></li>)}</ul></section>}
+    {modelImpact && retainedNodeIds.length > 0 && <section aria-label="Model retention locations"><h4>Model files retained</h4><p>Other installed recipes still reference this exact model on:</p><ul>{retainedNodeIds.map(nodeId => <li key={nodeId}>{nodeName(nodeId)}<TechnicalDetails compact items={[{label: "Node ID", value: nodeId}]}/></li>)}</ul></section>}
+    {modelImpact && (modelImpact.dependent_recipe_ids?.length ?? 0) > 0 && <p>{modelImpact.dependent_recipe_ids!.length} other installed recipe{modelImpact.dependent_recipe_ids!.length === 1 ? " still uses" : "s still use"} this exact model elsewhere in the fleet.</p>}
+    {!modelImpact && <section aria-label="Model impact"><h4>Model dependency impact unavailable</h4><p>The Controller must report shared model dependencies before Forge can promise whether model files stay or are removed.</p></section>}
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
       <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {nodeName(node.node_id)}</strong><span>{node.installed_bytes == null ? "Installed bytes unknown" : `${formatBytes(node.installed_bytes)} installed`}</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
     </li>)}</ol>

@@ -161,6 +161,12 @@ export type PublicRecipe = {
 export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
 export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"; changes_since_local: PublicRecipeRelease[]};
 export type ManagedCatalogSyncSummary = components["schemas"]["ManagedCatalogSyncResponse"];
+export type ManagedCatalogSyncInput = components["schemas"]["ManagedCatalogSyncRequest"];
+export type LibraryPlacementPreviewInput = components["schemas"]["LibraryPlacementPreviewRequest"];
+export type LibraryPlacementPreview = components["schemas"]["LibraryPlacementPreview"];
+export type LibraryPlacementApplyInput = components["schemas"]["LibraryPlacementApplyRequest"];
+export type LibraryPlacementApplication = components["schemas"]["LibraryPlacementApplication"];
+export type LibraryModelDeletionPlan = components["schemas"]["ModelDeletionPlanResponse"];
 export interface CatalogApi {
   catalogRecipes(cursor?: string): Promise<CatalogRecipeList>;
   catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision>;
@@ -173,7 +179,7 @@ export interface CatalogApi {
   listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
   previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview>;
   importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision>;
-  syncManagedRecipeCatalog(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
+  syncManagedRecipeCatalog(input?: ManagedCatalogSyncInput, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
   managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
   attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void>;
   publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>>;
@@ -195,6 +201,11 @@ export interface WorkloadRunApi {
 export interface LibraryApi {
   librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
   libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;
+  previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal): Promise<LibraryPlacementPreview>;
+  applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
+  libraryPlacement(placementId: string, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
+  previewLibraryModelDeletion(modelVersionSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
+  deleteLibraryModel(modelVersionSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal): Promise<LibraryBuildPlan>;
   applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal): Promise<LibraryMappingPlan>;
