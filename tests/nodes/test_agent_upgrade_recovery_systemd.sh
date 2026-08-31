@@ -254,6 +254,13 @@ baseline_package=$(find "$test_root/baseline-dist" -maxdepth 1 -type f \
 package_digest=$(sha256sum "$package" | cut -d' ' -f1)
 package_signature=$(tr -d '\n' < "${package}.host.sig")
 [[ "$package_signature" =~ ^[0-9a-f]{128}$ ]]
+target_recovery_runner=$test_root/target-package-upgrade-recover
+dpkg-deb --fsys-tarfile "$package" \
+  | tar -xOf - ./usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
+  > "$target_recovery_runner"
+chmod 0555 "$target_recovery_runner"
+target_recovery_runner_digest=$(sha256sum "$target_recovery_runner" \
+  | cut -d' ' -f1)
 agent_digest=$(sha256sum "$test_root/target-bin/vonk-agent" | cut -d' ' -f1)
 helper_digest=$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -d' ' -f1)
 baseline_agent_digest=$(sha256sum "$test_root/baseline-bin/vonk-agent" \
@@ -754,6 +761,8 @@ if [[ "$crash_mode" == full-cgroup ]]; then
       "$agent_unit")
     cp -- /var/lib/vonk-forge/package-upgrade/intent \
       "$test_root/compat-intent"
+    grep -Fxq "runner_sha256=$target_recovery_runner_digest" \
+      "$test_root/compat-intent"
     sed 's/^unit_sha256=.*/unit_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/' \
       "$test_root/compat-intent" > "$test_root/compat-intent.invalid"
     install -o root -g root -m 0600 "$test_root/compat-intent.invalid" \
@@ -812,6 +821,16 @@ if [[ "$crash_mode" == full-cgroup ]]; then
     install -o root -g root -m 0555 \
       "$test_root/baseline-bin/vonk-agent-helper" \
       /usr/lib/vonk-forge/vonk-agent-helper
+    # Killing the synthetic dpkg fixture may restore its baseline data file
+    # after the target preinst durably records the target runner. Spark3542's
+    # pinned authority instead proves the exact staged a122 runner is present,
+    # so restore and prove that observed state before exercising its one-shot
+    # compatibility grant.
+    install -o root -g root -m 0555 "$target_recovery_runner" \
+      /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+    test "$(sha256sum \
+      /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
+      | cut -d' ' -f1)" = "$target_recovery_runner_digest"
     systemctl --system daemon-reload
     systemctl --system reset-failed "$helper_unit" "$recovery_unit" \
       >/dev/null 2>&1 || true
