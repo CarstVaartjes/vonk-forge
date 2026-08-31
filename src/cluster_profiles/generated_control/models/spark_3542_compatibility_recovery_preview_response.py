@@ -9,6 +9,7 @@ from ..types import UNSET, Unset
 from ..models.spark_3542_compatibility_recovery_preview_response_state import check_spark_3542_compatibility_recovery_preview_response_state
 from ..models.spark_3542_compatibility_recovery_preview_response_state import Spark3542CompatibilityRecoveryPreviewResponseState
 from typing import cast
+from typing import cast, Union
 from typing import Literal, cast
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             compatibility_recovery_id (Literal['spark3542-a122-scheduled-reboot-v1']):
             delay_seconds (Literal[60]):
             dispatch_certificate_serial (str):
+            dispatch_job_targets (list[Literal['spk_2818d189042b4c77aefa7796f4befd23']]):
             expected_retry_attempt (Literal[4]):
             job_id (Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']):
             node_id (Literal['spk_2818d189042b4c77aefa7796f4befd23']):
@@ -42,6 +44,8 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             source_certificate_serial (str):
             source_fence (str):
             source_identity (Spark3542CompatibilityRecoverySourceIdentity):
+            source_job_targets (list[Union[Literal['spk_2818d189042b4c77aefa7796f4befd23'],
+                Literal['spk_9a86fdbab116442ab6707bf4181a3c1c']]]):
             state (Spark3542CompatibilityRecoveryPreviewResponseState):
             target (Spark3542CompatibilityRecoveryTarget):
             upgrade_payload_sha256 (str):
@@ -52,6 +56,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
     compatibility_recovery_id: Literal['spark3542-a122-scheduled-reboot-v1']
     delay_seconds: Literal[60]
     dispatch_certificate_serial: str
+    dispatch_job_targets: list[Literal['spk_2818d189042b4c77aefa7796f4befd23']]
     expected_retry_attempt: Literal[4]
     job_id: Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']
     node_id: Literal['spk_2818d189042b4c77aefa7796f4befd23']
@@ -62,6 +67,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
     source_certificate_serial: str
     source_fence: str
     source_identity: 'Spark3542CompatibilityRecoverySourceIdentity'
+    source_job_targets: list[Union[Literal['spk_2818d189042b4c77aefa7796f4befd23'], Literal['spk_9a86fdbab116442ab6707bf4181a3c1c']]]
     state: Spark3542CompatibilityRecoveryPreviewResponseState
     target: 'Spark3542CompatibilityRecoveryTarget'
     upgrade_payload_sha256: str
@@ -83,6 +89,10 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
 
         dispatch_certificate_serial = self.dispatch_certificate_serial
 
+        dispatch_job_targets = self.dispatch_job_targets
+
+
+
         expected_retry_attempt = self.expected_retry_attempt
 
         job_id = self.job_id
@@ -103,6 +113,14 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
 
         source_identity = self.source_identity.to_dict()
 
+        source_job_targets = []
+        for source_job_targets_item_data in self.source_job_targets:
+            source_job_targets_item: Union[Literal['spk_2818d189042b4c77aefa7796f4befd23'], Literal['spk_9a86fdbab116442ab6707bf4181a3c1c']]
+            source_job_targets_item = source_job_targets_item_data
+            source_job_targets.append(source_job_targets_item)
+
+
+
         state: str = self.state
 
         target = self.target.to_dict()
@@ -118,6 +136,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             "compatibility_recovery_id": compatibility_recovery_id,
             "delay_seconds": delay_seconds,
             "dispatch_certificate_serial": dispatch_certificate_serial,
+            "dispatch_job_targets": dispatch_job_targets,
             "expected_retry_attempt": expected_retry_attempt,
             "job_id": job_id,
             "node_id": node_id,
@@ -128,6 +147,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             "source_certificate_serial": source_certificate_serial,
             "source_fence": source_fence,
             "source_identity": source_identity,
+            "source_job_targets": source_job_targets,
             "state": state,
             "target": target,
             "upgrade_payload_sha256": upgrade_payload_sha256,
@@ -157,6 +177,15 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             raise ValueError(f"delay_seconds must match const 60, got '{delay_seconds}'")
 
         dispatch_certificate_serial = d.pop("dispatch_certificate_serial")
+
+        dispatch_job_targets = []
+        _dispatch_job_targets = d.pop("dispatch_job_targets")
+        for dispatch_job_targets_item_data in (_dispatch_job_targets):
+            dispatch_job_targets_item = cast(Literal['spk_2818d189042b4c77aefa7796f4befd23'] , dispatch_job_targets_item_data)
+            if dispatch_job_targets_item != 'spk_2818d189042b4c77aefa7796f4befd23':
+                raise ValueError(f"dispatch_job_targets_item must match const 'spk_2818d189042b4c77aefa7796f4befd23', got '{dispatch_job_targets_item}'")
+            dispatch_job_targets.append(dispatch_job_targets_item)
+
 
         expected_retry_attempt = cast(Literal[4] , d.pop("expected_retry_attempt"))
         if expected_retry_attempt != 4:
@@ -193,6 +222,24 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
 
 
 
+        source_job_targets = []
+        _source_job_targets = d.pop("source_job_targets")
+        for source_job_targets_item_data in (_source_job_targets):
+            def _parse_source_job_targets_item(data: object) -> Union[Literal['spk_2818d189042b4c77aefa7796f4befd23'], Literal['spk_9a86fdbab116442ab6707bf4181a3c1c']]:
+                source_job_targets_item_type_0 = cast(Literal['spk_2818d189042b4c77aefa7796f4befd23'] , data)
+                if source_job_targets_item_type_0 != 'spk_2818d189042b4c77aefa7796f4befd23':
+                    raise ValueError(f"source_job_targets_item_type_0 must match const 'spk_2818d189042b4c77aefa7796f4befd23', got '{source_job_targets_item_type_0}'")
+                return source_job_targets_item_type_0
+                source_job_targets_item_type_1 = cast(Literal['spk_9a86fdbab116442ab6707bf4181a3c1c'] , data)
+                if source_job_targets_item_type_1 != 'spk_9a86fdbab116442ab6707bf4181a3c1c':
+                    raise ValueError(f"source_job_targets_item_type_1 must match const 'spk_9a86fdbab116442ab6707bf4181a3c1c', got '{source_job_targets_item_type_1}'")
+                return source_job_targets_item_type_1
+
+            source_job_targets_item = _parse_source_job_targets_item(source_job_targets_item_data)
+
+            source_job_targets.append(source_job_targets_item)
+
+
         state = check_spark_3542_compatibility_recovery_preview_response_state(d.pop("state"))
 
 
@@ -211,6 +258,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             compatibility_recovery_id=compatibility_recovery_id,
             delay_seconds=delay_seconds,
             dispatch_certificate_serial=dispatch_certificate_serial,
+            dispatch_job_targets=dispatch_job_targets,
             expected_retry_attempt=expected_retry_attempt,
             job_id=job_id,
             node_id=node_id,
@@ -221,6 +269,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             source_certificate_serial=source_certificate_serial,
             source_fence=source_fence,
             source_identity=source_identity,
+            source_job_targets=source_job_targets,
             state=state,
             target=target,
             upgrade_payload_sha256=upgrade_payload_sha256,

@@ -372,6 +372,11 @@ class Spark3542CompatibilityRecoveryResponse(BaseModel):
     delay_seconds: Literal[60]
     compatibility_recovery_id: Literal["spark3542-a122-scheduled-reboot-v1"]
     node_id: Literal["spk_2818d189042b4c77aefa7796f4befd23"]
+    source_job_targets: tuple[
+        Literal["spk_2818d189042b4c77aefa7796f4befd23"],
+        Literal["spk_9a86fdbab116442ab6707bf4181a3c1c"],
+    ]
+    dispatch_job_targets: tuple[Literal["spk_2818d189042b4c77aefa7796f4befd23"]]
     source_identity: Spark3542CompatibilityRecoverySourceIdentity
     job_id: Literal["6b945136-1be6-47e4-8ba0-5c5f815304ad"]
     operation_id: Literal["d54e0b56-e465-41bd-9627-c81f37352dfd"]

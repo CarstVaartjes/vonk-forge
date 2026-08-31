@@ -4111,6 +4111,10 @@ export interface components {
             delay_seconds: 60;
             /** Dispatch Certificate Serial */
             dispatch_certificate_serial: string;
+            /** Dispatch Job Targets */
+            dispatch_job_targets: [
+                "spk_2818d189042b4c77aefa7796f4befd23"
+            ];
             /**
              * Expected Retry Attempt
              * @constant
@@ -4148,6 +4152,11 @@ export interface components {
             /** Source Fence */
             source_fence: string;
             source_identity: components["schemas"]["Spark3542CompatibilityRecoverySourceIdentity"];
+            /** Source Job Targets */
+            source_job_targets: [
+                "spk_2818d189042b4c77aefa7796f4befd23",
+                "spk_9a86fdbab116442ab6707bf4181a3c1c"
+            ];
             /**
              * State
              * @enum {string}
@@ -4178,6 +4187,10 @@ export interface components {
             delay_seconds: 60;
             /** Dispatch Certificate Serial */
             dispatch_certificate_serial: string;
+            /** Dispatch Job Targets */
+            dispatch_job_targets: [
+                "spk_2818d189042b4c77aefa7796f4befd23"
+            ];
             /**
              * Expected Retry Attempt
              * @constant
@@ -4210,6 +4223,11 @@ export interface components {
             /** Source Fence */
             source_fence: string;
             source_identity: components["schemas"]["Spark3542CompatibilityRecoverySourceIdentity"];
+            /** Source Job Targets */
+            source_job_targets: [
+                "spk_2818d189042b4c77aefa7796f4befd23",
+                "spk_9a86fdbab116442ab6707bf4181a3c1c"
+            ];
             /**
              * State
              * @enum {string}

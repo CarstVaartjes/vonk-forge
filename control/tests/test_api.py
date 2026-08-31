@@ -153,6 +153,7 @@ class CompatibilityRecovery:
     @staticmethod
     def preview():
         from vonk_control.compat_recovery import (
+            FOLLOWING_NODE_ID,
             JOB_ID,
             NODE_ID,
             OPERATION_ID,
@@ -175,6 +176,8 @@ class CompatibilityRecovery:
                 "compatibility_recovery_id": RECOVERY_ID,
                 "authority_revision": "c" * 64,
                 "node_id": NODE_ID,
+                "source_job_targets": [NODE_ID, FOLLOWING_NODE_ID],
+                "dispatch_job_targets": [NODE_ID],
                 "source_identity": {
                     "semantic_version": SOURCE_SEMANTIC_VERSION,
                     "binary_digest": SOURCE_BINARY_DIGEST,
