@@ -26,7 +26,7 @@ relay. SSH is not part of qualification or recovery.
 
 The settled recipe-library checkout contains **82** `recipes/*.json` documents
 and **243** resolved catalog entities. This matrix is bound to recipe-library commit
-`ad9a376af20b0708294149138eb911fac2754696` and the generated
+`f8d43aacbaa16c016697be684bf688ef3b81932a` and the generated
 `catalog-index.json` SHA-256
 `88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca`.
 
@@ -35,8 +35,7 @@ The repository gates are green for this snapshot:
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
 - the cross-repository validator passed all 82 recipes, all 243 entities, and
   the secret scan;
-- the focused fixture, campaign, and cross-repository validator suite passed 38
-  tests; and
+- the focused fleet, fixture, and campaign suite passed 75 tests; and
 - the portable cluster/control suite passed 201 tests and 45 subtests, while
   Linux-only package and lifecycle gates remain delegated to Linux CI.
 
