@@ -76,7 +76,7 @@ const preview: FleetProfilePreview = {
   plan_digest: "b".repeat(64),
   generated_at: NOW.toISOString(),
   allowed: true,
-  summary: {already_correct: 0, blockers: 0, distributions: 0, installs: 0, placements: 0, starts: 2, stops: 0, uninstalls: 0},
+  summary: {already_correct: 0, blockers: 0, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 2, stops: 0, uninstalls: 0},
   assignments: [{assignment_id: profile.assignments[0].id, recipe_revision_id: REVISION_ID, recipe_title: profile.assignments[0].recipe_title, desired_state: "running", current_state: "installed", node_ids: [NODE_A, NODE_B], actions: ["start"], reasons: []}],
   reasons: [],
   steps: [

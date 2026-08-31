@@ -1047,6 +1047,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/placements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Placement */
+        post: operations["applyLibraryPlacement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/placements/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Placement */
+        post: operations["previewLibraryPlacement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/placements/{placement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Placement */
+        get: operations["getLibraryPlacement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/recipes/{recipe_id}": {
         parameters: {
             query?: never;
@@ -2035,7 +2086,7 @@ export interface components {
         /** FleetProfileAssignmentPreview */
         FleetProfileAssignmentPreview: {
             /** Actions */
-            actions: ("stop" | "create-placement" | "distribute-image" | "install" | "start" | "keep")[];
+            actions: ("stop" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "keep")[];
             /** Assignment Id */
             assignment_id: string;
             /**
@@ -2124,7 +2175,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "stop" | "uninstall" | "create-placement" | "distribute-image" | "install" | "start";
+            kind: "stop" | "uninstall" | "create-placement" | "build" | "distribute-image" | "install" | "start";
             /** Label */
             label: string;
             /** Node Ids */
@@ -2140,6 +2191,8 @@ export interface components {
             already_correct: number;
             /** Blockers */
             blockers: number;
+            /** Builds */
+            builds: number;
             /** Distributions */
             distributions: number;
             /** Installs */
@@ -2666,6 +2719,217 @@ export interface components {
             page_local: true;
             /** Recipes */
             recipes: components["schemas"]["LibraryRecipeSummary"][];
+        };
+        /** LibraryPlacementApplication */
+        LibraryPlacementApplication: {
+            /** Alias */
+            alias: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Operation Id */
+            current_operation_id: string | null;
+            /** Current Step */
+            current_step: number;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            /** Id */
+            id: string;
+            locations: components["schemas"]["LibraryPlacementLocations"];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Progress */
+            progress: {
+                [key: string]: unknown;
+            };
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Selected Node Ids */
+            selected_node_ids: string[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            /** Status Reason */
+            status_reason: string | null;
+            /** Total Steps */
+            total_steps: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** LibraryPlacementApplyRequest */
+        LibraryPlacementApplyRequest: {
+            /** Alias */
+            alias?: string | null;
+            /**
+             * Desired State
+             * @default installed
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            /**
+             * Invocation
+             * @default button
+             * @enum {string}
+             */
+            invocation: "drag-drop" | "keyboard" | "button";
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /** LibraryPlacementLocations */
+        LibraryPlacementLocations: {
+            /** Installation Ids */
+            installation_ids: string[];
+            /** Installed */
+            installed: boolean;
+            /** Run Ids */
+            run_ids: string[];
+            /** Running */
+            running: boolean;
+        };
+        /** LibraryPlacementNode */
+        LibraryPlacementNode: {
+            /** Disk Free After Bytes */
+            disk_free_after_bytes?: number | null;
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Required Bytes */
+            disk_required_bytes?: number | null;
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Free After Bytes */
+            memory_free_after_bytes?: number | null;
+            /** Memory Required Bytes */
+            memory_required_bytes?: number | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+        };
+        /** LibraryPlacementPreview */
+        LibraryPlacementPreview: {
+            /** Alias */
+            alias: string | null;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["LibraryPlacementReason"][];
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Invocation
+             * @enum {string}
+             */
+            invocation: "drag-drop" | "keyboard" | "button";
+            locations: components["schemas"]["LibraryPlacementLocations"];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Recipe Title */
+            recipe_title: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Selected Node Ids */
+            selected_node_ids: string[];
+            /** Selected Nodes */
+            selected_nodes: components["schemas"]["LibraryPlacementNode"][];
+            /** Steps */
+            steps: components["schemas"]["LibraryPlacementStep"][];
+            /** Topology Name */
+            topology_name: string;
+            /** Warnings */
+            warnings: components["schemas"]["LibraryPlacementReason"][];
+        };
+        /** LibraryPlacementPreviewRequest */
+        LibraryPlacementPreviewRequest: {
+            /** Alias */
+            alias?: string | null;
+            /**
+             * Desired State
+             * @default installed
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            /**
+             * Invocation
+             * @default button
+             * @enum {string}
+             */
+            invocation: "drag-drop" | "keyboard" | "button";
+            /** Node Ids */
+            node_ids: string[];
+            /** Recipe Id */
+            recipe_id: string;
+        };
+        /** LibraryPlacementReason */
+        LibraryPlacementReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Node Ids */
+            node_ids?: string[];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "error";
+        };
+        /** LibraryPlacementStep */
+        LibraryPlacementStep: {
+            /** Index */
+            index: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stop" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "keep";
+            /** Label */
+            label: string;
+            /** Node Ids */
+            node_ids?: string[];
         };
         /** LibraryRecipeDetail */
         LibraryRecipeDetail: {
@@ -8300,6 +8564,220 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    applyLibraryPlacement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryPlacementApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryPlacementApplication"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewLibraryPlacement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryPlacementPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryPlacementPreview"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getLibraryPlacement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                placement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryPlacementApplication"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

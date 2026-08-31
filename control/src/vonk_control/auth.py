@@ -49,6 +49,8 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
+    ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
+    ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are

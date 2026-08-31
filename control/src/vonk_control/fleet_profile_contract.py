@@ -153,16 +153,28 @@ class FleetProfileAssignmentPreview(_StrictModel):
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     actions: list[
         Literal[
-            "stop", "create-placement", "distribute-image", "install", "start", "keep"
+            "stop",
+            "create-placement",
+            "build",
+            "distribute-image",
+            "install",
+            "start",
+            "keep",
         ]
-    ] = Field(max_length=6)
+    ] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
 
 
 class FleetProfilePlanStep(_StrictModel):
     index: int = Field(ge=0, le=1023)
     kind: Literal[
-        "stop", "uninstall", "create-placement", "distribute-image", "install", "start"
+        "stop",
+        "uninstall",
+        "create-placement",
+        "build",
+        "distribute-image",
+        "install",
+        "start",
     ]
     assignment_id: UuidId | None = None
     owner_id: UuidId | None = None
@@ -174,6 +186,7 @@ class FleetProfilePlanStep(_StrictModel):
 class FleetProfilePlanSummary(_StrictModel):
     already_correct: int = Field(ge=0, le=64)
     placements: int = Field(ge=0, le=64)
+    builds: int = Field(ge=0, le=64)
     distributions: int = Field(ge=0, le=64)
     installs: int = Field(ge=0, le=64)
     starts: int = Field(ge=0, le=64)

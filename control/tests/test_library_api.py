@@ -160,9 +160,16 @@ def test_library_maps_cursor_missing_and_unavailable_failures_without_mutations(
     }
     assert set(paths) == {
         "/api/v1/library",
+        "/api/v1/library/placements",
+        "/api/v1/library/placements/preview",
+        "/api/v1/library/placements/{placement_id}",
         "/api/v1/library/recipes/{recipe_id}",
     }
-    assert all(set(path_item) == {"get"} for path_item in paths.values())
+    assert set(paths["/api/v1/library"]) == {"get"}
+    assert set(paths["/api/v1/library/recipes/{recipe_id}"]) == {"get"}
+    assert set(paths["/api/v1/library/placements"]) == {"post"}
+    assert set(paths["/api/v1/library/placements/preview"]) == {"post"}
+    assert set(paths["/api/v1/library/placements/{placement_id}"]) == {"get"}
 
 
 def test_library_openapi_has_stable_operations_typed_models_and_bearer_security() -> (
