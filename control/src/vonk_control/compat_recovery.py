@@ -35,6 +35,7 @@ SOURCE_JOB_TARGETS = (NODE_ID, FOLLOWING_NODE_ID)
 JOB_ID = "6b945136-1be6-47e4-8ba0-5c5f815304ad"
 OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
 SOURCE_ATTEMPT = 3
+RETRY_ATTEMPT = SOURCE_ATTEMPT + 1
 SOURCE_ATTEMPT_CERTIFICATE_SERIAL = "45537549826457139242802212060416390279"
 DISPATCH_CERTIFICATE_SERIAL = "40880403280010118153316063771942676957"
 SOURCE_SEMANTIC_VERSION = "0.1.0"
@@ -57,6 +58,11 @@ TARGET_BUILD_DIGEST = (
 CONFIRMATION = "reboot-spark3542-to-resume-staged-a122-recovery"
 _ONLINE_WINDOW = timedelta(seconds=150)
 _TERMINAL_ATTEMPT_STATES = frozenset({"expired", "failed", "waiting-for-operator"})
+_REARM_LEASE = timedelta(seconds=60)
+_GRANTLESS_RETRY_FAILURE = {
+    "error_code": "agent_upgrade_failed",
+    "reason": "agent upgrade authority is unavailable",
+}
 
 
 class CompatibilityRecoveryConflict(RuntimeError):
@@ -93,6 +99,15 @@ class Spark3542CompatibilityRecoveryService:
         with self._sessions() as session:
             existing = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
             if existing is not None:
+                if self._grantless_rearm_candidate(existing):
+                    binding = self._rearm_snapshot(session, now, lock=False)
+                    return CompatibilityRecoveryPlan(
+                        plan_digest=hashlib.sha256(
+                            canonical_message(binding)
+                        ).hexdigest(),
+                        document=self._stored_document(existing),
+                        state="preview",
+                    )
                 return CompatibilityRecoveryPlan(
                     plan_digest=existing.plan_digest,
                     document=self._stored_document(existing),
@@ -123,87 +138,300 @@ class Spark3542CompatibilityRecoveryService:
                 .with_for_update(of=AgentUpgradeCompatibilityRecovery)
             )
             if existing is not None:
-                if existing.plan_digest != plan_digest:
-                    raise CompatibilityRecoveryConflict(
-                        "Spark3542 compatibility recovery was already armed from another plan"
+                if self._grantless_rearm_candidate(existing):
+                    binding = self._rearm_snapshot(session, now, lock=True)
+                    rearm_digest = hashlib.sha256(
+                        canonical_message(binding)
+                    ).hexdigest()
+                    if plan_digest != rearm_digest:
+                        raise CompatibilityRecoveryConflict(
+                            "Spark3542 compatibility recovery re-arm preview is stale"
+                        )
+                    operation = session.get(AgentOperation, OPERATION_ID)
+                    retry = session.scalar(
+                        select(AgentOperationAttempt).where(
+                            AgentOperationAttempt.operation_id == OPERATION_ID,
+                            AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+                        )
                     )
-                return CompatibilityRecoveryPlan(
-                    plan_digest=existing.plan_digest,
-                    document=self._stored_document(existing),
-                    state=existing.state,
+                    job = session.get(Job, JOB_ID)
+                    assert (
+                        operation is not None and retry is not None and job is not None
+                    )
+                    # Reopen the exact failed attempt. Its fence, certificate,
+                    # and failure result remain durable; this transition neither
+                    # constructs nor persists a host-helper grant.
+                    existing.state = "armed"
+                    existing.blocked_at = None
+                    retry.state = "running"
+                    retry.lease_deadline = now + _REARM_LEASE
+                    operation.state = "running"
+                    operation.updated_at = now
+                    job.state = "running"
+                    job.status_reason = None
+                    job.updated_at = now
+                    notify = True
+                    document = self._stored_document(existing)
+                    result = CompatibilityRecoveryPlan(rearm_digest, document, "armed")
+                else:
+                    if existing.plan_digest != plan_digest:
+                        raise CompatibilityRecoveryConflict(
+                            "Spark3542 compatibility recovery was already armed from another plan"
+                        )
+                    return CompatibilityRecoveryPlan(
+                        plan_digest=existing.plan_digest,
+                        document=self._stored_document(existing),
+                        state=existing.state,
+                    )
+            else:
+                result = None
+            if result is not None:
+                pass
+            else:
+                document = self._snapshot(session, now, lock=True)
+                expected_digest = hashlib.sha256(
+                    canonical_message(document)
+                ).hexdigest()
+                if plan_digest != expected_digest:
+                    raise CompatibilityRecoveryConflict(
+                        "Spark3542 compatibility recovery preview is stale"
+                    )
+                job = session.get(Job, JOB_ID)
+                operation = session.get(AgentOperation, OPERATION_ID)
+                source = session.scalar(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id == OPERATION_ID,
+                        AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
+                    )
                 )
-            document = self._snapshot(session, now, lock=True)
-            expected_digest = hashlib.sha256(canonical_message(document)).hexdigest()
-            if plan_digest != expected_digest:
-                raise CompatibilityRecoveryConflict(
-                    "Spark3542 compatibility recovery preview is stale"
+                assert job is not None and operation is not None and source is not None
+                session.add(
+                    AgentUpgradeCompatibilityRecovery(
+                        id=RECOVERY_ID,
+                        node_id=NODE_ID,
+                        job_id=JOB_ID,
+                        operation_id=OPERATION_ID,
+                        source_attempt=SOURCE_ATTEMPT,
+                        source_fence=source.fence,
+                        source_certificate_serial=source.agent_certificate_serial,
+                        expected_retry_attempt=SOURCE_ATTEMPT + 1,
+                        source_semantic_version=SOURCE_SEMANTIC_VERSION,
+                        source_build_digest=SOURCE_BUILD_DIGEST,
+                        source_binary_digest=SOURCE_BINARY_DIGEST,
+                        upgrade_payload_sha256=str(document["upgrade_payload_sha256"]),
+                        package_sha256=TARGET_PACKAGE_SHA256,
+                        target_package_version=TARGET_PACKAGE_VERSION,
+                        target_build_digest=TARGET_BUILD_DIGEST,
+                        target_binary_digest=TARGET_BINARY_DIGEST,
+                        authority_revision=operation.authority_revision,
+                        plan_digest=expected_digest,
+                        state="armed",
+                        actor=actor,
+                        request_id=request_id,
+                        created_at=now,
+                    )
                 )
-            job = session.get(Job, JOB_ID)
-            operation = session.get(AgentOperation, OPERATION_ID)
-            source = session.scalar(
-                select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == OPERATION_ID,
-                    AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
+                # This is the exact retry transition AgentJobService already
+                # understands. We intentionally do not replace the operation
+                # payload, fetch the current release candidate, or install a
+                # package. The compatibility authority may issue only the fixed,
+                # delayed reboot required to activate the staged recovery at boot.
+                # Narrow the historical two-Spark rollout to Spark3542 before it is
+                # resumed. Otherwise AgentUpgradeService would automatically
+                # materialize the old a122 package for Spark2297 after Spark3542
+                # proves the target identity.
+                package = operation.payload
+                job.targets = [NODE_ID]
+                job.payload = {
+                    "node_order": [NODE_ID],
+                    "package": dict(package),
+                    "strategy": "one-at-a-time",
+                }
+                job.payload_digest = self._job_plan_digest(
+                    authority_revision=job.authority_revision,
+                    node_ids=[NODE_ID],
+                    package=package,
                 )
+                job.state = "queued"
+                job.status_reason = None
+                job.updated_at = now
+                operation.retry_disposition = "retry"
+                operation.retry_disposition_attempt = SOURCE_ATTEMPT
+                operation.updated_at = now
+                notify = True
+                result = CompatibilityRecoveryPlan(expected_digest, document, "armed")
+        if notify:
+            self._notify_available()
+        return result
+
+    @staticmethod
+    def _grantless_rearm_candidate(
+        recovery: AgentUpgradeCompatibilityRecovery,
+    ) -> bool:
+        return bool(
+            recovery.state == "operator-blocked"
+            and recovery.blocked_at is not None
+            and recovery.completed_at is None
+            and recovery.retry_fence is None
+            and recovery.retry_certificate_serial is None
+            and recovery.signed_grant is None
+            and recovery.grant_request_id is None
+            and recovery.grant_expires_at is None
+            and recovery.identity_deadline is None
+            and recovery.issued_at is None
+        )
+
+    def _rearm_snapshot(
+        self, session: Session, now: datetime, *, lock: bool
+    ) -> dict[str, object]:
+        queries = {
+            "node": select(AgentNode).where(AgentNode.node_id == NODE_ID),
+            "job": select(Job).where(Job.id == JOB_ID),
+            "operation": select(AgentOperation).where(
+                AgentOperation.id == OPERATION_ID
+            ),
+            "source": select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
+            ),
+            "retry": select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            ),
+            "recovery": select(AgentUpgradeCompatibilityRecovery).where(
+                AgentUpgradeCompatibilityRecovery.id == RECOVERY_ID
+            ),
+            "dispatch_certificate": select(AgentCertificate).where(
+                AgentCertificate.serial == DISPATCH_CERTIFICATE_SERIAL
+            ),
+        }
+        if lock:
+            queries = {name: query.with_for_update() for name, query in queries.items()}
+        rows = {name: session.scalar(query) for name, query in queries.items()}
+        node = rows["node"]
+        job = rows["job"]
+        operation = rows["operation"]
+        source = rows["source"]
+        retry = rows["retry"]
+        recovery = rows["recovery"]
+        dispatch_certificate = rows["dispatch_certificate"]
+        if not (
+            isinstance(node, AgentNode)
+            and isinstance(job, Job)
+            and isinstance(operation, AgentOperation)
+            and isinstance(source, AgentOperationAttempt)
+            and isinstance(retry, AgentOperationAttempt)
+            and isinstance(recovery, AgentUpgradeCompatibilityRecovery)
+            and isinstance(dispatch_certificate, AgentCertificate)
+        ):
+            raise CompatibilityRecoveryConflict(
+                "the exact Spark3542 grantless retry is unavailable"
             )
-            assert job is not None and operation is not None and source is not None
-            session.add(
-                AgentUpgradeCompatibilityRecovery(
-                    id=RECOVERY_ID,
-                    node_id=NODE_ID,
-                    job_id=JOB_ID,
-                    operation_id=OPERATION_ID,
-                    source_attempt=SOURCE_ATTEMPT,
-                    source_fence=source.fence,
-                    source_certificate_serial=source.agent_certificate_serial,
-                    expected_retry_attempt=SOURCE_ATTEMPT + 1,
-                    source_semantic_version=SOURCE_SEMANTIC_VERSION,
-                    source_build_digest=SOURCE_BUILD_DIGEST,
-                    source_binary_digest=SOURCE_BINARY_DIGEST,
-                    upgrade_payload_sha256=str(document["upgrade_payload_sha256"]),
-                    package_sha256=TARGET_PACKAGE_SHA256,
-                    target_package_version=TARGET_PACKAGE_VERSION,
-                    target_build_digest=TARGET_BUILD_DIGEST,
-                    target_binary_digest=TARGET_BINARY_DIGEST,
-                    authority_revision=operation.authority_revision,
-                    plan_digest=expected_digest,
-                    state="armed",
-                    actor=actor,
-                    request_id=request_id,
-                    created_at=now,
-                )
-            )
-            # This is the exact retry transition AgentJobService already
-            # understands. We intentionally do not replace the operation
-            # payload, fetch the current release candidate, or install a
-            # package. The compatibility authority may issue only the fixed,
-            # delayed reboot required to activate the staged recovery at boot.
-            # Narrow the historical two-Spark rollout to Spark3542 before it is
-            # resumed. Otherwise AgentUpgradeService would automatically
-            # materialize the old a122 package for Spark2297 after Spark3542
-            # proves the target identity.
-            package = operation.payload
-            job.targets = [NODE_ID]
-            job.payload = {
-                "node_order": [NODE_ID],
-                "package": dict(package),
-                "strategy": "one-at-a-time",
-            }
-            job.payload_digest = self._job_plan_digest(
+        package = operation.payload
+        payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
+        stored_document = self._stored_document(recovery)
+        if not (
+            self._grantless_rearm_candidate(recovery)
+            and recovery.id == RECOVERY_ID
+            and recovery.node_id == NODE_ID
+            and recovery.job_id == JOB_ID
+            and recovery.operation_id == OPERATION_ID
+            and recovery.source_attempt == SOURCE_ATTEMPT
+            and recovery.expected_retry_attempt == RETRY_ATTEMPT
+            and recovery.source_fence == source.fence
+            and recovery.source_certificate_serial
+            == source.agent_certificate_serial
+            == SOURCE_ATTEMPT_CERTIFICATE_SERIAL
+            and recovery.source_semantic_version == SOURCE_SEMANTIC_VERSION
+            and recovery.source_binary_digest == SOURCE_BINARY_DIGEST
+            and recovery.source_build_digest == SOURCE_BUILD_DIGEST
+            and recovery.package_sha256 == TARGET_PACKAGE_SHA256
+            and recovery.target_package_version == TARGET_PACKAGE_VERSION
+            and recovery.target_binary_digest == TARGET_BINARY_DIGEST
+            and recovery.target_build_digest == TARGET_BUILD_DIGEST
+            and recovery.plan_digest
+            == hashlib.sha256(canonical_message(stored_document)).hexdigest()
+            and source.attempt == SOURCE_ATTEMPT
+            and source.state in _TERMINAL_ATTEMPT_STATES
+            and retry.attempt == RETRY_ATTEMPT
+            and retry.state == "failed"
+            and retry.agent_certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+            and retry.result == _GRANTLESS_RETRY_FAILURE
+            and _aware(retry.lease_deadline) <= _aware(now)
+            and operation.id == OPERATION_ID
+            and operation.parent_job_id == JOB_ID
+            and operation.node_id == NODE_ID
+            and operation.kind == "agent.upgrade.v1"
+            and operation.state == "waiting-for-operator"
+            and operation.current_attempt == RETRY_ATTEMPT
+            and operation.retry_disposition is None
+            and operation.retry_disposition_attempt is None
+            and operation.authority_revision == recovery.authority_revision
+            and operation.payload_digest == payload_digest
+            and recovery.upgrade_payload_sha256 == payload_digest
+            and self._exact_target(package)
+            and job.id == JOB_ID
+            and job.kind == "agent-upgrade"
+            and job.state == "waiting-for-operator"
+            and job.targets == [NODE_ID]
+            and job.authority_revision == recovery.authority_revision
+            and set(job.payload) == {"node_order", "package", "strategy"}
+            and job.payload.get("node_order") == [NODE_ID]
+            and job.payload.get("package") == package
+            and job.payload.get("strategy") == "one-at-a-time"
+            and job.payload_digest
+            == self._job_plan_digest(
                 authority_revision=job.authority_revision,
                 node_ids=[NODE_ID],
                 package=package,
             )
-            job.state = "queued"
-            job.status_reason = None
-            job.updated_at = now
-            operation.retry_disposition = "retry"
-            operation.retry_disposition_attempt = SOURCE_ATTEMPT
-            operation.updated_at = now
-            notify = True
-        if notify:
-            self._notify_available()
-        return CompatibilityRecoveryPlan(expected_digest, document, "armed")
+            and node.state == "active"
+            and node.revoked_at is None
+            and node.architecture == "linux-arm64"
+            and node.semantic_version == SOURCE_SEMANTIC_VERSION
+            and node.binary_digest == SOURCE_BINARY_DIGEST
+            and node.build_digest == SOURCE_BUILD_DIGEST
+            and node.self_test_passed is True
+            and node.protocol_version == 3
+            and node.contact_certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+            and {"agent.runtime.rust.v1", "agent.upgrade.v1"}.issubset(
+                set(node.capabilities or ())
+            )
+            and node.last_seen_at is not None
+            and _aware(node.last_seen_at) <= _aware(now)
+            and _aware(now) - _aware(node.last_seen_at) <= _ONLINE_WINDOW
+            and dispatch_certificate.node_id == NODE_ID
+            and dispatch_certificate.state == "active"
+            and dispatch_certificate.revoked_at is None
+            and dispatch_certificate.ca_revoked_at is None
+            and _aware(dispatch_certificate.not_before) <= _aware(now)
+            and _aware(dispatch_certificate.not_after) > _aware(now)
+        ):
+            raise CompatibilityRecoveryConflict(
+                "the exact Spark3542 grantless retry is no longer recoverable"
+            )
+        conflicting_mutation = session.scalar(
+            select(AgentOperation.id)
+            .where(
+                AgentOperation.node_id == NODE_ID,
+                AgentOperation.id != OPERATION_ID,
+                AgentOperation.state.in_({"queued", "running"}),
+                AgentOperation.kind.in_(MUTATING_AGENT_OPERATIONS),
+            )
+            .limit(1)
+        )
+        if conflicting_mutation is not None:
+            raise CompatibilityRecoveryConflict(
+                "Spark3542 has another queued or running mutation"
+            )
+        return {
+            "compatibility_recovery_id": RECOVERY_ID,
+            "recovery_plan_digest": recovery.plan_digest,
+            "replay_attempt": RETRY_ATTEMPT,
+            "replay_fence": retry.fence,
+            "replay_certificate_serial": retry.agent_certificate_serial,
+            "failure": dict(_GRANTLESS_RETRY_FAILURE),
+        }
 
     def _snapshot(
         self, session: Session, now: datetime, *, lock: bool

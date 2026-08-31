@@ -20,6 +20,7 @@ from vonk_control.compat_recovery import (
     NODE_ID,
     OPERATION_ID,
     RECOVERY_ID,
+    RETRY_ATTEMPT,
     SOURCE_ATTEMPT,
     SOURCE_ATTEMPT_CERTIFICATE_SERIAL,
     SOURCE_BINARY_DIGEST,
@@ -182,6 +183,238 @@ def seeded_services(tmp_path, *, engine=None):
     return sessions, service, notifications
 
 
+def seed_grantless_operator_blocked_retry(sessions) -> None:
+    with sessions.begin() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        job = session.get(Job, JOB_ID)
+        source = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
+            )
+        )
+        assert recovery is not None and operation is not None and job is not None
+        assert source is not None
+        source.state = "expired"
+        recovery.state = "operator-blocked"
+        recovery.blocked_at = NOW
+        operation.state = "waiting-for-operator"
+        operation.current_attempt = RETRY_ATTEMPT
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        job.state = "waiting-for-operator"
+        job.status_reason = "compatibility recovery timed out"
+        session.add(
+            AgentOperationAttempt(
+                operation_id=OPERATION_ID,
+                attempt=RETRY_ATTEMPT,
+                fence=RETRY_FENCE,
+                lease_deadline=NOW - timedelta(seconds=1),
+                agent_certificate_serial=SOURCE_CERTIFICATE,
+                state="failed",
+                result={
+                    "error_code": "agent_upgrade_failed",
+                    "reason": "agent upgrade authority is unavailable",
+                },
+            )
+        )
+
+
+def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, caplog):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    original_created_at = NOW
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+
+    preview = service.preview()
+    assert preview.state == "preview"
+    assert preview.plan_digest != original.plan_digest
+    applied = service.apply(
+        plan_digest=preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert applied.state == "armed"
+    assert notifications == [True, True]
+
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        job = session.get(Job, JOB_ID)
+        attempts = session.scalars(
+            select(AgentOperationAttempt)
+            .where(AgentOperationAttempt.operation_id == OPERATION_ID)
+            .order_by(AgentOperationAttempt.attempt)
+        ).all()
+        retry = attempts[-1]
+        assert recovery is not None and recovery.state == "armed"
+        assert recovery.created_at.replace(tzinfo=UTC) == original_created_at
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.signed_grant is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
+        assert [attempt.attempt for attempt in attempts] == [
+            SOURCE_ATTEMPT,
+            RETRY_ATTEMPT,
+        ]
+        assert retry.fence == RETRY_FENCE
+        assert retry.agent_certificate_serial == SOURCE_CERTIFICATE
+        assert retry.state == "running"
+        assert retry.result == {
+            "error_code": "agent_upgrade_failed",
+            "reason": "agent upgrade authority is unavailable",
+        }
+        assert retry.lease_deadline.replace(tzinfo=UTC) == NOW + timedelta(seconds=60)
+        assert operation is not None and operation.state == "running"
+        assert operation.current_attempt == RETRY_ATTEMPT
+        assert job is not None and job.state == "running"
+
+    operations = AgentJobService(sessions, clock=lambda: NOW)
+    replay = operations.claim(
+        NODE_ID,
+        SOURCE_CERTIFICATE,
+        30,
+        protocol_version=3,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity={
+            "architecture": "linux-arm64",
+            "semantic_version": SOURCE_SEMANTIC_VERSION,
+            "build_digest": SOURCE_BUILD_DIGEST,
+            "binary_digest": SOURCE_BINARY_DIGEST,
+            "self_test_passed": True,
+        },
+    )
+    assert replay is not None
+    assert replay.attempt == RETRY_ATTEMPT
+    assert replay.fence == RETRY_FENCE
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == OPERATION_ID,
+                    AgentOperationAttempt.attempt == RETRY_ATTEMPT + 1,
+                )
+            )
+            is None
+        )
+
+    authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(
+            ed25519.Ed25519PrivateKey.from_private_bytes(b"m" * 32),
+            clock=lambda: NOW,
+            request_id_factory=lambda: "30000000-0000-4000-8000-000000000003",
+        ),
+        clock=lambda: NOW,
+    )
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        authority.issue_agent_upgrade_grant(
+            node_id=NODE_ID,
+            job_id=JOB_ID,
+            operation_id=OPERATION_ID,
+            attempt=RETRY_ATTEMPT,
+            fence=RETRY_FENCE,
+            package_sha256=TARGET_PACKAGE_SHA256,
+            package_signature=PACKAGE_SIGNATURE,
+            certificate_serial=SOURCE_CERTIFICATE,
+            expires_in_seconds=30,
+        )
+    rejection = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "compatibility host-helper grant rejected"
+    )
+    assert rejection.compatibility_recovery_id == RECOVERY_ID
+    assert rejection.operation_id == OPERATION_ID
+    assert rejection.attempt == RETRY_ATTEMPT
+    assert rejection.rejection_category == "ttl_mismatch"
+    grant = authority.issue_agent_upgrade_grant(
+        node_id=NODE_ID,
+        job_id=JOB_ID,
+        operation_id=OPERATION_ID,
+        attempt=RETRY_ATTEMPT,
+        fence=RETRY_FENCE,
+        package_sha256=TARGET_PACKAGE_SHA256,
+        package_signature=PACKAGE_SIGNATURE,
+        certificate_serial=SOURCE_CERTIFICATE,
+        expires_in_seconds=10,
+    )
+    assert grant.claims.expires_at - grant.claims.issued_at == 10
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None and recovery.state == "issued"
+        assert recovery.retry_fence == RETRY_FENCE
+        assert recovery.signed_grant == grant.to_mapping()
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ("failure", "protocol", "capabilities", "self-test", "certificate", "payload"),
+)
+def test_grantless_operator_blocked_rearm_rejects_every_drift(tmp_path, drift):
+    sessions, service, _ = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    with sessions.begin() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        node = session.get(AgentNode, NODE_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        assert recovery is not None and retry is not None
+        assert node is not None and operation is not None
+        if drift == "failure":
+            retry.result = {
+                "error_code": "agent_upgrade_failed",
+                "reason": "different failure",
+            }
+        elif drift == "protocol":
+            node.protocol_version = 2
+        elif drift == "capabilities":
+            node.capabilities = ["agent.runtime.rust.v1"]
+        elif drift == "self-test":
+            node.self_test_passed = False
+        elif drift == "certificate":
+            retry.agent_certificate_serial = SOURCE_ATTEMPT_CERTIFICATE
+        elif drift == "payload":
+            operation.payload_digest = "0" * 64
+
+    with pytest.raises(CompatibilityRecoveryConflict, match="no longer recoverable"):
+        service.preview()
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert recovery is not None and recovery.state == "operator-blocked"
+        assert recovery.signed_grant is None
+        assert retry is not None and retry.state == "failed"
+
+
 def test_postgres_accepts_awaiting_identity_and_enforces_grant_shape(
     tmp_path, postgres_engine
 ):
@@ -225,7 +458,7 @@ def test_postgres_accepts_awaiting_identity_and_enforces_grant_shape(
         package_sha256=TARGET_PACKAGE_SHA256,
         package_signature=PACKAGE_SIGNATURE,
         certificate_serial=SOURCE_CERTIFICATE,
-        expires_in_seconds=30,
+        expires_in_seconds=10,
     )
     with sessions.begin() as session:
         recovery = session.get(
@@ -477,11 +710,11 @@ def test_grant_is_one_persisted_scheduled_reboot_and_never_an_install(tmp_path):
         "package_sha256": TARGET_PACKAGE_SHA256,
         "package_signature": PACKAGE_SIGNATURE,
         "certificate_serial": SOURCE_CERTIFICATE,
-        "expires_in_seconds": 30,
+        "expires_in_seconds": 10,
     }
 
     with pytest.raises(HostHelperAuthorityError, match="stale"):
-        authority.issue_agent_upgrade_grant(**{**arguments, "expires_in_seconds": 29})
+        authority.issue_agent_upgrade_grant(**{**arguments, "expires_in_seconds": 11})
     first = authority.issue_agent_upgrade_grant(**arguments)
     replay = authority.issue_agent_upgrade_grant(**arguments)
 
@@ -763,7 +996,7 @@ def test_lost_response_or_agent_death_times_out_operator_blocked(tmp_path):
         package_sha256=TARGET_PACKAGE_SHA256,
         package_signature=PACKAGE_SIGNATURE,
         certificate_serial=SOURCE_CERTIFICATE,
-        expires_in_seconds=30,
+        expires_in_seconds=10,
     )
     clock = [NOW + timedelta(seconds=601)]
     operations = AgentJobService(sessions, clock=lambda: clock[0])
