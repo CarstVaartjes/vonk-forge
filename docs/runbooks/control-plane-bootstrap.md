@@ -1,6 +1,12 @@
 # Bootstrap the control plane
 
-Prepare the complete control-plane project on a Linux or macOS workstation:
+Before downloading anything, complete the
+[Tailscale fresh-install preflight](tailscale.md#fresh-install-preflight). It
+defines the exact unsuffixed Service names, policy/self-access grants,
+auto-approval, MagicDNS/HTTPS settings, OAuth scope/tag, and control hostname.
+Do not create any other Service names in an operator tailnet.
+
+Then prepare the complete control-plane project on a Linux or macOS workstation:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh
@@ -21,7 +27,10 @@ performs its bounded database and secret initialization before serving, so the
 project has no exited setup containers. Neither API nor worker mounts a source
 checkout.
 
-After startup, get the private browser URL from `tailscale-configurator` logs.
+After startup, open
+`https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/` using the suffix copied during
+the preflight, and run the runbook's
+[post-install verification](tailscale.md#verification).
 Create a one-use Spark pairing grant in that interface, then copy its generated
 command to each Spark. The command includes the reserved NAS LAN address when
 the private service hostnames do not resolve directly:

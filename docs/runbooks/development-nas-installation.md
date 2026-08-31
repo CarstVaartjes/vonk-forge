@@ -6,6 +6,11 @@ and startup behavior; only immutable release identities differ.
 
 Prepare a complete upload directory on a Linux or macOS workstation:
 
+Before running the command, complete the
+[Tailscale fresh-install preflight](tailscale.md#fresh-install-preflight). The
+wizard repeats the checklist before requesting OAuth values. Operator tailnets
+use only the canonical unsuffixed Service names.
+
 ```sh
 curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 ```

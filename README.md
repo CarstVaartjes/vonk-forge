@@ -52,7 +52,13 @@ controller decides what may run and records what happened.
 
 ### 1. Prepare the controller project
 
-On macOS or Linux, run:
+Before the first run, complete the mandatory
+[Tailscale preflight](docs/runbooks/tailscale.md#fresh-install-preflight): enable
+MagicDNS and HTTPS, define the exact unsuffixed Services, apply the reviewed
+grants and auto-approvals, and create the scoped gateway OAuth client. Never
+add test-only Service names or policy to an operator tailnet.
+
+Then, on macOS or Linux, run:
 
 ```bash
 curl -fsSL https://install.vonkforge.ai/nas | sh

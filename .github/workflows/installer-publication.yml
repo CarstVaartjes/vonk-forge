@@ -538,6 +538,9 @@ jobs:
           VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
+          # Must be set only in an environment whose credentials belong to a
+          # dedicated disposable test tailnet, never an operator tailnet.
+          VONK_ACCEPTANCE_TAILNET_KIND: ${{ vars.VONK_ACCEPTANCE_TAILNET_KIND }}
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
           VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance

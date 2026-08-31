@@ -86,6 +86,14 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert result.returncode == 0, result.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
+    assert payload["preflight"] == [
+        "Use the operator tailnet only; define and advertise only the exact Services listed below.",
+        "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
+        "Define svc:vonk-forge with endpoint tcp:443; if enabling Hermes, also define svc:hermes-api and svc:hermes-dashboard.",
+        "Merge the reviewed grants.example.hujson policy, including gateway self-access and exact Service auto-approval.",
+        "Create a machine OAuth client with only auth_keys write scope and only tag:vonk-gateway.",
+        "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
+    ]
     assert payload["internal_values"] == [
         {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
         {"env": "VONK_INSTALL_CHANNEL", "value": "stable"},

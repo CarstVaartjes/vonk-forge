@@ -22,13 +22,21 @@ The tailnet policy also grants `tag:vonk-gateway` TCP 443 access to those exact
 Services. Tailscale uses that self-access when assigning the Service TailVIP
 `PrimaryRoutes`; omitting it can leave an approved, online host unroutable.
 
-Before use, define all three Services in the Tailscale admin console, apply a
-reviewed version of `grants.example.hujson`, and replace the GitHub-login
-placeholder with the exact identity shown by Tailscale. Create an OAuth client
+Before use, define `svc:vonk-forge` and, when Hermes is enabled, both Hermes
+Services in the Tailscale admin console. Apply a reviewed version of
+`grants.example.hujson`, and replace the GitHub-login placeholder with the exact
+identity shown by Tailscale. Create an OAuth client
 with only `auth_keys` write scope for `tag:vonk-gateway`. The OAuth client is for
 unattended gateway enrollment; it is not the operator's GitHub credential. Keep
 the captured client secret raw: Compose adds the non-ephemeral enrollment
 parameter only inside the gateway tmpfs.
+
+For a base install, the gateway advertises only `svc:vonk-forge`; it advertises
+the two Hermes Services only when Hermes is enabled and healthy. Operator
+tailnets never contain test-only Services or acceptance policy. Full acceptance
+uses separate credentials and a
+dedicated disposable test tailnet; after the run, remove its nodes, Service
+definitions, policy, and OAuth client.
 
 The repository's disposable acceptance harness sets
 `VONK_TAILSCALE_EPHEMERAL=true`, while generated operator bundles retain the

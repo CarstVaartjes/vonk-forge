@@ -134,6 +134,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "${{ matrix.gateway }}"
     )
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "full"
+    assert nas_environment["VONK_ACCEPTANCE_TAILNET_KIND"] == (
+        "${{ vars.VONK_ACCEPTANCE_TAILNET_KIND }}"
+    )
     assert spark_environment["VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY"] == (
         "loopback"
     )
@@ -451,6 +454,7 @@ def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() ->
     assert docker["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
     for forbidden in (
         "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT",
+        "VONK_ACCEPTANCE_TAILNET_KIND",
         "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME",
         "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
         "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",

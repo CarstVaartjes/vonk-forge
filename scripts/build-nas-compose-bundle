@@ -233,6 +233,14 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     return {
         "schema_version": 2,
         "docker_compose_yaml": compose,
+        "preflight": [
+            "Use the operator tailnet only; define and advertise only the exact Services listed below.",
+            "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
+            "Define svc:vonk-forge with endpoint tcp:443; if enabling Hermes, also define svc:hermes-api and svc:hermes-dashboard.",
+            "Merge the reviewed grants.example.hujson policy, including gateway self-access and exact Service auto-approval.",
+            "Create a machine OAuth client with only auth_keys write scope and only tag:vonk-gateway.",
+            "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
+        ],
         "internal_values": [
             {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
             {"env": "VONK_INSTALL_CHANNEL", "value": channel},
@@ -256,7 +264,9 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 validation="jurisdiction",
             ),
             _required_value(
-                "VONK_CONTROL_HOSTNAME", "Control hostname", validation="hostname"
+                "VONK_CONTROL_HOSTNAME",
+                "Control hostname (vonk-forge.<tailnet>.ts.net)",
+                validation="hostname",
             ),
             _required_value(
                 "VONK_AGENT_ENROLL_HOSTNAME",

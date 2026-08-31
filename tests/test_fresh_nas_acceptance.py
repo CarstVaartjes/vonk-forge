@@ -228,6 +228,45 @@ def test_tailscale_disabled_mode_refuses_credentials_and_gateway_ownership(
         acceptance.tailscale_acceptance_mode()
 
 
+def test_full_tailscale_acceptance_requires_isolated_disposable_tailnet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILNET_KIND", raising=False)
+    with pytest.raises(AcceptanceError, match="isolated disposable test tailnet"):
+        acceptance.assert_tailscale_acceptance_boundary("full")
+
+    monkeypatch.setenv(
+        "VONK_ACCEPTANCE_TAILNET_KIND", acceptance.ISOLATED_TAILNET_KIND
+    )
+    acceptance.assert_tailscale_acceptance_boundary("full")
+
+    with pytest.raises(AcceptanceError, match="must not select a tailnet kind"):
+        acceptance.assert_tailscale_acceptance_boundary("disabled")
+
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILNET_KIND")
+    acceptance.assert_tailscale_acceptance_boundary("disabled")
+
+
+def test_operator_tailscale_assets_have_no_acceptance_service_or_policy() -> None:
+    operator_assets = (
+        ROOT / "deploy/compose/tailscale/compose.yaml",
+        ROOT / "deploy/compose/tailscale/configure.sh",
+        ROOT / "deploy/compose/tailscale/grants.example.hujson",
+        ROOT / "deploy/compose/tailscale/README.md",
+        ROOT / "docs/runbooks/tailscale.md",
+    )
+    forbidden = (
+        "svc:vonk-forge-acceptance",
+        "svc:hermes-api-acceptance",
+        "svc:hermes-dashboard-acceptance",
+        "tag:vonk-acceptance",
+    )
+    for path in operator_assets:
+        text = path.read_text(encoding="utf-8")
+        assert all(item not in text for item in forbidden), path
+
+
 def test_tailscale_disabled_service_set_excludes_both_owners() -> None:
     acceptance = _acceptance_module()
 
@@ -383,7 +422,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     assert cause == "image pull failed while using <redacted>"
 
 
-def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
+def test_acceptance_service_override_accepts_canonical_names_and_matches_hostname(
     tmp_path: Path,
 ) -> None:
     acceptance = _acceptance_module()
@@ -395,26 +434,26 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
 
     acceptance.configure_tailnet_service_names(
         bundle,
-        control="svc:vonk-forge-acceptance",
+        control="svc:vonk-forge",
         gateway_hostname="vonk-forge-ci-123-1",
-        hermes_api="svc:hermes-api-acceptance",
-        hermes_dashboard="svc:hermes-dashboard-acceptance",
+        hermes_api="svc:hermes-api",
+        hermes_dashboard="svc:hermes-dashboard",
     )
 
     assert environment.stat().st_mode & 0o777 == 0o600
     assert environment.read_text(encoding="utf-8").splitlines() == [
         "COMPOSE_PROFILES=",
-        "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge-acceptance",
-        "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api-acceptance",
-        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard-acceptance",
+        "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge",
+        "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api",
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard",
         "VONK_TAILSCALE_EPHEMERAL=true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
     ]
     assert (
         acceptance.tailscale_service_hostname(
-            "svc:vonk-forge-acceptance", "acceptance.example.test"
+            "svc:vonk-forge", "acceptance.example.test"
         )
-        == "vonk-forge-acceptance.acceptance.example.test"
+        == "vonk-forge.acceptance.example.test"
     )
 
     with pytest.raises(AcceptanceError, match="Service names"):
@@ -423,16 +462,16 @@ def test_acceptance_service_override_is_safe_and_matches_tailnet_hostname(
             control="svc:duplicate",
             gateway_hostname="vonk-forge-ci-123-1",
             hermes_api="svc:duplicate",
-            hermes_dashboard="svc:hermes-dashboard-acceptance",
+            hermes_dashboard="svc:hermes-dashboard",
         )
 
     with pytest.raises(AcceptanceError, match="gateway hostname"):
         acceptance.configure_tailnet_service_names(
             bundle,
-            control="svc:vonk-forge-acceptance",
+            control="svc:vonk-forge",
             gateway_hostname="INVALID HOSTNAME",
-            hermes_api="svc:hermes-api-acceptance",
-            hermes_dashboard="svc:hermes-dashboard-acceptance",
+            hermes_api="svc:hermes-api",
+            hermes_dashboard="svc:hermes-dashboard",
         )
 
 
