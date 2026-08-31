@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 from uuid import uuid4
@@ -12,7 +12,7 @@ from uuid import uuid4
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentProtocolError
+from vonk_agent_protocol import AgentProtocolError, canonical_message
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -21,12 +21,40 @@ from vonk_agent_protocol.host_helper import (
     HostHelperOperation,
     HostHelperSignature,
     HostOperationKind,
+    RestartUnit,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
 
+from .compat_recovery import (
+    NODE_ID as COMPAT_NODE_ID,
+)
+from .compat_recovery import (
+    OPERATION_ID as COMPAT_OPERATION_ID,
+)
+from .compat_recovery import (
+    SOURCE_BINARY_DIGEST as COMPAT_SOURCE_BINARY_DIGEST,
+)
+from .compat_recovery import (
+    SOURCE_BUILD_DIGEST as COMPAT_SOURCE_BUILD_DIGEST,
+)
+from .compat_recovery import (
+    SOURCE_SEMANTIC_VERSION as COMPAT_SOURCE_SEMANTIC_VERSION,
+)
+from .compat_recovery import (
+    TARGET_BINARY_DIGEST as COMPAT_TARGET_BINARY_DIGEST,
+)
+from .compat_recovery import (
+    TARGET_BUILD_DIGEST as COMPAT_TARGET_BUILD_DIGEST,
+)
+from .compat_recovery import (
+    TARGET_PACKAGE_SHA256 as COMPAT_TARGET_PACKAGE_SHA256,
+)
+from .compat_recovery import (
+    TARGET_PACKAGE_VERSION as COMPAT_TARGET_PACKAGE_VERSION,
+)
+from .models import AgentNode, AgentOperationAttempt, AgentUpgradeCompatibilityRecovery
 from .models import AgentOperation as StoredAgentOperation
-from .models import AgentOperationAttempt
 from .workload_helper_authority import _load_private_key
 
 
@@ -157,6 +185,8 @@ class HostRuntimeAuthorityService:
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
     }
+    _COMPATIBILITY_GRANT_SECONDS: ClassVar[int] = 30
+    _COMPATIBILITY_IDENTITY_WINDOW: ClassVar[timedelta] = timedelta(minutes=15)
 
     def __init__(
         self,
@@ -238,7 +268,7 @@ class HostRuntimeAuthorityService:
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         now = self._clock()
-        with self._sessions() as session:
+        with self._sessions.begin() as session:
             operation = session.get(StoredAgentOperation, operation_id)
             current = session.scalar(
                 select(AgentOperationAttempt).where(
@@ -270,6 +300,28 @@ class HostRuntimeAuthorityService:
                 or lease_deadline <= now
             ):
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
+            recovery = session.scalar(
+                select(AgentUpgradeCompatibilityRecovery)
+                .where(AgentUpgradeCompatibilityRecovery.operation_id == operation_id)
+                .with_for_update(of=AgentUpgradeCompatibilityRecovery)
+            )
+            if recovery is not None:
+                return self._issue_compatibility_recovery_grant(
+                    session=session,
+                    recovery=recovery,
+                    operation=operation,
+                    current=current,
+                    lease_deadline=lease_deadline,
+                    node_id=node_id,
+                    job_id=job_id,
+                    operation_id=operation_id,
+                    attempt=attempt,
+                    fence=fence,
+                    package_sha256=package_sha256,
+                    certificate_serial=certificate_serial,
+                    expires_in_seconds=expires_in_seconds,
+                    now=now,
+                )
         grant = self._issuer.issue_grant(
             node_id=node_id,
             operation=HostHelperOperation(
@@ -285,6 +337,145 @@ class HostRuntimeAuthorityService:
             raise HostHelperAuthorityError(
                 "agent upgrade grant exceeds the active attempt lease"
             )
+        return grant
+
+    def _issue_compatibility_recovery_grant(
+        self,
+        *,
+        session: Session,
+        recovery: AgentUpgradeCompatibilityRecovery,
+        operation: StoredAgentOperation,
+        current: AgentOperationAttempt,
+        lease_deadline: datetime,
+        node_id: str,
+        job_id: str,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        package_sha256: str,
+        certificate_serial: str,
+        expires_in_seconds: int,
+        now: datetime,
+    ) -> SignedHostHelperGrant:
+        """Issue or replay the sole helper-restart grant; never fall through."""
+
+        node = session.get(AgentNode, node_id)
+        source = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation_id,
+                AgentOperationAttempt.attempt == recovery.source_attempt,
+            )
+        )
+        package = operation.payload
+        exact = bool(
+            recovery.node_id == COMPAT_NODE_ID == node_id
+            and recovery.job_id == job_id
+            and recovery.operation_id == COMPAT_OPERATION_ID == operation_id
+            and recovery.authority_revision == operation.authority_revision
+            and recovery.expected_retry_attempt == recovery.source_attempt + 1
+            and recovery.expected_retry_attempt == attempt
+            and current.attempt == attempt
+            and current.fence == fence
+            and current.agent_certificate_serial == certificate_serial
+            and source is not None
+            and source.attempt == recovery.source_attempt
+            and source.fence == recovery.source_fence
+            and source.agent_certificate_serial == recovery.source_certificate_serial
+            and node is not None
+            and node.contact_certificate_serial
+            == recovery.source_certificate_serial
+            == certificate_serial
+            and node.semantic_version
+            == recovery.source_semantic_version
+            == COMPAT_SOURCE_SEMANTIC_VERSION
+            and node.build_digest
+            == recovery.source_build_digest
+            == COMPAT_SOURCE_BUILD_DIGEST
+            and node.binary_digest
+            == recovery.source_binary_digest
+            == COMPAT_SOURCE_BINARY_DIGEST
+            and node.self_test_passed is True
+            and recovery.package_sha256
+            == package_sha256
+            == package.get("package_sha256")
+            == COMPAT_TARGET_PACKAGE_SHA256
+            and recovery.upgrade_payload_sha256
+            == operation.payload_digest
+            == hashlib.sha256(canonical_message(dict(package))).hexdigest()
+            and recovery.target_package_version
+            == package.get("package_version")
+            == COMPAT_TARGET_PACKAGE_VERSION
+            and recovery.target_binary_digest
+            == package.get("target_binary_digest")
+            == COMPAT_TARGET_BINARY_DIGEST
+            and recovery.target_build_digest
+            == package.get("target_build_digest")
+            == COMPAT_TARGET_BUILD_DIGEST
+            and expires_in_seconds == self._COMPATIBILITY_GRANT_SECONDS
+        )
+        if not exact:
+            raise HostHelperAuthorityError(
+                "Spark3542 compatibility recovery authority is stale"
+            )
+        if recovery.state == "issued":
+            expires_at = recovery.grant_expires_at
+            if (
+                recovery.retry_fence != fence
+                or recovery.retry_certificate_serial != certificate_serial
+                or recovery.signed_grant is None
+                or expires_at is None
+                or (
+                    expires_at
+                    if expires_at.tzinfo is not None
+                    else expires_at.replace(tzinfo=UTC)
+                )
+                <= now
+            ):
+                raise HostHelperAuthorityError(
+                    "Spark3542 compatibility recovery grant is stale"
+                )
+            try:
+                replay = SignedHostHelperGrant.parse(recovery.signed_grant)
+            except (AgentProtocolError, TypeError, ValueError) as error:
+                raise HostHelperAuthorityError(
+                    "Spark3542 compatibility recovery grant is invalid"
+                ) from error
+            if (
+                replay.claims.request_id != recovery.grant_request_id
+                or replay.claims.node_id != COMPAT_NODE_ID
+                or replay.claims.operation.to_mapping()
+                != {"type": "restart-vonk-unit", "unit": "helper"}
+            ):
+                raise HostHelperAuthorityError(
+                    "Spark3542 compatibility recovery grant is invalid"
+                )
+            return replay
+        if recovery.state != "armed" or recovery.signed_grant is not None:
+            raise HostHelperAuthorityError(
+                "Spark3542 compatibility recovery grant is unavailable"
+            )
+        grant = self._issuer.issue_grant(
+            node_id=node_id,
+            operation=HostHelperOperation(
+                HostOperationKind.RESTART_VONK_UNIT,
+                {"unit": RestartUnit.HELPER.value},
+            ),
+            expires_in_seconds=expires_in_seconds,
+        )
+        if grant.claims.expires_at > int(lease_deadline.timestamp()):
+            raise HostHelperAuthorityError(
+                "Spark3542 compatibility recovery grant exceeds the active attempt lease"
+            )
+        recovery.state = "issued"
+        recovery.retry_fence = fence
+        recovery.retry_certificate_serial = certificate_serial
+        recovery.signed_grant = grant.to_mapping()
+        recovery.grant_request_id = grant.claims.request_id
+        recovery.grant_expires_at = datetime.fromtimestamp(
+            grant.claims.expires_at, tz=UTC
+        )
+        recovery.identity_deadline = now + self._COMPATIBILITY_IDENTITY_WINDOW
+        recovery.issued_at = now
         return grant
 
     def _check_attempt(

@@ -1323,6 +1323,61 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     )
 
 
+def test_spark3542_compatibility_recovery_requires_typed_preview_and_apply() -> None:
+    endpoint = "/api/v1/agents/compatibility-recovery/spark3542-a122"
+    client = _Client({("GET", f"{endpoint}/preview"): {"plan_digest": "b" * 64}})
+
+    result, preview = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "preview",
+    )
+    assert result == 0
+    assert preview["plan_digest"] == "b" * 64
+    assert client.calls[-1][:2] == ("GET", f"{endpoint}/preview")
+
+    result, plan = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "apply",
+        "--plan-digest",
+        "b" * 64,
+        "--confirm",
+        "restart-staged-a122-recovery-on-spark3542",
+    )
+    assert result == 0
+    assert plan["mode"] == "plan"
+
+    result, _applied = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "upgrade",
+        "recover-spark3542",
+        "apply",
+        "--plan-digest",
+        "b" * 64,
+        "--confirm",
+        "restart-staged-a122-recovery-on-spark3542",
+        "--apply",
+    )
+    assert result == 0
+    assert client.calls[-1][:3] == (
+        "POST",
+        endpoint,
+        {
+            "plan_digest": "b" * 64,
+            "confirmation": "restart-staged-a122-recovery-on-spark3542",
+        },
+    )
+
+
 @pytest.mark.parametrize(
     "argv",
     [

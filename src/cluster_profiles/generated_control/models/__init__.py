@@ -258,6 +258,13 @@ from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
 from .source_policy_response import SourcePolicyResponse
+from .spark_3542_compatibility_recovery_apply_request import Spark3542CompatibilityRecoveryApplyRequest
+from .spark_3542_compatibility_recovery_preview_response import Spark3542CompatibilityRecoveryPreviewResponse
+from .spark_3542_compatibility_recovery_preview_response_state import Spark3542CompatibilityRecoveryPreviewResponseState
+from .spark_3542_compatibility_recovery_response import Spark3542CompatibilityRecoveryResponse
+from .spark_3542_compatibility_recovery_response_state import Spark3542CompatibilityRecoveryResponseState
+from .spark_3542_compatibility_recovery_source_identity import Spark3542CompatibilityRecoverySourceIdentity
+from .spark_3542_compatibility_recovery_target import Spark3542CompatibilityRecoveryTarget
 from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
@@ -570,6 +577,13 @@ __all__ = (
     "SourceCheckRequest",
     "SourcePolicyFindingResponse",
     "SourcePolicyResponse",
+    "Spark3542CompatibilityRecoveryApplyRequest",
+    "Spark3542CompatibilityRecoveryPreviewResponse",
+    "Spark3542CompatibilityRecoveryPreviewResponseState",
+    "Spark3542CompatibilityRecoveryResponse",
+    "Spark3542CompatibilityRecoveryResponseState",
+    "Spark3542CompatibilityRecoverySourceIdentity",
+    "Spark3542CompatibilityRecoveryTarget",
     "StopNodeImpactResponse",
     "StopPlanResponse",
     "StopPreviewRequest",

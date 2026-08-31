@@ -460,6 +460,7 @@ def create_app(
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
     agent_upgrades: Any | None = None,
+    compatibility_recovery: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
 ) -> FastAPI:
     app = FastAPI(
@@ -675,6 +676,7 @@ def create_app(
         audits=audits,
         services=agent,
         upgrades=agent_upgrades,
+        compatibility_recovery=compatibility_recovery,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
     if worker_authority is not None:
@@ -1424,6 +1426,13 @@ def production_app() -> FastAPI:
         ),
         release_api_url=settings.agent_release_api_url,
     )
+    from .compat_recovery import Spark3542CompatibilityRecoveryService
+
+    compatibility_recovery = Spark3542CompatibilityRecoveryService(
+        sessions,
+        clock=clock,
+        notify_available=agent_services.operations.notify_available,
+    )
 
     def consume_agent_result(session, operation, attempt, message) -> None:
         artifact_jobs.consume_agent_result(session, operation, attempt, message)
@@ -1517,6 +1526,7 @@ def production_app() -> FastAPI:
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         agent_upgrades=agent_upgrades,
+        compatibility_recovery=compatibility_recovery,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():

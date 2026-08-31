@@ -939,6 +939,119 @@ class AgentOperationAttempt(Base):
     result: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
+class AgentUpgradeCompatibilityRecovery(Base):
+    """One immutable, node-bound bridge to an already staged root recovery.
+
+    This is deliberately not a general upgrade mode.  The sole row records the
+    exact failed attempt that an administrator inspected, and the exact retry
+    grant issued through the legacy agent.  Persisting the signed grant makes a
+    transport retry a replay of one authorization rather than a second root
+    action.
+    """
+
+    __tablename__ = "agent_upgrade_compatibility_recoveries"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('armed','issued','awaiting-identity','completed',"
+            "'completed-before-dispatch','operator-blocked')",
+            name="ck_agent_upgrade_compatibility_recoveries_state",
+        ),
+        CheckConstraint(
+            "((retry_fence IS NULL AND retry_certificate_serial IS NULL "
+            "AND signed_grant IS NULL AND grant_request_id IS NULL "
+            "AND grant_expires_at IS NULL AND identity_deadline IS NULL "
+            "AND issued_at IS NULL) OR "
+            "(retry_fence IS NOT NULL AND retry_certificate_serial IS NOT NULL "
+            "AND signed_grant IS NOT NULL AND grant_request_id IS NOT NULL "
+            "AND grant_expires_at IS NOT NULL AND identity_deadline IS NOT NULL "
+            "AND issued_at IS NOT NULL))",
+            name="ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
+        ),
+        CheckConstraint(
+            "((state = 'armed' AND issued_at IS NULL AND completed_at IS NULL "
+            "AND blocked_at IS NULL) OR "
+            "(state IN ('issued','awaiting-identity') AND issued_at IS NOT NULL "
+            "AND completed_at IS NULL AND blocked_at IS NULL) OR "
+            "(state = 'completed' AND issued_at IS NOT NULL "
+            "AND completed_at IS NOT NULL) OR "
+            "(state = 'completed-before-dispatch' AND issued_at IS NULL "
+            "AND completed_at IS NOT NULL) OR "
+            "(state = 'operator-blocked' AND blocked_at IS NOT NULL "
+            "AND completed_at IS NULL))",
+            name="ck_agent_upgrade_compatibility_recoveries_state_fields",
+        ),
+        CheckConstraint(
+            "expected_retry_attempt = source_attempt + 1",
+            name="ck_agent_upgrade_compatibility_recoveries_attempt_sequence",
+        ),
+        CheckConstraint(
+            _lower_hex("plan_digest", 64),
+            name="ck_agent_upgrade_compatibility_recoveries_plan_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("source_binary_digest", 64),
+            name="ck_agent_upgrade_compatibility_recoveries_source_binary",
+        ),
+        CheckConstraint(
+            _lower_hex("package_sha256", 64),
+            name="ck_agent_upgrade_compatibility_recoveries_package",
+        ),
+        CheckConstraint(
+            _lower_hex("upgrade_payload_sha256", 64),
+            name="ck_agent_upgrade_compatibility_recoveries_upgrade_payload",
+        ),
+        CheckConstraint(
+            _lower_hex("target_binary_digest", 64),
+            name="ck_agent_upgrade_compatibility_recoveries_target_binary",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_operations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    source_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_fence: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_certificate_serial: Mapped[str] = mapped_column(String(128), nullable=False)
+    expected_retry_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_fence: Mapped[str | None] = mapped_column(String(36), unique=True)
+    retry_certificate_serial: Mapped[str | None] = mapped_column(String(128))
+    source_semantic_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_build_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    source_binary_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    upgrade_payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    package_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_package_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_build_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    target_binary_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    signed_grant: Mapped[dict[str, object] | None] = mapped_column(
+        JSON(none_as_null=True)
+    )
+    grant_request_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    grant_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    identity_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class RecipeSourceBundle(Base):
     __tablename__ = "recipe_source_bundles"
     __table_args__ = (

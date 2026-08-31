@@ -8319,6 +8319,315 @@
         "title": "SourcePolicyResponse",
         "type": "object"
       },
+      "Spark3542CompatibilityRecoveryApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "const": "restart-staged-a122-recovery-on-spark3542",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "confirmation"
+        ],
+        "title": "Spark3542CompatibilityRecoveryApplyRequest",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "restart-vonk-unit",
+            "title": "Action",
+            "type": "string"
+          },
+          "authority_revision": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Authority Revision",
+            "type": "string"
+          },
+          "compatibility_recovery_id": {
+            "const": "spark3542-a122-helper-restart-v1",
+            "title": "Compatibility Recovery Id",
+            "type": "string"
+          },
+          "expected_retry_attempt": {
+            "const": 4,
+            "title": "Expected Retry Attempt",
+            "type": "integer"
+          },
+          "job_id": {
+            "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "node_id": {
+            "const": "spk_2818d189042b4c77aefa7796f4befd23",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "const": "d54e0b56-e465-41bd-9627-c81f37352dfd",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "required_confirmation": {
+            "const": "restart-staged-a122-recovery-on-spark3542",
+            "title": "Required Confirmation",
+            "type": "string"
+          },
+          "source_attempt": {
+            "const": 3,
+            "title": "Source Attempt",
+            "type": "integer"
+          },
+          "source_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source Certificate Serial",
+            "type": "string"
+          },
+          "source_fence": {
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Source Fence",
+            "type": "string"
+          },
+          "source_identity": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
+          },
+          "state": {
+            "enum": [
+              "preview",
+              "armed",
+              "issued",
+              "awaiting-identity",
+              "completed",
+              "completed-before-dispatch",
+              "operator-blocked"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryTarget"
+          },
+          "unit": {
+            "const": "helper",
+            "title": "Unit",
+            "type": "string"
+          },
+          "upgrade_payload_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Upgrade Payload Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "unit",
+          "compatibility_recovery_id",
+          "node_id",
+          "source_identity",
+          "job_id",
+          "operation_id",
+          "source_attempt",
+          "source_fence",
+          "source_certificate_serial",
+          "expected_retry_attempt",
+          "authority_revision",
+          "upgrade_payload_sha256",
+          "target",
+          "plan_digest",
+          "state",
+          "required_confirmation"
+        ],
+        "title": "Spark3542CompatibilityRecoveryPreviewResponse",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "restart-vonk-unit",
+            "title": "Action",
+            "type": "string"
+          },
+          "authority_revision": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Authority Revision",
+            "type": "string"
+          },
+          "compatibility_recovery_id": {
+            "const": "spark3542-a122-helper-restart-v1",
+            "title": "Compatibility Recovery Id",
+            "type": "string"
+          },
+          "expected_retry_attempt": {
+            "const": 4,
+            "title": "Expected Retry Attempt",
+            "type": "integer"
+          },
+          "job_id": {
+            "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "node_id": {
+            "const": "spk_2818d189042b4c77aefa7796f4befd23",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "const": "d54e0b56-e465-41bd-9627-c81f37352dfd",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "source_attempt": {
+            "const": 3,
+            "title": "Source Attempt",
+            "type": "integer"
+          },
+          "source_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source Certificate Serial",
+            "type": "string"
+          },
+          "source_fence": {
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Source Fence",
+            "type": "string"
+          },
+          "source_identity": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
+          },
+          "state": {
+            "enum": [
+              "preview",
+              "armed",
+              "issued",
+              "awaiting-identity",
+              "completed",
+              "completed-before-dispatch",
+              "operator-blocked"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryTarget"
+          },
+          "unit": {
+            "const": "helper",
+            "title": "Unit",
+            "type": "string"
+          },
+          "upgrade_payload_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Upgrade Payload Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "unit",
+          "compatibility_recovery_id",
+          "node_id",
+          "source_identity",
+          "job_id",
+          "operation_id",
+          "source_attempt",
+          "source_fence",
+          "source_certificate_serial",
+          "expected_retry_attempt",
+          "authority_revision",
+          "upgrade_payload_sha256",
+          "target",
+          "plan_digest",
+          "state"
+        ],
+        "title": "Spark3542CompatibilityRecoveryResponse",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoverySourceIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Binary Digest",
+            "type": "string"
+          },
+          "build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Build Digest",
+            "type": "string"
+          },
+          "semantic_version": {
+            "const": "0.1.0",
+            "title": "Semantic Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "semantic_version",
+          "binary_digest",
+          "build_digest"
+        ],
+        "title": "Spark3542CompatibilityRecoverySourceIdentity",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_version": {
+            "const": "0.1.0~dev.381+ga122909feaa3",
+            "title": "Package Version",
+            "type": "string"
+          },
+          "target_binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Target Binary Digest",
+            "type": "string"
+          },
+          "target_build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Target Build Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_version",
+          "package_sha256",
+          "target_binary_digest",
+          "target_build_digest"
+        ],
+        "title": "Spark3542CompatibilityRecoveryTarget",
+        "type": "object"
+      },
       "StopNodeImpactResponse": {
         "additionalProperties": false,
         "properties": {
@@ -10578,6 +10887,72 @@
           }
         ],
         "summary": "Agent List"
+      }
+    },
+    "/api/v1/agents/compatibility-recovery/spark3542-a122": {
+      "post": {
+        "operationId": "applySpark3542A122CompatibilityRecovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Apply Spark3542 Compatibility Recovery"
+      }
+    },
+    "/api/v1/agents/compatibility-recovery/spark3542-a122/preview": {
+      "get": {
+        "operationId": "previewSpark3542A122CompatibilityRecovery",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Spark3542 Compatibility Recovery"
       }
     },
     "/api/v1/agents/enrollments": {

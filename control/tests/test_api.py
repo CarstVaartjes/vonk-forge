@@ -38,7 +38,13 @@ class Jobs:
         return Enqueued(id=job_id)
 
 
-def _client(role: str, *, generic_jobs_enabled: bool = True, agent_upgrades=None):
+def _client(
+    role: str,
+    *,
+    generic_jobs_enabled: bool = True,
+    agent_upgrades=None,
+    compatibility_recovery=None,
+):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     jobs = Jobs()
@@ -50,6 +56,7 @@ def _client(role: str, *, generic_jobs_enabled: bool = True, agent_upgrades=None
         now=lambda: 10,
         generic_jobs_enabled=generic_jobs_enabled,
         agent_upgrades=agent_upgrades,
+        compatibility_recovery=compatibility_recovery,
     )
     client = TestClient(app)
     token = codec.issue(Actor(role, role), ttl_seconds=1000, now=0)
@@ -68,7 +75,12 @@ def _opaque(byte: int) -> str:
     return base64.urlsafe_b64encode(bytes([byte]) * 32).decode().rstrip("=")
 
 
-def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
+def _browser_client(
+    *,
+    agent_upgrades=None,
+    compatibility_recovery=None,
+    role: str = "administrator",
+):
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -105,6 +117,7 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
         generic_jobs_enabled=True,
         browser_auth=service,
         agent_upgrades=agent_upgrades,
+        compatibility_recovery=compatibility_recovery,
     )
     client = TestClient(app, base_url="https://forge.example.test")
     return client, issued, service, sessions, clock, codec, jobs
@@ -131,6 +144,62 @@ class RepairPreviewUpgrades:
             ),
             strategy=strategy,
         )
+
+
+class CompatibilityRecovery:
+    def __init__(self) -> None:
+        self.applied: list[dict[str, str]] = []
+
+    @staticmethod
+    def preview():
+        from vonk_control.compat_recovery import (
+            JOB_ID,
+            NODE_ID,
+            OPERATION_ID,
+            RECOVERY_ID,
+            SOURCE_BINARY_DIGEST,
+            SOURCE_BUILD_DIGEST,
+            SOURCE_SEMANTIC_VERSION,
+            TARGET_BINARY_DIGEST,
+            TARGET_BUILD_DIGEST,
+            TARGET_PACKAGE_SHA256,
+            TARGET_PACKAGE_VERSION,
+            CompatibilityRecoveryPlan,
+        )
+
+        return CompatibilityRecoveryPlan(
+            plan_digest="d" * 64,
+            document={
+                "action": "restart-vonk-unit",
+                "unit": "helper",
+                "compatibility_recovery_id": RECOVERY_ID,
+                "authority_revision": "c" * 64,
+                "node_id": NODE_ID,
+                "source_identity": {
+                    "semantic_version": SOURCE_SEMANTIC_VERSION,
+                    "binary_digest": SOURCE_BINARY_DIGEST,
+                    "build_digest": SOURCE_BUILD_DIGEST,
+                },
+                "job_id": JOB_ID,
+                "operation_id": OPERATION_ID,
+                "source_attempt": 3,
+                "source_fence": "10000000-0000-4000-8000-000000000001",
+                "source_certificate_serial": "dev335-certificate",
+                "expected_retry_attempt": 4,
+                "upgrade_payload_sha256": "e" * 64,
+                "target": {
+                    "package_version": TARGET_PACKAGE_VERSION,
+                    "package_sha256": TARGET_PACKAGE_SHA256,
+                    "target_binary_digest": TARGET_BINARY_DIGEST,
+                    "target_build_digest": TARGET_BUILD_DIGEST,
+                },
+            },
+            state="preview",
+        )
+
+    def apply(self, **values):
+        self.applied.append(values)
+        return self.preview()
 
 
 def repair_preview_document() -> dict[str, object]:
@@ -411,6 +480,51 @@ def test_upgrade_preview_accepts_current_package_echo_but_rejects_unsigned_custo
         "a custom agent package requires its node-bound repair manifest"
     )
     assert len(upgrades.calls) == 1
+
+
+def test_spark3542_compatibility_recovery_is_admin_typed_and_audited() -> None:
+    recovery = CompatibilityRecovery()
+    client, headers, _jobs, audits = _client(
+        "administrator", compatibility_recovery=recovery
+    )
+    endpoint = "/api/v1/agents/compatibility-recovery/spark3542-a122"
+
+    preview = client.get(f"{endpoint}/preview", headers=headers)
+    assert preview.status_code == 200
+    assert preview.json()["plan_digest"] == "d" * 64
+    assert (
+        preview.json()["required_confirmation"]
+        == "restart-staged-a122-recovery-on-spark3542"
+    )
+
+    invalid = client.post(
+        endpoint,
+        headers=headers,
+        json={"plan_digest": "d" * 64, "confirmation": "restart"},
+    )
+    assert invalid.status_code == 422
+
+    applied = client.post(
+        endpoint,
+        headers=headers,
+        json={
+            "plan_digest": "d" * 64,
+            "confirmation": "restart-staged-a122-recovery-on-spark3542",
+        },
+    )
+    assert applied.status_code == 202
+    assert recovery.applied[-1]["actor"] == "administrator"
+    assert audits.list()[0].action == (
+        "agent.compatibility-recovery.spark3542-a122.apply"
+    )
+
+    operator_client, operator_headers, *_ = _client(
+        "operator", compatibility_recovery=CompatibilityRecovery()
+    )
+    assert (
+        operator_client.get(f"{endpoint}/preview", headers=operator_headers).status_code
+        == 403
+    )
 
 
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
