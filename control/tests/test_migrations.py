@@ -43,6 +43,7 @@ EXPECTED_BASELINE_TABLES = {
     "jobs",
     "local_recipe_revisions",
     "local_recipes",
+    "managed_recipe_library_links",
     "node_artifacts",
     "node_inventory_snapshots",
     "node_mutation_leases",
@@ -57,6 +58,7 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_import_items",
     "recipe_imports",
     "recipe_installations",
+    "recipe_library_sync_runs",
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
@@ -165,6 +167,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0007_compat_recovery_rearm_certificates.py",
         "0008_compat_recovery_abandon.py",
         "0009_compat_abandoned_at.py",
+        "0010_managed_recipe_catalog_sync.py",
     ]
 
 
@@ -370,7 +373,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0009_compat_abandoned_at"
+            == "0010_managed_recipe_catalog_sync"
         )
 
 
@@ -457,7 +460,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0009_compat_abandoned_at"
+            == "0010_managed_recipe_catalog_sync"
         )
 
 

@@ -160,6 +160,7 @@ export type PublicRecipe = {
 };
 export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
 export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"; changes_since_local: PublicRecipeRelease[]};
+export type ManagedCatalogSyncSummary = components["schemas"]["ManagedCatalogSyncResponse"];
 export interface CatalogApi {
   catalogRecipes(cursor?: string): Promise<CatalogRecipeList>;
   catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision>;
@@ -172,6 +173,8 @@ export interface CatalogApi {
   listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
   previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview>;
   importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision>;
+  syncManagedRecipeCatalog(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
+  managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
   attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void>;
   publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>>;
   uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt>;

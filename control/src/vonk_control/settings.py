@@ -153,6 +153,7 @@ class Settings:
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
     recipe_library_api_url: str = "https://api.github.com"
+    recipe_library_sync_interval_seconds: int = 900
     agent_release_api_url: str = "https://install.vonkforge.ai"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
@@ -277,6 +278,9 @@ class Settings:
                     "VONK_ARTIFACT_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60)
                 )
             )
+            recipe_library_sync_interval_seconds = int(
+                os.environ.get("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "900")
+            )
         except ValueError as error:
             raise SettingsError(
                 "artifact job storage settings must be integers"
@@ -288,6 +292,10 @@ class Settings:
         if not 3600 <= artifact_job_retention_seconds <= 365 * 24 * 60 * 60:
             raise SettingsError(
                 "artifact job retention must be between one hour and one year"
+            )
+        if not 60 <= recipe_library_sync_interval_seconds <= 24 * 60 * 60:
+            raise SettingsError(
+                "recipe library sync interval must be between one minute and one day"
             )
         try:
             configured_jurisdiction = operator_jurisdiction(
@@ -509,6 +517,7 @@ class Settings:
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             global_catalog_url=global_catalog_url,
             recipe_library_api_url=recipe_library_api_url,
+            recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,
             agent_release_api_url=agent_release_api_url,
             agent_controller_address=agent_controller_address,
             agent_service_hostnames=agent_service_hostnames,

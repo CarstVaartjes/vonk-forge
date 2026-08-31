@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import logging
 import re
 import secrets
 import time
@@ -62,7 +64,8 @@ from .auth import (
 )
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import install_catalog_routes
-from .catalog_service import CatalogService
+from .catalog_service import CatalogError, CatalogService
+from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
@@ -95,12 +98,14 @@ from .operation_api import (
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
-from .recipe_library import RecipeLibraryClient
+from .recipe_library import RecipeLibraryClient, RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
 from .workload_run_workflow import WorkloadRunWorkflow
+
+_LOGGER = logging.getLogger(__name__)
 
 _RECIPE_IMAGE_UPLOAD = re.compile(
     r"/agent/v1/recipe-builds/"
@@ -455,6 +460,7 @@ def create_app(
     catalog: CatalogService | None = None,
     global_catalog: Any | None = None,
     recipe_library: Any | None = None,
+    managed_catalog_sync: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
@@ -702,6 +708,7 @@ def create_app(
         service=catalog,
         global_catalog=global_catalog,
         recipe_library=recipe_library,
+        managed_sync=managed_catalog_sync,
     )
     install_library_routes(
         app,
@@ -1474,10 +1481,17 @@ def production_app() -> FastAPI:
         cursors=cursor_codec,
         source_bundles=database_bundles,
     )
+    managed_catalog_sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=catalog_service,
+        reader=recipe_library,
+        clock=clock,
+    )
+    audits_store = SqlAuditStore(sessions, clock)
     app = create_app(
         jobs=job_service,
         tokens=token_codec,
-        audits=SqlAuditStore(sessions, clock),
+        audits=audits_store,
         fleet=dashboard.fleet,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
@@ -1509,6 +1523,7 @@ def production_app() -> FastAPI:
         catalog=catalog_service,
         global_catalog=global_catalog,
         recipe_library=recipe_library,
+        managed_catalog_sync=managed_catalog_sync,
         workload_run=WorkloadRunWorkflow(
             sessions,
             clock=clock,
@@ -1532,8 +1547,43 @@ def production_app() -> FastAPI:
     if web_root.is_dir():
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")
 
+    automatic_sync_task: asyncio.Task[None] | None = None
+    automatic_sync_stop = asyncio.Event()
+
+    async def run_automatic_catalog_sync() -> None:
+        # Let migrations, health checks, and the local relay settle before the
+        # first network-bound refresh. The durable ledger remains authoritative.
+        try:
+            await asyncio.wait_for(automatic_sync_stop.wait(), timeout=10)
+            return
+        except TimeoutError:
+            pass
+        while not automatic_sync_stop.is_set():
+            try:
+                await asyncio.to_thread(managed_catalog_sync.automatic)
+            except (CatalogError, CatalogSyncError, RecipeLibraryError, OSError) as error:
+                _LOGGER.warning(
+                    "automatic managed recipe catalog sync failed: %s",
+                    type(error).__name__,
+                )
+            try:
+                await asyncio.wait_for(
+                    automatic_sync_stop.wait(),
+                    timeout=settings.recipe_library_sync_interval_seconds,
+                )
+            except TimeoutError:
+                continue
+
+    @app.on_event("startup")
+    async def start_automatic_catalog_sync() -> None:
+        nonlocal automatic_sync_task
+        automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
+
     @app.on_event("shutdown")
-    def close_global_catalog() -> None:
+    async def close_global_catalog() -> None:
+        automatic_sync_stop.set()
+        if automatic_sync_task is not None:
+            await automatic_sync_task
         global_catalog.close()
         recipe_library.close()
         agent_upgrades.close()

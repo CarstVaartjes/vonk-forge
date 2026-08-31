@@ -502,6 +502,31 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
   }
 });
 
+it("starts managed recipe synchronization with a fresh idempotency key", async () => {
+  document.cookie = "vonk_csrf=catalog-csrf; path=/";
+  let capturedPath = "";
+  let capturedInit: RequestInit | undefined;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    capturedPath = String(input);
+    capturedInit = init;
+    return new Response(JSON.stringify({state: "current"}), {
+      headers: {"Content-Type": "application/json"},
+      status: 200,
+    });
+  });
+
+  const result = await new ApiClient().syncManagedRecipeCatalog();
+
+  expect(result.state).toBe("current");
+  expect(capturedPath).toBe("/api/v1/catalog/managed-recipes/sync");
+  expect(capturedInit?.method).toBe("POST");
+  expect(new Headers(capturedInit?.headers).get("X-CSRF-Token")).toBe("catalog-csrf");
+  const body = JSON.parse(String(capturedInit?.body)) as {request_key: string};
+  expect(body.request_key).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+});
+
 it("previews and applies an exact repair manifest through browser CSRF auth", async () => {
   document.cookie = "vonk_csrf=repair-csrf; path=/";
   const captured: Request[] = [];

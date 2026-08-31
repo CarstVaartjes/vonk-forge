@@ -1310,6 +1310,131 @@ def _resolved_recipe_revision_is_immutable(
         raise ValueError("resolved recipe revisions are immutable")
 
 
+class RecipeLibrarySyncRun(Base):
+    """Durable, idempotent evidence for one managed recipe-library refresh."""
+
+    __tablename__ = "recipe_library_sync_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "trigger IN ('manual','automatic')",
+            name="ck_recipe_library_sync_runs_trigger",
+        ),
+        CheckConstraint(
+            "state IN ('running','succeeded','failed')",
+            name="ck_recipe_library_sync_runs_state",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("expected_commit", 40),
+            name="ck_recipe_library_sync_runs_expected_commit",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("observed_commit", 40),
+            name="ck_recipe_library_sync_runs_observed_commit",
+        ),
+        CheckConstraint(
+            "total_count >= 0 AND processed_count >= 0 AND imported_count >= 0 "
+            "AND updated_count >= 0 AND current_count >= 0 "
+            "AND conflict_count >= 0 AND missing_count >= 0 "
+            "AND processed_count <= total_count",
+            name="ck_recipe_library_sync_runs_counts",
+        ),
+        CheckConstraint(
+            "(state = 'running' AND completed_at IS NULL) OR "
+            "(state IN ('succeeded','failed') AND completed_at IS NOT NULL)",
+            name="ck_recipe_library_sync_runs_completion",
+        ),
+        CheckConstraint(
+            "(state = 'running' AND active_slot = 'managed-recipes') OR "
+            "(state IN ('succeeded','failed') AND active_slot IS NULL)",
+            name="ck_recipe_library_sync_runs_active_slot",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    request_key: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    active_slot: Mapped[str | None] = mapped_column(String(32), unique=True)
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    expected_commit: Mapped[str | None] = mapped_column(String(40))
+    observed_commit: Mapped[str | None] = mapped_column(String(40), index=True)
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    conflict_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    missing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    result: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_detail: Mapped[str | None] = mapped_column(String(256))
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ManagedRecipeLibraryLink(Base):
+    """Stable remote identity bound to the latest imported immutable revision."""
+
+    __tablename__ = "managed_recipe_library_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "repository",
+            "publisher",
+            "slug",
+            name="uq_managed_recipe_library_identity",
+        ),
+        CheckConstraint(
+            "availability IN ('present','missing')",
+            name="ck_managed_recipe_library_links_availability",
+        ),
+        CheckConstraint(
+            "sync_state IN ('current','update-available','error')",
+            name="ck_managed_recipe_library_links_sync_state",
+        ),
+        CheckConstraint(
+            _lower_hex("remote_content_sha256", 64),
+            name="ck_managed_recipe_library_links_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("remote_commit", 40),
+            name="ck_managed_recipe_library_links_commit",
+        ),
+    )
+    recipe_id: Mapped[str] = mapped_column(
+        ForeignKey("local_recipes.id", ondelete="CASCADE"), primary_key=True
+    )
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    publisher: Mapped[str] = mapped_column(String(63), nullable=False)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False)
+    source_path: Mapped[str] = mapped_column(String(256), nullable=False)
+    remote_commit: Mapped[str] = mapped_column(String(40), nullable=False)
+    remote_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    local_revision_id: Mapped[str] = mapped_column(
+        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    availability: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    sync_state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    last_error: Mapped[str | None] = mapped_column(String(256))
+    last_seen_run_id: Mapped[str] = mapped_column(
+        ForeignKey("recipe_library_sync_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    first_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
 class RecipeImport(Base):
     __tablename__ = "recipe_imports"
     __table_args__ = (

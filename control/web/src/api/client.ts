@@ -30,6 +30,7 @@ import type {
   GlobalRecipeRevision,
   PublicRecipeList,
   PublicRecipePreview,
+  ManagedCatalogSyncSummary,
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
@@ -240,6 +241,18 @@ export class ApiClient implements ControlApi {
 
   importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision> {
     return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256}), signal});
+  }
+
+  syncManagedRecipeCatalog(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
+    return this.request("/api/v1/catalog/managed-recipes/sync", {
+      method: "POST",
+      body: JSON.stringify({request_key: crypto.randomUUID()}),
+      signal,
+    });
+  }
+
+  managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
+    return this.request("/api/v1/catalog/managed-recipes/sync-status", {signal});
   }
 
   async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {

@@ -21,17 +21,38 @@ download or use.
 
 ## Development versus production
 
-Development follows the recipe library's `main` branch and is allowed to
-change as pull requests merge. Production selects an approved immutable
-recipe-library release tag and records its commit in the local import receipt. The local
-controller resolves every recipe dependency by `kind`, `publisher`, `slug`,
-and content digest; it never turns a branch, display name, or `latest` tag into
-execution authority.
+The Controller watches the recipe library's reviewed `main` branch, but each
+sync first resolves that branch to one immutable Git commit. Every imported
+recipe, dependency, source bundle, and receipt is then verified against that
+exact snapshot. The local controller resolves every recipe dependency by
+`kind`, `publisher`, `slug`, and content digest; it never turns a branch,
+display name, or `latest` tag directly into execution authority.
 
-An administrator imports a validated checkout with the platform's
-recipe-library import operation. The import receipt records
-the exact library commit and recipe path; re-importing the same recipe digest
-is idempotent. The checkout is never mounted into a running workload.
+The Controller refreshes the managed catalog automatically every 15 minutes by
+default. Set `VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS` between 60 and 86400
+seconds only when a different cadence is required. Opening Library also offers
+**Update from Vonk Forge remote** for an immediate administrator-triggered
+refresh. Both paths use the same durable, idempotent operation and exact commit
+gate. The import receipt records the exact library commit and recipe path;
+re-importing the same recipe digest is idempotent. The checkout is never mounted
+into a running workload.
+
+Managed synchronization only owns recipes whose source is
+`recipe_library`. Local drafts, WorkloadRun imports, forks, and other custom
+recipes are never overwritten. A slug collision is reported as a conflict for
+operator review. If a managed recipe disappears remotely, its immutable local
+history and any installation remain intact. It is surfaced as withdrawn only
+while it is installed or running; synchronization never stops or uninstalls it.
+When a newer revision is imported, existing installations and runs remain bound
+to their old immutable revision and are reported as stale until the operator
+reviews an update.
+
+The latest durable result is available from
+`GET /api/v1/catalog/managed-recipes/sync-status`. An explicit refresh uses
+`POST /api/v1/catalog/managed-recipes/sync` with a fresh UUID `request_key` and,
+when the caller already reviewed a snapshot, its 40-character
+`expected_commit`. Reusing a request key with different semantics or racing a
+second sync fails closed.
 
 The recipe library's GitHub Actions workflow calls the reusable validator in
 this repository. Before publishing a production recipe-library release, pin
