@@ -529,7 +529,6 @@ export function LibraryWorkcell({
                 <div className="library-workcell-recipe-signals"><span className={`recipe-origin ${record.custom ? "is-custom" : "is-managed"}`}>{record.custom ? "Custom" : "Managed"}</span>{record.withdrawnInstalled && <span className="is-withdrawn">Withdrawn upstream · installed</span>}{record.catalog && <span className={`library-qualification qualification-${record.catalog.qualification}`}>{record.catalog.qualification === "cataloged" ? "Accepted" : "Candidate"}</span>}<span>{releaseStatus(record)}</span><span>{recipeStatus(record)}</span>{record.catalog && <span>{record.catalog.node_count} Spark{record.catalog.node_count === 1 ? "" : "s"}</span>}</div>
               </div>
               <div className="library-workcell-recipe-actions">{record.catalog?.local.status === "update-available" && <a aria-label={`Review update for ${record.title}`} className="library-release-link" href={`/library/import?recipe=${encodeURIComponent(record.catalog.uri)}`} onClick={event => onNavigate(event, `/library/import?recipe=${encodeURIComponent(record.catalog!.uri)}`)}>Review update</a>}<button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Automatic catalog sync must create the local immutable revision first." : undefined} onClick={event => { placementTrigger.current = event.currentTarget; void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : "Place on Spark"}</button>{record.recipe && <span className="drag-hint">Drag to a compatible Spark</span>}</div>
-              {active && <section className="library-inline-detail" aria-label="Recipe detail"><div className="library-inline-detail-heading"><div><h3>{record.title}</h3><span>Exact recipe authority</span></div><span>Detail stays inside the recipe work surface</span></div>{detailLoading && <p role="status">Loading exact recipe authority…</p>}{detailError && <div className="fleet-error" role="alert"><p>{detailError}</p><button type="button" onClick={onRetryDetail}>Retry recipe detail</button></div>}{detailContent}</section>}
             </article>;
           })}
           {visibleRecords.length === 0 && <div className="library-workcell-empty"><strong>No recipes match</strong><p>Clear a filter or choose another model. Custom recipes remain available under Local status.</p></div>}
@@ -581,6 +580,12 @@ export function LibraryWorkcell({
         })}</div>
         {fleet && fleet.nodes.length === 0 && <div className="library-workcell-empty"><strong>No Sparks enrolled</strong><p>Enroll a Spark before previewing placement.</p></div>}
       </aside>
+      {route.kind === "recipe" && selectedRecord && <section className="library-pane library-detail library-inline-detail library-workcell-detail" aria-label="Recipe detail">
+        <div className="library-inline-detail-heading"><div><h3>{selectedRecord.title}</h3><span>Exact recipe authority</span></div><span>Full operational workspace</span></div>
+        {detailLoading && <p role="status">Loading exact recipe authority…</p>}
+        {detailError && <div className="fleet-error" role="alert"><p>{detailError}</p><button type="button" onClick={onRetryDetail}>Retry recipe detail</button></div>}
+        {detailContent}
+      </section>}
     </div>
     <p className="visually-hidden" role="status" aria-live="polite">{announcement}</p>
     {review?.record.recipe && <LibraryPlacementDialog

@@ -2223,6 +2223,28 @@
   min-width: 0;
 }
 
+.library-workcell.route-recipe {
+  grid-template-areas:
+    "models recipes sparks"
+    ". detail detail";
+}
+
+.library-workcell.route-recipe > .library-models {
+  grid-area: models;
+}
+
+.library-workcell.route-recipe > .library-recipes {
+  grid-area: recipes;
+}
+
+.library-workcell.route-recipe > .library-spark-rail {
+  grid-area: sparks;
+}
+
+.library-workcell.route-recipe > .library-workcell-detail {
+  grid-area: detail;
+}
+
 .library-workcell > .library-pane {
   display: none;
 }
@@ -2231,8 +2253,14 @@
 .library-workcell.route-model > .library-recipes,
 .library-workcell.route-model > .library-spark-rail,
 .library-workcell.route-recipe > .library-recipes,
-.library-workcell.route-recipe > .library-spark-rail {
+.library-workcell.route-recipe > .library-spark-rail,
+.library-workcell.route-recipe > .library-workcell-detail {
   display: block;
+}
+
+.library-workcell-detail {
+  min-width: 0;
+  overflow: visible;
 }
 
 .library-workcell .library-pane-heading {
@@ -3034,6 +3062,7 @@
   }
 
   .library-workcell {
+    grid-template-areas: none;
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -3047,12 +3076,16 @@
     order: 1;
   }
 
-  .library-workcell .library-spark-rail {
+  .library-workcell .library-workcell-detail {
     order: 2;
   }
 
-  .library-workcell .library-models {
+  .library-workcell .library-spark-rail {
     order: 3;
+  }
+
+  .library-workcell .library-models {
+    order: 4;
   }
 
   .library-spark-list {
