@@ -108,7 +108,9 @@ class Spark3542CompatibilityRecoveryService:
         with self._sessions() as session:
             existing = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
             if existing is not None:
-                if self._grantless_rearm_candidate(existing):
+                if self._grantless_rearm_candidate(
+                    existing
+                ) or self._grantless_abandoned_rearm_candidate(existing):
                     binding = self._rearm_snapshot(session, now, lock=False)
                     return CompatibilityRecoveryPlan(
                         plan_digest=hashlib.sha256(
@@ -166,7 +168,9 @@ class Spark3542CompatibilityRecoveryService:
                 .with_for_update(of=AgentUpgradeCompatibilityRecovery)
             )
             if existing is not None:
-                if self._grantless_rearm_candidate(existing):
+                if self._grantless_rearm_candidate(
+                    existing
+                ) or self._grantless_abandoned_rearm_candidate(existing):
                     binding = self._rearm_snapshot(session, now, lock=True)
                     rearm_digest = hashlib.sha256(
                         canonical_message(binding)
@@ -197,6 +201,7 @@ class Spark3542CompatibilityRecoveryService:
                     )
                     existing.state = "armed"
                     existing.blocked_at = None
+                    existing.completed_at = None
                     retry.state = "running"
                     retry.lease_deadline = now + _REARM_LEASE
                     operation.state = "running"
@@ -359,6 +364,7 @@ class Spark3542CompatibilityRecoveryService:
             assert recovery is not None and operation is not None and job is not None
             recovery.state = "abandoned"
             recovery.completed_at = now
+            recovery.abandoned_at = now
             # Preserve the original arm actor/request as immutable evidence;
             # the API audit record captures the abandonment actor/request.
             del actor, request_id
@@ -600,6 +606,33 @@ class Spark3542CompatibilityRecoveryService:
         )
 
     @staticmethod
+    def _grantless_abandoned_rearm_candidate(
+        recovery: AgentUpgradeCompatibilityRecovery,
+    ) -> bool:
+        """Recognize only the same grantless attempt after lane release.
+
+        ``abandoned_at`` remains populated when this candidate is re-armed, so
+        releasing and later reauthorizing the one-shot repair cannot erase the
+        intervening administrative decision.
+        """
+
+        return bool(
+            recovery.state == "abandoned"
+            and recovery.blocked_at is not None
+            and recovery.completed_at is not None
+            and recovery.abandoned_at is not None
+            and recovery.retry_fence is None
+            and recovery.retry_certificate_serial is None
+            and recovery.signed_grant is None
+            and recovery.grant_request_id is None
+            and recovery.grant_expires_at is None
+            and recovery.identity_deadline is None
+            and recovery.issued_at is None
+            and recovery.rearm_attempt_certificate_serial is not None
+            and recovery.rearm_dispatch_certificate_serial is not None
+        )
+
+    @staticmethod
     def _grantless_rearm_applied_candidate(
         session: Session,
         recovery: AgentUpgradeCompatibilityRecovery,
@@ -693,6 +726,17 @@ class Spark3542CompatibilityRecoveryService:
             and retry.state in {"failed", "waiting-for-operator"}
             and _aware(retry.lease_deadline) <= _aware(now)
         )
+        abandoned_rearm = bool(
+            self._grantless_abandoned_rearm_candidate(recovery)
+            and recovery.rearm_attempt_certificate_serial
+            == retry.agent_certificate_serial
+            and recovery.rearm_dispatch_certificate_serial
+            == node.contact_certificate_serial
+            and operation.state == "cancelled"
+            and job.state == "cancelled"
+            and retry.state in {"failed", "waiting-for-operator"}
+            and _aware(retry.lease_deadline) <= _aware(now)
+        )
         applied_rearm = bool(
             recovery.state == "armed"
             and recovery.blocked_at is None
@@ -714,7 +758,7 @@ class Spark3542CompatibilityRecoveryService:
             and _aware(retry.lease_deadline) > _aware(now)
         )
         if not (
-            (blocked_rearm or applied_rearm)
+            (blocked_rearm or abandoned_rearm or applied_rearm)
             and recovery.id == RECOVERY_ID
             and recovery.node_id == NODE_ID
             and recovery.job_id == JOB_ID
@@ -804,6 +848,18 @@ class Spark3542CompatibilityRecoveryService:
             raise CompatibilityRecoveryConflict(
                 "Spark3542 has another queued or running mutation"
             )
+        paused_mutations = list(
+            session.scalars(
+                select(AgentOperation)
+                .where(
+                    AgentOperation.node_id == NODE_ID,
+                    AgentOperation.id != OPERATION_ID,
+                    AgentOperation.state == "waiting-for-operator",
+                    AgentOperation.kind.in_(MUTATING_AGENT_OPERATIONS),
+                )
+                .order_by(AgentOperation.created_at, AgentOperation.id)
+            )
+        )
         return {
             "compatibility_recovery_id": RECOVERY_ID,
             "recovery_plan_digest": recovery.plan_digest,
@@ -812,6 +868,16 @@ class Spark3542CompatibilityRecoveryService:
             "rearm_attempt_certificate_serial": retry.agent_certificate_serial,
             "rearm_dispatch_certificate_serial": dispatch_certificate.serial,
             "failure": dict(_GRANTLESS_RETRY_FAILURE),
+            "paused_mutations": [
+                {
+                    "job_id": paused.parent_job_id,
+                    "operation_id": paused.id,
+                    "kind": paused.kind,
+                    "authority_revision": paused.authority_revision,
+                    "payload_digest": paused.payload_digest,
+                }
+                for paused in paused_mutations
+            ],
         }
 
     def _snapshot(
