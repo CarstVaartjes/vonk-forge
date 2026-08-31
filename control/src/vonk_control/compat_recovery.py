@@ -63,6 +63,7 @@ TARGET_BUILD_DIGEST = (
     "sha256:f12f9a3953b34638b69ce687f64cd81aa936ce4bc855816fe3ef2cc279362420"
 )
 CONFIRMATION = "reboot-spark3542-to-resume-staged-a122-recovery"
+ABANDON_CONFIRMATION = "abandon-expired-spark3542-a122-recovery"
 _ONLINE_WINDOW = timedelta(seconds=150)
 _TERMINAL_ATTEMPT_STATES = frozenset({"expired", "failed", "waiting-for-operator"})
 _REARM_LEASE = timedelta(seconds=60)
@@ -320,6 +321,237 @@ class Spark3542CompatibilityRecoveryService:
         if notify:
             self._notify_available()
         return result
+
+    def preview_abandon(self) -> CompatibilityRecoveryPlan:
+        """Preview releasing a terminally blocked one-shot recovery quarantine."""
+
+        now = self._clock()
+        with self._sessions() as session:
+            document = self._abandon_snapshot(session, now, lock=False)
+        digest = hashlib.sha256(canonical_message(document)).hexdigest()
+        return CompatibilityRecoveryPlan(digest, document, "preview")
+
+    def abandon(
+        self,
+        *,
+        plan_digest: str,
+        confirmation: str,
+        actor: str,
+        request_id: str,
+    ) -> CompatibilityRecoveryPlan:
+        """Cancel only the expired legacy operation and release its mutation lane."""
+
+        if confirmation != ABANDON_CONFIRMATION:
+            raise CompatibilityRecoveryConflict(
+                f"confirmation must be exactly {ABANDON_CONFIRMATION}"
+            )
+        now = self._clock()
+        with self._sessions.begin() as session:
+            document = self._abandon_snapshot(session, now, lock=True)
+            expected_digest = hashlib.sha256(canonical_message(document)).hexdigest()
+            if plan_digest != expected_digest:
+                raise CompatibilityRecoveryConflict(
+                    "Spark3542 compatibility recovery abandonment preview is stale"
+                )
+            recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+            operation = session.get(AgentOperation, OPERATION_ID)
+            job = session.get(Job, JOB_ID)
+            assert recovery is not None and operation is not None and job is not None
+            recovery.state = "abandoned"
+            recovery.completed_at = now
+            # Preserve the original arm actor/request as immutable evidence;
+            # the API audit record captures the abandonment actor/request.
+            del actor, request_id
+            operation.state = "cancelled"
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.updated_at = now
+            job.state = "cancelled"
+            job.status_reason = (
+                "expired Spark3542 a122 compatibility recovery abandoned; "
+                "no replacement grant was issued"
+            )
+            job.updated_at = now
+        self._notify_available()
+        return CompatibilityRecoveryPlan(expected_digest, document, "abandoned")
+
+    def _abandon_snapshot(
+        self, session: Session, now: datetime, *, lock: bool
+    ) -> dict[str, object]:
+        queries = {
+            "node": select(AgentNode).where(AgentNode.node_id == NODE_ID),
+            "recovery": select(AgentUpgradeCompatibilityRecovery).where(
+                AgentUpgradeCompatibilityRecovery.id == RECOVERY_ID
+            ),
+            "job": select(Job).where(Job.id == JOB_ID),
+            "operation": select(AgentOperation).where(
+                AgentOperation.id == OPERATION_ID
+            ),
+            "retry": select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            ),
+        }
+        if lock:
+            queries = {name: query.with_for_update() for name, query in queries.items()}
+        rows = {name: session.scalar(query) for name, query in queries.items()}
+        node = rows["node"]
+        recovery = rows["recovery"]
+        job = rows["job"]
+        operation = rows["operation"]
+        retry = rows["retry"]
+        certificate = None
+        if isinstance(node, AgentNode) and node.contact_certificate_serial is not None:
+            certificate_query = select(AgentCertificate).where(
+                AgentCertificate.serial == node.contact_certificate_serial
+            )
+            if lock:
+                certificate_query = certificate_query.with_for_update(
+                    of=AgentCertificate
+                )
+            certificate = session.scalar(certificate_query)
+        if not (
+            isinstance(node, AgentNode)
+            and isinstance(recovery, AgentUpgradeCompatibilityRecovery)
+            and isinstance(job, Job)
+            and isinstance(operation, AgentOperation)
+            and isinstance(retry, AgentOperationAttempt)
+            and isinstance(certificate, AgentCertificate)
+        ):
+            raise CompatibilityRecoveryConflict(
+                "the expired Spark3542 compatibility recovery is unavailable"
+            )
+        package = operation.payload
+        payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
+        stored_document = self._stored_document(recovery)
+        if not (
+            recovery.state == "operator-blocked"
+            and recovery.blocked_at is not None
+            and recovery.completed_at is None
+            and recovery.issued_at is not None
+            and recovery.retry_fence is not None
+            and recovery.retry_certificate_serial is not None
+            and recovery.signed_grant is not None
+            and recovery.grant_request_id is not None
+            and recovery.grant_expires_at is not None
+            and recovery.identity_deadline is not None
+            and _aware(recovery.identity_deadline) <= _aware(now)
+            and recovery.plan_digest
+            == hashlib.sha256(canonical_message(stored_document)).hexdigest()
+            and recovery.node_id == NODE_ID
+            and recovery.job_id == JOB_ID
+            and recovery.operation_id == OPERATION_ID
+            and recovery.expected_retry_attempt == RETRY_ATTEMPT
+            and recovery.package_sha256 == TARGET_PACKAGE_SHA256
+            and recovery.target_package_version == TARGET_PACKAGE_VERSION
+            and recovery.target_binary_digest == TARGET_BINARY_DIGEST
+            and recovery.target_build_digest == TARGET_BUILD_DIGEST
+            and retry.attempt == RETRY_ATTEMPT
+            and retry.state == "waiting-for-operator"
+            and retry.fence == GRANTLESS_RETRY_FENCE
+            and retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE_SERIAL
+            and retry.result == _GRANTLESS_RETRY_FAILURE
+            and operation.state == "waiting-for-operator"
+            and operation.current_attempt == RETRY_ATTEMPT
+            and operation.retry_disposition is None
+            and operation.retry_disposition_attempt is None
+            and operation.kind == "agent.upgrade.v1"
+            and operation.node_id == NODE_ID
+            and operation.parent_job_id == JOB_ID
+            and operation.payload_digest == payload_digest
+            and recovery.upgrade_payload_sha256 == payload_digest
+            and self._exact_target(package)
+            and job.state == "waiting-for-operator"
+            and job.kind == "agent-upgrade"
+            and job.targets == [NODE_ID]
+            and job.authority_revision == recovery.authority_revision
+            and operation.authority_revision == recovery.authority_revision
+            and job.payload.get("node_order") == [NODE_ID]
+            and job.payload.get("package") == package
+            and job.payload.get("strategy") == "one-at-a-time"
+            and job.payload_digest
+            == self._job_plan_digest(
+                authority_revision=job.authority_revision,
+                node_ids=[NODE_ID],
+                package=package,
+            )
+            and node.state == "active"
+            and node.revoked_at is None
+            and node.architecture == "linux-arm64"
+            and node.semantic_version == SOURCE_SEMANTIC_VERSION
+            and node.binary_digest == SOURCE_BINARY_DIGEST
+            and node.build_digest == SOURCE_BUILD_DIGEST
+            and node.self_test_passed is True
+            and node.protocol_version == 3
+            and {"agent.runtime.rust.v1", "agent.upgrade.v1"}.issubset(
+                set(node.capabilities or ())
+            )
+            and node.last_seen_at is not None
+            and _aware(node.last_seen_at) <= _aware(now)
+            and _aware(now) - _aware(node.last_seen_at) <= _ONLINE_WINDOW
+            and node.contact_certificate_serial == certificate.serial
+            and certificate.node_id == NODE_ID
+            and certificate.state == "active"
+            and certificate.revoked_at is None
+            and certificate.ca_revoked_at is None
+            and _aware(certificate.not_before) <= _aware(now)
+            and _aware(certificate.not_after) > _aware(now)
+        ):
+            raise CompatibilityRecoveryConflict(
+                "the expired Spark3542 compatibility recovery cannot be abandoned"
+            )
+        running_mutation = session.scalar(
+            select(AgentOperation.id)
+            .where(
+                AgentOperation.node_id == NODE_ID,
+                AgentOperation.id != OPERATION_ID,
+                AgentOperation.state == "running",
+                AgentOperation.kind.in_(MUTATING_AGENT_OPERATIONS),
+            )
+            .limit(1)
+        )
+        if running_mutation is not None:
+            raise CompatibilityRecoveryConflict(
+                "Spark3542 has another running mutation"
+            )
+        queued = list(
+            session.scalars(
+                select(AgentOperation)
+                .where(
+                    AgentOperation.node_id == NODE_ID,
+                    AgentOperation.id != OPERATION_ID,
+                    AgentOperation.state == "queued",
+                    AgentOperation.kind.in_(MUTATING_AGENT_OPERATIONS),
+                )
+                .order_by(AgentOperation.created_at, AgentOperation.id)
+            )
+        )
+        return {
+            "action": "abandon-recovery",
+            "compatibility_recovery_id": RECOVERY_ID,
+            "node_id": NODE_ID,
+            "job_id": JOB_ID,
+            "operation_id": OPERATION_ID,
+            "retry_attempt": RETRY_ATTEMPT,
+            "blocked_at": _aware(recovery.blocked_at).isoformat(),
+            "identity_deadline": _aware(recovery.identity_deadline).isoformat(),
+            "contact_certificate_serial": certificate.serial,
+            "source_identity": {
+                "semantic_version": node.semantic_version,
+                "binary_digest": node.binary_digest,
+                "build_digest": node.build_digest,
+            },
+            "queued_mutations": [
+                {
+                    "job_id": queued_operation.parent_job_id,
+                    "operation_id": queued_operation.id,
+                    "kind": queued_operation.kind,
+                    "authority_revision": queued_operation.authority_revision,
+                    "payload_digest": queued_operation.payload_digest,
+                }
+                for queued_operation in queued
+            ],
+        }
 
     @staticmethod
     def _grantless_rearm_candidate(

@@ -13,6 +13,7 @@ from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.compat_recovery import (
+    ABANDON_CONFIRMATION,
     CONFIRMATION,
     FOLLOWING_NODE_ID,
     GRANTLESS_RETRY_CERTIFICATE_SERIAL,
@@ -237,6 +238,101 @@ def seed_grantless_operator_blocked_retry(sessions) -> None:
                 },
             )
         )
+
+
+def test_expired_recovery_abandonment_releases_only_queued_mutation(tmp_path):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    queued_job_id = "ac238c29-d66e-49bc-a480-b7f11fdc8d6c"
+    queued_operation_id = "bc238c29-d66e-49bc-a480-b7f11fdc8d6c"
+    with sessions.begin() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert recovery is not None and retry is not None
+        recovery.retry_fence = "40000000-0000-4000-8000-000000000004"
+        recovery.retry_certificate_serial = SOURCE_CERTIFICATE
+        recovery.signed_grant = {"schema_version": 1, "kind": "scheduled-reboot"}
+        recovery.grant_request_id = "50000000-0000-4000-8000-000000000005"
+        recovery.grant_expires_at = NOW - timedelta(seconds=1)
+        recovery.identity_deadline = NOW - timedelta(seconds=1)
+        recovery.issued_at = NOW - timedelta(minutes=2)
+        retry.state = "waiting-for-operator"
+        session.add(
+            Job(
+                id=queued_job_id,
+                request_id=str(uuid.uuid4()),
+                kind="agent-upgrade",
+                state="queued",
+                actor="admin",
+                authority_revision="c" * 64,
+                targets=[NODE_ID],
+                payload_digest="d" * 64,
+                payload={"node_order": [NODE_ID]},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=queued_operation_id,
+                parent_job_id=queued_job_id,
+                node_id=NODE_ID,
+                kind="agent.upgrade.v1",
+                payload_digest="e" * 64,
+                payload={"schema_version": 1},
+                authority_revision="c" * 64,
+                state="queued",
+                current_attempt=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    preview = service.preview_abandon()
+    assert preview.state == "preview"
+    assert preview.document["queued_mutations"] == [
+        {
+            "job_id": queued_job_id,
+            "operation_id": queued_operation_id,
+            "kind": "agent.upgrade.v1",
+            "authority_revision": "c" * 64,
+            "payload_digest": "e" * 64,
+        }
+    ]
+    abandoned = service.abandon(
+        plan_digest=preview.plan_digest,
+        confirmation=ABANDON_CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert abandoned.state == "abandoned"
+    assert notifications == [True, True]
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        job = session.get(Job, JOB_ID)
+        queued_operation = session.get(AgentOperation, queued_operation_id)
+        assert recovery is not None and recovery.state == "abandoned"
+        assert recovery.completed_at.replace(tzinfo=UTC) == NOW
+        assert recovery.signed_grant == {
+            "schema_version": 1,
+            "kind": "scheduled-reboot",
+        }
+        assert operation is not None and operation.state == "cancelled"
+        assert job is not None and job.state == "cancelled"
+        assert queued_operation is not None and queued_operation.state == "queued"
 
 
 def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, caplog):

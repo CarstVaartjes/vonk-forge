@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon Spark3542 Compatibility Recovery */
+        post: operations["abandonSpark3542A122CompatibilityRecovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Spark3542 Compatibility Recovery Abandonment */
+        get: operations["previewSpark3542A122CompatibilityRecoveryAbandonment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/compatibility-recovery/spark3542-a122/preview": {
         parameters: {
             query?: never;
@@ -4080,6 +4114,131 @@ export interface components {
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
         };
+        /** Spark3542CompatibilityRecoveryAbandonApplyRequest */
+        Spark3542CompatibilityRecoveryAbandonApplyRequest: {
+            /**
+             * Confirmation
+             * @constant
+             */
+            confirmation: "abandon-expired-spark3542-a122-recovery";
+            /** Plan Digest */
+            plan_digest: string;
+        };
+        /** Spark3542CompatibilityRecoveryAbandonPreviewResponse */
+        Spark3542CompatibilityRecoveryAbandonPreviewResponse: {
+            /**
+             * Action
+             * @constant
+             */
+            action: "abandon-recovery";
+            /**
+             * Blocked At
+             * Format: date-time
+             */
+            blocked_at: string;
+            /**
+             * Compatibility Recovery Id
+             * @constant
+             */
+            compatibility_recovery_id: "spark3542-a122-scheduled-reboot-v1";
+            /** Contact Certificate Serial */
+            contact_certificate_serial: string;
+            /**
+             * Identity Deadline
+             * Format: date-time
+             */
+            identity_deadline: string;
+            /**
+             * Job Id
+             * @constant
+             */
+            job_id: "6b945136-1be6-47e4-8ba0-5c5f815304ad";
+            /**
+             * Node Id
+             * @constant
+             */
+            node_id: "spk_2818d189042b4c77aefa7796f4befd23";
+            /**
+             * Operation Id
+             * @constant
+             */
+            operation_id: "d54e0b56-e465-41bd-9627-c81f37352dfd";
+            /** Plan Digest */
+            plan_digest: string;
+            /** Queued Mutations */
+            queued_mutations: components["schemas"]["Spark3542CompatibilityRecoveryQueuedMutation"][];
+            /**
+             * Required Confirmation
+             * @constant
+             */
+            required_confirmation: "abandon-expired-spark3542-a122-recovery";
+            /**
+             * Retry Attempt
+             * @constant
+             */
+            retry_attempt: 4;
+            source_identity: components["schemas"]["Spark3542CompatibilityRecoverySourceIdentity"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preview" | "abandoned";
+        };
+        /** Spark3542CompatibilityRecoveryAbandonResponse */
+        Spark3542CompatibilityRecoveryAbandonResponse: {
+            /**
+             * Action
+             * @constant
+             */
+            action: "abandon-recovery";
+            /**
+             * Blocked At
+             * Format: date-time
+             */
+            blocked_at: string;
+            /**
+             * Compatibility Recovery Id
+             * @constant
+             */
+            compatibility_recovery_id: "spark3542-a122-scheduled-reboot-v1";
+            /** Contact Certificate Serial */
+            contact_certificate_serial: string;
+            /**
+             * Identity Deadline
+             * Format: date-time
+             */
+            identity_deadline: string;
+            /**
+             * Job Id
+             * @constant
+             */
+            job_id: "6b945136-1be6-47e4-8ba0-5c5f815304ad";
+            /**
+             * Node Id
+             * @constant
+             */
+            node_id: "spk_2818d189042b4c77aefa7796f4befd23";
+            /**
+             * Operation Id
+             * @constant
+             */
+            operation_id: "d54e0b56-e465-41bd-9627-c81f37352dfd";
+            /** Plan Digest */
+            plan_digest: string;
+            /** Queued Mutations */
+            queued_mutations: components["schemas"]["Spark3542CompatibilityRecoveryQueuedMutation"][];
+            /**
+             * Retry Attempt
+             * @constant
+             */
+            retry_attempt: 4;
+            source_identity: components["schemas"]["Spark3542CompatibilityRecoverySourceIdentity"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preview" | "abandoned";
+        };
         /** Spark3542CompatibilityRecoveryApplyRequest */
         Spark3542CompatibilityRecoveryApplyRequest: {
             /**
@@ -4161,10 +4320,23 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked";
+            state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked" | "abandoned";
             target: components["schemas"]["Spark3542CompatibilityRecoveryTarget"];
             /** Upgrade Payload Sha256 */
             upgrade_payload_sha256: string;
+        };
+        /** Spark3542CompatibilityRecoveryQueuedMutation */
+        Spark3542CompatibilityRecoveryQueuedMutation: {
+            /** Authority Revision */
+            authority_revision: string;
+            /** Job Id */
+            job_id: string;
+            /** Kind */
+            kind: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Payload Digest */
+            payload_digest: string;
         };
         /** Spark3542CompatibilityRecoveryResponse */
         Spark3542CompatibilityRecoveryResponse: {
@@ -4232,7 +4404,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked";
+            state: "preview" | "armed" | "issued" | "awaiting-identity" | "completed" | "completed-before-dispatch" | "operator-blocked" | "abandoned";
             target: components["schemas"]["Spark3542CompatibilityRecoveryTarget"];
             /** Upgrade Payload Sha256 */
             upgrade_payload_sha256: string;
@@ -4962,6 +5134,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abandonSpark3542A122CompatibilityRecovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Spark3542CompatibilityRecoveryAbandonApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Spark3542CompatibilityRecoveryAbandonResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewSpark3542A122CompatibilityRecoveryAbandonment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Spark3542CompatibilityRecoveryAbandonPreviewResponse"];
                 };
             };
         };

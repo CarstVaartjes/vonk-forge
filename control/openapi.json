@@ -8319,6 +8319,215 @@
         "title": "SourcePolicyResponse",
         "type": "object"
       },
+      "Spark3542CompatibilityRecoveryAbandonApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "const": "abandon-expired-spark3542-a122-recovery",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "confirmation"
+        ],
+        "title": "Spark3542CompatibilityRecoveryAbandonApplyRequest",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryAbandonPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "abandon-recovery",
+            "title": "Action",
+            "type": "string"
+          },
+          "blocked_at": {
+            "format": "date-time",
+            "title": "Blocked At",
+            "type": "string"
+          },
+          "compatibility_recovery_id": {
+            "const": "spark3542-a122-scheduled-reboot-v1",
+            "title": "Compatibility Recovery Id",
+            "type": "string"
+          },
+          "contact_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Contact Certificate Serial",
+            "type": "string"
+          },
+          "identity_deadline": {
+            "format": "date-time",
+            "title": "Identity Deadline",
+            "type": "string"
+          },
+          "job_id": {
+            "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "node_id": {
+            "const": "spk_2818d189042b4c77aefa7796f4befd23",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "const": "d54e0b56-e465-41bd-9627-c81f37352dfd",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "queued_mutations": {
+            "items": {
+              "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryQueuedMutation"
+            },
+            "title": "Queued Mutations",
+            "type": "array"
+          },
+          "required_confirmation": {
+            "const": "abandon-expired-spark3542-a122-recovery",
+            "title": "Required Confirmation",
+            "type": "string"
+          },
+          "retry_attempt": {
+            "const": 4,
+            "title": "Retry Attempt",
+            "type": "integer"
+          },
+          "source_identity": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
+          },
+          "state": {
+            "enum": [
+              "preview",
+              "abandoned"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "compatibility_recovery_id",
+          "node_id",
+          "job_id",
+          "operation_id",
+          "retry_attempt",
+          "blocked_at",
+          "identity_deadline",
+          "contact_certificate_serial",
+          "source_identity",
+          "queued_mutations",
+          "plan_digest",
+          "state",
+          "required_confirmation"
+        ],
+        "title": "Spark3542CompatibilityRecoveryAbandonPreviewResponse",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryAbandonResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "abandon-recovery",
+            "title": "Action",
+            "type": "string"
+          },
+          "blocked_at": {
+            "format": "date-time",
+            "title": "Blocked At",
+            "type": "string"
+          },
+          "compatibility_recovery_id": {
+            "const": "spark3542-a122-scheduled-reboot-v1",
+            "title": "Compatibility Recovery Id",
+            "type": "string"
+          },
+          "contact_certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Contact Certificate Serial",
+            "type": "string"
+          },
+          "identity_deadline": {
+            "format": "date-time",
+            "title": "Identity Deadline",
+            "type": "string"
+          },
+          "job_id": {
+            "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "node_id": {
+            "const": "spk_2818d189042b4c77aefa7796f4befd23",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "const": "d54e0b56-e465-41bd-9627-c81f37352dfd",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "queued_mutations": {
+            "items": {
+              "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryQueuedMutation"
+            },
+            "title": "Queued Mutations",
+            "type": "array"
+          },
+          "retry_attempt": {
+            "const": 4,
+            "title": "Retry Attempt",
+            "type": "integer"
+          },
+          "source_identity": {
+            "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
+          },
+          "state": {
+            "enum": [
+              "preview",
+              "abandoned"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "compatibility_recovery_id",
+          "node_id",
+          "job_id",
+          "operation_id",
+          "retry_attempt",
+          "blocked_at",
+          "identity_deadline",
+          "contact_certificate_serial",
+          "source_identity",
+          "queued_mutations",
+          "plan_digest",
+          "state"
+        ],
+        "title": "Spark3542CompatibilityRecoveryAbandonResponse",
+        "type": "object"
+      },
       "Spark3542CompatibilityRecoveryApplyRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8455,7 +8664,8 @@
               "awaiting-identity",
               "completed",
               "completed-before-dispatch",
-              "operator-blocked"
+              "operator-blocked",
+              "abandoned"
             ],
             "title": "State",
             "type": "string"
@@ -8492,6 +8702,49 @@
           "required_confirmation"
         ],
         "title": "Spark3542CompatibilityRecoveryPreviewResponse",
+        "type": "object"
+      },
+      "Spark3542CompatibilityRecoveryQueuedMutation": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_revision": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Authority Revision",
+            "type": "string"
+          },
+          "job_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Job Id",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "operation_id",
+          "kind",
+          "authority_revision",
+          "payload_digest"
+        ],
+        "title": "Spark3542CompatibilityRecoveryQueuedMutation",
         "type": "object"
       },
       "Spark3542CompatibilityRecoveryResponse": {
@@ -8604,7 +8857,8 @@
               "awaiting-identity",
               "completed",
               "completed-before-dispatch",
-              "operator-blocked"
+              "operator-blocked",
+              "abandoned"
             ],
             "title": "State",
             "type": "string"
@@ -11004,6 +11258,72 @@
           }
         ],
         "summary": "Apply Spark3542 Compatibility Recovery"
+      }
+    },
+    "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon": {
+      "post": {
+        "operationId": "abandonSpark3542A122CompatibilityRecovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryAbandonApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryAbandonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Abandon Spark3542 Compatibility Recovery"
+      }
+    },
+    "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon/preview": {
+      "get": {
+        "operationId": "previewSpark3542A122CompatibilityRecoveryAbandonment",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Spark3542CompatibilityRecoveryAbandonPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Spark3542 Compatibility Recovery Abandonment"
       }
     },
     "/api/v1/agents/compatibility-recovery/spark3542-a122/preview": {

@@ -1,7 +1,7 @@
 # Recipe qualification decision matrix
 
 This matrix is the operational decision record for the recipe-library checkout
-used by the 2026-08-30 two-Spark qualification campaign. It covers every exact
+used by the 2026-08-31 two-Spark qualification campaign. It covers every exact
 recipe slug present in `recipes/` at the snapshot recorded below, including
 recipes whose declared topology cannot run on the present fleet.
 
@@ -24,16 +24,16 @@ relay. SSH is not part of qualification or recovery.
 
 ## Inventory snapshot
 
-The settled recipe-library checkout contains **76** `recipes/*.json` documents
-and **236** catalog entities. This matrix is bound to recipe-library commit
-`745a42b5daa3ac8010483421c45235e32e866672` and the generated
+The settled recipe-library checkout contains **77** `recipes/*.json` documents
+and **242** catalog entities. This matrix is bound to recipe-library commit
+`da0fd92d3ccfdde5fc42059ea60d88d1d9fd15eb` and the generated
 `catalog-index.json` SHA-256
-`e864b644e374c76f594bcc4a394348844d4e5aa8d7dc78142f7d596b1fc2b55e`.
+`a131c9b8933584202fd91cbb780950529b25537c968dc4d82273da74df6c8050`.
 
 The repository gates are green for this snapshot:
 
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
-- the cross-repository validator passed all 76 recipes, all 236 entities, and
+- the cross-repository validator passed all 77 recipes, all 242 entities, and
   the secret scan;
 - the focused fixture, campaign, and cross-repository validator suite passed 38
   tests; and
@@ -41,9 +41,9 @@ The repository gates are green for this snapshot:
   Linux-only package and lifecycle gates remain delegated to Linux CI.
 
 The checked-in runner registry contains 19 provenance-bound fixture records,
-42 exact artifact contracts with 56 explicit smoke cases, 30 digest-bound
+42 exact artifact contracts with 56 explicit smoke cases, 31 digest-bound
 service contracts, and zero special/unresolved fixture dispositions. Together
-those are all **72** exact
+those are all **73** exact
 one- or two-Spark recipe contracts. Exactly four catalog recipes are omitted
 from execution because their declared topologies require three, four, four,
 and eight Sparks. Repository green means installable and directly qualifiable;
@@ -103,6 +103,7 @@ explicit and are never bypassed to reach that state.
 | `deepseek-v4-flash-0731-ds4-dspark-latency-single` | 1 Spark | Current latency/speculative DS4 profile | EC, repository-green | Guarded DSpark drafter path; prove fallback and speculative tokens on hardware | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-ds4-single` | 1 Spark | Current target-only, two-session concurrency baseline | EC, focused fix | Release wording now reflects ordered CUDA fallback, not native batching | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-mia-dual` | 2 Sparks | Current Mia distributed reference | EC, repository-green | Exact two-rank start/readiness, endpoint ownership, and rank-loss recovery remain unproved | Yes, exactly 2 Sparks | qualify |
+| `deepseek-v4-flash-vision-exp-mia-dual` | 2 Sparks | New official native-vision Mia distributed profile | EC, repository-green, new candidate | Prove the pinned 32-layer ViT and aligner, OpenAI image input, TP2 formation, 1M context, eight-image bound, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `deepseek-v4-flash-0731-mia-sparkinfer-single` | 1 Spark | Mia checkpoint through SparkInfer/EXL3 | EC, repository-green | High 116 GB steady envelope; verify admission headroom and speculative decode | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-sparkinfer-single` | 1 Spark | REAP-K216 SparkInfer alternative | EC, repository-green; capacity-blocked | High 116 GB steady envelope exceeds the checked lower-node free-memory authority by 1,053,716,480 bytes | No on current free memory | capacity-blocked |
 | `gemma-4-26b-a4b-vllm-single` | 1 Spark | Current Gemma 4 plain-chat profile | EC, focused contract fix | Remains on vLLM 0.27.1; unsupported tool-use claims/flags were removed and thinking is disabled. Prove plain chat and absence of raw channel leakage | Yes, 1 Spark | qualify |

@@ -361,6 +361,23 @@ def add_controller_commands(
     )
     _apply(compatibility_recovery_apply)
     _add_json(compatibility_recovery_apply)
+    compatibility_recovery_abandon_preview = compatibility_recovery_commands.add_parser(
+        "abandon-preview",
+        help="Verify the expired recovery can be retired without a new grant",
+    )
+    _add_json(compatibility_recovery_abandon_preview)
+    compatibility_recovery_abandon = compatibility_recovery_commands.add_parser(
+        "abandon",
+        help="Retire the expired recovery and release its mutation lane",
+    )
+    compatibility_recovery_abandon.add_argument("--plan-digest", required=True)
+    compatibility_recovery_abandon.add_argument(
+        "--confirm",
+        required=True,
+        choices=("abandon-expired-spark3542-a122-recovery",),
+    )
+    _apply(compatibility_recovery_abandon)
+    _add_json(compatibility_recovery_abandon)
     for variant in ("preview", "apply"):
         upgrade_variant = upgrade_commands.add_parser(variant)
         upgrade_variant.add_argument(
@@ -1701,6 +1718,10 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             endpoint = "/api/v1/agents/compatibility-recovery/spark3542-a122"
             if args.compatibility_recovery_command == "preview":
                 return client.request("GET", f"{endpoint}/preview")
+            if args.compatibility_recovery_command == "abandon-preview":
+                return client.request("GET", f"{endpoint}/abandon/preview")
+            if args.compatibility_recovery_command == "abandon":
+                endpoint = f"{endpoint}/abandon"
             return _plan_or_request(
                 args,
                 client,

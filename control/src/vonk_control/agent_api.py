@@ -47,6 +47,9 @@ from .auth import (
     agent_source_from_scope,
 )
 from .compat_recovery import (
+    ABANDON_CONFIRMATION as COMPATIBILITY_RECOVERY_ABANDON_CONFIRMATION,
+)
+from .compat_recovery import (
     CONFIRMATION as COMPATIBILITY_RECOVERY_CONFIRMATION,
 )
 from .compat_recovery import (
@@ -397,6 +400,7 @@ class Spark3542CompatibilityRecoveryResponse(BaseModel):
         "completed",
         "completed-before-dispatch",
         "operator-blocked",
+        "abandoned",
     ]
 
 
@@ -404,6 +408,44 @@ class Spark3542CompatibilityRecoveryPreviewResponse(
     Spark3542CompatibilityRecoveryResponse
 ):
     required_confirmation: Literal["reboot-spark3542-to-resume-staged-a122-recovery"]
+
+
+class Spark3542CompatibilityRecoveryAbandonApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmation: Literal["abandon-expired-spark3542-a122-recovery"]
+
+
+class Spark3542CompatibilityRecoveryQueuedMutation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=36)
+    operation_id: str = Field(min_length=1, max_length=36)
+    kind: str = Field(min_length=1, max_length=64)
+    authority_revision: str = Field(min_length=1, max_length=128)
+    payload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class Spark3542CompatibilityRecoveryAbandonResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["abandon-recovery"]
+    compatibility_recovery_id: Literal["spark3542-a122-scheduled-reboot-v1"]
+    node_id: Literal["spk_2818d189042b4c77aefa7796f4befd23"]
+    job_id: Literal["6b945136-1be6-47e4-8ba0-5c5f815304ad"]
+    operation_id: Literal["d54e0b56-e465-41bd-9627-c81f37352dfd"]
+    retry_attempt: Literal[4]
+    blocked_at: datetime
+    identity_deadline: datetime
+    contact_certificate_serial: str = Field(min_length=1, max_length=128)
+    source_identity: Spark3542CompatibilityRecoverySourceIdentity
+    queued_mutations: list[Spark3542CompatibilityRecoveryQueuedMutation]
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    state: Literal["preview", "abandoned"]
+
+
+class Spark3542CompatibilityRecoveryAbandonPreviewResponse(
+    Spark3542CompatibilityRecoveryAbandonResponse
+):
+    required_confirmation: Literal["abandon-expired-spark3542-a122-recovery"]
 
 
 def _agent_upgrade_request_material(
@@ -1393,6 +1435,74 @@ def install_agent_routes(
                 authenticated.subject,
                 "agent.compatibility-recovery.spark3542-a122.apply",
                 str(plan.document["authority_revision"]),
+                (str(plan.document["node_id"]),),
+            )
+        )
+        return {
+            **plan.document,
+            "plan_digest": plan.plan_digest,
+            "state": plan.state,
+        }
+
+    @human.get(
+        "/compatibility-recovery/spark3542-a122/abandon/preview",
+        operation_id="previewSpark3542A122CompatibilityRecoveryAbandonment",
+        response_model=Spark3542CompatibilityRecoveryAbandonPreviewResponse,
+    )
+    def preview_spark3542_compatibility_recovery_abandonment(
+        authenticated: Actor = authenticated_actor,
+    ) -> dict[str, object]:
+        path = "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon/preview"
+        _require_administrator(authenticated, path)
+        if compatibility_recovery is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Spark3542 compatibility recovery is unavailable",
+            )
+        try:
+            plan = compatibility_recovery.preview_abandon()
+        except CompatibilityRecoveryConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        return {
+            **plan.document,
+            "plan_digest": plan.plan_digest,
+            "state": plan.state,
+            "required_confirmation": COMPATIBILITY_RECOVERY_ABANDON_CONFIRMATION,
+        }
+
+    @human.post(
+        "/compatibility-recovery/spark3542-a122/abandon",
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="abandonSpark3542A122CompatibilityRecovery",
+        response_model=Spark3542CompatibilityRecoveryAbandonResponse,
+    )
+    def abandon_spark3542_compatibility_recovery(
+        body: Spark3542CompatibilityRecoveryAbandonApplyRequest,
+        request: Request,
+        authenticated: Actor = authenticated_actor,
+    ) -> dict[str, object]:
+        path = "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon"
+        _require_administrator(authenticated, path)
+        if compatibility_recovery is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Spark3542 compatibility recovery is unavailable",
+            )
+        try:
+            plan = compatibility_recovery.abandon(
+                plan_digest=body.plan_digest,
+                confirmation=body.confirmation,
+                actor=authenticated.subject,
+                request_id=request.state.request_id,
+            )
+        except CompatibilityRecoveryConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                authenticated.subject,
+                "agent.compatibility-recovery.spark3542-a122.abandon",
+                None,
                 (str(plan.document["node_id"]),),
             )
         )

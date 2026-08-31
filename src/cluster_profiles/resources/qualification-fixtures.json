@@ -3573,6 +3573,24 @@
         ]
       }
     },
+    "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual": {
+      "content_sha256": "d0121b2d092af5ffeada0555f47ce2acc6ca541c3dcc3bc0a79e818d623f6d09",
+      "alias": "deepseek-v4-flash-vision-exp",
+      "smoke_cases": [
+        "M0",
+        "A391",
+        "T_REPORT",
+        "V_RED"
+      ],
+      "higher_tiers": {
+        "stress": [
+          "Bounded long-context, concurrency, and eight-image input canaries"
+        ],
+        "recovery": [
+          "Controller-only rank-loss, warm-cache recovery, and image-input revalidation"
+        ]
+      }
+    },
     "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual": {
       "content_sha256": "97e28bf3ebff5e672b8c11945628a78ee891d88945f13b5343e27ff81385d1a1",
       "alias": "glm-5.3-flash",

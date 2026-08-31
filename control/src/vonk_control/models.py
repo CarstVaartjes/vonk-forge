@@ -953,7 +953,7 @@ class AgentUpgradeCompatibilityRecovery(Base):
     __table_args__ = (
         CheckConstraint(
             "state IN ('armed','issued','awaiting-identity','completed',"
-            "'completed-before-dispatch','operator-blocked')",
+            "'completed-before-dispatch','operator-blocked','abandoned')",
             name="ck_agent_upgrade_compatibility_recoveries_state",
         ),
         CheckConstraint(
@@ -990,7 +990,9 @@ class AgentUpgradeCompatibilityRecovery(Base):
             "(state = 'completed-before-dispatch' AND issued_at IS NULL "
             "AND completed_at IS NOT NULL) OR "
             "(state = 'operator-blocked' AND blocked_at IS NOT NULL "
-            "AND completed_at IS NULL))",
+            "AND completed_at IS NULL) OR "
+            "(state = 'abandoned' AND blocked_at IS NOT NULL "
+            "AND completed_at IS NOT NULL))",
             name="ck_agent_upgrade_compatibility_recoveries_state_fields",
         ),
         CheckConstraint(

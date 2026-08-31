@@ -258,9 +258,15 @@ from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
 from .source_policy_response import SourcePolicyResponse
+from .spark_3542_compatibility_recovery_abandon_apply_request import Spark3542CompatibilityRecoveryAbandonApplyRequest
+from .spark_3542_compatibility_recovery_abandon_preview_response import Spark3542CompatibilityRecoveryAbandonPreviewResponse
+from .spark_3542_compatibility_recovery_abandon_preview_response_state import Spark3542CompatibilityRecoveryAbandonPreviewResponseState
+from .spark_3542_compatibility_recovery_abandon_response import Spark3542CompatibilityRecoveryAbandonResponse
+from .spark_3542_compatibility_recovery_abandon_response_state import Spark3542CompatibilityRecoveryAbandonResponseState
 from .spark_3542_compatibility_recovery_apply_request import Spark3542CompatibilityRecoveryApplyRequest
 from .spark_3542_compatibility_recovery_preview_response import Spark3542CompatibilityRecoveryPreviewResponse
 from .spark_3542_compatibility_recovery_preview_response_state import Spark3542CompatibilityRecoveryPreviewResponseState
+from .spark_3542_compatibility_recovery_queued_mutation import Spark3542CompatibilityRecoveryQueuedMutation
 from .spark_3542_compatibility_recovery_response import Spark3542CompatibilityRecoveryResponse
 from .spark_3542_compatibility_recovery_response_state import Spark3542CompatibilityRecoveryResponseState
 from .spark_3542_compatibility_recovery_source_identity import Spark3542CompatibilityRecoverySourceIdentity
@@ -577,9 +583,15 @@ __all__ = (
     "SourceCheckRequest",
     "SourcePolicyFindingResponse",
     "SourcePolicyResponse",
+    "Spark3542CompatibilityRecoveryAbandonApplyRequest",
+    "Spark3542CompatibilityRecoveryAbandonPreviewResponse",
+    "Spark3542CompatibilityRecoveryAbandonPreviewResponseState",
+    "Spark3542CompatibilityRecoveryAbandonResponse",
+    "Spark3542CompatibilityRecoveryAbandonResponseState",
     "Spark3542CompatibilityRecoveryApplyRequest",
     "Spark3542CompatibilityRecoveryPreviewResponse",
     "Spark3542CompatibilityRecoveryPreviewResponseState",
+    "Spark3542CompatibilityRecoveryQueuedMutation",
     "Spark3542CompatibilityRecoveryResponse",
     "Spark3542CompatibilityRecoveryResponseState",
     "Spark3542CompatibilityRecoverySourceIdentity",
