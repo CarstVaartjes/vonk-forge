@@ -19,6 +19,12 @@ baseline_semantic=0.0.0
 stale_pending_format=${STALE_PENDING_FORMAT:-prior3}
 crash_mode=${CRASH_MODE:-full-cgroup}
 candidate_custody=${CANDIDATE_CUSTODY:-legacy}
+compatibility_trigger=0
+if [[ "$stale_pending_format" == legacy2 \
+  && "$crash_mode" == full-cgroup \
+  && "$candidate_custody" == legacy ]]; then
+  compatibility_trigger=1
+fi
 case "$candidate_custody" in
   legacy|root) ;;
   *) printf 'unknown candidate custody fixture: %s\n' "$candidate_custody" >&2; exit 64 ;;
@@ -69,6 +75,11 @@ cleanup() {
   cleanup_status=$?
   if (( cleanup_status != 0 )); then
     dump_failure_diagnostics
+  fi
+  if [[ -n "${dpkg_lock_pid:-}" ]]; then
+    touch "$test_root/release-dpkg-lock" 2>/dev/null || true
+    kill "$dpkg_lock_pid" >/dev/null 2>&1 || true
+    wait "$dpkg_lock_pid" >/dev/null 2>&1 || true
   fi
   systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
   systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
@@ -190,8 +201,21 @@ SOURCE
 gcc -O2 -o "$test_root/baseline-bin/vonk-agent" \
   "$test_root/baseline-agent.c"
 gcc -O2 -o "$test_root/target-bin/vonk-agent-helper" "$test_root/helper.c"
-cp -- "$test_root/target-bin/vonk-agent-helper" \
-  "$test_root/baseline-bin/vonk-agent-helper"
+if (( compatibility_trigger == 1 )); then
+  dev335_source=$test_root/dev335-source
+  mkdir -p "$dev335_source"
+  git -C "$repo_root" archive \
+    2eaaf4d9b2b56b7090541873b5700e04ad9e3662 \
+    | tar -x -C "$dev335_source"
+  CARGO_TARGET_DIR=$test_root/dev335-target cargo build \
+    --locked --release --manifest-path "$dev335_source/Cargo.toml" \
+    -p vonk-agent-helper
+  cp -- "$test_root/dev335-target/release/vonk-agent-helper" \
+    "$test_root/baseline-bin/vonk-agent-helper"
+else
+  cp -- "$test_root/target-bin/vonk-agent-helper" \
+    "$test_root/baseline-bin/vonk-agent-helper"
+fi
 for binary_dir in "$test_root/target-bin" "$test_root/baseline-bin"; do
   cp -- "$binary_dir/vonk-agent-helper" "$binary_dir/oras"
   printf '%s\n' 'ORAS recovery fixture license' > "$binary_dir/oras.LICENSE"
@@ -232,6 +256,10 @@ agent_digest=$(sha256sum "$test_root/target-bin/vonk-agent" | cut -d' ' -f1)
 helper_digest=$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -d' ' -f1)
 baseline_agent_digest=$(sha256sum "$test_root/baseline-bin/vonk-agent" \
   | cut -d' ' -f1)
+if (( compatibility_trigger == 1 )); then
+  dev335_helper_digest=$(sha256sum \
+    "$test_root/baseline-bin/vonk-agent-helper" | cut -d' ' -f1)
+fi
 
 getent group vonk-agent >/dev/null 2>&1 || groupadd --system vonk-agent
 id -u vonk-agent >/dev/null 2>&1 \
@@ -381,6 +409,11 @@ install -o root -g root -m 0644 "$test_root/installed-helper.service" \
   "$old_helper_unit"
 install -o root -g root -m 0644 "$test_root/installed-helper.socket" \
   "$old_socket_unit"
+if (( compatibility_trigger == 1 )); then
+  systemctl --system start "$agent_unit"
+  test "$(systemctl --system show --property=ActiveState --value \
+    "$agent_unit")" = active
+fi
 stage_candidate
 
 case "$stale_pending_format" in
@@ -681,11 +714,170 @@ if [[ "$crash_mode" == full-cgroup ]]; then
     "$helper_unit")" = inactive
   test "$(systemctl --system show --property=Result --value \
     "$helper_unit")" = success
-  systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
-  test "$(systemctl --system show --property=ActiveState --value "$agent_unit")" \
-    != active
-  systemctl --system stop "$socket_unit" >/dev/null
-  systemctl --system start "$socket_unit" >/dev/null
+  if (( compatibility_trigger == 1 )); then
+    # The staged recovery must reject corrupt root state before it stops the
+    # still-running dev335-identity agent. Restore the exact intent only after
+    # observing the permanent (78) failure.
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" = active
+    old_agent_pid=$(systemctl --system show --property=MainPID --value \
+      "$agent_unit")
+    cp -- /var/lib/vonk-forge/package-upgrade/intent \
+      "$test_root/compat-intent"
+    sed 's/^unit_sha256=.*/unit_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/' \
+      "$test_root/compat-intent" > "$test_root/compat-intent.invalid"
+    install -o root -g root -m 0600 "$test_root/compat-intent.invalid" \
+      /var/lib/vonk-forge/package-upgrade/intent
+    systemctl --system reset-failed "$recovery_unit" >/dev/null 2>&1 || true
+    if systemctl --system start "$recovery_unit" >/dev/null 2>&1; then
+      printf '%s\n' 'unsafe staged recovery unexpectedly succeeded' >&2
+      exit 1
+    fi
+    test "$(systemctl --system show --property=ExecMainStatus --value \
+      "$recovery_unit")" = 78
+    test "$(systemctl --system show --property=MainPID --value \
+      "$agent_unit")" = "$old_agent_pid"
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" = active
+    install -o root -g root -m 0600 "$test_root/compat-intent" \
+      /var/lib/vonk-forge/package-upgrade/intent
+    sync -f /var/lib/vonk-forge/package-upgrade/intent
+    sync -f /var/lib/vonk-forge/package-upgrade
+
+    # Run the exact dev335 helper binary against the active production-shaped
+    # socket, while leaving the fully staged target payload on disk for the
+    # root recovery owner. The fixed Rust fixture signs only
+    # RestartVonkUnit(helper), drops its response, then replays that same grant.
+    install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper/requests
+    install -d -o root -g root -m 0755 /etc/vonk-forge-agent
+    printf '%s\n' \
+      8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312 \
+      > /etc/vonk-forge-agent/host-helper-authority.pub
+    chown root:root /etc/vonk-forge-agent/host-helper-authority.pub
+    chmod 0644 /etc/vonk-forge-agent/host-helper-authority.pub
+    printf 'node_id = "%s"\n' \
+      spk_2818d189042b4c77aefa7796f4befd23 \
+      > /etc/vonk-forge-agent/agent.toml
+    chown root:root /etc/vonk-forge-agent/agent.toml
+    chmod 0644 /etc/vonk-forge-agent/agent.toml
+    cp -- /usr/lib/vonk-forge/vonk-agent-helper \
+      "$test_root/staged-target-helper"
+    cp -- "$old_socket_unit" "$test_root/staged-target-helper.socket"
+    sed '/^Wants=vonk-forge-package-upgrade-recover.service$/d' \
+      "$test_root/staged-target-helper.socket" \
+      > "$test_root/pre-trigger-helper.socket"
+    install -o root -g root -m 0644 "$test_root/pre-trigger-helper.socket" \
+      "$old_socket_unit"
+    if [[ -f /lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf ]]; then
+      mv -- /lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf \
+        "$test_root/staged-target-helper.socket-dropin"
+    fi
+    sed 's#^ExecStart=.*#ExecStart=/usr/lib/vonk-forge/vonk-agent-helper#' \
+      "$old_helper_unit" > "$test_root/dev335-helper.service"
+    grep -Fxq 'ExecStart=/usr/lib/vonk-forge/vonk-agent-helper' \
+      "$test_root/dev335-helper.service"
+    install -o root -g root -m 0644 "$test_root/dev335-helper.service" \
+      "$old_helper_unit"
+    install -o root -g root -m 0555 \
+      "$test_root/baseline-bin/vonk-agent-helper" \
+      /usr/lib/vonk-forge/vonk-agent-helper
+    systemctl --system daemon-reload
+    systemctl --system reset-failed "$helper_unit" "$recovery_unit" \
+      >/dev/null 2>&1 || true
+    systemctl --system start "$helper_unit"
+    compat_helper_pid=$(systemctl --system show --property=MainPID --value \
+      "$helper_unit")
+    test "$(sha256sum "/proc/$compat_helper_pid/exe" | cut -d' ' -f1)" \
+      = "$dev335_helper_digest"
+    install -o root -g root -m 0555 "$test_root/staged-target-helper" \
+      /usr/lib/vonk-forge/vonk-agent-helper
+    install -o root -g root -m 0644 "$test_root/staged-target-helper.socket" \
+      "$old_socket_unit"
+    if [[ -f "$test_root/staged-target-helper.socket-dropin" ]]; then
+      install -d -o root -g root -m 0755 \
+        /lib/systemd/system/vonk-forge-package-helper.socket.d
+      install -o root -g root -m 0644 \
+        "$test_root/staged-target-helper.socket-dropin" \
+        /lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
+    fi
+    systemctl --system daemon-reload
+    vonk_agent_gid=$(getent group vonk-agent | cut -d: -f3)
+
+    # A pre-existing transient name must make the exact dev335 helper reject
+    # its consumed request without restarting the helper or falling back to a
+    # direct systemctl action.
+    systemd-run --quiet --collect \
+      --unit=vonk-forge-helper-restart.service /bin/sleep 30
+    CARGO_TARGET_DIR=$test_root/compat-target \
+      VONK_SPARK3542_COMPAT_FIXTURE=1 \
+      setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
+      cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
+        -p vonk-agent-helper --test spark3542_compat_restart_fixture \
+        transient_unit_collision_fails_closed_for_the_second_pinned_request \
+        -- --ignored --exact
+    test "$(systemctl --system show --property=MainPID --value \
+      "$helper_unit")" = "$compat_helper_pid"
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$recovery_unit")" != active
+    systemctl --system stop vonk-forge-helper-restart.service
+    systemctl --system reset-failed vonk-forge-helper-restart.service \
+      >/dev/null 2>&1 || true
+
+    # Deliver while the old agent is still active. Hold dpkg's native advisory
+    # lock so the recovery wake must stop that agent before its temporary exit
+    # (75); the unit's bounded restart then converges after lock release.
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" = active
+    delivered_agent_pid=$(systemctl --system show --property=MainPID --value \
+      "$agent_unit")
+    test "$delivered_agent_pid" = "$old_agent_pid"
+    python3 - "$test_root/dpkg-lock-ready" \
+      "$test_root/release-dpkg-lock" <<'PY' &
+import fcntl
+import pathlib
+import sys
+import time
+
+ready = pathlib.Path(sys.argv[1])
+release = pathlib.Path(sys.argv[2])
+with pathlib.Path("/var/lib/dpkg/lock").open("r+") as lock:
+    fcntl.lockf(lock, fcntl.LOCK_EX)
+    ready.touch()
+    while not release.exists():
+        time.sleep(0.05)
+PY
+    dpkg_lock_pid=$!
+    for _ in {1..200}; do
+      [[ -f "$test_root/dpkg-lock-ready" ]] && break
+      sleep 0.05
+    done
+    test -f "$test_root/dpkg-lock-ready"
+    CARGO_TARGET_DIR=$test_root/compat-target \
+      VONK_SPARK3542_COMPAT_FIXTURE=1 \
+      setpriv --reuid 0 --regid "$vonk_agent_gid" --clear-groups \
+      cargo test --locked --manifest-path "$repo_root/Cargo.toml" \
+        -p vonk-agent-helper --test spark3542_compat_restart_fixture \
+        sends_only_one_pinned_helper_restart_and_replay_is_rejected \
+        -- --ignored --exact
+    for _ in {1..150}; do
+      recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
+        "$recovery_unit")
+      [[ "$recovery_exit" == 75 ]] && break
+      sleep 0.1
+    done
+    test "$recovery_exit" = 75
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" = inactive
+    touch "$test_root/release-dpkg-lock"
+    wait "$dpkg_lock_pid"
+    dpkg_lock_pid=
+  else
+    systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
+    test "$(systemctl --system show --property=ActiveState --value \
+      "$agent_unit")" != active
+    systemctl --system stop "$socket_unit" >/dev/null
+    systemctl --system start "$socket_unit" >/dev/null
+  fi
 fi
 printf 'durable recovery crash-point pending gate: %s\n' \
   "$(cat "$test_root/crash-point-pending-kind")"

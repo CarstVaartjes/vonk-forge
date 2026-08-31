@@ -232,6 +232,7 @@ struct RecordingRunner {
     calls: SharedCalls,
     runtime_container: Arc<Mutex<Option<(String, String)>>>,
     runtime_running: Arc<Mutex<bool>>,
+    fail_systemd_run: Arc<Mutex<bool>>,
 }
 
 #[derive(Debug)]
@@ -391,6 +392,11 @@ impl CommandRunner for RecordingRunner {
         } else {
             Vec::new()
         };
+        if executable == std::path::Path::new("/usr/bin/systemd-run")
+            && *self.fail_systemd_run.lock().unwrap()
+        {
+            success = false;
+        }
         Ok(CommandOutput {
             success,
             stdout,
@@ -1097,6 +1103,44 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
     );
     assert_eq!(calls[4].0, PathBuf::from("/usr/bin/systemd-run"));
     assert!(calls[4].1.contains(&"--on-active=300s".to_owned()));
+}
+
+#[test]
+fn helper_restart_transient_unit_collision_fails_closed_without_fallback() {
+    let (_temp, roots, runner, release) = fixture();
+    *runner.fail_systemd_run.lock().unwrap() = true;
+    let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
+    let executor = OperationExecutor::new(
+        roots,
+        release.public_key().as_ref(),
+        runner.clone(),
+        Some(package_owner),
+    )
+    .unwrap()
+    .with_package_owner(package_owner);
+
+    assert!(
+        executor
+            .execute(&HostOperation::RestartVonkUnit {
+                unit: RestartUnit::Helper,
+            })
+            .is_err()
+    );
+    assert_eq!(
+        *runner.calls.lock().unwrap(),
+        vec![(
+            PathBuf::from("/usr/bin/systemd-run"),
+            vec![
+                "--quiet".to_owned(),
+                "--collect".to_owned(),
+                "--unit=vonk-forge-helper-restart.service".to_owned(),
+                "--on-active=1s".to_owned(),
+                "/usr/bin/systemctl".to_owned(),
+                "restart".to_owned(),
+                "vonk-forge-package-helper.service".to_owned(),
+            ],
+        )]
+    );
 }
 
 fn signed_package(

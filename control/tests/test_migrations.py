@@ -25,6 +25,7 @@ EXPECTED_BASELINE_TABLES = {
     "agent_nodes",
     "agent_operation_attempts",
     "agent_operations",
+    "agent_upgrade_compatibility_recoveries",
     "agent_presence",
     "audit_events",
     "catalog_entities",
@@ -100,6 +101,24 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
+    compatibility_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns(
+            "agent_upgrade_compatibility_recoveries"
+        )
+    }
+    assert compatibility_columns["state"]["type"].length == 32
+    assert compatibility_columns["identity_deadline"]["nullable"] is True
+    compatibility_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints(
+            "agent_upgrade_compatibility_recoveries"
+        )
+    }
+    assert {
+        "ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
+        "ck_agent_upgrade_compatibility_recoveries_state_fields",
+    } <= compatibility_checks
     with engine.connect() as connection:
         assert (
             compare_metadata(MigrationContext.configure(connection), Base.metadata)
@@ -135,6 +154,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0003_agent_reenrollment_grants.py",
         "0004_artifact_jobs.py",
         "0005_repair_fleet_profile_tables.py",
+        "0006_spark3542_compat_recovery.py",
     ]
 
 
@@ -167,7 +187,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0005_repair_fleet_profile_tables"
+            == "0006_spark3542_compat_recovery"
         )
 
 
@@ -254,7 +274,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0005_repair_fleet_profile_tables"
+            == "0006_spark3542_compat_recovery"
         )
 
 
