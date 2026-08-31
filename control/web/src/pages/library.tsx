@@ -1,9 +1,8 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, VisualFleetSnapshot} from "../api/types";
+import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, ManagedCatalogSyncSummary, PublicRecipe, VisualFleetSnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
-import type {ManagedCatalogSyncSummary} from "../components/library-workcell";
 import {nodeDisplayName} from "../lib/fleet";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
@@ -17,7 +16,8 @@ type RouteParent =
   | {kind: "unlinked"; recipe: LibraryRecipeSummary};
 
 type ManagedCatalogSyncApi = {
-  syncManagedRecipeCatalog?(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
+  managedRecipeCatalogSyncStatus?(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
+  syncManagedRecipeCatalog?(input?: {expected_commit?: string; request_key?: string}, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
 };
 
 function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
@@ -147,7 +147,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [syncSummary, setSyncSummary] = useState<ManagedCatalogSyncSummary>();
-  const automaticSyncAttempted = useRef(false);
+  const syncRequestKey = useRef("");
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -223,28 +223,56 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     return () => controller.abort();
   }, [api, catalogAttempt]);
 
-  const syncAvailable = typeof (api as LibraryApi & ManagedCatalogSyncApi).syncManagedRecipeCatalog === "function";
+  const managedSyncApi = api as LibraryApi & ManagedCatalogSyncApi;
+  const syncAvailable = typeof managedSyncApi.syncManagedRecipeCatalog === "function";
+  const syncStatusAvailable = typeof managedSyncApi.managedRecipeCatalogSyncStatus === "function";
   const syncManagedCatalog = useCallback(async () => {
-    const syncApi = api as LibraryApi & ManagedCatalogSyncApi;
-    if (!syncApi.syncManagedRecipeCatalog || syncing) return;
+    if (!managedSyncApi.syncManagedRecipeCatalog || syncing) return;
     const controller = new AbortController();
     setSyncing(true);
     setSyncError("");
     try {
-      setSyncSummary(await syncApi.syncManagedRecipeCatalog(controller.signal));
+      syncRequestKey.current ||= crypto.randomUUID();
+      setSyncSummary(await managedSyncApi.syncManagedRecipeCatalog({
+        ...(catalogCommit ? {expected_commit: catalogCommit} : {}),
+        request_key: syncRequestKey.current,
+      }, controller.signal));
+      syncRequestKey.current = "";
       setCatalogAttempt(value => value + 1);
       setSnapshotAttempt(value => value + 1);
     } catch (value) {
-      setSyncError(value instanceof Error ? value.message.slice(0, 256) : "Managed recipe synchronization failed");
+      const detail = value instanceof Error ? value.message.slice(0, 256) : "Managed recipe synchronization failed";
+      if (/returned 409|sync_preview_changed|preview changed/i.test(detail)) {
+        syncRequestKey.current = "";
+        setCatalogAttempt(current => current + 1);
+        setSyncError("The Vonk Forge remote changed during review. Catalog state is refreshing; start the update again when it is ready.");
+      } else {
+        setSyncError(detail);
+      }
     } finally {
       setSyncing(false);
     }
-  }, [api, syncing]);
+  }, [catalogCommit, managedSyncApi, syncing]);
   useEffect(() => {
-    if (!syncAvailable || automaticSyncAttempted.current) return;
-    automaticSyncAttempted.current = true;
-    void syncManagedCatalog();
-  }, [syncAvailable, syncManagedCatalog]);
+    if (!syncStatusAvailable || !managedSyncApi.managedRecipeCatalogSyncStatus) return;
+    const controller = new AbortController();
+    let timer = 0;
+    async function refreshStatus() {
+      try {
+        const value = await managedSyncApi.managedRecipeCatalogSyncStatus?.(controller.signal);
+        if (!value || controller.signal.aborted) return;
+        setSyncSummary(value);
+        setSyncError("");
+        if (value.state === "syncing") timer = window.setTimeout(() => void refreshStatus(), 2000);
+      } catch (value) {
+        if (controller.signal.aborted) return;
+        const detail = value instanceof Error ? value.message.slice(0, 256) : "Unable to read automatic sync status";
+        if (!/returned 404|sync_not_found/i.test(detail)) setSyncError(`Automatic sync status unavailable: ${detail}`);
+      }
+    }
+    void refreshStatus();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [managedSyncApi, syncStatusAvailable]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -300,6 +328,12 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
       if (!signal.aborted) setDetailError(value instanceof Error ? value.message.slice(0, 256) : "Unable to refresh recipe authority");
     }
   }, [api, recipeId]);
+  const refreshLibraryAuthority = useCallback(async (signal: AbortSignal) => {
+    await refreshDetail(signal);
+    if (signal.aborted) return;
+    setSnapshotAttempt(value => value + 1);
+    setFleetAttempt(value => value + 1);
+  }, [refreshDetail]);
   useEffect(() => {
     setDetail(undefined);
     setDetailError("");
@@ -404,7 +438,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         onClearSearch={() => setQuery("")}
         onNavigate={contextualNavigate}
         onBusyChange={onBusyChange}
-        onRefresh={refreshDetail}
+        onRefresh={refreshLibraryAuthority}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
         onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
         onRetryFleet={() => setFleetAttempt(value => value + 1)}

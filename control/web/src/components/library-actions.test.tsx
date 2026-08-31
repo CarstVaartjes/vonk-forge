@@ -14,6 +14,7 @@ import type {
 import {App} from "../app";
 import {fullLibraryDetail, librarySnapshot} from "../test-fixtures/library";
 import {LibraryOperationProgress} from "./library-operation-progress";
+import {UninstallPreview} from "./library-action-preview";
 
 const GIB = 1024 ** 3;
 
@@ -636,7 +637,7 @@ test("previews Stop and Remove consequences without implying released capacity o
     nodes: [{installed_bytes: null, node_id: "node-alpha", rank: 0, role: "leader", state: "installed"}, {installed_bytes: 60 * GIB, node_id: "node-beta", rank: 1, role: "worker", state: "installed"}],
     original_plan_digest: "install-plan", plan_digest: "uninstall-plan", recipe_content: {}, recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", warnings: [],
   };
-  const allowedUninstallPlan = {...uninstallPlan, active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * GIB, model_impact: {effect: "recipe-and-unused-model", model_title: "Qwen 3"}};
+  const allowedUninstallPlan = {...uninstallPlan, active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * GIB, model_impact: {...uninstallPlan.model_impact, model_title: "Qwen 3"}};
   const previewLibraryUninstall = vi.fn().mockResolvedValueOnce(uninstallPlan).mockResolvedValueOnce(allowedUninstallPlan);
   const applyLibraryStop = vi.fn(async () => ({...operation("succeeded"), id: "operation-stop", kind: "stop", owner_id: "run-chat", plan_digest: "stop-plan"}));
   const applyLibraryUninstall = vi.fn(async () => ({...operation("succeeded"), id: "operation-remove", kind: "uninstall", owner_id: "installation-chat", plan_digest: "uninstall-plan"}));
@@ -672,7 +673,8 @@ test("previews Stop and Remove consequences without implying released capacity o
   expect(within(remove).getByText("Forge will not stop active runs automatically.")).toBeVisible();
   expect(within(remove).getByText("The local catalog recipe is retained.")).toBeVisible();
   expect(within(remove).getByText("Reinstall is required to restore removed content.")).toBeVisible();
-  expect(within(remove).getByRole("heading", {name: "Model dependency impact unavailable"})).toBeVisible();
+  expect(within(remove).getByRole("heading", {name: "Recipe and unused model"})).toBeVisible();
+  expect(within(remove).getByRole("heading", {name: "Model files removed"})).toBeVisible();
   expect(within(remove).getByRole("button", {name: "Remove selected installation"})).toBeDisabled();
   await user.click(within(remove).getByRole("button", {name: "Close review"}));
 
@@ -684,6 +686,23 @@ test("previews Stop and Remove consequences without implying released capacity o
   await user.click(within(allowedRemove).getByRole("button", {name: "Remove selected installation"}));
   expect(applyLibraryUninstall).toHaveBeenCalledWith("installation-chat", {plan_digest: "uninstall-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
   expect(await screen.findByRole("region", {name: "Remove operation progress"})).toHaveTextContent("Operation complete");
+});
+
+test("explains partial per-Spark model cleanup when another recipe retains the shared model", () => {
+  const partialPlan: LibraryUninstallPlan = {
+    active_run_count: 0, active_runs: [], active_runs_truncated: false, allowed: true, blockers: [], bytes_removed: 60 * GIB,
+    consequences: {automatic_stop: false, catalog_retained: true, reinstall_required: true}, installation_authority_digest: "install-authority", installation_id: "installation-chat", installation_state: "installed",
+    model_impact: {cleanup_node_ids: ["node-alpha"], dependent_recipe_ids: ["recipe-code"], effect: "recipe-and-partial-model-cleanup", model_title: "Qwen 3", model_version_sha256: "e".repeat(64), retained_node_ids: ["node-beta"]},
+    nodes: [{installed_bytes: 60 * GIB, node_id: "node-alpha", rank: 0, role: "leader", state: "installed"}, {installed_bytes: 60 * GIB, node_id: "node-beta", rank: 1, role: "worker", state: "installed"}],
+    original_plan_digest: "install-plan", plan_digest: "uninstall-plan", recipe_content: {}, recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", warnings: [],
+  };
+  render(<UninstallPreview plan={partialPlan}/>);
+
+  expect(screen.getByRole("heading", {name: "Recipe and partial model cleanup"})).toBeVisible();
+  expect(screen.getByRole("heading", {name: "Model files removed"})).toBeVisible();
+  expect(screen.getByRole("heading", {name: "Model files retained"})).toBeVisible();
+  expect(screen.getByText("Other installed recipes still reference this exact model on:")).toBeVisible();
+  expect(screen.getByText("1 other installed recipe still uses this exact model elsewhere in the fleet.")).toBeVisible();
 });
 
 test("retries operation status errors and cancels pending polls on cleanup", async () => {

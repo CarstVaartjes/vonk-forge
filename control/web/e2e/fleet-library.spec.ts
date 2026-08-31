@@ -176,6 +176,9 @@ async function installLocalFleetFixture(page: Page) {
     }});
   });
   await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: []}}));
+  const managedSync = {schema_version: 1, sync_id: "00000000-0000-4000-8000-000000000101", request_key: "00000000-0000-4000-8000-000000000102", trigger: "automatic", state: "current", repository: "CarstVaartjes/vonk-forge-recipes", commit, expected_commit: commit, total_count: 0, processed_count: 0, imported_count: 0, updated_count: 0, unchanged_count: 0, skipped_count: 0, withdrawn_count: 0, withdrawn_recipes: [], stale_recipes: [], problems: [], created_at: "2026-09-01T12:00:00Z", completed_at: "2026-09-01T12:00:01Z"};
+  await page.route("**/api/v1/catalog/managed-recipes/sync-status", route => route.fulfill({json: managedSync}));
+  await page.route("**/api/v1/catalog/managed-recipes/sync", route => route.fulfill({json: {...managedSync, trigger: "manual"}}));
   await page.route("**/api/v1/library?*", route => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
@@ -554,8 +557,9 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(detail).toBeVisible();
+  await expect(page.getByRole("complementary", {name: "Sparks"})).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
@@ -610,7 +614,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   });
   const fractionalFrame = page.frameLocator('iframe[title="Fractional Library viewport"]');
   await expect.poll(() => page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.getBoundingClientRect().width)).toBe(899.5);
-  await fractionalFrame.locator(".library-browser").waitFor();
+  await fractionalFrame.locator(".library-browser-shell").waitFor();
   await fractionalFrame.locator("html").evaluate(() => {
     for (const sheet of Array.from(document.styleSheets)) {
       for (const rule of Array.from(sheet.cssRules)) {
@@ -619,7 +623,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
     }
   });
   await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
   await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
   await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
 

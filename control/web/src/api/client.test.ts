@@ -527,6 +527,83 @@ it("starts managed recipe synchronization with a fresh idempotency key", async (
   );
 });
 
+it("previews, applies, and reads one durable atomic Library placement", async () => {
+  document.cookie = "vonk_csrf=placement-csrf; path=/";
+  const recipeId = "00000000-0000-4000-8000-000000000201";
+  const revisionId = "00000000-0000-4000-8000-000000000202";
+  const placementId = "00000000-0000-4000-8000-000000000203";
+  const requestKey = "00000000-0000-4000-8000-000000000204";
+  const nodeIds = [`spk_${"a".repeat(32)}`, `spk_${"b".repeat(32)}`];
+  const intent = {alias: null, desired_state: "installed" as const, invocation: "drag-drop" as const, node_ids: nodeIds, recipe_id: recipeId};
+  const preview = {
+    schema_version: 1, generated_at: "2026-09-01T12:00:00Z", recipe_id: recipeId, recipe_revision_id: revisionId,
+    recipe_title: "Tiny model", topology_name: "pair", desired_state: "installed", alias: null, invocation: "drag-drop",
+    selected_node_ids: nodeIds, selected_nodes: [], allowed: true, steps: [], blockers: [], warnings: [],
+    locations: {installation_ids: [], run_ids: [], installed: false, running: false}, plan_digest: "d".repeat(64),
+  };
+  const application = {
+    schema_version: 1, id: placementId, state: "queued", recipe_id: recipeId, recipe_revision_id: revisionId,
+    selected_node_ids: nodeIds, desired_state: "installed", alias: null, plan_digest: preview.plan_digest,
+    current_step: 0, total_steps: 0, current_operation_id: null, status_reason: null, progress: {}, locations: preview.locations,
+    created_at: "2026-09-01T12:00:00Z", updated_at: "2026-09-01T12:00:00Z",
+  };
+  const captured: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    captured.push(request.clone());
+    const body = request.url.endsWith("/preview") ? preview : application;
+    return new Response(JSON.stringify(body), {headers: {"Content-Type": "application/json"}, status: request.method === "POST" && !request.url.endsWith("/preview") ? 202 : 200});
+  });
+
+  const api = new ApiClient();
+  expect(await api.previewLibraryPlacement(intent)).toEqual(preview);
+  expect(await api.applyLibraryPlacement({...intent, plan_digest: preview.plan_digest, request_key: requestKey})).toEqual(application);
+  expect(await api.libraryPlacement(placementId)).toEqual(application);
+
+  expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
+    ["/api/v1/library/placements/preview", "POST"],
+    ["/api/v1/library/placements", "POST"],
+    [`/api/v1/library/placements/${placementId}`, "GET"],
+  ]);
+  expect(await captured[0]!.json()).toEqual(intent);
+  expect(await captured[1]!.json()).toEqual({...intent, plan_digest: preview.plan_digest, request_key: requestKey});
+  expect(captured[0]!.headers.get("X-CSRF-Token")).toBe("placement-csrf");
+  expect(captured[1]!.headers.get("X-CSRF-Token")).toBe("placement-csrf");
+});
+
+it("previews and applies one digest-bound fleet-wide model deletion", async () => {
+  document.cookie = "vonk_csrf=model-delete-csrf; path=/";
+  const modelDigest = "e".repeat(64);
+  const requestKey = "00000000-0000-4000-8000-000000000205";
+  const plan = {
+    active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * 1024 ** 3,
+    installations: [{installation_id: "installation-chat", installed_bytes: 120 * 1024 ** 3, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
+    model_title: "Qwen 3 BF16", model_version_sha256: modelDigest,
+    nodes: [{installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-alpha", recipe_ids: ["recipe-chat"]}, {installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-beta", recipe_ids: ["recipe-chat"]}],
+    plan_digest: "model-delete-plan", shared_cache_policy: "Unrelated immutable caches remain installed.", warnings: [],
+  };
+  const operation = {id: "operation-model-delete", kind: "model-delete", owner_id: modelDigest, state: "queued", plan_digest: plan.plan_digest, nodes: ["node-alpha", "node-beta"], result: null};
+  const captured: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    captured.push(request.clone());
+    return new Response(JSON.stringify(request.url.endsWith("/preview") ? plan : operation), {headers: {"Content-Type": "application/json"}, status: request.url.endsWith("/preview") ? 200 : 202});
+  });
+
+  const api = new ApiClient();
+  expect(await api.previewLibraryModelDeletion(modelDigest)).toEqual(plan);
+  expect(await api.deleteLibraryModel(modelDigest, {plan_digest: plan.plan_digest, request_key: requestKey})).toEqual(operation);
+
+  expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
+    ["/api/v1/library/model-deletion-plans/preview", "POST"],
+    [`/api/v1/library/models/${modelDigest}/delete`, "POST"],
+  ]);
+  expect(await captured[0]!.json()).toEqual({model_version_sha256: modelDigest});
+  expect(await captured[1]!.json()).toEqual({plan_digest: plan.plan_digest, request_key: requestKey});
+  expect(captured[0]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");
+  expect(captured[1]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");
+});
+
 it("previews and applies an exact repair manifest through browser CSRF auth", async () => {
   document.cookie = "vonk_csrf=repair-csrf; path=/";
   const captured: Request[] = [];

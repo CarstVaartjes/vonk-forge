@@ -1,7 +1,8 @@
-import {useMemo, useRef, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import type {DragEvent, MouseEvent, ReactNode} from "react";
 import type {
   LibraryApi,
+  ManagedCatalogSyncSummary,
   LibraryModel,
   LibraryOperation,
   LibraryRecipeDetail,
@@ -15,8 +16,12 @@ import type {
 import {formatBytes} from "../lib/fleet";
 import type {LibraryRoute} from "../lib/library-route";
 import {modelLibraryPath, modelVersionKey, recipeLibraryPath, unlinkedLibraryPath} from "../lib/library-route";
+import type {LibraryPlacementGroup} from "./library-action-types";
 import {LibraryActionDialog} from "./library-action-dialog";
-import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
+import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
+import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
+import {LibraryPlacementDialog} from "./library-placement-dialog";
+import type {LibraryPlacementInvocation} from "./library-placement-dialog";
 import {friendlyModelName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
@@ -25,20 +30,7 @@ type UpdatedFilter = "" | "7" | "30" | "90" | "365";
 type LocalFilter = "" | PublicRecipe["local"]["status"] | "needs-review" | "custom" | "withdrawn";
 type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d";
 
-export type ManagedCatalogWithdrawal = {
-  model_version_key?: string;
-  recipe_id: string;
-  recipe_uri?: string;
-  release_version?: string;
-};
-
-export type ManagedCatalogSyncSummary = {
-  imported_count?: number;
-  state: string;
-  updated_count?: number;
-  withdrawn_count?: number;
-  withdrawn_recipes?: ManagedCatalogWithdrawal[];
-};
+export type ManagedCatalogWithdrawal = ManagedCatalogSyncSummary["withdrawn_recipes"][number];
 
 export type LibraryWorkcellFilters = {
   capabilities: PublicRecipeCapability[];
@@ -247,15 +239,11 @@ function groupForNode(detail: LibraryRecipeDetail, nodeId: string): LibraryPlace
   return detail.placement.flatMap(placement => placement.recommendations).find(group => group.eligible && group.group_complete && group.node_ids.includes(nodeId));
 }
 
-function targetForGroup(group: LibraryPlacementGroup): LibraryActionTarget | undefined {
-  return group.preview_targets.find(target => target.kind === "install") ?? group.preview_targets[0];
-}
-
 function selectionRecipeIds(records: LibraryRecipeRecord[]): Set<string> {
   return new Set(records.flatMap(record => record.recipe ? [record.recipe.recipe_id] : []));
 }
 
-export type SparkPlacementState = "available" | "installed" | "running" | "update" | "withdrawn" | "incompatible" | "offline" | "select";
+export type SparkPlacementState = "available" | "installed" | "running" | "running-attention" | "update" | "withdrawn" | "incompatible" | "offline" | "select";
 
 export function sparkPlacementState(node: VisualFleetNode, selectedRecords: LibraryRecipeRecord[], detail?: LibraryRecipeDetail): SparkPlacementState {
   if (node.connection?.online_state !== "online") return "offline";
@@ -263,7 +251,9 @@ export function sparkPlacementState(node: VisualFleetNode, selectedRecords: Libr
   const ids = selectionRecipeIds(selectedRecords);
   const withdrawnIds = new Set(selectedRecords.flatMap(record => record.withdrawnInstalled && record.recipe ? [record.recipe.recipe_id] : []));
   if ((node.loaded ?? []).some(run => withdrawnIds.has(run.recipe_id)) || (node.installed ?? []).some(installation => withdrawnIds.has(installation.recipe_id) && installation.rank_state === "installed")) return "withdrawn";
-  if ((node.loaded ?? []).some(run => ids.has(run.recipe_id))) return "running";
+  const selectedRuns = (node.loaded ?? []).filter(run => ids.has(run.recipe_id));
+  if (selectedRuns.some(run => run.healthy === false)) return "running-attention";
+  if (selectedRuns.length > 0) return "running";
   const installed = (node.installed ?? []).some(installation => ids.has(installation.recipe_id) && installation.rank_state === "installed");
   if (installed && selectedRecords.some(record => record.catalog?.local.status === "update-available")) return "update";
   if (installed) return "installed";
@@ -274,6 +264,7 @@ export function sparkPlacementState(node: VisualFleetNode, selectedRecords: Libr
 function stateLabel(state: SparkPlacementState): string {
   if (state === "update") return "Update available";
   if (state === "withdrawn") return "Withdrawn upstream";
+  if (state === "running-attention") return "Running · attention";
   if (state === "select") return "Select a model or recipe";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
@@ -284,6 +275,13 @@ function modelPath(model: {key: string; model?: LibraryModel["model"]}): string 
 
 function valueOptions(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.flatMap(value => value ? [value] : []))].sort();
+}
+
+function formattedSyncTime(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"}).format(date);
 }
 
 function FilterSelect({label, onChange, options, value}: {label: string; onChange(value: string): void; options: Array<{label: string; value: string}>; value: string}) {
@@ -327,9 +325,14 @@ export function LibraryWorkcell({
   const [placementDetail, setPlacementDetail] = useState<LibraryRecipeDetail>();
   const [placementError, setPlacementError] = useState("");
   const [placementLoading, setPlacementLoading] = useState(false);
-  const [review, setReview] = useState<(LibraryActionReview & {record: LibraryRecipeRecord})>();
+  const [review, setReview] = useState<{invocation: LibraryPlacementInvocation; nodeIds: string[]; record: LibraryRecipeRecord}>();
+  const [recipeRemovalId, setRecipeRemovalId] = useState("");
+  const [modelDeletionOpen, setModelDeletionOpen] = useState(false);
+  const [removalOperation, setRemovalOperation] = useState<LibraryOperation>();
   const [announcement, setAnnouncement] = useState("");
   const placementTrigger = useRef<HTMLButtonElement | null>(null);
+  const removalTrigger = useRef<HTMLButtonElement | null>(null);
+  const modelDeletionTrigger = useRef<HTMLButtonElement | null>(null);
   const placementRequest = useRef(0);
   const allRecords = useMemo(
     () => applyManagedCatalogWithdrawals(buildLibraryRecipeRecords(snapshot, publicRecipes), fleet, syncSummary?.withdrawn_recipes ?? []),
@@ -343,7 +346,19 @@ export function LibraryWorkcell({
     ? matchingRecords.filter(record => record.modelKey === "unlinked")
     : selectedModelKey ? matchingRecords.filter(record => record.modelKey === selectedModelKey) : matchingRecords;
   const selectedRecords = selectedRecord ? [selectedRecord] : selectedModelKey ? allRecords.filter(record => record.modelKey === selectedModelKey) : [];
+  const selectedModelIdentity = selectedRecords.find(record => record.model)?.model;
+  const selectedModelRecipeIds = selectionRecipeIds(selectedRecords);
+  const selectedModelNodeIds = [...new Set(fleet?.nodes.flatMap(node => (node.installed ?? []).some(installation => selectedModelRecipeIds.has(installation.recipe_id) && installation.rank_state === "installed") || (node.loaded ?? []).some(run => selectedModelRecipeIds.has(run.recipe_id)) ? [node.id] : []) ?? [])];
+  const selectedModelInstalledRecipeCount = new Set(fleet?.nodes.flatMap(node => [
+    ...(node.installed ?? []).flatMap(installation => selectedModelRecipeIds.has(installation.recipe_id) && installation.rank_state === "installed" ? [installation.recipe_id] : []),
+    ...(node.loaded ?? []).flatMap(run => selectedModelRecipeIds.has(run.recipe_id) ? [run.recipe_id] : []),
+  ]) ?? []).size;
   const activeDetail = detail && selectedRecord?.recipe && detail.recipe.recipe_id === selectedRecord.recipe.recipe_id ? detail : placementDetail;
+  const selectedRecipeDetail = detail && selectedRecord?.recipe && detail.recipe.recipe_id === selectedRecord.recipe.recipe_id ? detail : undefined;
+  const selectedInstallations = selectedRecipeDetail?.operational_state.installations.filter(installation => installation.state !== "uninstalled") ?? [];
+  const selectedActiveRuns = selectedRecipeDetail?.operational_state.runs.filter(run => ["running", "published"].includes(run.state)) ?? [];
+  const selectedHasFleetRun = Boolean(selectedRecord?.recipe && fleet?.nodes.some(node => (node.loaded ?? []).some(run => run.recipe_id === selectedRecord.recipe?.recipe_id)));
+  const selectedHasActiveRun = selectedActiveRuns.length > 0 || selectedHasFleetRun;
   const creators = valueOptions(publicRecipes.map(recipe => recipe.source_owner));
   const repositories = valueOptions(publicRecipes.map(recipe => recipe.source_repository));
   const runtimes = valueOptions(publicRecipes.map(recipe => recipe.runtime_distribution));
@@ -353,6 +368,24 @@ export function LibraryWorkcell({
   const modelVersions = [...new Map(allRecords.map(record => [record.modelKey, record.modelTitle])).entries()];
   const appliedFilterCount = Object.entries(filters).reduce((count, [, value]) => count + (Array.isArray(value) ? value.length : value ? 1 : 0), 0);
   const installedWithdrawalCount = new Set(allRecords.flatMap(record => record.withdrawnInstalled && record.recipe ? [record.recipe.recipe_id] : [])).size;
+  const syncTime = formattedSyncTime(syncSummary?.completed_at ?? null);
+  const staleInstallationCount = syncSummary?.stale_recipes.reduce((count, item) => count + item.stale_installation_count, 0) ?? 0;
+  const staleRunCount = syncSummary?.stale_recipes.reduce((count, item) => count + item.stale_run_count, 0) ?? 0;
+  const syncState = syncing ? "Updating…"
+    : syncError ? "Update needs attention"
+      : syncSummary?.state === "partial" ? "Updated with items to review"
+        : syncSummary?.state === "failed" ? "Automatic update failed"
+          : syncSummary?.state === "syncing" ? "Automatic update in progress"
+            : syncSummary?.state === "current" ? "Vonk Forge remote is current"
+              : syncAvailable ? "Automatic updates enabled" : "Catalog discovery only";
+
+  useEffect(() => {
+    setRecipeRemovalId("");
+    setRemovalOperation(undefined);
+    setModelDeletionOpen(false);
+  }, [selectedRecord?.key]);
+
+  useEffect(() => { setModelDeletionOpen(false); }, [selectedModelKey]);
 
   function updateFilter<K extends keyof LibraryWorkcellFilters>(key: K, value: LibraryWorkcellFilters[K]) {
     onFiltersChange({...filters, [key]: value});
@@ -391,7 +424,7 @@ export function LibraryWorkcell({
     }
   }
 
-  async function openPlacement(record: LibraryRecipeRecord, node: VisualFleetNode, trigger: HTMLButtonElement) {
+  async function openPlacement(record: LibraryRecipeRecord, node: VisualFleetNode, trigger: HTMLButtonElement, invocation: LibraryPlacementInvocation) {
     if (!record.recipe || node.connection?.online_state !== "online") return;
     placementTrigger.current = trigger;
     setPlacementLoading(true);
@@ -404,12 +437,11 @@ export function LibraryWorkcell({
           : await api.libraryRecipe(record.recipe.recipe_id);
       setPlacementDetail(nextDetail);
       const group = groupForNode(nextDetail, node.id);
-      const target = group && targetForGroup(group);
-      if (!group || !target) {
+      if (!group) {
         setPlacementError(`${node.display_name || node.hostname} is not in a compatible complete placement group for ${record.title}.`);
         return;
       }
-      setReview({evidence: group, record, target});
+      setReview({invocation, nodeIds: [...group.node_ids].sort(), record});
     } catch (value) {
       setPlacementError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load placement authority");
     } finally {
@@ -430,17 +462,29 @@ export function LibraryWorkcell({
     queueMicrotask(() => placementTrigger.current?.focus());
   }
 
+  function closeRecipeRemoval() {
+    setRecipeRemovalId("");
+    queueMicrotask(() => removalTrigger.current?.focus());
+  }
+
+  function closeModelDeletion() {
+    setModelDeletionOpen(false);
+    queueMicrotask(() => modelDeletionTrigger.current?.focus());
+  }
+
   const railRecord = draggedRecipe ?? placementRecipe ?? selectedRecord;
   return <>
     <section className="library-sync-strip" aria-label="Managed catalog synchronization">
-      <div><strong>Managed recipes synchronize automatically</strong><span>{catalogRepository ? `${catalogRepository}${catalogCommit ? ` · ${catalogCommit.slice(0, 8)}` : ""}` : "Waiting for catalog authority"}</span></div>
-      <div className="library-sync-status"><span>{syncing ? "Synchronizing…" : syncError ? "Sync needs attention" : syncAvailable ? "Automatic sync enabled" : "Catalog discovery only"}</span><button type="button" className="button secondary" disabled={!syncAvailable || syncing} title={!syncAvailable ? "The Controller does not yet expose managed-catalog synchronization." : undefined} onClick={onSyncNow}>{syncing ? "Syncing…" : "Sync now"}</button></div>
-      {syncSummary && <p role="status">Last sync: {syncSummary.imported_count ?? 0} imported · {syncSummary.updated_count ?? 0} updated</p>}
+      <div><strong>Managed recipes update automatically</strong><span>{catalogRepository ? `${catalogRepository}${catalogCommit ? ` · ${catalogCommit.slice(0, 8)}` : ""}` : "Waiting for Vonk Forge remote"}</span></div>
+      <div className="library-sync-status"><span>{syncState}</span><button type="button" className="button secondary" disabled={!syncAvailable || syncing || syncSummary?.state === "syncing"} title={!syncAvailable ? "The Controller does not expose managed recipe synchronization." : undefined} onClick={onSyncNow}>{syncing ? "Updating from remote…" : "Update from Vonk Forge remote"}</button></div>
+      {syncSummary && <p role="status">Last update: {syncSummary.imported_count} imported · {syncSummary.updated_count} updated · {syncSummary.unchanged_count} unchanged{syncTime ? ` · ${syncTime}` : ""}</p>}
+      {(staleInstallationCount > 0 || staleRunCount > 0) && <p className="is-warning" role="status">{staleInstallationCount} installed placement{staleInstallationCount === 1 ? " uses" : "s use"} an older recipe revision · {staleRunCount} active run{staleRunCount === 1 ? " needs" : "s need"} review.</p>}
+      {syncSummary && syncSummary.problems.length > 0 && <details className="library-sync-problems"><summary>{syncSummary.problems.length} update item{syncSummary.problems.length === 1 ? "" : "s"} need review</summary><ul>{syncSummary.problems.map((problem, index) => <li key={`${problem.recipe_uri}-${problem.code}-${index}`}><strong>{problem.code}</strong><span>{problem.detail}</span></li>)}</ul></details>}
       {installedWithdrawalCount > 0 && <p className="is-warning" role="status">{installedWithdrawalCount} installed recipe{installedWithdrawalCount === 1 ? " is" : "s are"} withdrawn upstream. Installed content remains pinned until you review its removal.</p>}
       {syncError && <p className="is-error" role="alert">{syncError}</p>}
     </section>
     <details className="library-filter-board" open={appliedFilterCount > 0}>
-      <summary><span><strong>Recipe filters</strong><small>{appliedFilterCount ? `${appliedFilterCount} applied · models derive from matching recipes` : "Model, creator, topology, runtime, status, and capability"}</small></span><span className="library-filter-disclosure">Expand</span></summary>
+      <summary><span><strong>Recipe filters</strong><small>{appliedFilterCount ? `${appliedFilterCount} applied · models derive from matching recipes` : "Model, creator, topology, runtime, status, and capability"}</small></span><span aria-hidden="true" className="library-filter-disclosure">Expand</span></summary>
       <div className="library-filter-grid">
         <FilterSelect label="Model type" value={filters.modelType} onChange={value => updateFilter("modelType", value as ModelType)} options={[
           {value: "language", label: "Language / chat"}, {value: "vision", label: "Vision / multimodal"}, {value: "image", label: "Image"}, {value: "video", label: "Video"}, {value: "audio", label: "Audio"}, {value: "3d", label: "3D"},
@@ -493,6 +537,22 @@ export function LibraryWorkcell({
       </section>
       <aside className="library-pane library-spark-rail" aria-label="Sparks">
         <div className="library-pane-heading"><div><h3>Sparks</h3></div><small>{fleet?.nodes.length ?? 0} enrolled</small></div>
+        {selectedRecord && selectedInstallations.length > 0 && <section className="library-removal-overview" aria-label={`Remove ${selectedRecord.title}`}>
+          <div><strong>Installed recipe</strong><span>{selectedRecord.title} occupies {new Set(selectedInstallations.flatMap(installation => installation.node_ids)).size} Spark{new Set(selectedInstallations.flatMap(installation => installation.node_ids)).size === 1 ? "" : "s"}.</span></div>
+          {selectedHasActiveRun && <p className="is-warning">Active runs must stop before removal. You can still review the exact blocked plan.</p>}
+          {selectedInstallations.map((installation, index) => <div className="library-removal-placement" key={installation.installation_id}>
+            <span>Placement {selectedInstallations.length > 1 ? index + 1 : ""} · {installation.node_ids.map(nodeId => fleet?.nodes.find(node => node.id === nodeId)?.display_name ?? nodeId).join(" + ")}</span>
+            <button type="button" className="button secondary" disabled={removalOperation !== undefined && !operationSettled(removalOperation.state)} onClick={event => { removalTrigger.current = event.currentTarget; setRecipeRemovalId(installation.installation_id); }}>Review recipe removal</button>
+          </div>)}
+          <small>The catalog recipe remains available. The Controller preview decides whether shared model files stay on each Spark.</small>
+        </section>}
+        {route.kind === "model" && selectedModelIdentity && selectedModelNodeIds.length > 0 && <section className="library-removal-overview library-model-removal-overview" aria-label={`Delete ${selectedRecords[0]?.modelTitle ?? "selected model"}`}>
+          <div><strong>Installed model</strong><span>{selectedRecords[0]?.modelTitle ?? "This exact model"} is used by {selectedModelInstalledRecipeCount} installed recipe{selectedModelInstalledRecipeCount === 1 ? "" : "s"} across {selectedModelNodeIds.length} Spark{selectedModelNodeIds.length === 1 ? "" : "s"}.</span></div>
+          <p>Deleting the model also removes every installed recipe that relies on it. Active runs block deletion and are never stopped automatically.</p>
+          <button ref={modelDeletionTrigger} type="button" className="button secondary" onClick={() => setModelDeletionOpen(true)}>Review model deletion</button>
+          <small>Shared unrelated caches remain protected. The server preview lists every affected placement before confirmation.</small>
+        </section>}
+        {removalOperation && <LibraryOperationProgress api={api} name="Remove" onChange={setRemovalOperation} onRefresh={onRefresh} operation={removalOperation}/>}
         {!fleet && !fleetError && <p className="library-placeholder" role="status">Loading live Spark state…</p>}
         {fleetError && <div className="library-spark-error" role="alert"><p>{fleetError}</p><button type="button" className="button secondary" onClick={onRetryFleet}>Retry Sparks</button></div>}
         {placementError && <div className="library-spark-error" role="alert"><p>{placementError}</p><button type="button" className="button secondary" onClick={() => setPlacementError("")}>Dismiss</button></div>}
@@ -500,27 +560,58 @@ export function LibraryWorkcell({
           const stateRecords = railRecord ? [railRecord] : selectedRecords;
           const stateRecipeIds = selectionRecipeIds(stateRecords);
           const activeSelectedRun = (node.loaded ?? []).some(run => stateRecipeIds.has(run.recipe_id));
+          const runningRecords = stateRecords.filter(record => record.recipe && (node.loaded ?? []).some(run => run.recipe_id === record.recipe?.recipe_id));
+          const installedRecords = stateRecords.filter(record => record.recipe && !runningRecords.includes(record) && (node.installed ?? []).some(installation => installation.recipe_id === record.recipe?.recipe_id && installation.rank_state === "installed"));
           const projectedState = sparkPlacementState(node, stateRecords, activeDetail);
           const group = activeDetail ? groupForNode(activeDetail, node.id) : undefined;
           const groupReady = Boolean(group?.node_ids.every(nodeId => fleet.nodes.some(item => item.id === nodeId && item.connection?.online_state === "online")));
-          const state = railRecord && activeDetail && !["running", "installed", "update", "withdrawn", "offline"].includes(projectedState) && !groupReady ? "incompatible" : projectedState;
+          const state = railRecord && activeDetail && !["running", "running-attention", "installed", "update", "withdrawn", "offline"].includes(projectedState) && !groupReady ? "incompatible" : projectedState;
           const compatibilityPending = Boolean(railRecord?.recipe) && placementLoading && !activeDetail;
           const compatible = Boolean(railRecord?.recipe) && node.connection?.online_state === "online" && Boolean(activeDetail && groupReady);
           const atomicNodes = group?.node_ids ?? [];
           const dropActive = dropNodeId === node.id;
-          return <article key={node.id} className={`library-spark-target state-${state}${dropActive ? " is-drop-active" : ""}${compatibilityPending ? " is-drop-pending" : ""}${(draggedRecipe || placementRecipe) && !compatible && !compatibilityPending ? " is-drop-incompatible" : ""}`} onDragEnter={event => { event.preventDefault(); setDropNodeId(node.id); }} onDragOver={event => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={() => setDropNodeId(current => current === node.id ? "" : current)} onDrop={event => { event.preventDefault(); setDropNodeId(""); const record = draggedRecipe ?? placementRecipe; setDraggedRecipe(undefined); if (record && compatible) void openPlacement(record, node, event.currentTarget.querySelector("button")!); }}>
+          return <article key={node.id} className={`library-spark-target state-${state}${dropActive ? " is-drop-active" : ""}${compatibilityPending ? " is-drop-pending" : ""}${(draggedRecipe || placementRecipe) && !compatible && !compatibilityPending ? " is-drop-incompatible" : ""}`} onDragEnter={event => { event.preventDefault(); setDropNodeId(node.id); }} onDragOver={event => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={() => setDropNodeId(current => current === node.id ? "" : current)} onDrop={event => { event.preventDefault(); setDropNodeId(""); const record = draggedRecipe ?? placementRecipe; setDraggedRecipe(undefined); const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".library-place-target"); if (record && compatible && trigger) void openPlacement(record, node, trigger, "drag-drop"); }}>
             <header><div><strong>{node.display_name || node.hostname}</strong><span>{node.hostname}</span></div><span className={`library-spark-state state-${state}`}>{stateLabel(state)}</span></header>
             <dl><div><dt>Connection</dt><dd>{node.connection?.online_state ?? "Unknown"}</dd></div><div><dt>Workloads</dt><dd>{(node.loaded ?? []).length} running · {(node.installed ?? []).length} installed</dd></div>{node.inventory && <div><dt>Disk free</dt><dd>{formatBytes(node.inventory.disk_free_bytes)}</dd></div>}</dl>
+            {(runningRecords.length > 0 || installedRecords.length > 0) && <div className="library-selected-locations" role="group" aria-label={`Selected content on ${node.display_name || node.hostname}`}>{runningRecords.map(record => { const run = (node.loaded ?? []).find(item => item.recipe_id === record.recipe?.recipe_id); return <p key={`run-${record.key}`}><strong>{run?.healthy === false ? "Running · attention" : "Running"}</strong><span>{record.title}</span></p>; })}{installedRecords.map(record => <p key={`installed-${record.key}`}><strong>Installed</strong><span>{record.title}</span></p>)}</div>}
             {atomicNodes.length > 1 && <p className="library-atomic-placement"><strong>Atomic {atomicNodes.length}-Spark placement</strong><span>{atomicNodes.map(nodeId => fleet.nodes.find(item => item.id === nodeId)?.display_name ?? nodeId).join(" + ")}</span></p>}
             {state === "withdrawn" && <p className="library-withdrawn-impact"><strong>Installed content is withdrawn upstream</strong><span>{activeSelectedRun ? "This content is running. Stop the complete run before reviewing removal." : "This exact local content stays pinned and cannot receive further catalog updates."}</span></p>}
-            {(draggedRecipe || placementRecipe) && <button type="button" className="button secondary library-place-target" disabled={!compatible || placementLoading} onClick={event => { const record = draggedRecipe ?? placementRecipe; if (record) void openPlacement(record, node, event.currentTarget); }}>{compatibilityPending ? "Checking compatibility…" : compatible ? `Review placement on ${node.display_name || node.hostname}` : `${state === "offline" ? "Offline" : "Incompatible"} for placement`}</button>}
-            {selectedRecords.length > 0 && <div className="library-removal-impact"><strong>Removal safety</strong><span>{activeSelectedRun ? "Active runs must stop before uninstall." : "Recipe removal uses the server preview."}</span><button type="button" className="button secondary" disabled title="Model dependency preview is not available from the Controller yet.">Review model removal</button></div>}
+            {(draggedRecipe || placementRecipe) && <button type="button" className="button secondary library-place-target" disabled={!compatible || placementLoading} onClick={event => { const record = draggedRecipe ?? placementRecipe; if (record) void openPlacement(record, node, event.currentTarget, event.detail === 0 ? "keyboard" : "button"); }}>{compatibilityPending ? "Checking compatibility…" : compatible ? `Review placement on ${node.display_name || node.hostname}` : `${state === "offline" ? "Offline" : "Incompatible"} for placement`}</button>}
           </article>;
         })}</div>
         {fleet && fleet.nodes.length === 0 && <div className="library-workcell-empty"><strong>No Sparks enrolled</strong><p>Enroll a Spark before previewing placement.</p></div>}
       </aside>
     </div>
     <p className="visually-hidden" role="status" aria-live="polite">{announcement}</p>
-    {review && <LibraryActionDialog alias={review.record.recipe?.slug ?? review.record.catalog?.slug ?? "model"} api={api} evidence={review.evidence} onApplied={(operation: LibraryOperation, name: LibraryActionName) => { setAnnouncement(`${name} operation ${operation.id} started.`); setPlacementRecipe(undefined); }} onBusyChange={onBusyChange} onClose={closeReview} onRefresh={onRefresh} policy={snapshot.freshness_policy} target={review.target}/>}
+    {review?.record.recipe && <LibraryPlacementDialog
+      api={api}
+      invocation={review.invocation}
+      nodeIds={review.nodeIds}
+      nodeNames={Object.fromEntries(fleet?.nodes.map(node => [node.id, node.display_name || node.hostname]) ?? [])}
+      onBusyChange={onBusyChange}
+      onClose={closeReview}
+      onRefresh={onRefresh}
+      recipeId={review.record.recipe.recipe_id}
+      recipeTitle={review.record.title}
+    />}
+    {selectedRecord && recipeRemovalId && <LibraryActionDialog
+      alias={selectedRecord.recipe?.slug ?? selectedRecord.title}
+      api={api}
+      onApplied={operation => setRemovalOperation(operation)}
+      onBusyChange={onBusyChange}
+      onClose={closeRecipeRemoval}
+      onRefresh={onRefresh}
+      policy={snapshot.freshness_policy}
+      target={{kind: "uninstall", installationId: recipeRemovalId}}
+    />}
+    {modelDeletionOpen && selectedModelIdentity && <LibraryModelDeletionDialog
+      api={api}
+      modelTitle={selectedRecords[0]?.modelTitle ?? friendlyModelName(selectedModelIdentity)}
+      modelVersionSha256={selectedModelIdentity.content_sha256}
+      nodeNames={Object.fromEntries(fleet?.nodes.map(node => [node.id, node.display_name || node.hostname]) ?? [])}
+      onBusyChange={onBusyChange}
+      onClose={closeModelDeletion}
+      onRefresh={onRefresh}
+    />}
   </>;
 }

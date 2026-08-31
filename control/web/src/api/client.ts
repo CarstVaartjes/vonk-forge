@@ -31,6 +31,7 @@ import type {
   PublicRecipeList,
   PublicRecipePreview,
   ManagedCatalogSyncSummary,
+  ManagedCatalogSyncInput,
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
@@ -50,6 +51,8 @@ import type {
   LibraryInstallPreviewInput,
   LibraryLoadApplyInput,
   LibraryLoadPreviewInput,
+  LibraryPlacementApplyInput,
+  LibraryPlacementPreviewInput,
   LibraryMappingApplyInput,
   LibraryMappingPreviewInput,
   LibraryStopApplyInput,
@@ -117,7 +120,7 @@ function resultData<T>(result: {data?: T; error?: unknown; response: Response}):
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? formatApiDetail(result.error.detail)
       : "request failed";
-    throw new Error(`Control API returned ${result.response.status}: ${detail}`);
+    throw new ApiError(result.response.status, `Control API returned ${result.response.status}: ${detail}`);
   }
   return result.data;
 }
@@ -243,10 +246,10 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256}), signal});
   }
 
-  syncManagedRecipeCatalog(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
+  syncManagedRecipeCatalog(input?: ManagedCatalogSyncInput, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
     return this.request("/api/v1/catalog/managed-recipes/sync", {
       method: "POST",
-      body: JSON.stringify({request_key: crypto.randomUUID()}),
+      body: JSON.stringify({request_key: crypto.randomUUID(), ...input}),
       signal,
     });
   }
@@ -380,6 +383,36 @@ export class ApiClient implements ControlApi {
   async libraryRecipe(recipeId: string, signal?: AbortSignal) {
     return resultData(await this.generated.GET("/api/v1/library/recipes/{recipe_id}", {
       params: {path: {recipe_id: recipeId}},
+      signal,
+    }));
+  }
+
+  async previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/placements/preview", {body: input, signal}));
+  }
+
+  async applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/placements", {body: input, signal}));
+  }
+
+  async libraryPlacement(placementId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/library/placements/{placement_id}", {
+      params: {path: {placement_id: placementId}},
+      signal,
+    }));
+  }
+
+  async previewLibraryModelDeletion(modelVersionSha256: string, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/model-deletion-plans/preview", {
+      body: {model_version_sha256: modelVersionSha256},
+      signal,
+    }));
+  }
+
+  async deleteLibraryModel(modelVersionSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/models/{model_version_sha256}/delete", {
+      params: {path: {model_version_sha256: modelVersionSha256}},
+      body: input,
       signal,
     }));
   }

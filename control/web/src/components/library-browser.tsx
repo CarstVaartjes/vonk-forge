@@ -8,7 +8,7 @@ import {LibraryComparison} from "./library-comparison";
 import {LibraryRecipeAuthority} from "./library-recipe-detail";
 import {friendlyModelName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
 import {EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
-import type {ManagedCatalogSyncSummary} from "./library-workcell";
+import type {ManagedCatalogSyncSummary} from "../api/types";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type LibraryViewMode = "browse" | "compact" | "compare";
