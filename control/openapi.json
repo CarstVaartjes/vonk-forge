@@ -5730,6 +5730,11 @@
             "title": "Display Name",
             "type": "string"
           },
+          "health_probe_stale": {
+            "description": "True when explicit node.probe evidence is missing or older than the Controller health-probe window. This is not aggregate node readiness; use Fleet connection, inventory, and telemetry fields for live readiness.",
+            "title": "Health Probe Stale",
+            "type": "boolean"
+          },
           "healthy": {
             "anyOf": [
               {
@@ -5739,6 +5744,7 @@
                 "type": "null"
               }
             ],
+            "description": "Health state from the latest explicit node.probe compute gate; null when no completed probe is available.",
             "title": "Healthy"
           },
           "hostname": {
@@ -5835,6 +5841,7 @@
                 "type": "null"
               }
             ],
+            "description": "Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.",
             "title": "Probe Age Seconds"
           },
           "profile": {
@@ -5849,6 +5856,8 @@
             "title": "Profile"
           },
           "stale": {
+            "deprecated": true,
+            "description": "Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node readiness.",
             "title": "Stale",
             "type": "boolean"
           }
@@ -5859,6 +5868,7 @@
           "hostname",
           "lifecycle",
           "healthy",
+          "health_probe_stale",
           "stale",
           "labels",
           "profile",
@@ -17348,6 +17358,7 @@
     },
     "/api/v1/nodes/status": {
       "get": {
+        "description": "Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.",
         "operationId": "getNodeStatuses",
         "responses": {
           "200": {
@@ -17376,7 +17387,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Node Status View"
+        "summary": "Read explicit node health-probe evidence"
       }
     },
     "/api/v1/nodes/{node_id}/profile": {

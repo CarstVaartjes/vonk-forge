@@ -357,6 +357,7 @@ def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
                     "memory_available_bytes": 0,
                     "disk_available_bytes": 0,
                     "probe_age_seconds": None,
+                    "health_probe_stale": True,
                     "stale": True,
                 }
             ],
@@ -369,6 +370,7 @@ def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
     assert response.status_code == 200
     node = response.json()["nodes"][0]
     assert node["healthy"] is None
+    assert node["health_probe_stale"] is True
     assert node["stale"] is True
     assert node["probe_age_seconds"] is None
     assert "management" not in json.dumps(response.json(), sort_keys=True)
@@ -1201,6 +1203,15 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/nodes/status"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
+    node_status = schema["components"]["schemas"]["NodeStatus"]
+    health_probe_stale = node_status["properties"]["health_probe_stale"]
+    legacy_stale = node_status["properties"]["stale"]
+    assert "not aggregate node readiness" in health_probe_stale["description"]
+    assert legacy_stale["deprecated"] is True
+    assert "health_probe_stale" in legacy_stale["description"]
+    assert paths["/api/v1/nodes/status"]["get"]["summary"] == (
+        "Read explicit node health-probe evidence"
+    )
     assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
         "getNodeTelemetryHistory"
     )

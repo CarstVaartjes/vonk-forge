@@ -830,6 +830,13 @@ def create_app(
         response_model=FleetStatusResponse,
         responses=bounded_error_responses(401),
         operation_id="getNodeStatuses",
+        summary="Read explicit node health-probe evidence",
+        description=(
+            "Returns the legacy node health-probe projection. Its stale fields refer "
+            "only to explicit node.probe compute-gate evidence, not aggregate Fleet "
+            "readiness. Use /api/v1/fleet for live connection, inventory, and "
+            "telemetry readiness."
+        ),
     )
     def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
         return fleet_response(fleet())
