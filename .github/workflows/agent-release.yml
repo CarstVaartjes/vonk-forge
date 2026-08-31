@@ -320,6 +320,14 @@ jobs:
             +refs/heads/main:refs/remotes/origin/main
           test "$GITHUB_SHA" = \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+      - name: Install pinned Rust toolchain for the historical helper fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          rustup set profile minimal
+          rustup toolchain install 1.97.1
+          rustup default 1.97.1
       - name: Download accepted dual-architecture package set for ARM64
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
