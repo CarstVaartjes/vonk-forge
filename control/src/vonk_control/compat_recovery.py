@@ -3,9 +3,8 @@
 The installed dev335 agent already forwards the signed host-helper grant from an
 ``agent.upgrade.v1`` attempt without interpreting the operation. This module
 arms exactly one retry of the existing failed a122 operation. The authority
-reissues only that operation's exact package grant: a122's already-installed
-``preinst`` recognizes its immutable recovery intent, wakes the recovery owner,
-and refuses to begin a second package transaction.
+then substitutes only a fixed 60-second scheduled reboot for that retry. On the
+next boot, the enabled helper socket pulls in the already-staged a122 recovery.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ from .models import (
     Job,
 )
 
-RECOVERY_ID = "spark3542-a122-exact-package-retry-v1"
+RECOVERY_ID = "spark3542-a122-scheduled-reboot-v1"
 NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 JOB_ID = "6b945136-1be6-47e4-8ba0-5c5f815304ad"
 OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
@@ -51,7 +50,7 @@ TARGET_BINARY_DIGEST = (
 TARGET_BUILD_DIGEST = (
     "sha256:f12f9a3953b34638b69ce687f64cd81aa936ce4bc855816fe3ef2cc279362420"
 )
-CONFIRMATION = "retry-exact-staged-a122-package-on-spark3542"
+CONFIRMATION = "reboot-spark3542-to-resume-staged-a122-recovery"
 _ONLINE_WINDOW = timedelta(seconds=150)
 _TERMINAL_ATTEMPT_STATES = frozenset({"expired", "failed", "waiting-for-operator"})
 
@@ -172,10 +171,9 @@ class Spark3542CompatibilityRecoveryService:
             )
             # This is the exact retry transition AgentJobService already
             # understands. We intentionally do not replace the operation
-            # payload, fetch the current release candidate, or authorize a
-            # reboot. The legacy agent replays the exact a122 package request;
-            # its staged preinst converts that request into a recovery wake and
-            # refuses a competing package transaction.
+            # payload, fetch the current release candidate, or install a
+            # package. The compatibility authority may issue only the fixed,
+            # delayed reboot required to activate the staged recovery at boot.
             job.state = "queued"
             job.status_reason = None
             job.updated_at = now
@@ -285,7 +283,8 @@ class Spark3542CompatibilityRecoveryService:
                 "the existing Spark3542 operation is not the exact a122 package"
             )
         return {
-            "action": "retry-exact-package-install",
+            "action": "schedule-reboot",
+            "delay_seconds": 60,
             "compatibility_recovery_id": RECOVERY_ID,
             "node_id": NODE_ID,
             "source_identity": {
@@ -352,7 +351,8 @@ class Spark3542CompatibilityRecoveryService:
         recovery: AgentUpgradeCompatibilityRecovery,
     ) -> dict[str, object]:
         return {
-            "action": "retry-exact-package-install",
+            "action": "schedule-reboot",
+            "delay_seconds": 60,
             "compatibility_recovery_id": recovery.id,
             "node_id": recovery.node_id,
             "source_identity": {

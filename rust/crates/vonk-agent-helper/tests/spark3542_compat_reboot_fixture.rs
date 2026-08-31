@@ -1,10 +1,9 @@
-//! Native-only proof for the one pinned Spark3542 recovery grant.
+//! Native-only proof for the one pinned Spark3542 recovery reboot grant.
 //!
 //! This is intentionally not a utility: it has no arguments, accepts no key or
-//! operation input beyond the lifecycle harness's exact generated package
-//! identity, and signs only InstallVonkDeb for that package with a public test
+//! operation input, and signs only ScheduleReboot(60s) with a public test
 //! seed. The systemd lifecycle harness runs the ignored test against its
-//! disposable dev335 helper/socket fixture and already-staged recovery intent.
+//! disposable dev335 helper/socket fixture.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -20,6 +19,7 @@ use vonk_agent_protocol::canonical_json;
 const SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 const NODE_ID: &str = "spk_2818d189042b4c77aefa7796f4befd23";
 const REQUEST_ID: &str = "35420000-0000-4000-8000-000000000001";
+const COLLISION_REQUEST_ID: &str = "35420000-0000-4000-8000-000000000002";
 const TEST_SEED: [u8; 32] = [b'm'; 32];
 const MAX_FRAME: usize = 256 * 1024;
 
@@ -46,11 +46,7 @@ fn send(body: &[u8], lose_response: bool) -> Option<Vec<u8>> {
 }
 
 fn pinned_grant(request_id: &str) -> Vec<u8> {
-    assert_eq!(request_id, REQUEST_ID);
-    let package_sha256 =
-        std::env::var("VONK_SPARK3542_COMPAT_PACKAGE_SHA256").expect("package digest");
-    let package_signature =
-        std::env::var("VONK_SPARK3542_COMPAT_PACKAGE_SIGNATURE").expect("package signature");
+    assert!(matches!(request_id, REQUEST_ID | COLLISION_REQUEST_ID));
     let key_pair = Ed25519KeyPair::from_seed_unchecked(&TEST_SEED).unwrap();
     assert_eq!(
         hex::encode(key_pair.public_key().as_ref()),
@@ -67,10 +63,7 @@ fn pinned_grant(request_id: &str) -> Vec<u8> {
         node_id: NODE_ID.to_owned(),
         issued_at: now,
         expires_at: now + 30,
-        operation: HostOperation::InstallVonkDeb {
-            package_sha256,
-            package_signature,
-        },
+        operation: HostOperation::ScheduleReboot { delay_seconds: 60 },
     };
     let signature = key_pair.sign(&canonical_signing_bytes(&claims).unwrap());
     canonical_json(&SignedGrant {
@@ -87,22 +80,40 @@ fn pinned_grant(request_id: &str) -> Vec<u8> {
 
 #[test]
 #[ignore = "requires the disposable root/systemd dev335 recovery fixture"]
-fn sends_only_one_pinned_exact_package_retry_and_replay_is_rejected() {
+fn transient_reboot_unit_collision_fails_closed_for_the_second_pinned_request() {
+    assert_eq!(
+        std::env::var("VONK_SPARK3542_COMPAT_FIXTURE").as_deref(),
+        Ok("1")
+    );
+    let response = send(&pinned_grant(COLLISION_REQUEST_ID), false).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(value["status"], "rejected");
+}
+
+#[test]
+#[ignore = "requires the disposable root/systemd dev335 recovery fixture"]
+fn sends_only_one_pinned_reboot_and_replay_is_rejected() {
     assert_eq!(
         std::env::var("VONK_SPARK3542_COMPAT_FIXTURE").as_deref(),
         Ok("1")
     );
     let body = pinned_grant(REQUEST_ID);
 
-    // Model a lost HTTP/helper response: the signed request is fully written,
-    // then the dev335 agent disappears without learning the outcome.
-    assert!(send(&body, true).is_none());
+    let response = send(&body, false).expect("dev335 helper response");
+    let value: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["request_id"], REQUEST_ID);
+    assert_eq!(value["status"], "reboot-scheduled");
+    assert_eq!(
+        value["evidence_sha256"],
+        "39fa9ec190eee7b6f4dff1100d6343e10918d044c75eac8f9e9a2596173f80c9"
+    );
     std::thread::sleep(Duration::from_millis(200));
 
     // If the helper is still accepting before its delayed self-restart, the
-    // same persisted grant must hit dev335's request ledger, not start a second
-    // package command. A connection loss is also acceptable because recovery
-    // deliberately stops this service after the first preinst wakes it.
+    // same persisted grant must hit dev335's request ledger, not schedule a
+    // second root action. A connection loss is also acceptable because the
+    // first authorization deliberately schedules a reboot.
     if let Ok(mut stream) = UnixStream::connect(SOCKET) {
         stream
             .set_read_timeout(Some(Duration::from_secs(1)))

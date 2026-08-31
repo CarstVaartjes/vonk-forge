@@ -4086,7 +4086,7 @@ export interface components {
              * Confirmation
              * @constant
              */
-            confirmation: "retry-exact-staged-a122-package-on-spark3542";
+            confirmation: "reboot-spark3542-to-resume-staged-a122-recovery";
             /** Plan Digest */
             plan_digest: string;
         };
@@ -4096,14 +4096,19 @@ export interface components {
              * Action
              * @constant
              */
-            action: "retry-exact-package-install";
+            action: "schedule-reboot";
             /** Authority Revision */
             authority_revision: string;
             /**
              * Compatibility Recovery Id
              * @constant
              */
-            compatibility_recovery_id: "spark3542-a122-exact-package-retry-v1";
+            compatibility_recovery_id: "spark3542-a122-scheduled-reboot-v1";
+            /**
+             * Delay Seconds
+             * @constant
+             */
+            delay_seconds: 60;
             /**
              * Expected Retry Attempt
              * @constant
@@ -4130,7 +4135,7 @@ export interface components {
              * Required Confirmation
              * @constant
              */
-            required_confirmation: "retry-exact-staged-a122-package-on-spark3542";
+            required_confirmation: "reboot-spark3542-to-resume-staged-a122-recovery";
             /**
              * Source Attempt
              * @constant
@@ -4156,14 +4161,19 @@ export interface components {
              * Action
              * @constant
              */
-            action: "retry-exact-package-install";
+            action: "schedule-reboot";
             /** Authority Revision */
             authority_revision: string;
             /**
              * Compatibility Recovery Id
              * @constant
              */
-            compatibility_recovery_id: "spark3542-a122-exact-package-retry-v1";
+            compatibility_recovery_id: "spark3542-a122-scheduled-reboot-v1";
+            /**
+             * Delay Seconds
+             * @constant
+             */
+            delay_seconds: 60;
             /**
              * Expected Retry Attempt
              * @constant

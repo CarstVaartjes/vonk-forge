@@ -358,7 +358,7 @@ class HostRuntimeAuthorityService:
         expires_in_seconds: int,
         now: datetime,
     ) -> SignedHostHelperGrant:
-        """Issue or replay the sole exact a122 package grant; never fall through."""
+        """Issue or replay the sole scheduled-reboot grant; never fall through."""
 
         node = session.get(AgentNode, node_id)
         source = session.scalar(
@@ -446,11 +446,7 @@ class HostRuntimeAuthorityService:
                 replay.claims.request_id != recovery.grant_request_id
                 or replay.claims.node_id != COMPAT_NODE_ID
                 or replay.claims.operation.to_mapping()
-                != {
-                    "type": "install-vonk-deb",
-                    "package_sha256": COMPAT_TARGET_PACKAGE_SHA256,
-                    "package_signature": package_signature,
-                }
+                != {"type": "schedule-reboot", "delay_seconds": 60}
             ):
                 raise HostHelperAuthorityError(
                     "Spark3542 compatibility recovery grant is invalid"
@@ -463,11 +459,8 @@ class HostRuntimeAuthorityService:
         grant = self._issuer.issue_grant(
             node_id=node_id,
             operation=HostHelperOperation(
-                HostOperationKind.INSTALL_VONK_DEB,
-                {
-                    "package_sha256": package_sha256,
-                    "package_signature": package_signature,
-                },
+                HostOperationKind.SCHEDULE_REBOOT,
+                {"delay_seconds": 60},
             ),
             expires_in_seconds=expires_in_seconds,
         )

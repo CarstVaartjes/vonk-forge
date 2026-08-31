@@ -348,7 +348,7 @@ class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
 class Spark3542CompatibilityRecoveryApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    confirmation: Literal["retry-exact-staged-a122-package-on-spark3542"]
+    confirmation: Literal["reboot-spark3542-to-resume-staged-a122-recovery"]
 
 
 class Spark3542CompatibilityRecoverySourceIdentity(BaseModel):
@@ -368,8 +368,9 @@ class Spark3542CompatibilityRecoveryTarget(BaseModel):
 
 class Spark3542CompatibilityRecoveryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["retry-exact-package-install"]
-    compatibility_recovery_id: Literal["spark3542-a122-exact-package-retry-v1"]
+    action: Literal["schedule-reboot"]
+    delay_seconds: Literal[60]
+    compatibility_recovery_id: Literal["spark3542-a122-scheduled-reboot-v1"]
     node_id: Literal["spk_2818d189042b4c77aefa7796f4befd23"]
     source_identity: Spark3542CompatibilityRecoverySourceIdentity
     job_id: Literal["6b945136-1be6-47e4-8ba0-5c5f815304ad"]
@@ -396,7 +397,7 @@ class Spark3542CompatibilityRecoveryResponse(BaseModel):
 class Spark3542CompatibilityRecoveryPreviewResponse(
     Spark3542CompatibilityRecoveryResponse
 ):
-    required_confirmation: Literal["retry-exact-staged-a122-package-on-spark3542"]
+    required_confirmation: Literal["reboot-spark3542-to-resume-staged-a122-recovery"]
 
 
 def _agent_upgrade_request_material(

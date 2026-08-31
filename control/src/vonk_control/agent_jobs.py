@@ -753,8 +753,11 @@ class AgentJobService:
         This path cannot issue, refresh, or re-enable a grant. It only consumes
         authenticated target contact. Before dispatch it preserves the failed
         source attempt as audit; after dispatch it also requires the exact
-        signed exact-package grant and retry fence already persisted.
+        signed scheduled-reboot grant and retry fence already persisted.
         """
+
+        from vonk_agent_protocol import AgentProtocolError
+        from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 
         from .compat_recovery import (
             JOB_ID,
@@ -783,6 +786,27 @@ class AgentJobService:
         # 4.  Grant presence, not the terminal timeout state name, is the
         # durable distinction between pre- and post-dispatch reconciliation.
         before_dispatch = recovery.issued_at is None
+        persisted_grant_is_exact = before_dispatch
+        if not before_dispatch and recovery.signed_grant is not None:
+            try:
+                persisted_grant = SignedHostHelperGrant.parse(recovery.signed_grant)
+            except (AgentProtocolError, TypeError, ValueError):
+                persisted_grant_is_exact = False
+            else:
+                grant_expires_at = recovery.grant_expires_at
+                grant_issued_at = recovery.issued_at
+                persisted_grant_is_exact = bool(
+                    persisted_grant.claims.node_id == NODE_ID
+                    and persisted_grant.claims.request_id == recovery.grant_request_id
+                    and persisted_grant.claims.operation.to_mapping()
+                    == {"type": "schedule-reboot", "delay_seconds": 60}
+                    and grant_expires_at is not None
+                    and persisted_grant.claims.expires_at
+                    == int(_aware(grant_expires_at).timestamp())
+                    and grant_issued_at is not None
+                    and persisted_grant.claims.issued_at
+                    == int(_aware(grant_issued_at).timestamp())
+                )
         parent = session.scalar(
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
@@ -885,6 +909,7 @@ class AgentJobService:
                 )
                 or (
                     not before_dispatch
+                    and persisted_grant_is_exact
                     and recovery.retry_fence is not None
                     and recovery.retry_certificate_serial is not None
                     and recovery.signed_grant is not None

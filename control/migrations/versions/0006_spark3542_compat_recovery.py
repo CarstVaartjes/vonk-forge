@@ -1,4 +1,4 @@
-"""Persist the one-shot Spark3542 staged-recovery package retry."""
+"""Persist the one-shot Spark3542 staged-recovery reboot grant."""
 
 from __future__ import annotations
 

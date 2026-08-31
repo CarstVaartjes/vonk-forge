@@ -27,15 +27,16 @@ T = TypeVar("T", bound="Spark3542CompatibilityRecoveryPreviewResponse")
 class Spark3542CompatibilityRecoveryPreviewResponse:
     """
         Attributes:
-            action (Literal['retry-exact-package-install']):
+            action (Literal['schedule-reboot']):
             authority_revision (str):
-            compatibility_recovery_id (Literal['spark3542-a122-exact-package-retry-v1']):
+            compatibility_recovery_id (Literal['spark3542-a122-scheduled-reboot-v1']):
+            delay_seconds (Literal[60]):
             expected_retry_attempt (Literal[4]):
             job_id (Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']):
             node_id (Literal['spk_2818d189042b4c77aefa7796f4befd23']):
             operation_id (Literal['d54e0b56-e465-41bd-9627-c81f37352dfd']):
             plan_digest (str):
-            required_confirmation (Literal['retry-exact-staged-a122-package-on-spark3542']):
+            required_confirmation (Literal['reboot-spark3542-to-resume-staged-a122-recovery']):
             source_attempt (Literal[3]):
             source_certificate_serial (str):
             source_fence (str):
@@ -45,15 +46,16 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             upgrade_payload_sha256 (str):
      """
 
-    action: Literal['retry-exact-package-install']
+    action: Literal['schedule-reboot']
     authority_revision: str
-    compatibility_recovery_id: Literal['spark3542-a122-exact-package-retry-v1']
+    compatibility_recovery_id: Literal['spark3542-a122-scheduled-reboot-v1']
+    delay_seconds: Literal[60]
     expected_retry_attempt: Literal[4]
     job_id: Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']
     node_id: Literal['spk_2818d189042b4c77aefa7796f4befd23']
     operation_id: Literal['d54e0b56-e465-41bd-9627-c81f37352dfd']
     plan_digest: str
-    required_confirmation: Literal['retry-exact-staged-a122-package-on-spark3542']
+    required_confirmation: Literal['reboot-spark3542-to-resume-staged-a122-recovery']
     source_attempt: Literal[3]
     source_certificate_serial: str
     source_fence: str
@@ -74,6 +76,8 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
         authority_revision = self.authority_revision
 
         compatibility_recovery_id = self.compatibility_recovery_id
+
+        delay_seconds = self.delay_seconds
 
         expected_retry_attempt = self.expected_retry_attempt
 
@@ -108,6 +112,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             "action": action,
             "authority_revision": authority_revision,
             "compatibility_recovery_id": compatibility_recovery_id,
+            "delay_seconds": delay_seconds,
             "expected_retry_attempt": expected_retry_attempt,
             "job_id": job_id,
             "node_id": node_id,
@@ -132,15 +137,19 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
         from ..models.spark_3542_compatibility_recovery_source_identity import Spark3542CompatibilityRecoverySourceIdentity
         from ..models.spark_3542_compatibility_recovery_target import Spark3542CompatibilityRecoveryTarget
         d = dict(src_dict)
-        action = cast(Literal['retry-exact-package-install'] , d.pop("action"))
-        if action != 'retry-exact-package-install':
-            raise ValueError(f"action must match const 'retry-exact-package-install', got '{action}'")
+        action = cast(Literal['schedule-reboot'] , d.pop("action"))
+        if action != 'schedule-reboot':
+            raise ValueError(f"action must match const 'schedule-reboot', got '{action}'")
 
         authority_revision = d.pop("authority_revision")
 
-        compatibility_recovery_id = cast(Literal['spark3542-a122-exact-package-retry-v1'] , d.pop("compatibility_recovery_id"))
-        if compatibility_recovery_id != 'spark3542-a122-exact-package-retry-v1':
-            raise ValueError(f"compatibility_recovery_id must match const 'spark3542-a122-exact-package-retry-v1', got '{compatibility_recovery_id}'")
+        compatibility_recovery_id = cast(Literal['spark3542-a122-scheduled-reboot-v1'] , d.pop("compatibility_recovery_id"))
+        if compatibility_recovery_id != 'spark3542-a122-scheduled-reboot-v1':
+            raise ValueError(f"compatibility_recovery_id must match const 'spark3542-a122-scheduled-reboot-v1', got '{compatibility_recovery_id}'")
+
+        delay_seconds = cast(Literal[60] , d.pop("delay_seconds"))
+        if delay_seconds != 60:
+            raise ValueError(f"delay_seconds must match const 60, got '{delay_seconds}'")
 
         expected_retry_attempt = cast(Literal[4] , d.pop("expected_retry_attempt"))
         if expected_retry_attempt != 4:
@@ -160,9 +169,9 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
 
         plan_digest = d.pop("plan_digest")
 
-        required_confirmation = cast(Literal['retry-exact-staged-a122-package-on-spark3542'] , d.pop("required_confirmation"))
-        if required_confirmation != 'retry-exact-staged-a122-package-on-spark3542':
-            raise ValueError(f"required_confirmation must match const 'retry-exact-staged-a122-package-on-spark3542', got '{required_confirmation}'")
+        required_confirmation = cast(Literal['reboot-spark3542-to-resume-staged-a122-recovery'] , d.pop("required_confirmation"))
+        if required_confirmation != 'reboot-spark3542-to-resume-staged-a122-recovery':
+            raise ValueError(f"required_confirmation must match const 'reboot-spark3542-to-resume-staged-a122-recovery', got '{required_confirmation}'")
 
         source_attempt = cast(Literal[3] , d.pop("source_attempt"))
         if source_attempt != 3:
@@ -193,6 +202,7 @@ class Spark3542CompatibilityRecoveryPreviewResponse:
             action=action,
             authority_revision=authority_revision,
             compatibility_recovery_id=compatibility_recovery_id,
+            delay_seconds=delay_seconds,
             expected_retry_attempt=expected_retry_attempt,
             job_id=job_id,
             node_id=node_id,
