@@ -108,7 +108,7 @@ def test_packaged_generic_fixtures_are_digest_and_format_valid() -> None:
     )
     assert len(registry.recipes) == 42
     assert len(registry.special) == 0
-    assert len(registry.service_recipes) == 31
+    assert len(registry.service_recipes) == 32
     assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 56
     qwen_cases = registry.recipes[
         "vonk-forge/qwen-image-edit-2511-comfyui-single"
@@ -383,7 +383,7 @@ def test_packaged_recipe_bindings_match_the_campaign_matrix_exactly() -> None:
         set(registry.recipes) | set(registry.special) | set(registry.service_recipes)
     )
 
-    assert len(catalog_keys) == 77
+    assert len(catalog_keys) == 78
     assert fixture_keys == catalog_keys - unsupported_topologies
 
 
@@ -417,6 +417,26 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
     )
     assert glm_exl3.higher_tiers["stress"] == (
         "8K, 16K, 100K, 256K, and 300K cold-prefill ladder plus bounded concurrency canaries",
+    )
+
+
+def test_deepseek_target_only_canary_binding_is_exact() -> None:
+    registry = FixtureRegistry.packaged()
+    canary = registry.service_recipes[
+        "vonk-forge/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single"
+    ]
+
+    assert (
+        canary.content_sha256,
+        canary.alias,
+        tuple(case.case_id for case in canary.cases),
+    ) == (
+        "a6ec867073cea61fd2e5daff92695c2a79fbb1371f9047ad54833e1398d98dc9",
+        "deepseek-v4-flash-0731-spark",
+        ("M0", "A391"),
+    )
+    assert canary.higher_tiers["stress"] == (
+        "Physical memory headroom, 252K cold-prefill, and bounded concurrency canaries",
     )
 
     expected_artifacts = {

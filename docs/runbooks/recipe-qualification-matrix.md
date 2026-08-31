@@ -24,16 +24,16 @@ relay. SSH is not part of qualification or recovery.
 
 ## Inventory snapshot
 
-The settled recipe-library checkout contains **77** `recipes/*.json` documents
-and **242** catalog entities. This matrix is bound to recipe-library commit
-`9b5cf001864b82793fc4841895f4b115134eb94e` and the generated
+The settled recipe-library checkout contains **78** `recipes/*.json` documents
+and **242** resolved catalog entities. This matrix is bound to recipe-library commit
+`eea3dec19c27f4696e860979eca6d6605b4d7963` and the generated
 `catalog-index.json` SHA-256
-`90a3a2293323459159670f84f15cb33cd56e1f017bea0850105e0bda6c5ed4e1`.
+`274a11f06e7ef766617c865ae4bba53b11e1be0b14a626739f471cecd74354b6`.
 
 The repository gates are green for this snapshot:
 
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
-- the cross-repository validator passed all 77 recipes, all 242 entities, and
+- the cross-repository validator passed all 78 recipes, all 242 entities, and
   the secret scan;
 - the focused fixture, campaign, and cross-repository validator suite passed 38
   tests; and
@@ -41,9 +41,9 @@ The repository gates are green for this snapshot:
   Linux-only package and lifecycle gates remain delegated to Linux CI.
 
 The checked-in runner registry contains 19 provenance-bound fixture records,
-42 exact artifact contracts with 56 explicit smoke cases, 31 digest-bound
+42 exact artifact contracts with 56 explicit smoke cases, 32 digest-bound
 service contracts, and zero special/unresolved fixture dispositions. Together
-those are all **73** exact
+those are all **74** exact
 one- or two-Spark recipe contracts. Exactly four catalog recipes are omitted
 from execution because their declared topologies require three, four, four,
 and eight Sparks. Repository green means installable and directly qualifiable;
@@ -106,6 +106,7 @@ explicit and are never bypassed to reach that state.
 | `deepseek-v4-flash-vision-exp-mia-dual` | 2 Sparks | New official native-vision Mia distributed profile | EC, repository-green, new candidate | Prove the pinned 32-layer ViT and aligner, OpenAI image input, TP2 formation, 1M context, eight-image bound, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `deepseek-v4-flash-0731-mia-sparkinfer-single` | 1 Spark | Mia checkpoint through SparkInfer/EXL3 | EC, repository-green | High 116 GB steady envelope; verify admission headroom and speculative decode | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-sparkinfer-single` | 1 Spark | REAP-K216 SparkInfer alternative | EC, repository-green; capacity-blocked | High 116 GB steady envelope exceeds the checked lower-node free-memory authority by 1,053,716,480 bytes | No on current free memory | capacity-blocked |
+| `deepseek-v4-flash-0731-sparkinfer-target-only-canary-single` | 1 Spark | REAP-K216 SparkInfer target-only canary | EC, repository-green | Supported `MODE=mtp0` omits the measured 3.26 GiB K64 draft load; its exact 126 GB envelope fits the lower-node authority by 946,283,520 bytes and requires a physical memory/semantic/structured-output canary | Yes, 1 Spark | qualify |
 | `gemma-4-26b-a4b-vllm-single` | 1 Spark | Current Gemma 4 plain-chat profile | EC, focused contract fix | Remains on vLLM 0.27.1; unsupported tool-use claims/flags were removed and thinking is disabled. Prove plain chat and absence of raw channel leakage | Yes, 1 Spark | qualify |
 | `gemma-4-26b-a4b-vllm028-single` | 1 Spark | Current stable-vLLM Gemma 4 profile | EC, repository-green, new candidate | vLLM 0.28 uses its own exact alias and retains the Gemma 4 reasoning/parser and multimodal smoke contract; qualify beside the 0.27.1 compatibility control | Yes, 1 Spark | qualify |
 | `glm-5-2-aqlm-vllm-triple` | 3 Sparks | Historical GLM 5.2 TP3/AQLM reference | EC, topology-inadmissible | No three-node placement exists on the present fleet | Yes on 3 Sparks, not now | unsupported topology |
