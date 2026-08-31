@@ -401,7 +401,7 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
         "gemma-4-26b-a4b-it-vllm028",
     )
     assert (lfm.content_sha256, lfm.alias) == (
-        "26d475b2b589cf655d461729de3bc16944e6ca9e8a1e605347946258a032b2b7",
+        "b86876422bcbc1f2adc21e3f1ea58c9e2a1849ddc15930ac8d07283c943be9b4",
         "lfm2-5-vl-3b-vllm028",
     )
     assert (glm_nvfp4.content_sha256, glm_nvfp4.alias) == (
@@ -484,11 +484,11 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
     expected_artifacts = {
         "vonk-forge/flux-2-klein-4b-comfyui-single": "2169cae98b93ef16b8ea63c508b0319a32736fb309191a0e4b0e3c73743898f6",
         "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": "d7b92ff1327c7cd0b92970556bd17ea66ec3af95291c1a8890ccb7c200cd5d5e",
-        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "960b825735a830becc2e42f01fc92ff0edf4b6f2f7a812a0f6c706810f8614da",
-        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "32f866c8eb41e0de62f3c18ce9d9ba6107c9c2ca8846402ac45c4cd5e62999a4",
-        "vonk-forge/ltx-2-19b-distilled-diffusers-single": "2402dd923e0544ccfba4f0e8d147233ecaa00ea38d192c6309029af15dfdcf75",
-        "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "3838c0f398c42785137619fa4d3b8e18cef6f66bc8811e554647a1e150e42c8f",
-        "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "1850c1240b7028522631d23cd1438bc930db199fcdbddca3606263081ace6b42",
+        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "0addc2134149c337544fcc6c67d375e24b9a202f4ee88971c24826b3ae893f12",
+        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "baff135e07ea79ae4eb19729ee543edd77805a26c9b3922839ab58a63188b2e1",
+        "vonk-forge/ltx-2-19b-distilled-diffusers-single": "476a81e835313af326cc29a4f965a3c8d239a48525e1c321a22c990b464b1ae0",
+        "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "110bc132308331799923cf3f00f44e49c8cba4ce910031c4cb602b62ffa81984",
+        "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "c2279d47dec15e776ba9498d896ddb4476d39b17c681576b61c36cf69a617316",
         "vonk-forge/minimax-h3-fl2va-diffusers-single": "3d0cc380ae32b9c19e9b0cf2da5a8dd5522dd63690d166c65f41604ca106f1e6",
         "vonk-forge/qwen-image-2512-comfyui-single": "681b33b3c55a91597692ace91c35b099b9278d4eebef597456f5709e0e228190",
         "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "b7ffa44be4ae99feb10716ee5b46ba68a48632c47072579311f0bcc0b7ee2eab",

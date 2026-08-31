@@ -1724,7 +1724,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": {
-      "content_sha256": "960b825735a830becc2e42f01fc92ff0edf4b6f2f7a812a0f6c706810f8614da",
+      "content_sha256": "0addc2134149c337544fcc6c67d375e24b9a202f4ee88971c24826b3ae893f12",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1791,7 +1791,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": {
-      "content_sha256": "32f866c8eb41e0de62f3c18ce9d9ba6107c9c2ca8846402ac45c4cd5e62999a4",
+      "content_sha256": "baff135e07ea79ae4eb19729ee543edd77805a26c9b3922839ab58a63188b2e1",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1858,7 +1858,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-distilled-diffusers-single": {
-      "content_sha256": "2402dd923e0544ccfba4f0e8d147233ecaa00ea38d192c6309029af15dfdcf75",
+      "content_sha256": "476a81e835313af326cc29a4f965a3c8d239a48525e1c321a22c990b464b1ae0",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1925,7 +1925,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": {
-      "content_sha256": "3838c0f398c42785137619fa4d3b8e18cef6f66bc8811e554647a1e150e42c8f",
+      "content_sha256": "110bc132308331799923cf3f00f44e49c8cba4ce910031c4cb602b62ffa81984",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1992,7 +1992,7 @@
       ]
     },
     "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": {
-      "content_sha256": "1850c1240b7028522631d23cd1438bc930db199fcdbddca3606263081ace6b42",
+      "content_sha256": "c2279d47dec15e776ba9498d896ddb4476d39b17c681576b61c36cf69a617316",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -3745,7 +3745,7 @@
       }
     },
     "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual": {
-      "content_sha256": "d0121b2d092af5ffeada0555f47ce2acc6ca541c3dcc3bc0a79e818d623f6d09",
+      "content_sha256": "44efc986cd6740f9da8fb57d3471c60966adeedac9094afddda7efa029ffcd51",
       "alias": "deepseek-v4-flash-vision-exp",
       "smoke_cases": [
         "M0",
@@ -4097,7 +4097,7 @@
       }
     },
     "vonk-forge/lfm2-5-vl-3b-vllm-single": {
-      "content_sha256": "9de420087749ac379cc9ff84adad8d799b41d34055dd62adae075c2ba8c89c54",
+      "content_sha256": "65a63bb642cb822d7d3a815bdbb8f32df7f795549f6abc87bc3c1b2d87355619",
       "alias": "lfm2-5-vl-3b",
       "smoke_cases": [
         "M0",
@@ -4164,7 +4164,7 @@
       }
     },
     "vonk-forge/lfm2-5-vl-3b-vllm028-single": {
-      "content_sha256": "26d475b2b589cf655d461729de3bc16944e6ca9e8a1e605347946258a032b2b7",
+      "content_sha256": "b86876422bcbc1f2adc21e3f1ea58c9e2a1849ddc15930ac8d07283c943be9b4",
       "alias": "lfm2-5-vl-3b-vllm028",
       "smoke_cases": [
         "M0",
