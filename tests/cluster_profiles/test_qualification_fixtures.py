@@ -422,8 +422,8 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
     expected_artifacts = {
         "vonk-forge/flux-2-klein-4b-comfyui-single": "eea5ea1b7d83e13fc609d05fd6fbbcdc90e75ba48268a9d80841a356282bc0cd",
         "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": "dc2f424a7b33cbd80e4ef21cc4d44b4be60c98c8cf9e6825d4bd401431ebbe6b",
-        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "aa04af6689b07c224aca55cbb3cd163e5126a553e636cc230c631f428bb33f23",
-        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "b458ed9412c5c8036ba79f2210dead04f0843dae56fcf1e6bd1bd4baef6576a5",
+        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "a8f88e67bdb9846f378ccca6afe8f6e3dccf724360d61ce4ed68a85f9a07db9b",
+        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "06b3a57766d29b92544870a51879b9fc7f22a09784b0402d7f31a9182ce99c03",
         "vonk-forge/ltx-2-19b-distilled-diffusers-single": "8e923fc076b95429ba212faa8023261b467c3becfc27d626427c793cd5eb081e",
         "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "4a897b5f628f176f4c22069dbdaae694fc953186640391bdadf87c494ae438a4",
         "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "08e3c9c5b9f7336ada4200e29f1ab107eb6e70cd87d04527af11d44ce56f4921",
