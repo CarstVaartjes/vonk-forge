@@ -16,6 +16,7 @@ from vonk_control.compat_recovery import (
     CONFIRMATION,
     DISPATCH_CERTIFICATE_SERIAL,
     FOLLOWING_NODE_ID,
+    GRANTLESS_RETRY_CERTIFICATE_SERIAL,
     JOB_ID,
     NODE_ID,
     OPERATION_ID,
@@ -52,6 +53,7 @@ NOW = datetime(2026, 8, 29, 15, 0, tzinfo=UTC)
 SOURCE_FENCE = "10000000-0000-4000-8000-000000000001"
 RETRY_FENCE = "20000000-0000-4000-8000-000000000002"
 SOURCE_CERTIFICATE = DISPATCH_CERTIFICATE_SERIAL
+GRANTLESS_RETRY_CERTIFICATE = GRANTLESS_RETRY_CERTIFICATE_SERIAL
 SOURCE_ATTEMPT_CERTIFICATE = SOURCE_ATTEMPT_CERTIFICATE_SERIAL
 PACKAGE_SIGNATURE = "a" * 128
 AUTHORITY_REVISION = "b" * 64
@@ -117,12 +119,24 @@ def seeded_services(tmp_path, *, engine=None):
         )
         session.add(
             AgentCertificate(
+                serial=GRANTLESS_RETRY_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(days=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="grantless-retry-fingerprint",
+                state="revoked",
+                generation=2,
+                revoked_at=NOW - timedelta(seconds=1),
+            )
+        )
+        session.add(
+            AgentCertificate(
                 serial=SOURCE_CERTIFICATE,
                 node_id=NODE_ID,
                 not_before=NOW - timedelta(days=1),
                 not_after=NOW + timedelta(days=1),
                 fingerprint="dispatch-fingerprint",
-                generation=2,
+                generation=3,
             )
         )
         session.flush()
@@ -211,7 +225,7 @@ def seed_grantless_operator_blocked_retry(sessions) -> None:
                 attempt=RETRY_ATTEMPT,
                 fence=RETRY_FENCE,
                 lease_deadline=NOW - timedelta(seconds=1),
-                agent_certificate_serial=SOURCE_CERTIFICATE,
+                agent_certificate_serial=GRANTLESS_RETRY_CERTIFICATE,
                 state="failed",
                 result={
                     "error_code": "agent_upgrade_failed",
@@ -269,7 +283,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
             RETRY_ATTEMPT,
         ]
         assert retry.fence == RETRY_FENCE
-        assert retry.agent_certificate_serial == SOURCE_CERTIFICATE
+        assert retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE
         assert retry.state == "running"
         assert retry.result == {
             "error_code": "agent_upgrade_failed",
@@ -339,6 +353,18 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
     assert rejection.operation_id == OPERATION_ID
     assert rejection.attempt == RETRY_ATTEMPT
     assert rejection.rejection_category == "ttl_mismatch"
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        authority.issue_agent_upgrade_grant(
+            node_id=NODE_ID,
+            job_id=JOB_ID,
+            operation_id=OPERATION_ID,
+            attempt=RETRY_ATTEMPT,
+            fence=RETRY_FENCE,
+            package_sha256=TARGET_PACKAGE_SHA256,
+            package_signature=PACKAGE_SIGNATURE,
+            certificate_serial=GRANTLESS_RETRY_CERTIFICATE,
+            expires_in_seconds=10,
+        )
     grant = authority.issue_agent_upgrade_grant(
         node_id=NODE_ID,
         job_id=JOB_ID,
@@ -355,7 +381,39 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         assert recovery is not None and recovery.state == "issued"
         assert recovery.retry_fence == RETRY_FENCE
+        assert recovery.retry_certificate_serial == SOURCE_CERTIFICATE
         assert recovery.signed_grant == grant.to_mapping()
+
+    assert (
+        operations.claim(
+            NODE_ID,
+            SOURCE_CERTIFICATE,
+            30,
+            protocol_version=3,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity={
+                "architecture": "linux-arm64",
+                "semantic_version": "0.1.0",
+                "build_digest": TARGET_BUILD_DIGEST,
+                "binary_digest": TARGET_BINARY_DIGEST,
+                "self_test_passed": True,
+            },
+        )
+        is None
+    )
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert recovery is not None and recovery.state == "completed"
+        assert operation is not None and operation.state == "succeeded"
+        assert retry is not None
+        assert retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE
 
 
 def test_grantless_rearm_apply_is_idempotent_after_lost_response(tmp_path):
@@ -1433,7 +1491,7 @@ def test_identity_only_terminal_reconciliation_rejects_every_inexact_contact(
                     not_before=NOW - timedelta(days=1),
                     not_after=NOW + timedelta(days=1),
                     fingerprint="other-active-fingerprint",
-                    generation=3,
+                    generation=4,
                 )
             )
         elif drift == "payload":

@@ -37,6 +37,10 @@ OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
 SOURCE_ATTEMPT = 3
 RETRY_ATTEMPT = SOURCE_ATTEMPT + 1
 SOURCE_ATTEMPT_CERTIFICATE_SERIAL = "45537549826457139242802212060416390279"
+# Attempt 4 was originally claimed under this now-historical certificate.  The
+# row is immutable audit evidence and must not be rewritten when an
+# administrator re-arms the exact grantless failure.
+GRANTLESS_RETRY_CERTIFICATE_SERIAL = "4088040328001011815331063771942676957"
 DISPATCH_CERTIFICATE_SERIAL = "40880403280010118153316063771942676957"
 SOURCE_SEMANTIC_VERSION = "0.1.0"
 SOURCE_BINARY_DIGEST = (
@@ -430,7 +434,8 @@ class Spark3542CompatibilityRecoveryService:
             and source.attempt == SOURCE_ATTEMPT
             and source.state in _TERMINAL_ATTEMPT_STATES
             and retry.attempt == RETRY_ATTEMPT
-            and retry.agent_certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+            and retry.agent_certificate_serial
+            == GRANTLESS_RETRY_CERTIFICATE_SERIAL
             and retry.result == _GRANTLESS_RETRY_FAILURE
             and operation.id == OPERATION_ID
             and operation.parent_job_id == JOB_ID
@@ -501,7 +506,8 @@ class Spark3542CompatibilityRecoveryService:
             "recovery_plan_digest": recovery.plan_digest,
             "replay_attempt": RETRY_ATTEMPT,
             "replay_fence": retry.fence,
-            "replay_certificate_serial": retry.agent_certificate_serial,
+            "historical_retry_certificate_serial": retry.agent_certificate_serial,
+            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
             "failure": dict(_GRANTLESS_RETRY_FAILURE),
         }
 
