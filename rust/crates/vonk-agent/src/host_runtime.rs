@@ -11,7 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use thiserror::Error;
 use vonk_agent_protocol::{
-    AgentClaim, HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256, parse_strict,
+    AgentClaim, HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding, canonical_json,
+    hex_sha256, parse_strict,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -37,11 +38,19 @@ struct HelperResponse {
     evidence_sha256: Option<String>,
     #[serde(default)]
     exit_code: Option<i32>,
+    #[serde(default)]
+    error_code: Option<String>,
 }
 
 pub struct HostRuntimeOutcome {
     pub exit_code: Option<i32>,
     pub stop_uncertain: bool,
+}
+
+pub struct RecipeRunInspectionOutcome {
+    pub grant: serde_json::Value,
+    pub observation_identity_sha256: String,
+    pub process_running: bool,
 }
 
 pub struct HostRuntimeBoundary<'a> {
@@ -59,6 +68,80 @@ impl Drop for RequestFileCleanup {
 }
 
 impl HostRuntimeBoundary<'_> {
+    pub async fn inspect_recipe_run(
+        &self,
+        binding: RecipeRunInspectionBinding,
+        arguments: Vec<String>,
+    ) -> Result<RecipeRunInspectionOutcome, HostRuntimeError> {
+        binding.validate().map_err(|_| HostRuntimeError::Protocol)?;
+        let attempt =
+            u32::try_from(binding.run_generation).map_err(|_| HostRuntimeError::Protocol)?;
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::RunInspect,
+            job_id: binding.run_id,
+            operation_id: uuid::Uuid::new_v4(),
+            attempt,
+            fence: uuid::Uuid::new_v4(),
+            arguments,
+            observation: Some(binding.clone()),
+        };
+        request.validate().map_err(|_| HostRuntimeError::Protocol)?;
+        let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
+        let digest = hex_sha256(&body);
+        let request_path = write_request(self.request_root, &digest, &body)?;
+        let _request_cleanup = RequestFileCleanup(request_path);
+        let authorization = self
+            .client
+            .recipe_run_inspection_grant(&binding, &request, &digest)
+            .await?;
+        let request_id = authorization
+            .grant
+            .get("claims")
+            .and_then(|claims| claims.get("request_id"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .filter(|value| value.get_version() == Some(uuid::Version::Random))
+            .ok_or(HostRuntimeError::Protocol)?
+            .to_string();
+        let grant_bytes =
+            canonical_json(&authorization.grant).map_err(|_| HostRuntimeError::Protocol)?;
+        let helper_socket = self.helper_socket.to_path_buf();
+        let response = tokio::task::spawn_blocking(move || {
+            call_helper(&helper_socket, &grant_bytes, Duration::from_secs(15))
+        })
+        .await
+        .map_err(|_| HostRuntimeError::Protocol)??;
+        if response.schema_version != 1 || response.request_id.as_deref() != Some(&request_id) {
+            return Err(HostRuntimeError::Protocol);
+        }
+        let process_running = match response.status.as_str() {
+            "container-runtime-request-executed"
+                if response.error_code.is_none()
+                    && response
+                        .evidence_sha256
+                        .as_deref()
+                        .is_some_and(|value| lower_hex(value, 64))
+                    && response.exit_code.is_none() =>
+            {
+                true
+            }
+            "rejected"
+                if response.error_code.as_deref() == Some("operation_failed")
+                    && response.evidence_sha256.is_none()
+                    && response.exit_code.is_none() =>
+            {
+                false
+            }
+            _ => return Err(HostRuntimeError::Protocol),
+        };
+        Ok(RecipeRunInspectionOutcome {
+            grant: authorization.grant,
+            observation_identity_sha256: authorization.observation_identity_sha256,
+            process_running,
+        })
+    }
+
     pub async fn execute(
         &self,
         claim: &AgentClaim,
@@ -93,6 +176,7 @@ impl HostRuntimeBoundary<'_> {
             attempt: claim.attempt,
             fence: claim.fence,
             arguments,
+            observation: None,
         };
         request.validate().map_err(|_| HostRuntimeError::Protocol)?;
         let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
@@ -124,6 +208,7 @@ impl HostRuntimeBoundary<'_> {
             if response.schema_version != 1
                 || response.request_id.as_deref() != Some(request_id.as_str())
                 || (!stop_uncertain && response.status != "container-runtime-request-executed")
+                || response.error_code.is_some()
                 || response
                     .evidence_sha256
                     .as_deref()

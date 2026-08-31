@@ -99,6 +99,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
             attempt: 2,
             fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
             request_sha256: "a".repeat(64),
+            observation_identity_sha256: None,
         },
     ];
 
@@ -445,6 +446,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
         attempt: request.attempt,
         fence: request.fence,
         request_sha256: digest,
+        observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
     }
 }
 
@@ -457,6 +459,7 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         attempt: 1,
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
+        observation: None,
     }
 }
 

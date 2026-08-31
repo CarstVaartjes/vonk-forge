@@ -61,7 +61,9 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRun,
     RecipeSourceBundle,
+    RunNode,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
@@ -2034,6 +2036,166 @@ def test_dev335_agent_upgrade_grant_api_forwards_exact_ten_second_ttl(
     assert rejected.status_code == 409
     assert rejected.json() == {"detail": "agent upgrade authority rejected request"}
     assert [call["expires_in_seconds"] for call in authority.calls] == [10, 30]
+
+
+def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+
+    class Grant:
+        @staticmethod
+        def to_mapping() -> dict[str, object]:
+            return {"schema_version": 1, "test": "exact-rank-inspection"}
+
+    class ExactObservationAuthority:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def issue_recipe_run_observation_grant(self, **values):
+            self.calls.append(values)
+            assert values["certificate_serial"] == "serial-a"
+            assert values["expires_in_seconds"] == 10
+            return "f" * 64, Grant()
+
+    authority = ExactObservationAuthority()
+    object.__setattr__(services, "host_runtime_authority", authority)
+    run_id = "10000000-0000-4000-8000-000000000001"
+    request = {
+        "schema_version": 1,
+        "node_id": NODE_A,
+        "run_id": run_id,
+        "installation_id": "20000000-0000-4000-8000-000000000002",
+        "recipe_revision_id": "30000000-0000-4000-8000-000000000003",
+        "recipe_content_sha256": "a" * 64,
+        "mapping_id": "40000000-0000-4000-8000-000000000004",
+        "mapping_generation": 2,
+        "run_generation": 3,
+        "image_digest": "b" * 64,
+        "artifact_set_digest": "c" * 64,
+        "model_identity": "publisher/model@revision",
+        "rank": 1,
+        "role": "worker",
+        "world_size": 2,
+        "local_address": "192.168.100.3",
+        "master_address": "192.168.100.2",
+        "master_port": 29500,
+        "port": 8888,
+        "runtime_arguments_sha256": "d" * 64,
+        "job_id": run_id,
+        "operation_id": "50000000-0000-4000-8000-000000000005",
+        "attempt": 3,
+        "fence": "60000000-0000-4000-8000-000000000006",
+        "request_sha256": "e" * 64,
+        "expires_in_seconds": 10,
+    }
+
+    accepted = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=request,
+    )
+    wrong_node = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "node_id": NODE_B},
+    )
+    unknown_field = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "command": "docker inspect"},
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {
+        "schema_version": 1,
+        "observation_identity_sha256": "f" * 64,
+        "grant": {"schema_version": 1, "test": "exact-rank-inspection"},
+    }
+    assert wrong_node.status_code == 409
+    assert unknown_field.status_code == 422
+    assert len(authority.calls) == 1
+
+    identity_fields = {
+        key: value
+        for key, value in request.items()
+        if key
+        not in {
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "request_sha256",
+            "expires_in_seconds",
+        }
+    }
+    naive_item_time = client.post(
+        "/agent/v1/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "schema_version": 2,
+            "observed_at": clock.now.isoformat(),
+            "runs": [
+                {
+                    **identity_fields,
+                    "observed_at": clock.now.replace(tzinfo=None).isoformat(),
+                    "observation_identity_sha256": "f" * 64,
+                    "process_running": True,
+                    "endpoint_ready": None,
+                    "grant": {"schema_version": 1},
+                }
+            ],
+        },
+    )
+    assert naive_item_time.status_code == 422
+    assert "timezone-aware" in naive_item_time.text
+
+    starting_run_id = "70000000-0000-4000-8000-000000000007"
+    with services.sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=starting_run_id,
+                installation_id="80000000-0000-4000-8000-000000000008",
+                mapping_id="90000000-0000-4000-8000-000000000009",
+                mapping_generation=1,
+                run_generation=1,
+                alias="starting-exact",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="starting",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=starting_run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="starting",
+                port=8888,
+                reserved_memory_bytes=1,
+                updated_at=clock.now,
+            )
+        )
+    starting_request = {
+        **request,
+        "run_id": starting_run_id,
+        "job_id": starting_run_id,
+        "run_generation": 1,
+        "attempt": 1,
+    }
+    too_early = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=starting_request,
+    )
+    assert too_early.status_code == 425
+    assert too_early.json() == {"detail": "recipe run observation is not ready"}
+    assert len(authority.calls) == 1
 
 
 def test_obsolete_enrollment_decision_routes_are_not_exposed(agent_system) -> None:

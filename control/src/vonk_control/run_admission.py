@@ -33,6 +33,7 @@ from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entitie
 from .topology import Placement, TopologyError, validate_topology
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
+_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
 
 
 class RunPlanConflict(RuntimeError):
@@ -267,6 +268,17 @@ class RunAdmissionService:
                     AdmissionReason(
                         "run.distributed_start_capability_missing",
                         "Spark agent does not support two-phase distributed start.",
+                    )
+                )
+            if (
+                two_phase_start
+                and _EXACT_RUN_INSPECTION_CAPABILITY
+                not in agent_capabilities.get(placement.node_id, ())
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        "run.distributed_observation_capability_missing",
+                        "Spark agent does not support exact distributed rank inspection.",
                     )
                 )
             role = role_by_name.get(placement.role)
@@ -522,14 +534,21 @@ class RunAdmissionService:
             and interfaces[0].get("adapter")
             in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
         )
+        topology = recipe_topology(revision.document)
+        observation_schema_version = (
+            2 if len(plan.nodes) > 1 and topology.get("mode") == "distributed" else 1
+        )
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
+            run_generation=1,
             alias=plan.alias,
             plan_digest=plan.plan_digest,
             plan={
                 "schema_version": 1,
+                "observation_schema_version": observation_schema_version,
+                "run_generation": 1,
                 "installation_id": plan.installation_id,
                 "alias": plan.alias,
                 "mapping_id": plan.mapping_id,

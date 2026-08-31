@@ -114,18 +114,20 @@ class HostHelperOperation:
                 raise AgentProtocolError("reboot delay is invalid")
             return values
         if self.kind is HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST:
-            _exact(
-                values,
-                {
-                    "action",
-                    "job_id",
-                    "operation_id",
-                    "attempt",
-                    "fence",
-                    "request_sha256",
-                },
-                "container runtime operation",
-            )
+            base_fields = {
+                "action",
+                "job_id",
+                "operation_id",
+                "attempt",
+                "fence",
+                "request_sha256",
+            }
+            fields = set(values)
+            if fields not in (
+                base_fields,
+                base_fields | {"observation_identity_sha256"},
+            ):
+                raise AgentProtocolError("container runtime operation is invalid")
             try:
                 action = ContainerRuntimeAction(values["action"])
             except (TypeError, ValueError) as error:
@@ -145,7 +147,7 @@ class HostHelperOperation:
             ):
                 raise AgentProtocolError("container runtime attempt is invalid")
             _digest(values["request_sha256"], "container runtime request")
-            return {
+            parsed = {
                 "action": action.value,
                 "job_id": job_id,
                 "operation_id": operation_id,
@@ -153,6 +155,15 @@ class HostHelperOperation:
                 "fence": fence,
                 "request_sha256": values["request_sha256"],
             }
+            observation_identity = values.get("observation_identity_sha256")
+            if observation_identity is not None:
+                if action is not ContainerRuntimeAction.RUN_INSPECT:
+                    raise AgentProtocolError(
+                        "container runtime observation identity is invalid"
+                    )
+                _digest(observation_identity, "container runtime observation identity")
+                parsed["observation_identity_sha256"] = observation_identity
+            return parsed
         raise AgentProtocolError("host helper operation is invalid")
 
 

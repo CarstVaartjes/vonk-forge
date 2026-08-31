@@ -77,6 +77,8 @@ pub enum HostOperation {
         attempt: u32,
         fence: Uuid,
         request_sha256: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_identity_sha256: Option<String>,
     },
 }
 
@@ -98,6 +100,8 @@ impl HostOperation {
                 attempt,
                 fence,
                 request_sha256,
+                action,
+                observation_identity_sha256,
                 ..
             } => {
                 job_id.get_version() == Some(Version::Random)
@@ -105,6 +109,12 @@ impl HostOperation {
                     && *attempt > 0
                     && fence.get_version() == Some(Version::Random)
                     && valid_digest(request_sha256)
+                    && match observation_identity_sha256 {
+                        None => true,
+                        Some(digest) => {
+                            *action == ContainerRuntimeAction::RunInspect && valid_digest(digest)
+                        }
+                    }
             }
         };
         if valid {

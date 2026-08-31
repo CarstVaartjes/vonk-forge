@@ -13,7 +13,10 @@ use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
-    executor::{ControlExecutor, LoopError, RecipeExecutor, run_once_with_claim_hook},
+    executor::{
+        ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
+        run_once_with_claim_hook,
+    },
     inventory::InventoryCollector,
     oci::OciRuntime,
     pair::{collect_evidence, complete_pairing_with, pair},
@@ -190,6 +193,7 @@ async fn run_control_lane(
         "recipe.install",
         "recipe.start",
         "recipe.start.two-phase.v1",
+        "recipe.run.inspect.exact.v1",
         "recipe.stop",
         "recipe.uninstall",
         "recipe.model-uninstall.v1",
@@ -250,10 +254,34 @@ async fn run_control_lane(
                 incoming: Path::new("/var/lib/vonk-forge/incoming"),
             },
         };
+        let exact_observation_result = executor
+            .recipes
+            .report_exact_recipe_run_observations()
+            .await;
+        let exact_observation_disposition =
+            exact_observation_disposition(&exact_observation_result);
+        let exact_observation_count = exact_observation_disposition.managed_run_count;
+        match exact_observation_result {
+            Ok(_) => {
+                observation_failures = 0;
+            }
+            Err(_) if exact_observation_disposition.transition_not_ready => {
+                // A rank-launch lifecycle is retained before the Controller can
+                // mark the run running.  Do not delay the collective-readiness
+                // claim on that expected, explicitly typed transition.
+            }
+            Err(error) => {
+                // Exact observation collection is fail-closed by its explicit
+                // empty v2 report.  It must not terminate the claim lane: a
+                // stop/recovery operation may already be waiting for us.
+                observation_failures = observation_failures.saturating_add(1);
+                eprintln!("vonk-agent: exact recipe observation failed: {error}");
+            }
+        }
         let observations = executor.recipes.runtime.recipe_run_observations()?;
         let wait_seconds = claim_wait_seconds(
             config.poll_max_seconds,
-            observations.len(),
+            observations.len() + exact_observation_count,
             readiness_published,
         );
         let observation_entropy =
@@ -462,6 +490,21 @@ enum ObservationFailureAction {
     Stop,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExactObservationDisposition {
+    managed_run_count: usize,
+    transition_not_ready: bool,
+}
+
+fn exact_observation_disposition(
+    result: &Result<usize, RecipeObservationError>,
+) -> ExactObservationDisposition {
+    ExactObservationDisposition {
+        managed_run_count: result.as_ref().copied().unwrap_or(0),
+        transition_not_ready: result.as_ref().is_err_and(|error| error.not_ready()),
+    }
+}
+
 fn observation_failure_action(error: &ClientError) -> ObservationFailureAction {
     if error.retryable() {
         ObservationFailureAction::BackoffThenClaim
@@ -489,11 +532,35 @@ fn claim_wait_seconds(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaneExit, ObservationFailureAction, claim_wait_seconds, observation_failure_action,
-        supervise_lanes, telemetry_retry_after,
+        LaneExit, ObservationFailureAction, claim_wait_seconds, exact_observation_disposition,
+        observation_failure_action, supervise_lanes, telemetry_retry_after,
     };
     use std::future;
     use vonk_agent::client::ClientError;
+    use vonk_agent::{executor::RecipeObservationError, host_runtime::HostRuntimeError};
+
+    #[test]
+    fn exact_observation_failures_never_stop_the_next_claim() {
+        let transition = Err(RecipeObservationError::Inspection(
+            HostRuntimeError::Controller(ClientError::ObservationNotReady),
+        ));
+        let transition = exact_observation_disposition(&transition);
+        assert_eq!(transition.managed_run_count, 0);
+        assert!(transition.transition_not_ready);
+
+        let denied = Err(RecipeObservationError::Inspection(
+            HostRuntimeError::Controller(ClientError::Protocol),
+        ));
+        let denied = exact_observation_disposition(&denied);
+        assert_eq!(denied.managed_run_count, 0);
+        assert!(!denied.transition_not_ready);
+
+        for cycle in [Ok(2), Ok(2)] {
+            let complete = exact_observation_disposition(&cycle);
+            assert_eq!(complete.managed_run_count, 2);
+            assert!(!complete.transition_not_ready);
+        }
+    }
 
     #[test]
     fn managed_runs_cap_claim_long_poll_at_ten_seconds() {

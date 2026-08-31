@@ -31,6 +31,8 @@ pub struct HostRuntimeRequest {
     pub attempt: u32,
     pub fence: Uuid,
     pub arguments: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<RecipeRunInspectionBinding>,
 }
 
 impl HostRuntimeRequest {
@@ -44,6 +46,79 @@ impl HostRuntimeRequest {
             })
         {
             return Err(ProtocolError::Identity("host runtime request"));
+        }
+        match (&self.action, &self.observation) {
+            (HostRuntimeAction::RunInspect, Some(binding)) => {
+                binding.validate()?;
+                if self.job_id != binding.run_id
+                    || u32::try_from(binding.run_generation).ok() != Some(self.attempt)
+                    || hex_sha256(&canonical_json(&self.arguments)?)
+                        != binding.runtime_arguments_sha256
+                {
+                    return Err(ProtocolError::Identity("host runtime observation binding"));
+                }
+            }
+            (HostRuntimeAction::RunInspect, None) => {}
+            (_, None) => {}
+            (_, Some(_)) => {
+                return Err(ProtocolError::Identity("host runtime observation action"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Immutable Controller/run identity carried inside an exact periodic runtime
+/// inspection request.  Because the host-helper grant signs the canonical
+/// request digest, these fields are bound to the exact RunInspect arguments and
+/// cannot be replayed for another generation or installed recipe.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunInspectionBinding {
+    pub artifact_set_digest: String,
+    pub image_digest: String,
+    pub installation_id: Uuid,
+    pub local_address: std::net::IpAddr,
+    pub master_address: std::net::IpAddr,
+    pub master_port: u16,
+    pub mapping_generation: u64,
+    pub mapping_id: Uuid,
+    pub model_identity: String,
+    pub port: u16,
+    pub rank: u32,
+    pub recipe_content_sha256: String,
+    pub recipe_revision_id: Uuid,
+    pub role: String,
+    pub run_id: Uuid,
+    pub run_generation: u64,
+    pub runtime_arguments_sha256: String,
+    pub world_size: u32,
+}
+
+impl RecipeRunInspectionBinding {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.mapping_generation == 0
+            || self.run_generation == 0
+            || self.world_size <= 1
+            || self.rank >= self.world_size
+            || self.master_port == 0
+            || self.port == 0
+            || !valid_fabric_address(self.local_address)
+            || !valid_fabric_address(self.master_address)
+            || !valid_role(&self.role)
+            || !lower_hex(&self.recipe_content_sha256, 64)
+            || !lower_hex(&self.artifact_set_digest, 64)
+            || !lower_hex(&self.image_digest, 64)
+            || !lower_hex(&self.runtime_arguments_sha256, 64)
+            || self.model_identity.is_empty()
+            || self.model_identity.len() > 1024
+            || self.model_identity.contains(['\0', '\r', '\n'])
+            || self.run_id.get_version() != Some(uuid::Version::Random)
+            || self.installation_id.get_version() != Some(uuid::Version::Random)
+            || self.mapping_id.get_version() != Some(uuid::Version::Random)
+            || self.recipe_revision_id.get_version() != Some(uuid::Version::Random)
+        {
+            return Err(ProtocolError::Identity("recipe run inspection binding"));
         }
         Ok(())
     }
@@ -539,6 +614,8 @@ pub struct RecipeStartRequest {
     pub reserved_memory_bytes: u64,
     pub role: String,
     pub run_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_generation: Option<u64>,
     pub schema_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_deadline: Option<DateTime<FixedOffset>>,
@@ -631,13 +708,21 @@ impl RecipeOperationRequest {
                     && valid_role(&value.role)
             }
             Self::Start(value) => {
-                let valid_phase = match (&value.phase, &value.start_deadline) {
-                    (None, None) => true,
-                    (Some(RecipeStartPhase::RankLaunch), Some(deadline)) => {
-                        value.world_size > 1 && deadline.offset().local_minus_utc() == 0
+                let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
+                {
+                    (None, None, None) => true,
+                    (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
+                        generation > 0
+                            && value.world_size > 1
+                            && deadline.offset().local_minus_utc() == 0
                     }
-                    (Some(RecipeStartPhase::CollectiveReadiness), Some(deadline)) => {
-                        value.world_size > 1
+                    (
+                        Some(RecipeStartPhase::CollectiveReadiness),
+                        Some(deadline),
+                        Some(generation),
+                    ) => {
+                        generation > 0
+                            && value.world_size > 1
                             && value.local_address.is_some()
                             && value.local_address == value.master_address
                             && deadline.offset().local_minus_utc() == 0
@@ -741,6 +826,7 @@ mod recipe_start_tests {
         if let Some(phase) = phase {
             let document = payload.as_object_mut().unwrap();
             document.insert("phase".to_owned(), Value::String(phase.to_owned()));
+            document.insert("run_generation".to_owned(), Value::from(1));
             document.insert(
                 "start_deadline".to_owned(),
                 Value::String("2026-09-01T12:00:00+00:00".to_owned()),
@@ -777,6 +863,7 @@ mod recipe_start_tests {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
+        assert_eq!(single.run_generation, None);
         let legacy_wire = serde_json::to_value(single).unwrap();
         assert!(legacy_wire.get("phase").is_none());
         assert!(legacy_wire.get("start_deadline").is_none());
@@ -856,6 +943,19 @@ mod recipe_start_tests {
             .unwrap()
             .remove("start_deadline");
         assert!(parsed_start(missing_deadline).is_err());
+
+        let mut missing_generation = start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        );
+        missing_generation
+            .as_object_mut()
+            .unwrap()
+            .remove("run_generation");
+        assert!(parsed_start(missing_generation).is_err());
 
         let mut legacy_with_deadline =
             start_payload(2, 1, Some("192.168.100.3"), Some("192.168.100.2"), None);
@@ -1530,5 +1630,61 @@ mod recipe_job_tests {
         };
 
         result.validate().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod recipe_run_inspection_tests {
+    use super::*;
+
+    fn binding() -> RecipeRunInspectionBinding {
+        RecipeRunInspectionBinding {
+            artifact_set_digest: "a".repeat(64),
+            image_digest: "b".repeat(64),
+            installation_id: Uuid::new_v4(),
+            local_address: "192.168.100.11".parse().unwrap(),
+            master_address: "192.168.100.10".parse().unwrap(),
+            master_port: 29500,
+            mapping_generation: 3,
+            mapping_id: Uuid::new_v4(),
+            model_identity: "example/model@0123456789abcdef".to_owned(),
+            port: 8000,
+            rank: 1,
+            recipe_content_sha256: "c".repeat(64),
+            recipe_revision_id: Uuid::new_v4(),
+            role: "worker".to_owned(),
+            run_id: Uuid::new_v4(),
+            run_generation: 2,
+            runtime_arguments_sha256: hex_sha256(
+                &canonical_json(&vec![
+                    format!("sha256:{}", "b".repeat(64)),
+                    "run".to_owned(),
+                ])
+                .unwrap(),
+            ),
+            world_size: 2,
+        }
+    }
+
+    #[test]
+    fn exact_inspection_binds_generation_and_is_run_inspect_only() {
+        let binding = binding();
+        let mut request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::RunInspect,
+            job_id: binding.run_id,
+            operation_id: Uuid::new_v4(),
+            attempt: binding.run_generation as u32,
+            fence: Uuid::new_v4(),
+            arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
+            observation: Some(binding.clone()),
+        };
+        request.validate().unwrap();
+
+        request.action = HostRuntimeAction::Start;
+        assert!(request.validate().is_err());
+        request.action = HostRuntimeAction::RunInspect;
+        request.observation.as_mut().unwrap().run_generation = 0;
+        assert!(request.validate().is_err());
     }
 }

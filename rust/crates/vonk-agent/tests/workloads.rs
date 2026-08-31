@@ -15,7 +15,7 @@ use std::{
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_agent::{
-    oci::OciRuntime,
+    oci::{OciRuntime, RecipeRunStartIdentity},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
         ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, JobSpec, LifecycleSpec,
@@ -2808,6 +2808,65 @@ fn distributed_worker_observes_collective_endpoint_owner() {
             .iter()
             .all(|value| value != "http://192.168.100.11:8101/v1/models")
     );
+}
+
+#[test]
+fn exact_distributed_worker_inspection_reconstructs_local_process_without_http() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let mut workload = spec();
+    bind_distributed_placement(&mut workload);
+    workload.security.host_network = true;
+    workload.topology = TopologySpec {
+        name: "dual".to_owned(),
+        node_count: 2,
+        rank: 1,
+        role: "worker".to_owned(),
+    };
+    write_legacy_ds4_installation(directory.path(), installation_id, &workload);
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &workload,
+            installation_id,
+            run_id,
+            &Placement {
+                endpoint_address: Some("192.168.1.212".parse().unwrap()),
+                rank: 1,
+                role: "worker".to_owned(),
+                world_size: 2,
+                local_address: Some("192.168.100.11".parse().unwrap()),
+                master_address: Some("192.168.100.10".parse().unwrap()),
+                master_port: Some(29500),
+                port: 8101,
+                reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+            },
+            &RecipeRunStartIdentity {
+                mapping_generation: 3,
+                mapping_id: "11111111-1111-4111-8111-111111111111".parse().unwrap(),
+                recipe_content_sha256: workload.identity.recipe_revision_sha256.clone(),
+                recipe_revision_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),
+                run_generation: 2,
+            },
+        )
+        .unwrap();
+
+    let plans = runtime.recipe_run_inspection_plans().unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].binding.run_generation, 2);
+    assert_eq!(plans[0].binding.rank, 1);
+    assert!(plans[0].endpoint_address.is_none());
+    assert!(plans[0].arguments.iter().any(|value| value == run_id));
+    assert!(runner.calls.borrow().is_empty());
 }
 
 #[test]

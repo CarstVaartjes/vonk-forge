@@ -27,6 +27,7 @@ from .models import (
 from .recipe_contract import recipe_topology
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
+_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
 
 
 class _RecoveryJobQueue(Protocol):
@@ -90,7 +91,7 @@ class DistributedRecoveryCoordinator:
                 )
                 if not failed:
                     continue
-                if run.route_state == "published":
+                if run.route_state != "withdrawn":
                     self._routes.withdraw_run_in_session(session, run.id)
                     run.route_state = "withdrawn"
                     run.updated_at = now
@@ -99,6 +100,8 @@ class DistributedRecoveryCoordinator:
                     if worked:
                         break
                     continue
+                run.run_generation += 1
+                run.plan = {**run.plan, "run_generation": run.run_generation}
                 try:
                     authority = _recovery_authority(session, run, now, failed[0].rank)
                 except DistributedLifecycleError as error:
@@ -308,11 +311,15 @@ def _recovery_authority(
         )
     }
     if any(
-        _DISTRIBUTED_START_CAPABILITY not in advertised.get(run_node.node_id, set())
+        not {
+            _DISTRIBUTED_START_CAPABILITY,
+            _EXACT_RUN_INSPECTION_CAPABILITY,
+        }
+        <= advertised.get(run_node.node_id, set())
         for run_node in nodes
     ):
         raise DistributedLifecycleError(
-            "distributed recovery requires two-phase agent support"
+            "distributed recovery requires two-phase exact-observation agent support"
         )
     start_payloads: dict[str, tuple[str, dict[str, object]]] = {}
     for node in nodes:
@@ -331,6 +338,7 @@ def _recovery_authority(
                 "recipe_content_sha256": revision.content_sha256,
                 "mapping_id": run.mapping_id,
                 "mapping_generation": run.mapping_generation,
+                "run_generation": run.run_generation,
                 "image_digest": installation.image_digest,
                 "plan_digest": run.plan_digest,
                 "alias": run.alias,

@@ -76,6 +76,7 @@ class RecipeOperationConflict(RuntimeError):
 
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
+_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -667,12 +668,15 @@ class RecipeOperationService:
                     )
                 }
                 if any(
-                    _DISTRIBUTED_START_CAPABILITY
-                    not in advertised.get(planned.node_id, set())
+                    not {
+                        _DISTRIBUTED_START_CAPABILITY,
+                        _EXACT_RUN_INSPECTION_CAPABILITY,
+                    }
+                    <= advertised.get(planned.node_id, set())
                     for planned in plan.nodes
                 ):
                     raise RecipeOperationConflict(
-                        "distributed start requires two-phase agent support"
+                        "distributed start requires two-phase exact-observation agent support"
                     )
             run.state = "starting"
             run.updated_at = now
@@ -711,6 +715,7 @@ class RecipeOperationService:
                             {
                                 "phase": "rank-launch",
                                 "start_deadline": start_deadline,
+                                "run_generation": run.run_generation,
                             }
                             if start_deadline is not None
                             else {}
@@ -1604,24 +1609,38 @@ class RecipeOperationService:
                 operation.payload.get("phase") if job.kind == "recipe.start" else None
             )
             if start_phase == "rank-launch":
-                node.state = "starting" if succeeded else "failed"
+                if not succeeded:
+                    node.state = "failed"
+                elif node.state != "failed":
+                    node.state = "starting"
                 if succeeded:
                     node.evidence_digest = _validate_rank_launch_evidence(
                         session, owner_id, operation, evidence
                     )
                 node.updated_at = now
             elif start_phase == "collective-readiness":
-                node.state = "running" if succeeded else "failed"
+                if not succeeded:
+                    node.state = "failed"
                 if succeeded:
                     endpoint, digest = _validate_start_evidence(
                         session, owner_id, operation, evidence
                     )
+                    recorded = (
+                        dict(job.result) if isinstance(job.result, Mapping) else {}
+                    )
+                    launches = recorded.get("launch_evidence")
+                    expected_generation = operation.payload.get("run_generation")
                     for started_node in session.scalars(
                         select(RunNode).where(RunNode.run_id == owner_id)
                     ):
-                        if (
-                            started_node.state != "starting"
-                            and started_node.id != node.id
+                        launch = (
+                            launches.get(started_node.node_id)
+                            if isinstance(launches, Mapping)
+                            else None
+                        )
+                        if not isinstance(launch, Mapping) or (
+                            expected_generation is not None
+                            and launch.get("run_generation") != expected_generation
                         ):
                             raise RecipeOperationConflict(
                                 "collective readiness preceded rank launch"
@@ -3231,6 +3250,9 @@ def _validate_rank_launch_evidence(
         "launched",
         "evidence_digest",
     }
+    exact_inspection = operation.payload.get("run_generation") is not None
+    if exact_inspection:
+        expected_fields |= {"run_generation", "runtime_arguments_sha256"}
     if (
         set(evidence) != expected_fields
         or evidence.get("phase") != "rank-launch"
@@ -3271,6 +3293,8 @@ def _validate_rank_launch_evidence(
         "master_port": operation.payload.get("master_port"),
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
+    if exact_inspection:
+        comparisons["run_generation"] = operation.payload.get("run_generation")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "rank launch evidence does not match its fenced request"
@@ -3282,6 +3306,16 @@ def _validate_rank_launch_evidence(
         or any(character not in "0123456789abcdef" for character in artifact_set_digest)
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
+    runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
+    if exact_inspection and (
+        not isinstance(runtime_arguments_sha256, str)
+        or len(runtime_arguments_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in runtime_arguments_sha256
+        )
+    ):
+        raise RecipeOperationConflict("start runtime identity evidence is invalid")
     digest = evidence.get("evidence_digest")
     identity = {
         key: value for key, value in evidence.items() if key != "evidence_digest"
@@ -3314,6 +3348,15 @@ def _validate_start_evidence(
     phase = operation.payload.get("phase")
     if phase == "collective-readiness":
         expected_fields |= {"phase", "run_id", "role"}
+    exact_inspection = operation.payload.get("run_generation") is not None
+    if exact_inspection:
+        expected_fields |= {
+            "run_generation",
+            "runtime_arguments_sha256",
+            "local_address",
+            "master_address",
+            "master_port",
+        }
     if set(evidence) != expected_fields or evidence.get("ready") is not True:
         raise RecipeOperationConflict("start evidence is invalid")
     run = session.get(RecipeRun, run_id)
@@ -3361,6 +3404,11 @@ def _validate_start_evidence(
                 "role": operation.payload.get("role"),
             }
         )
+    if exact_inspection:
+        comparisons["run_generation"] = operation.payload.get("run_generation")
+        comparisons["local_address"] = str(operation.payload.get("local_address"))
+        comparisons["master_address"] = str(operation.payload.get("master_address"))
+        comparisons["master_port"] = operation.payload.get("master_port")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "start evidence does not match its fenced request"
@@ -3372,6 +3420,16 @@ def _validate_start_evidence(
         or any(character not in "0123456789abcdef" for character in artifact_set_digest)
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
+    runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
+    if exact_inspection and (
+        not isinstance(runtime_arguments_sha256, str)
+        or len(runtime_arguments_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in runtime_arguments_sha256
+        )
+    ):
+        raise RecipeOperationConflict("start runtime identity evidence is invalid")
     digest = evidence.get("evidence_digest")
     identity = {
         key: value for key, value in evidence.items() if key != "evidence_digest"
@@ -3419,10 +3477,49 @@ def record_recipe_run_observations(
             )
         )
         for node in assigned:
+            run = session.get(RecipeRun, node.run_id)
+            if run is not None and run.plan.get("observation_schema_version") == 2:
+                continue
             if _aware(node.updated_at) > observed:
                 continue
-            node.state = "running" if by_run.get(node.run_id, False) else "failed"
+            if node.state != "failed":
+                node.state = "running" if by_run.get(node.run_id, False) else "failed"
             node.updated_at = observed
+
+
+def prepare_exact_recipe_run_observation_nodes(
+    session: Session,
+    node_id: str,
+    observed_at: datetime,
+    included_run_ids: set[str],
+) -> tuple[RunNode, ...]:
+    """Partition one exact-v2 partial or explicit-empty failure snapshot."""
+
+    assigned = tuple(
+        node
+        for node in session.scalars(
+            select(RunNode)
+            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+            .where(
+                RunNode.node_id == node_id,
+                RecipeRun.state == "running",
+            )
+            .order_by(RunNode.run_id)
+            .with_for_update(of=RunNode)
+        )
+        if (
+            (run := session.get(RecipeRun, node.run_id)) is not None
+            and run.plan.get("observation_schema_version") == 2
+        )
+    )
+    if included_run_ids - {node.run_id for node in assigned}:
+        raise ValueError("recipe run observation is not assigned")
+    if not included_run_ids:
+        for node in assigned:
+            if _aware(node.updated_at) < observed_at:
+                node.state = "failed"
+                node.updated_at = observed_at
+    return assigned
 
 
 __all__ = [
@@ -3432,5 +3529,6 @@ __all__ = [
     "RecipeRunObservation",
     "RecipeRunRankStatus",
     "RecipeRunStatus",
+    "prepare_exact_recipe_run_observation_nodes",
     "record_recipe_run_observations",
 ]

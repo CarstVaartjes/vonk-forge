@@ -482,6 +482,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 attempt,
                 fence,
                 request_sha256,
+                observation_identity_sha256: _,
             } => {
                 let outcome = self.execute_runtime_request(
                     action,

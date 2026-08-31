@@ -2195,6 +2195,10 @@ class RecipeRun(Base):
             name="ck_recipe_runs_route_generation",
         ),
         CheckConstraint(
+            "run_generation>=1",
+            name="ck_recipe_runs_run_generation",
+        ),
+        CheckConstraint(
             "route_digest IS NULL OR length(route_digest)=64",
             name="ck_recipe_runs_route_digest",
         ),
@@ -2213,6 +2217,9 @@ class RecipeRun(Base):
         index=True,
     )
     mapping_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=1, server_default="1"
+    )
     alias: Mapped[str] = mapped_column(String(128), nullable=False)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -2265,6 +2272,32 @@ class RunNode(Base):
     evidence_digest: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+
+class RecipeRunObservationGrant(Base):
+    """Current exact-inspection grant nonce for one retained local rank."""
+
+    __tablename__ = "recipe_run_observation_grants"
+    __table_args__ = (
+        CheckConstraint(
+            _lower_hex("identity_sha256", 64),
+            name="ck_recipe_run_observation_grants_identity",
+        ),
+        CheckConstraint(
+            "expires_at >= issued_at",
+            name="ck_recipe_run_observation_grants_expiry",
+        ),
+    )
+    run_node_id: Mapped[str] = mapped_column(
+        ForeignKey("run_nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+    request_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    issued_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    consumed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
 
 

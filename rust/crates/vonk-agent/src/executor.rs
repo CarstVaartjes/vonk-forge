@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
+use futures_util::{StreamExt, stream};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -13,11 +14,11 @@ use std::{
 use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError},
+    client::{AgentHttpClient, ClientError, ExactRecipeRunObservation},
     health::{HealthEvidence, wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
-    oci::OciRuntime,
+    oci::{OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
@@ -138,6 +139,27 @@ pub struct RecipeExecutor<'a, R> {
     pub runtime_root: &'a Path,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RecipeObservationError {
+    #[error("managed recipe run identity is invalid")]
+    Runtime(#[from] crate::oci::OciError),
+    #[error("exact recipe run inspection was not authorized")]
+    Inspection(#[from] crate::host_runtime::HostRuntimeError),
+    #[error("exact recipe run observation could not be reported")]
+    Report(#[from] ClientError),
+}
+
+impl RecipeObservationError {
+    pub fn not_ready(&self) -> bool {
+        matches!(
+            self,
+            Self::Inspection(crate::host_runtime::HostRuntimeError::Controller(
+                ClientError::ObservationNotReady
+            ))
+        )
+    }
+}
+
 pub struct ControlExecutor<'a, R> {
     pub recipes: RecipeExecutor<'a, R>,
     pub upgrades: AgentUpgradeExecutor<'a>,
@@ -170,6 +192,81 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
+    pub async fn report_exact_recipe_run_observations(
+        &self,
+    ) -> Result<usize, RecipeObservationError>
+    where
+        R: ProcessRunner,
+    {
+        let plans = self.runtime.recipe_run_inspection_plans()?;
+        if plans.is_empty() {
+            self.client
+                .report_exact_recipe_run_observations(&[])
+                .await?;
+            return Ok(0);
+        }
+        let observation_count = plans.len();
+        let results = stream::iter(plans)
+            .map(|plan| async move {
+                let request_root = self.runtime_root.join("runtime-requests");
+                let boundary = HostRuntimeBoundary {
+                    client: self.client,
+                    request_root: &request_root,
+                    helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+                };
+                let endpoint = plan.endpoint_address;
+                let outcome = boundary
+                    .inspect_recipe_run(plan.binding.clone(), plan.arguments)
+                    .await?;
+                // This timestamp is part of the signed-grant freshness proof.
+                // Capture it immediately after the local privileged inspection;
+                // an owner-only HTTP probe follows and remains independently
+                // bounded to five seconds.
+                let observed_at = Utc::now();
+                let endpoint_ready = endpoint.map(|address| {
+                    outcome.process_running
+                        && self.runtime.readiness_request(
+                            address,
+                            plan.endpoint_port,
+                            &plan.health_path,
+                        )
+                });
+                let observation = ExactRecipeRunObservation {
+                    schema_version: 1,
+                    node_id: self.client.node_id().to_owned(),
+                    observed_at,
+                    binding: plan.binding,
+                    endpoint_ready,
+                    grant: outcome.grant,
+                    observation_identity_sha256: outcome.observation_identity_sha256,
+                    process_running: outcome.process_running,
+                };
+                self.client
+                    .report_exact_recipe_run_observations(std::slice::from_ref(&observation))
+                    .await?;
+                Ok::<(), RecipeObservationError>(())
+            })
+            .buffer_unordered(8)
+            .collect::<Vec<_>>()
+            .await;
+        let errors = results
+            .into_iter()
+            .filter_map(Result::err)
+            .collect::<Vec<_>>();
+        if errors.iter().any(|error| !error.not_ready()) {
+            // An incomplete exact snapshot is never allowed to preserve a
+            // distributed route.  The explicit empty v2 report marks every
+            // assigned exact-observation rank failed, but reporting failure is
+            // still not allowed to terminate the claim lane.
+            let _ = self.client.report_exact_recipe_run_observations(&[]).await;
+            return Err(errors.into_iter().find(|error| !error.not_ready()).unwrap());
+        }
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
+        }
+        Ok(observation_count)
+    }
+
     async fn execute_host_runtime_outcome(
         &self,
         claim: &AgentClaim,
@@ -874,6 +971,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     reserved_memory_bytes: request.reserved_memory_bytes,
                 };
                 let run_id = request.run_id.to_string();
+                let inspection_identity =
+                    request
+                        .run_generation
+                        .map(|run_generation| RecipeRunStartIdentity {
+                            mapping_generation: request.mapping_generation,
+                            mapping_id: request.mapping_id,
+                            recipe_content_sha256: request.recipe_content_sha256.clone(),
+                            recipe_revision_id: request.recipe_revision_id,
+                            run_generation,
+                        });
                 let collective_readiness =
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
                 let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
@@ -883,11 +990,25 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("distributed start deadline elapsed before execution");
                 }
                 let plan = if collective_readiness {
-                    match self.runtime.prepare_retained_start(
-                        &spec,
-                        &installation_id,
-                        &run_id,
-                        &placement,
+                    match inspection_identity.as_ref().map_or_else(
+                        || {
+                            self.runtime.prepare_retained_start(
+                                &spec,
+                                &installation_id,
+                                &run_id,
+                                &placement,
+                            )
+                        },
+                        |identity| {
+                            self.runtime
+                                .prepare_retained_start_with_inspection_identity(
+                                    &spec,
+                                    &installation_id,
+                                    &run_id,
+                                    &placement,
+                                    identity,
+                                )
+                        },
                     ) {
                         Ok(plan) => plan,
                         Err(_) => {
@@ -907,10 +1028,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     {
                         return failed("local memory capacity changed after run admission");
                     }
-                    match self
-                        .runtime
-                        .prepare_start(&spec, &installation_id, &run_id, &placement)
-                    {
+                    match inspection_identity.as_ref().map_or_else(
+                        || {
+                            self.runtime
+                                .prepare_start(&spec, &installation_id, &run_id, &placement)
+                        },
+                        |identity| {
+                            self.runtime.prepare_start_with_inspection_identity(
+                                &spec,
+                                &installation_id,
+                                &run_id,
+                                &placement,
+                                identity,
+                            )
+                        },
+                    ) {
                         Ok(plan) => plan,
                         Err(_) => {
                             return failed("container runtime could not prepare the workload");
@@ -1021,13 +1153,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("rank launch evidence is unavailable");
                             }
                         };
+                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
+                        Ok(arguments) => hex_sha256(&arguments),
+                        Err(_) => return failed("rank launch evidence is unavailable"),
+                    };
                     let evidence = json!({
                         "phase": "rank-launch",
                         "run_id": run_id,
+                        "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
                         "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
                         "artifact_set_digest": artifact_set_digest,
+                        "runtime_arguments_sha256": runtime_arguments_sha256,
                         "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
                         "rank": request.rank,
                         "role": request.role,
@@ -1122,17 +1260,26 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         },
                         request.port
                     );
+                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
+                        Ok(arguments) => hex_sha256(&arguments),
+                        Err(_) => return failed("collective readiness evidence is unavailable"),
+                    };
                     let evidence = json!({
                         "phase": "collective-readiness",
                         "run_id": run_id,
+                        "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
                         "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
                         "artifact_set_digest": artifact_set_digest,
+                        "runtime_arguments_sha256": runtime_arguments_sha256,
                         "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
                         "rank": request.rank,
                         "role": request.role,
                         "world_size": request.world_size,
+                        "local_address": request.local_address,
+                        "master_address": request.master_address,
+                        "master_port": request.master_port,
                         "endpoint": endpoint_url,
                         "memory_reservation_bytes": request.reserved_memory_bytes,
                         "ready": true,
