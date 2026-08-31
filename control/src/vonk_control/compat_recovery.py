@@ -64,9 +64,17 @@ TARGET_BUILD_DIGEST = (
 )
 CONFIRMATION = "reboot-spark3542-to-resume-staged-a122-recovery"
 ABANDON_CONFIRMATION = "abandon-expired-spark3542-a122-recovery"
+COMPATIBILITY_TIMEOUT_REASON = (
+    "Spark3542 compatibility recovery timed out before exact authenticated "
+    "a122 identity; no replacement grant will be issued"
+)
 _ONLINE_WINDOW = timedelta(seconds=150)
 _TERMINAL_ATTEMPT_STATES = frozenset({"expired", "failed", "waiting-for-operator"})
-_REARM_LEASE = timedelta(seconds=60)
+# The agent permits a five-minute polling backoff and may already be inside a
+# long poll when an administrator applies the digest-bound re-arm. Ten minutes
+# leaves one complete backoff plus scheduling margin without broadening the
+# one-shot authority or its ten-second host-helper grant.
+_REARM_LEASE = timedelta(minutes=10)
 _GRANTLESS_RETRY_FAILURE = {
     "error_code": "agent_upgrade_failed",
     "reason": "agent upgrade authority is unavailable",
@@ -721,8 +729,21 @@ class Spark3542CompatibilityRecoveryService:
         stored_document = self._stored_document(recovery)
         blocked_rearm = bool(
             self._grantless_rearm_candidate(recovery)
+            and (
+                (
+                    recovery.rearm_attempt_certificate_serial is None
+                    and recovery.rearm_dispatch_certificate_serial is None
+                )
+                or (
+                    recovery.rearm_attempt_certificate_serial
+                    == retry.agent_certificate_serial
+                    and recovery.rearm_dispatch_certificate_serial
+                    == node.contact_certificate_serial
+                )
+            )
             and operation.state == "waiting-for-operator"
             and job.state == "waiting-for-operator"
+            and job.status_reason == COMPATIBILITY_TIMEOUT_REASON
             and retry.state in {"failed", "waiting-for-operator"}
             and _aware(retry.lease_deadline) <= _aware(now)
         )
