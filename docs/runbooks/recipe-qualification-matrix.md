@@ -24,16 +24,16 @@ relay. SSH is not part of qualification or recovery.
 
 ## Inventory snapshot
 
-The settled recipe-library checkout contains **77** `recipes/*.json` documents
-and **242** catalog entities. This matrix is bound to recipe-library commit
-`9b5cf001864b82793fc4841895f4b115134eb94e` and the generated
+The settled recipe-library checkout contains **82** `recipes/*.json` documents
+and **243** resolved catalog entities. This matrix is bound to recipe-library commit
+`ad9a376af20b0708294149138eb911fac2754696` and the generated
 `catalog-index.json` SHA-256
-`90a3a2293323459159670f84f15cb33cd56e1f017bea0850105e0bda6c5ed4e1`.
+`88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca`.
 
 The repository gates are green for this snapshot:
 
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
-- the cross-repository validator passed all 77 recipes, all 242 entities, and
+- the cross-repository validator passed all 82 recipes, all 243 entities, and
   the secret scan;
 - the focused fixture, campaign, and cross-repository validator suite passed 38
   tests; and
@@ -41,9 +41,9 @@ The repository gates are green for this snapshot:
   Linux-only package and lifecycle gates remain delegated to Linux CI.
 
 The checked-in runner registry contains 19 provenance-bound fixture records,
-42 exact artifact contracts with 56 explicit smoke cases, 31 digest-bound
+44 exact artifact contracts with 59 explicit smoke cases, 34 digest-bound
 service contracts, and zero special/unresolved fixture dispositions. Together
-those are all **73** exact
+those are all **78** exact
 one- or two-Spark recipe contracts. Exactly four catalog recipes are omitted
 from execution because their declared topologies require three, four, four,
 and eight Sparks. Repository green means installable and directly qualifiable;
@@ -106,6 +106,7 @@ explicit and are never bypassed to reach that state.
 | `deepseek-v4-flash-vision-exp-mia-dual` | 2 Sparks | New official native-vision Mia distributed profile | EC, repository-green, new candidate | Prove the pinned 32-layer ViT and aligner, OpenAI image input, TP2 formation, 1M context, eight-image bound, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `deepseek-v4-flash-0731-mia-sparkinfer-single` | 1 Spark | Mia checkpoint through SparkInfer/EXL3 | EC, repository-green | High 116 GB steady envelope; verify admission headroom and speculative decode | Yes, 1 Spark | qualify |
 | `deepseek-v4-flash-0731-sparkinfer-single` | 1 Spark | REAP-K216 SparkInfer alternative | EC, repository-green; capacity-blocked | High 116 GB steady envelope exceeds the checked lower-node free-memory authority by 1,053,716,480 bytes | No on current free memory | capacity-blocked |
+| `deepseek-v4-flash-0731-sparkinfer-target-only-canary-single` | 1 Spark | REAP-K216 SparkInfer target-only canary | EC, repository-green | Supported `MODE=mtp0` omits the measured 3.26 GiB K64 draft load; its exact 126 GB envelope fits the lower-node authority by 946,283,520 bytes and requires a physical memory/semantic/structured-output canary | Yes, 1 Spark | qualify |
 | `gemma-4-26b-a4b-vllm-single` | 1 Spark | Current Gemma 4 plain-chat profile | EC, focused contract fix | Remains on vLLM 0.27.1; unsupported tool-use claims/flags were removed and thinking is disabled. Prove plain chat and absence of raw channel leakage | Yes, 1 Spark | qualify |
 | `gemma-4-26b-a4b-vllm028-single` | 1 Spark | Current stable-vLLM Gemma 4 profile | EC, repository-green, new candidate | vLLM 0.28 uses its own exact alias and retains the Gemma 4 reasoning/parser and multimodal smoke contract; qualify beside the 0.27.1 compatibility control | Yes, 1 Spark | qualify |
 | `glm-5-2-aqlm-vllm-triple` | 3 Sparks | Historical GLM 5.2 TP3/AQLM reference | EC, topology-inadmissible | No three-node placement exists on the present fleet | Yes on 3 Sparks, not now | unsupported topology |
@@ -117,12 +118,14 @@ explicit and are never bypassed to reach that state.
 | `inkling-975b-a41b-nvfp4-sglang-eight` | 8 Sparks | Future-only full Inkling profile | EC, topology-inadmissible | Requires eight Sparks; cannot be reduced without changing model/runtime semantics | No on present fleet | unsupported topology |
 | `inkling-small-nvfp4-sglang-dual` | 2 Sparks | Current smaller Inkling multimodal TP2 profile | EC, repository-green | Prove SGLang two-rank formation, multimodal requests, tool calls, and recovery | Yes, exactly 2 Sparks | qualify |
 | `laguna-s-2-1-nvfp4-vllm-single` | 1 Spark | Obsolete large Laguna S checkpoint/profile | EC, but unsafe current envelope; capacity-blocked | Pinned checkpoint is stale and the checked fleet memory envelope is 3,053,716,480 bytes short | No; qualify XS first | capacity-blocked |
+| `laguna-s-2-1-nvfp4-vllm-low-memory-canary-single` | 1 Spark | Bounded Laguna S 32K physical memory canary | EC, repository-green, new candidate | Explicit 3 GB FP8 KV cache, one sequence, chunked prefill, and eager execution produce a 126 GB admission hypothesis; physical startup, memory, latency, and output equivalence remain gates | Yes, 1 Spark | qualify |
 | `laguna-xs-2-1-nvfp4-vllm-single` | 1 Spark | Current safer Laguna XS baseline | EC, repository-green | Prove model parser/tool path and memory envelope | Yes, 1 Spark | qualify |
 | `lfm2-5-vl-3b-vllm-single` | 1 Spark | Current small vision-language/OCR baseline | EC, repository-green | Retains its specialized vLLM 0.27.1 runtime; prove multimodal preprocessing, OCR/layout, grounding, and parsed tool calls | Yes, 1 Spark | qualify |
 | `lfm2-5-vl-3b-vllm028-single` | 1 Spark | Current stable-vLLM LFM 2.5 VL profile | EC, repository-green, new candidate | vLLM 0.28 uses an exact distinct alias while preserving OCR, grounding, multimodal preprocessing, and parsed-tool smoke coverage | Yes, 1 Spark | qualify |
 | `ling-3-0-flash-dspark-sglang-single` | 1 Spark | Current Ling INT4 DSpark/SGLang profile | EC, focused fit correction | Pinned upstream telemetry supports 0.80 static memory, the full 262,144-token limit, and a 126 GB admission envelope | Yes, 1 Spark | qualify |
 | `muse-glimmer-30b-bf16-vllm-single` | 1 Spark | Current multimodal/agentic specialist | EC, repository-green, upstream-pending tag | Uses its official Muse-specific CUDA 13 vLLM image; prove image, reasoning, and tool behavior on GB10 | Yes, 1 Spark | qualify |
 | `nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single` | 1 Spark | Current speculative low-concurrency latency profile | EC, focused harness fix; capacity-blocked | Typed attention/chunked-prefill/media options landed; the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
+| `nemotron-3-5-lightning-dspark-lowmem-canary-single` | 1 Spark | Bounded Nemotron 3.5 DSpark 256K physical memory canary | EC, repository-green, new candidate | Explicit 4 GB FP8 KV cache, one sequence, FP16 Mamba state, chunked prefill, and eager execution produce a 126 GB admission hypothesis; prove DSpark acceptance rate, latency, memory, and output equivalence | Yes, 1 Spark | qualify |
 | `nemotron-3-5-lightning-30b-a3b-vllm-single` | 1 Spark | Current target-only Lightning baseline | EC, focused harness fix | Use as control for DSpark latency delta; verify tool and reasoning parsers | Yes, 1 Spark | qualify |
 | `nemotron-3-nano-30b-a3b-vllm-single` | 1 Spark | Older compact text baseline | EC, repository-green | vLLM 0.20 runtime is older; retain as compatibility control | Yes only after 3.5 baseline | superseded |
 | `nemotron-3-nano-omni-30b-a3b-vllm-single` | 1 Spark | Distinct older Omni/text profile | EC, repository-green | Declared interface is text-only despite Omni lineage; prove exact exposed capabilities | Yes, 1 Spark | qualify |
@@ -165,6 +168,7 @@ Both GLBs are structurally validated before upload and again by their adapters.
 | `ltx-2-19b-distilled-fp8-diffusers-single` | 1 Spark | Legacy lower-memory FP8 variant | EC, focused adapter fix | Upscaler resolution was corrected, but the generation is superseded by LTX-2.5 | No; qualify 2.5 first | superseded |
 | `ltx-2-3-22b-distilled-1-1-diffusers-single` | 1 Spark | Recent 2.3 compatibility profile | EC, focused adapter fix | Hard-coded upscaler slug fixed; authenticated filtered 2.5 recipe is the primary target | No; qualify 2.5 first | superseded |
 | `ltx-2-5-22b-distilled-bf16-diffusers-single` | 1 Spark | New primary LTX-2.5 BF16 baseline with optional FP8 layerwise-cast/offload profiles | EC, repository-green, build-unvalidated, gated; artifact fixture current; capacity-blocked | Authenticated 70.09 GB snapshot is current, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
+| `ltx-2-5-22b-distilled-fp8-cast-diffusers-single` | 1 Spark | Immutable LTX-2.5 FP8-cast sequential-offload canary | EC, repository-green, build-unvalidated, gated; artifact fixture current | FP8 E4M3FN layerwise storage, BF16 compute, and sequential offload are fixed and cannot fall back through request input; the 120 GB admission fits but needs physical memory and synchronized audiovisual acceptance | Yes, 1 Spark | qualify |
 | `minimax-h3-diffusers-single` | 1 Spark | Full MiniMax H3 synchronized-media profile | EC, focused fix; artifact fixture current; legal block | Exact MiniMax model authority denies EU use; retain the fixture for lawful jurisdictions but reject the Netherlands campaign | No in this jurisdiction | legal-blocked |
 | `minimax-h3-fl2va-diffusers-single` | 1 Spark | Slim MiniMax H3 FL2VA text/keyframe profile | EC, repository-green; artifact fixture current; legal block | Distinct FL2VA artifacts and keyframe contract are current, but exact MiniMax model authority denies EU use | No in this jurisdiction | legal-blocked |
 | `moss-vl-realtime-11b-pytorch-single` | 1 Spark | Realtime session-replay artifact-job specialist | EC, repository-green; artifact lane green | Digest-bound schema-v1 session references an authenticated frame; exact H.264 replay and ordered authority/ack/terminal JSONL semantics are enforced | Yes, 1 Spark | qualify |
@@ -192,6 +196,7 @@ Both GLBs are structurally validated before upload and again by their adapters.
 | `wan-2-2-t2v-14b-comfyui-single` | 1 Spark | Current Wan 2.2 text-to-video quality profile | EC, focused fix; artifact lane green | Exact 640x640, 81-frame, 16 fps contract and strict MP4 validation landed | Yes, 1 Spark | qualify |
 | `wan-2-2-ti2v-5b-comfyui-single` | 1 Spark | Current smaller TI2V efficiency profile | EC, focused fix; artifact lane green | Exact 1280x704, 121-frame, 24 fps H.264 contract and strict output validation landed | Yes, 1 Spark | qualify |
 | `wan-dancer-14b-pytorch-single` | 1 Spark | Current music-conditioned dance specialist | EC, focused input hardening; capacity-blocked | Canvas is now bounded to 921,600 pixels so 1280x1280 cannot exceed the declared benchmark; the 128 GB memory envelope still needs a peak-memory canary | No until a safe memory peak is proved | capacity-blocked |
+| `wan-dancer-14b-disk-offload-pytorch-single` | 1 Spark | Wan-Dancer disk-offload physical memory canary | EC, repository-green, build-unvalidated; artifact fixture current | Pinned DiffSynth disk offload, sequential global/local experts, and the 921,600-pixel ceiling produce a 126 GB admission hypothesis; prove startup, peak memory, latency, and music/video quality | Yes, 1 Spark | qualify |
 
 ## Generic acceptance procedure
 

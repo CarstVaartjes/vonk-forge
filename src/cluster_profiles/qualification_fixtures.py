@@ -1501,7 +1501,10 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             if not isinstance(equals, Mapping) or equals_size > 64 * 1024:
                 raise FixtureError(f"recipe fixture {key} JSON equals is invalid")
     elif kind == "semantic-receipt":
-        if assertion.get("profile") != "ltx-2.5":
+        if assertion.get("profile") not in {
+            "ltx-2.5",
+            "fp8-cast-sequential-offload",
+        }:
             raise FixtureError(f"recipe fixture {key} receipt profile is invalid")
     else:
         raise FixtureError(f"recipe fixture {key} assertion kind is invalid")
@@ -1993,20 +1996,28 @@ def validate_outputs(
                         input_fixture.content, "LTX 2.5 qualification request"
                     )
                     request_profiles.append(request.get("profile"))
-                if len(request_profiles) > 1 or any(
-                    profile
-                    not in {
-                        "fp8-cast-model-offload",
-                        "fp8-cast-sequential-offload",
-                    }
-                    for profile in request_profiles
-                ):
-                    raise FixtureError("LTX 2.5 qualification profile is invalid")
-                expected_profile = (
-                    str(request_profiles[0])
-                    if request_profiles
-                    else "bf16-model-offload"
-                )
+                declared_profile = str(assertion["profile"])
+                if declared_profile == "ltx-2.5":
+                    if len(request_profiles) > 1 or any(
+                        profile
+                        not in {
+                            "fp8-cast-model-offload",
+                            "fp8-cast-sequential-offload",
+                        }
+                        for profile in request_profiles
+                    ):
+                        raise FixtureError("LTX 2.5 qualification profile is invalid")
+                    expected_profile = (
+                        str(request_profiles[0])
+                        if request_profiles
+                        else "bf16-model-offload"
+                    )
+                else:
+                    if request_profiles:
+                        raise FixtureError(
+                            "immutable LTX 2.5 qualification profile cannot be overridden"
+                        )
+                    expected_profile = declared_profile
                 for _, content, _ in selected:
                     _validate_ltx25_receipt(content, output_contents, expected_profile)
     return {
