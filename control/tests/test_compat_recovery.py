@@ -15,6 +15,7 @@ from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.compat_recovery import (
     CONFIRMATION,
     DISPATCH_CERTIFICATE_SERIAL,
+    FOLLOWING_NODE_ID,
     JOB_ID,
     NODE_ID,
     OPERATION_ID,
@@ -72,7 +73,7 @@ JOB_PLAN_DIGEST = hashlib.sha256(
     canonical_message(
         {
             "authority_revision": AUTHORITY_REVISION,
-            "node_ids": [NODE_ID],
+            "node_ids": [NODE_ID, FOLLOWING_NODE_ID],
             "package": PACKAGE,
             "strategy": "one-at-a-time",
         }
@@ -132,10 +133,10 @@ def seeded_services(tmp_path, *, engine=None):
                 state="waiting-for-operator",
                 actor="admin",
                 authority_revision=AUTHORITY_REVISION,
-                targets=[NODE_ID],
+                targets=[NODE_ID, FOLLOWING_NODE_ID],
                 payload_digest=JOB_PLAN_DIGEST,
                 payload={
-                    "node_order": [NODE_ID],
+                    "node_order": [NODE_ID, FOLLOWING_NODE_ID],
                     "package": PACKAGE,
                     "strategy": "one-at-a-time",
                 },
@@ -257,6 +258,8 @@ def test_preview_and_apply_bind_exact_failed_attempt_and_arm_only_its_retry(tmp_
     assert plan.document["source_fence"] == SOURCE_FENCE
     assert plan.document["source_certificate_serial"] == SOURCE_ATTEMPT_CERTIFICATE
     assert plan.document["dispatch_certificate_serial"] == SOURCE_CERTIFICATE
+    assert plan.document["source_job_targets"] == [NODE_ID, FOLLOWING_NODE_ID]
+    assert plan.document["dispatch_job_targets"] == [NODE_ID]
     assert plan.document["expected_retry_attempt"] == 4
     assert plan.document["target"]["package_sha256"] == TARGET_PACKAGE_SHA256
     with pytest.raises(CompatibilityRecoveryConflict, match="confirmation"):
@@ -289,6 +292,21 @@ def test_preview_and_apply_bind_exact_failed_attempt_and_arm_only_its_retry(tmp_
         assert operation is not None and operation.retry_disposition == "retry"
         assert operation.retry_disposition_attempt == SOURCE_ATTEMPT
         assert job is not None and job.state == "queued"
+        assert job.targets == [NODE_ID]
+        assert job.payload["node_order"] == [NODE_ID]
+        assert (
+            job.payload_digest
+            == hashlib.sha256(
+                canonical_message(
+                    {
+                        "authority_revision": AUTHORITY_REVISION,
+                        "node_ids": [NODE_ID],
+                        "package": PACKAGE,
+                        "strategy": "one-at-a-time",
+                    }
+                )
+            ).hexdigest()
+        )
 
     replay = service.apply(
         plan_digest=plan.plan_digest,
@@ -691,6 +709,14 @@ def test_grant_is_one_persisted_scheduled_reboot_and_never_an_install(tmp_path):
         )
         assert operation is not None and operation.state == "succeeded"
         assert job is not None and job.state == "succeeded"
+        assert (
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.node_id == FOLLOWING_NODE_ID
+                )
+            )
+            is None
+        )
         assert recovery is not None and recovery.state == "completed"
         assert recovery.completed_at is not None
         assert recovery.completed_at.replace(tzinfo=UTC) == NOW

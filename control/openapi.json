@@ -8370,6 +8370,18 @@
             "title": "Dispatch Certificate Serial",
             "type": "string"
           },
+          "dispatch_job_targets": {
+            "maxItems": 1,
+            "minItems": 1,
+            "prefixItems": [
+              {
+                "const": "spk_2818d189042b4c77aefa7796f4befd23",
+                "type": "string"
+              }
+            ],
+            "title": "Dispatch Job Targets",
+            "type": "array"
+          },
           "expected_retry_attempt": {
             "const": 4,
             "title": "Expected Retry Attempt",
@@ -8419,6 +8431,22 @@
           "source_identity": {
             "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
           },
+          "source_job_targets": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "const": "spk_2818d189042b4c77aefa7796f4befd23",
+                "type": "string"
+              },
+              {
+                "const": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+                "type": "string"
+              }
+            ],
+            "title": "Source Job Targets",
+            "type": "array"
+          },
           "state": {
             "enum": [
               "preview",
@@ -8446,6 +8474,8 @@
           "delay_seconds",
           "compatibility_recovery_id",
           "node_id",
+          "source_job_targets",
+          "dispatch_job_targets",
           "source_identity",
           "job_id",
           "operation_id",
@@ -8494,6 +8524,18 @@
             "title": "Dispatch Certificate Serial",
             "type": "string"
           },
+          "dispatch_job_targets": {
+            "maxItems": 1,
+            "minItems": 1,
+            "prefixItems": [
+              {
+                "const": "spk_2818d189042b4c77aefa7796f4befd23",
+                "type": "string"
+              }
+            ],
+            "title": "Dispatch Job Targets",
+            "type": "array"
+          },
           "expected_retry_attempt": {
             "const": 4,
             "title": "Expected Retry Attempt",
@@ -8538,6 +8580,22 @@
           "source_identity": {
             "$ref": "#/components/schemas/Spark3542CompatibilityRecoverySourceIdentity"
           },
+          "source_job_targets": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "const": "spk_2818d189042b4c77aefa7796f4befd23",
+                "type": "string"
+              },
+              {
+                "const": "spk_9a86fdbab116442ab6707bf4181a3c1c",
+                "type": "string"
+              }
+            ],
+            "title": "Source Job Targets",
+            "type": "array"
+          },
           "state": {
             "enum": [
               "preview",
@@ -8565,6 +8623,8 @@
           "delay_seconds",
           "compatibility_recovery_id",
           "node_id",
+          "source_job_targets",
+          "dispatch_job_targets",
           "source_identity",
           "job_id",
           "operation_id",

@@ -30,6 +30,8 @@ from .models import (
 
 RECOVERY_ID = "spark3542-a122-scheduled-reboot-v1"
 NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
+FOLLOWING_NODE_ID = "spk_9a86fdbab116442ab6707bf4181a3c1c"
+SOURCE_JOB_TARGETS = (NODE_ID, FOLLOWING_NODE_ID)
 JOB_ID = "6b945136-1be6-47e4-8ba0-5c5f815304ad"
 OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
 SOURCE_ATTEMPT = 3
@@ -176,6 +178,22 @@ class Spark3542CompatibilityRecoveryService:
             # payload, fetch the current release candidate, or install a
             # package. The compatibility authority may issue only the fixed,
             # delayed reboot required to activate the staged recovery at boot.
+            # Narrow the historical two-Spark rollout to Spark3542 before it is
+            # resumed. Otherwise AgentUpgradeService would automatically
+            # materialize the old a122 package for Spark2297 after Spark3542
+            # proves the target identity.
+            package = operation.payload
+            job.targets = [NODE_ID]
+            job.payload = {
+                "node_order": [NODE_ID],
+                "package": dict(package),
+                "strategy": "one-at-a-time",
+            }
+            job.payload_digest = self._job_plan_digest(
+                authority_revision=job.authority_revision,
+                node_ids=[NODE_ID],
+                package=package,
+            )
             job.state = "queued"
             job.status_reason = None
             job.updated_at = now
@@ -231,6 +249,10 @@ class Spark3542CompatibilityRecoveryService:
             )
         source_certificate = session.scalar(source_certificate_query)
         dispatch_certificate = session.scalar(dispatch_certificate_query)
+        if operation.payload_digest != upgrade_payload_sha256:
+            raise CompatibilityRecoveryConflict(
+                "the existing Spark3542 operation payload digest is invalid"
+            )
         if (
             node.state != "active"
             or node.revoked_at is not None
@@ -276,7 +298,18 @@ class Spark3542CompatibilityRecoveryService:
         if (
             job.kind != "agent-upgrade"
             or job.state != "waiting-for-operator"
-            or job.targets != [NODE_ID]
+            or job.targets != list(SOURCE_JOB_TARGETS)
+            or set(job.payload) != {"node_order", "package", "strategy"}
+            or job.payload.get("node_order") != list(SOURCE_JOB_TARGETS)
+            or job.payload.get("strategy") != "one-at-a-time"
+            or job.payload.get("package") != package
+            or job.authority_revision != operation.authority_revision
+            or job.payload_digest
+            != self._job_plan_digest(
+                authority_revision=job.authority_revision,
+                node_ids=list(SOURCE_JOB_TARGETS),
+                package=package,
+            )
             or operation.parent_job_id != JOB_ID
             or operation.node_id != NODE_ID
             or operation.kind != "agent.upgrade.v1"
@@ -304,10 +337,6 @@ class Spark3542CompatibilityRecoveryService:
             raise CompatibilityRecoveryConflict(
                 "Spark3542 has another queued or running mutation"
             )
-        if operation.payload_digest != upgrade_payload_sha256:
-            raise CompatibilityRecoveryConflict(
-                "the existing Spark3542 operation payload digest is invalid"
-            )
         if not self._exact_target(package):
             raise CompatibilityRecoveryConflict(
                 "the existing Spark3542 operation is not the exact a122 package"
@@ -317,6 +346,8 @@ class Spark3542CompatibilityRecoveryService:
             "delay_seconds": 60,
             "compatibility_recovery_id": RECOVERY_ID,
             "node_id": NODE_ID,
+            "source_job_targets": list(SOURCE_JOB_TARGETS),
+            "dispatch_job_targets": [NODE_ID],
             "source_identity": {
                 "semantic_version": SOURCE_SEMANTIC_VERSION,
                 "binary_digest": SOURCE_BINARY_DIGEST,
@@ -378,6 +409,24 @@ class Spark3542CompatibilityRecoveryService:
         )
 
     @staticmethod
+    def _job_plan_digest(
+        *,
+        authority_revision: str,
+        node_ids: list[str],
+        package: Mapping[str, object],
+    ) -> str:
+        return hashlib.sha256(
+            canonical_message(
+                {
+                    "authority_revision": authority_revision,
+                    "node_ids": node_ids,
+                    "package": dict(package),
+                    "strategy": "one-at-a-time",
+                }
+            )
+        ).hexdigest()
+
+    @staticmethod
     def _stored_document(
         recovery: AgentUpgradeCompatibilityRecovery,
     ) -> dict[str, object]:
@@ -386,6 +435,8 @@ class Spark3542CompatibilityRecoveryService:
             "delay_seconds": 60,
             "compatibility_recovery_id": recovery.id,
             "node_id": recovery.node_id,
+            "source_job_targets": list(SOURCE_JOB_TARGETS),
+            "dispatch_job_targets": [NODE_ID],
             "source_identity": {
                 "semantic_version": recovery.source_semantic_version,
                 "binary_digest": recovery.source_binary_digest,
