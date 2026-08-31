@@ -244,15 +244,19 @@ runs:
           prebuilt/amd64/baseline.json \
           prebuilt/amd64/baseline/vonk-agent \
           prebuilt/amd64/baseline/vonk-agent-helper \
+          prebuilt/amd64/baseline/vonk-build-egress \
           prebuilt/amd64/candidate.json \
           prebuilt/amd64/candidate/vonk-agent \
           prebuilt/amd64/candidate/vonk-agent-helper \
+          prebuilt/amd64/candidate/vonk-build-egress \
           prebuilt/arm64/baseline.json \
           prebuilt/arm64/baseline/vonk-agent \
           prebuilt/arm64/baseline/vonk-agent-helper \
+          prebuilt/arm64/baseline/vonk-build-egress \
           prebuilt/arm64/candidate.json \
           prebuilt/arm64/candidate/vonk-agent \
-          prebuilt/arm64/candidate/vonk-agent-helper)
+          prebuilt/arm64/candidate/vonk-agent-helper \
+          prebuilt/arm64/candidate/vonk-build-egress)
         actual=$(find prebuilt -type f -print | LC_ALL=C sort)
         test "$actual" = "$expected"
         test -z "$(find prebuilt -type l -print -quit)"

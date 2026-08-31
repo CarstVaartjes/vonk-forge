@@ -17,7 +17,9 @@ def test_repair_workflow_runs_full_native_arm64_matrix_without_secrets() -> None
     assert 'test \"$(dpkg --print-architecture)\" = arm64' in text
     assert "REPAIR_MATRIX_MODE: full" in text
     assert "cargo build --locked --release --package vonk-repair-helper-probe" in text
+    assert "cargo build --locked --release --package vonk-build-egress" in text
     assert "REPAIR_PROBE_BINARY" in text
+    assert "BUILD_EGRESS_BINARY" in text
     assert 'sudo install -o root -g root -m 0755 "$probe" "$probe_staged"' in text
     assert 'sudo mv -f "$probe_staged" "$probe"' in text
     assert "podman shellcheck" in text
@@ -42,6 +44,7 @@ def test_repair_workflow_is_scoped_to_recovery_inputs() -> None:
     for required_path in (
         "packaging/debian/postinst-repair",
         "packaging/debian/preinst-repair",
+        "rust/crates/vonk-build-egress/**",
         "rust/crates/vonk-repair-helper-probe/**",
         "scripts/build-agent-deb",
         "scripts/verify-agent-deb",

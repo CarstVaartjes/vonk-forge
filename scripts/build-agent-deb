@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
 BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
+EGRESS_BINARY = "vonk-build-egress"
 ORAS_VERSION = "1.3.2"
 ARCHITECTURES = {
     "linux-arm64": {
@@ -209,6 +210,7 @@ def read_release_binary(
     machine: int,
     build_digest: str | None = None,
     semantic_version: str | None = None,
+    require_static: bool = False,
 ) -> bytes:
     try:
         descriptor = os.open(
@@ -250,6 +252,23 @@ def read_release_binary(
         or struct.unpack_from("<H", raw, 18)[0] != machine
     ):
         raise BuildError(f"release binary architecture is invalid: {path.name}")
+    if require_static:
+        program_offset = struct.unpack_from("<Q", raw, 32)[0]
+        program_size = struct.unpack_from("<H", raw, 54)[0]
+        program_count = struct.unpack_from("<H", raw, 56)[0]
+        if (
+            program_size < 56
+            or program_count < 1
+            or program_offset + program_size * program_count > len(raw)
+            or any(
+                struct.unpack_from(
+                    "<I", raw, program_offset + index * program_size
+                )[0]
+                == 3
+                for index in range(program_count)
+            )
+        ):
+            raise BuildError(f"release binary is not static: {path.name}")
     if build_digest is not None:
         marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
         if marker not in raw:
@@ -395,6 +414,23 @@ def compile_binaries(
             "--workspace",
         ],
         env=environment,
+    )
+    static_environment = {
+        **environment,
+        "RUSTFLAGS": "-C target-feature=+crt-static",
+    }
+    run(
+        [
+            cargo,
+            "build",
+            "--release",
+            "--locked",
+            "--target",
+            str(ARCHITECTURES[architecture]["target"]),
+            "--package",
+            "vonk-build-egress",
+        ],
+        env=static_environment,
     )
     return ROOT / "target" / str(ARCHITECTURES[architecture]["target"]) / "release"
 
@@ -882,6 +918,12 @@ def build(
         raise BuildError("repair authority requires node-bound repair version")
     if acceptance_baseline and repair_authority_raw is not None:
         raise BuildError("acceptance baseline cannot be a repair capsule")
+    if repair_authority_raw is None:
+        binaries[EGRESS_BINARY] = read_release_binary(
+            binary_root / EGRESS_BINARY,
+            machine=int(spec["machine"]),
+            require_static=True,
+        )
     package_name = f"{PACKAGE}_{version}_{debian_architecture}.deb"
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-") as temporary:
@@ -899,6 +941,13 @@ def build(
             binaries["vonk-agent-helper"],
             0o555,
         )
+        if EGRESS_BINARY in binaries:
+            install_file(
+                stage,
+                "usr/lib/vonk-forge/vonk-build-egress",
+                binaries[EGRESS_BINARY],
+                0o555,
+            )
         install_file(stage, "usr/lib/vonk-forge/oras", binaries["oras"], 0o555)
         install_file(
             stage,

@@ -106,7 +106,6 @@ class RecipeBuildService:
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
-            _ensure_supported_build_network(build)
             if (
                 not isinstance(source_sha256, str)
                 or session.get(RecipeSourceBundle, source_sha256) is None
@@ -137,8 +136,6 @@ class RecipeBuildService:
                     "build.node_unknown", "builder GPU node is unknown"
                 )
             _validate_builder(node)
-            assert node.binary_digest is not None
-            builder_binary_digest = node.binary_digest
             document = copy.deepcopy(revision.document)
             try:
                 resolve_recipe_entities(session, document)
@@ -150,7 +147,14 @@ class RecipeBuildService:
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
-            _ensure_supported_build_network(build)
+            public_network = _public_build_network(build)
+            if public_network and "recipe.build.egress-proxy.v1" not in node.capabilities:
+                raise RecipeBuildError(
+                    "build.network_capability_missing",
+                    "builder does not advertise the hostname-aware build egress boundary",
+                )
+            assert node.binary_digest is not None
+            builder_binary_digest = node.binary_digest
             if not isinstance(source_sha256, str):
                 raise RecipeBuildError(
                     "build.source_invalid", "recipe source bundle identity is invalid"
@@ -193,6 +197,11 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.capability_missing",
                 "builder does not support typed recipe builds",
+            )
+        if public_network and "recipe.build.egress-proxy.v1" not in snapshot.capabilities:
+            raise RecipeBuildError(
+                "build.network_capability_missing",
+                "fresh builder inventory does not prove the hostname-aware build egress boundary",
             )
         assert isinstance(build, dict)
         resources = build.get("resources")
@@ -576,15 +585,11 @@ def _validate_builder(node: AgentNode) -> None:
         )
 
 
-def _ensure_supported_build_network(build: object) -> None:
+def _public_build_network(build: object) -> bool:
     if not isinstance(build, dict):
-        return
+        return False
     network = build.get("network")
-    if isinstance(network, dict) and network.get("mode") == "public":
-        raise RecipeBuildError(
-            "build.network_unsupported",
-            "public build networking is unavailable until a hostname-aware egress boundary is installed",
-        )
+    return isinstance(network, dict) and network.get("mode") == "public"
 
 
 def _declared_image_bytes(document: dict[str, object]) -> int:

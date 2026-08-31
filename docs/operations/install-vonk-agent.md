@@ -46,6 +46,12 @@ eligible nodes, rolls out one Spark at a time by default, and requires the new
 agent and privileged helper activation evidence before continuing. This path
 preserves configuration and identity and does not require SSH.
 
+The signed package also installs the static recipe-build egress proxy. After an
+upgrade, the agent advertises `recipe.build.egress-proxy.v1` only when that
+root-owned executable is present and safe. The Controller will not send a
+public-network recipe build to an older or incomplete installation; no manual
+Spark networking or SSH step is needed.
+
 Rerun the channel command without `--enroll` for a local package repair or when
 the controller-managed path is unavailable. It preserves configuration and
 identity, replaces the Debian package directly, restarts the services, and

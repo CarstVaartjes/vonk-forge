@@ -9,6 +9,7 @@ on:
       - Cargo.toml
       - packaging/debian/postinst-repair
       - packaging/debian/preinst-repair
+      - rust/crates/vonk-build-egress/**
       - rust/crates/vonk-repair-helper-probe/**
       - scripts/build-agent-deb
       - scripts/verify-agent-deb
@@ -23,6 +24,7 @@ on:
       - Cargo.toml
       - packaging/debian/postinst-repair
       - packaging/debian/preinst-repair
+      - rust/crates/vonk-build-egress/**
       - rust/crates/vonk-repair-helper-probe/**
       - scripts/build-agent-deb
       - scripts/verify-agent-deb
@@ -87,16 +89,24 @@ jobs:
           shellcheck \
             tests/nodes/test_agent_upgrade_repair_matrix.sh \
             tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - name: Build exact repair probe once
+      - name: Build exact repair fixtures once
         shell: bash
         run: |
           set -euo pipefail
           cargo build --locked --release --package vonk-repair-helper-probe
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
           probe=$(realpath target/release/vonk-repair-helper-probe)
+          build_egress=$(realpath target/release/vonk-build-egress)
           probe_staged="$probe.root-owned"
+          build_egress_staged="$build_egress.root-owned"
           sudo install -o root -g root -m 0755 "$probe" "$probe_staged"
+          sudo install -o root -g root -m 0755 \
+            "$build_egress" "$build_egress_staged"
           sudo mv -f "$probe_staged" "$probe"
+          sudo mv -f "$build_egress_staged" "$build_egress"
           test "$(stat -c %u:%g:%a:%h "$probe")" = 0:0:755:1
+          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
       - name: Exercise every repair success, refusal, and crash path
         shell: bash
         env:
@@ -107,6 +117,8 @@ jobs:
           test -d /run/systemd/system
           test "$(dpkg --print-architecture)" = arm64
           probe=$(realpath target/release/vonk-repair-helper-probe)
+          build_egress=$(realpath target/release/vonk-build-egress)
           sudo env REPAIR_MATRIX_MODE="$REPAIR_MATRIX_MODE" \
             REPAIR_PROBE_BINARY="$probe" \
+            BUILD_EGRESS_BINARY="$build_egress" \
             tests/nodes/test_agent_upgrade_repair_matrix.sh

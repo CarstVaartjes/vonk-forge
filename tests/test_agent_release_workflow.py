@@ -179,7 +179,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper", "oras"):
+    for name in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras"):
         raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
@@ -187,6 +187,11 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         raw[128 : 128 + len(marker)] = marker
         semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
+        if name == "vonk-build-egress":
+            struct.pack_into("<Q", raw, 32, 320)
+            struct.pack_into("<H", raw, 54, 56)
+            struct.pack_into("<H", raw, 56, 1)
+            struct.pack_into("<I", raw, 320, 1)
         (binaries / name).write_bytes(raw)
         (binaries / name).chmod(0o555)
     (binaries / "oras.LICENSE").write_text("ORAS test license\n")
@@ -800,7 +805,9 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert 'cache-workspace-crates: "false"' in text
     assert "+refs/heads/main:refs/remotes/origin/main" in authority
     assert "+refs/heads/main:refs/remotes/origin/main" in upload_authority
-    assert compile_step.count("cargo build --release --locked") == 1
+    assert compile_step.count("cargo build --release --locked") == 2
+    assert "--package vonk-build-egress" in compile_step
+    assert "target-feature=+crt-static" in compile_step
     assert "--package vonk-agent --package vonk-agent-helper" in compile_step
     assert "--workspace" not in compile_step
     assert "vonk-nas-setup" not in compile_step

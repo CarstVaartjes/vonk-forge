@@ -11,10 +11,15 @@ BUILD_DIGEST = "sha256:" + "a" * 64
 SEMANTIC_VERSION = "0.1.0"
 
 
-def binary(machine: int, *, identity: bool) -> bytes:
+def binary(machine: int, *, identity: bool, static: bool = False) -> bytes:
     raw = bytearray(512)
     raw[:7] = b"\x7fELF\x02\x01\x01"
     struct.pack_into("<H", raw, 18, machine)
+    if static:
+        struct.pack_into("<Q", raw, 32, 64)
+        struct.pack_into("<H", raw, 54, 56)
+        struct.pack_into("<H", raw, 56, 1)
+        struct.pack_into("<I", raw, 64, 1)
     if identity:
         markers = (
             f"VONK_AGENT_BUILD_DIGEST={BUILD_DIGEST}".encode(),
@@ -29,6 +34,9 @@ def fixture(root: Path, machine: int = 183) -> Path:
     root.mkdir()
     (root / "vonk-agent").write_bytes(binary(machine, identity=True))
     (root / "vonk-agent-helper").write_bytes(binary(machine, identity=False))
+    (root / "vonk-build-egress").write_bytes(
+        binary(machine, identity=False, static=True)
+    )
     for path in root.iterdir():
         path.chmod(0o555)
     return root
@@ -65,7 +73,11 @@ def test_verifier_accepts_exact_identity_bound_binary_set(tmp_path: Path) -> Non
     assert evidence["architecture"] == "linux-arm64"
     assert evidence["build_digest"] == BUILD_DIGEST
     assert evidence["semantic_version"] == SEMANTIC_VERSION
-    assert set(evidence["files"]) == {"vonk-agent", "vonk-agent-helper"}
+    assert set(evidence["files"]) == {
+        "vonk-agent",
+        "vonk-agent-helper",
+        "vonk-build-egress",
+    }
 
 
 @pytest.mark.parametrize("mutation", ("architecture", "identity", "extra", "symlink"))
