@@ -284,7 +284,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0007_compat_recovery_rearm_certificates"
+            == "0007_compat_rearm_certificates"
         )
 
 
@@ -371,7 +371,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0007_compat_recovery_rearm_certificates"
+            == "0007_compat_rearm_certificates"
         )
 
 

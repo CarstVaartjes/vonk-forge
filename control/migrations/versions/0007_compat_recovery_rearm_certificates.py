@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0007_compat_recovery_rearm_certificates"
+revision = "0007_compat_rearm_certificates"
 down_revision = "0006_spark3542_compat_recovery"
 branch_labels = None
 depends_on = None
