@@ -358,6 +358,107 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         assert recovery.signed_grant == grant.to_mapping()
 
 
+def test_grantless_rearm_apply_is_idempotent_after_lost_response(tmp_path):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+
+    preview = service.preview()
+    first = service.apply(
+        plan_digest=preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    repeated_preview = service.preview()
+    repeated = service.apply(
+        plan_digest=preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    assert first.state == repeated_preview.state == repeated.state == "armed"
+    assert first.plan_digest == repeated_preview.plan_digest == repeated.plan_digest
+    assert notifications == [True, True]
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        attempts = session.scalars(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID
+            )
+        ).all()
+        assert recovery is not None and recovery.signed_grant is None
+        assert len(attempts) == 2
+
+
+def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    preview = service.preview()
+    service.apply(
+        plan_digest=preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    later = NOW + timedelta(minutes=6)
+    operations = AgentJobService(sessions, clock=lambda: later)
+    assert operations.reconcile_compatibility_recoveries() is True
+    with sessions.begin() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        node = session.get(AgentNode, NODE_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert recovery is not None and recovery.state == "operator-blocked"
+        assert node is not None
+        node.last_seen_at = later
+        assert retry is not None and retry.state == "waiting-for-operator"
+
+    later_service = Spark3542CompatibilityRecoveryService(
+        sessions,
+        clock=lambda: later,
+        notify_available=lambda: notifications.append(True),
+    )
+    repeated_preview = later_service.preview()
+    assert repeated_preview.state == "preview"
+    repeated = later_service.apply(
+        plan_digest=repeated_preview.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert repeated.state == "armed"
+    assert notifications == [True, True, True]
+    with sessions() as session:
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert retry is not None and retry.state == "running"
+        assert retry.lease_deadline.replace(tzinfo=UTC) == later + timedelta(seconds=60)
+
+
 @pytest.mark.parametrize(
     "drift",
     ("failure", "protocol", "capabilities", "self-test", "certificate", "payload"),

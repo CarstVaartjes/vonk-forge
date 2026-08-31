@@ -108,6 +108,15 @@ class Spark3542CompatibilityRecoveryService:
                         document=self._stored_document(existing),
                         state="preview",
                     )
+                if self._grantless_rearm_applied_candidate(session, existing):
+                    binding = self._rearm_snapshot(session, now, lock=False)
+                    return CompatibilityRecoveryPlan(
+                        plan_digest=hashlib.sha256(
+                            canonical_message(binding)
+                        ).hexdigest(),
+                        document=self._stored_document(existing),
+                        state="armed",
+                    )
                 return CompatibilityRecoveryPlan(
                     plan_digest=existing.plan_digest,
                     document=self._stored_document(existing),
@@ -173,6 +182,20 @@ class Spark3542CompatibilityRecoveryService:
                     notify = True
                     document = self._stored_document(existing)
                     result = CompatibilityRecoveryPlan(rearm_digest, document, "armed")
+                elif self._grantless_rearm_applied_candidate(session, existing):
+                    binding = self._rearm_snapshot(session, now, lock=True)
+                    rearm_digest = hashlib.sha256(
+                        canonical_message(binding)
+                    ).hexdigest()
+                    if plan_digest != rearm_digest:
+                        raise CompatibilityRecoveryConflict(
+                            "Spark3542 compatibility recovery re-arm preview is stale"
+                        )
+                    return CompatibilityRecoveryPlan(
+                        rearm_digest,
+                        self._stored_document(existing),
+                        "armed",
+                    )
                 else:
                     if existing.plan_digest != plan_digest:
                         raise CompatibilityRecoveryConflict(
@@ -281,6 +304,36 @@ class Spark3542CompatibilityRecoveryService:
             and recovery.issued_at is None
         )
 
+    @staticmethod
+    def _grantless_rearm_applied_candidate(
+        session: Session,
+        recovery: AgentUpgradeCompatibilityRecovery,
+    ) -> bool:
+        if not (
+            recovery.state == "armed"
+            and recovery.blocked_at is None
+            and recovery.completed_at is None
+            and recovery.retry_fence is None
+            and recovery.retry_certificate_serial is None
+            and recovery.signed_grant is None
+            and recovery.grant_request_id is None
+            and recovery.grant_expires_at is None
+            and recovery.identity_deadline is None
+            and recovery.issued_at is None
+        ):
+            return False
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        return bool(
+            retry is not None
+            and retry.state == "running"
+            and retry.result == _GRANTLESS_RETRY_FAILURE
+        )
+
     def _rearm_snapshot(
         self, session: Session, now: datetime, *, lock: bool
     ) -> dict[str, object]:
@@ -330,8 +383,31 @@ class Spark3542CompatibilityRecoveryService:
         package = operation.payload
         payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
         stored_document = self._stored_document(recovery)
-        if not (
+        blocked_rearm = bool(
             self._grantless_rearm_candidate(recovery)
+            and operation.state == "waiting-for-operator"
+            and job.state == "waiting-for-operator"
+            and retry.state in {"failed", "waiting-for-operator"}
+            and _aware(retry.lease_deadline) <= _aware(now)
+        )
+        applied_rearm = bool(
+            recovery.state == "armed"
+            and recovery.blocked_at is None
+            and recovery.completed_at is None
+            and recovery.retry_fence is None
+            and recovery.retry_certificate_serial is None
+            and recovery.signed_grant is None
+            and recovery.grant_request_id is None
+            and recovery.grant_expires_at is None
+            and recovery.identity_deadline is None
+            and recovery.issued_at is None
+            and operation.state == "running"
+            and job.state == "running"
+            and retry.state == "running"
+            and _aware(retry.lease_deadline) > _aware(now)
+        )
+        if not (
+            (blocked_rearm or applied_rearm)
             and recovery.id == RECOVERY_ID
             and recovery.node_id == NODE_ID
             and recovery.job_id == JOB_ID
@@ -354,15 +430,12 @@ class Spark3542CompatibilityRecoveryService:
             and source.attempt == SOURCE_ATTEMPT
             and source.state in _TERMINAL_ATTEMPT_STATES
             and retry.attempt == RETRY_ATTEMPT
-            and retry.state == "failed"
             and retry.agent_certificate_serial == DISPATCH_CERTIFICATE_SERIAL
             and retry.result == _GRANTLESS_RETRY_FAILURE
-            and _aware(retry.lease_deadline) <= _aware(now)
             and operation.id == OPERATION_ID
             and operation.parent_job_id == JOB_ID
             and operation.node_id == NODE_ID
             and operation.kind == "agent.upgrade.v1"
-            and operation.state == "waiting-for-operator"
             and operation.current_attempt == RETRY_ATTEMPT
             and operation.retry_disposition is None
             and operation.retry_disposition_attempt is None
@@ -372,7 +445,6 @@ class Spark3542CompatibilityRecoveryService:
             and self._exact_target(package)
             and job.id == JOB_ID
             and job.kind == "agent-upgrade"
-            and job.state == "waiting-for-operator"
             and job.targets == [NODE_ID]
             and job.authority_revision == recovery.authority_revision
             and set(job.payload) == {"node_order", "package", "strategy"}
