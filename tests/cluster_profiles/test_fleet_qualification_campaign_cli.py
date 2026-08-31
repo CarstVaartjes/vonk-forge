@@ -323,6 +323,138 @@ def test_packaged_authority_binds_current_745a_catalog_closure() -> None:
     }.issubset(authority.actionable_recipe_keys)
 
 
+def test_packaged_authority_binds_current_f8d43_catalog_closure() -> None:
+    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-f8d43aac")
+
+    assert authority.authority_sha256 == (
+        "8b2b362a83175146f49c936415b3238f232e827aafff6212897df8361cfc8efd"
+    )
+    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
+    assert authority.commit == "f8d43aacbaa16c016697be684bf688ef3b81932a"
+    assert (
+        authority.catalog_index_sha256
+        == "88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca"
+    )
+    assert authority.catalog_recipe_count == 82
+    assert authority.jurisdiction == "NL"
+    assert [
+        len(authority.actionable_recipe_keys),
+        len(authority.capacity_blocked_recipe_keys),
+        len(authority.legal_blocked_recipe_keys),
+        len(authority.dual_spark_recipe_keys),
+        len(authority.unsupported_topology_recipe_keys),
+    ] == [57, 5, 9, 7, 4]
+    categories = (
+        authority.actionable_recipe_keys,
+        authority.capacity_blocked_recipe_keys,
+        authority.legal_blocked_recipe_keys,
+        authority.dual_spark_recipe_keys,
+        authority.unsupported_topology_recipe_keys,
+    )
+    classified = [recipe for category in categories for recipe in category]
+    assert len(classified) == len(set(classified)) == 82
+    assert {
+        "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
+        "vonk-forge/minimax-h3-diffusers-single",
+        "vonk-forge/minimax-h3-fl2va-diffusers-single",
+    }.issubset(authority.legal_blocked_recipe_keys)
+    assert {
+        "vonk-forge/deepseek-v4-flash-0731-sparkinfer-single",
+        "vonk-forge/laguna-s-2-1-nvfp4-vllm-single",
+        "vonk-forge/ltx-2-5-22b-distilled-bf16-diffusers-single",
+    }.issubset(authority.capacity_blocked_recipe_keys)
+    assert {
+        "vonk-forge/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single",
+        "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single",
+        "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
+        "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single",
+        "vonk-forge/wan-dancer-14b-disk-offload-pytorch-single",
+    }.issubset(authority.actionable_recipe_keys)
+
+
+def test_checked_in_f8d43_physical_campaign_is_complete_and_dependency_ordered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
+    manifest = campaign_cli.load_manifest(
+        REPOSITORY_ROOT / "config/qualification/nl-single-spark-f8d43aac.json"
+    )
+
+    assert manifest.manifest_sha256 == (
+        "f6dbe17d8b399ccb0df78ce6193a6cc18e1401d2e7fb2f0efe3dcb672183826e"
+    )
+    assert manifest.cleanup == "stop"
+    assert manifest.jurisdiction == "NL"
+    assert [
+        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
+    ] == [
+        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
+        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 28),
+    ]
+    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
+    assert len(assigned) == len(set(assigned)) == 57
+    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
+    assert set(assigned).isdisjoint(manifest.authority.legal_blocked_recipe_keys)
+    assert set(assigned).isdisjoint(manifest.authority.capacity_blocked_recipe_keys)
+
+    lanes = {lane.name: list(lane.recipes) for lane in manifest.lanes}
+    first = lanes["spark-3542"]
+    second = lanes["spark-2297"]
+    for earlier, later in (
+        (
+            "vonk-forge/mova-360p-diffusers-single",
+            "vonk-forge/mova-720p-diffusers-single",
+        ),
+        (
+            "vonk-forge/step1x-3d-geometry-pytorch-single",
+            "vonk-forge/step1x-3d-label-geometry-pytorch-single",
+        ),
+        (
+            "vonk-forge/step1x-3d-label-geometry-pytorch-single",
+            "vonk-forge/step1x-3d-texture-pytorch-single",
+        ),
+        (
+            "vonk-forge/qwen3-8-27b-fp8-vllm-single",
+            "vonk-forge/qwen3-8-27b-vllm-single",
+        ),
+        (
+            "vonk-forge/wan-2-2-ti2v-5b-comfyui-single",
+            "vonk-forge/wan-2-2-i2v-14b-comfyui-single",
+        ),
+    ):
+        assert first.index(earlier) < first.index(later)
+    for earlier, later in (
+        (
+            "vonk-forge/deepseek-v4-flash-0731-ds4-single",
+            "vonk-forge/deepseek-v4-flash-0731-ds4-dspark-latency-single",
+        ),
+        (
+            "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single",
+            "vonk-forge/flux-2-klein-4b-comfyui-single",
+        ),
+        (
+            "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single",
+            "vonk-forge/qwen-image-2512-comfyui-single",
+        ),
+        (
+            "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single",
+            "vonk-forge/qwen-image-edit-2511-comfyui-single",
+        ),
+        (
+            "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single",
+            "vonk-forge/ltx-2-19b-distilled-diffusers-single",
+        ),
+    ):
+        assert second.index(earlier) < second.index(later)
+
+    state_root = (
+        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-f8d43aac"
+    ).resolve()
+    for lane in manifest.lanes:
+        assert lane.ledger.is_relative_to(state_root)
+        assert lane.plan_output.is_relative_to(state_root)
+
+
 def test_checked_in_745a_physical_campaign_is_the_exact_reviewed_partition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -38,6 +38,7 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/qualification_authorities/nl-single-spark-e996f025.json" = "cluster_profiles/qualification_authorities/nl-single-spark-e996f025.json"
 "src/cluster_profiles/qualification_authorities/nl-single-spark-02ae8bb5.json" = "cluster_profiles/qualification_authorities/nl-single-spark-02ae8bb5.json"
 "src/cluster_profiles/qualification_authorities/nl-single-spark-745a42b5.json" = "cluster_profiles/qualification_authorities/nl-single-spark-745a42b5.json"
+"src/cluster_profiles/qualification_authorities/nl-single-spark-f8d43aac.json" = "cluster_profiles/qualification_authorities/nl-single-spark-f8d43aac.json"
 
 [tool.ruff]
 required-version = "==0.16.1"
