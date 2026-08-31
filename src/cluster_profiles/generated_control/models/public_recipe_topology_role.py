@@ -6,7 +6,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.public_recipe_disk_requirements import PublicRecipeDiskRequirements
 
 
 
@@ -21,11 +24,13 @@ class PublicRecipeTopologyRole:
     """
         Attributes:
             count (int):
+            disk (PublicRecipeDiskRequirements):
             endpoint_owner (bool):
             name (str):
      """
 
     count: int
+    disk: 'PublicRecipeDiskRequirements'
     endpoint_owner: bool
     name: str
 
@@ -34,7 +39,10 @@ class PublicRecipeTopologyRole:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_recipe_disk_requirements import PublicRecipeDiskRequirements
         count = self.count
+
+        disk = self.disk.to_dict()
 
         endpoint_owner = self.endpoint_owner
 
@@ -45,6 +53,7 @@ class PublicRecipeTopologyRole:
 
         field_dict.update({
             "count": count,
+            "disk": disk,
             "endpoint_owner": endpoint_owner,
             "name": name,
         })
@@ -55,8 +64,14 @@ class PublicRecipeTopologyRole:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_recipe_disk_requirements import PublicRecipeDiskRequirements
         d = dict(src_dict)
         count = d.pop("count")
+
+        disk = PublicRecipeDiskRequirements.from_dict(d.pop("disk"))
+
+
+
 
         endpoint_owner = d.pop("endpoint_owner")
 
@@ -64,6 +79,7 @@ class PublicRecipeTopologyRole:
 
         public_recipe_topology_role = cls(
             count=count,
+            disk=disk,
             endpoint_owner=endpoint_owner,
             name=name,
         )

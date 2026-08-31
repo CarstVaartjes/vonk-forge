@@ -184,8 +184,10 @@ from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
 from .public_import_request import PublicImportRequest
+from .public_recipe_artifact_identity import PublicRecipeArtifactIdentity
 from .public_recipe_change import PublicRecipeChange
 from .public_recipe_change_kind import PublicRecipeChangeKind
+from .public_recipe_disk_requirements import PublicRecipeDiskRequirements
 from .public_recipe_fabric import PublicRecipeFabric
 from .public_recipe_fabric_connectivity import PublicRecipeFabricConnectivity
 from .public_recipe_list_item import PublicRecipeListItem
@@ -512,8 +514,10 @@ __all__ = (
     "ProposalRequest",
     "PublicationExportRequest",
     "PublicImportRequest",
+    "PublicRecipeArtifactIdentity",
     "PublicRecipeChange",
     "PublicRecipeChangeKind",
+    "PublicRecipeDiskRequirements",
     "PublicRecipeFabric",
     "PublicRecipeFabricConnectivity",
     "PublicRecipeListItem",

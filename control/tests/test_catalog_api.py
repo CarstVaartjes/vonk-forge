@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog_api import (
+    PublicRecipeDiskRequirements,
     PublicRecipeTopologyRole,
     _canonical_source_repository,
     _public_recipe_execution_readiness,
@@ -57,7 +58,19 @@ class Jobs:
 def test_public_recipe_topology_role_matches_canonical_recipe_name_and_count(
     name: str, count: int
 ) -> None:
-    role = PublicRecipeTopologyRole(name=name, count=count, endpoint_owner=False)
+    role = PublicRecipeTopologyRole(
+        name=name,
+        count=count,
+        endpoint_owner=False,
+        disk=PublicRecipeDiskRequirements(
+            image_bytes=0,
+            artifact_bytes=0,
+            staging_bytes=0,
+            cache_bytes=0,
+            rollback_bytes=0,
+            safety_margin_bytes=0,
+        ),
+    )
 
     assert role.name == name
     assert role.count == count
@@ -1133,13 +1146,35 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed_recipe["topology_mode"] == "single"
     assert listed_recipe["node_count"] == 1
     assert listed_recipe["topology_roles"] == [
-        {"name": "entrypoint", "count": 1, "endpoint_owner": True}
+        {
+            "name": "entrypoint",
+            "count": 1,
+            "endpoint_owner": True,
+            "disk": {
+                "image_bytes": 268_435_456,
+                "artifact_bytes": 10,
+                "staging_bytes": 536_870_912,
+                "cache_bytes": 0,
+                "rollback_bytes": 0,
+                "safety_margin_bytes": 536_870_912,
+            },
+        }
     ]
     assert listed_recipe["fabric"] == {
         "connectivity": "none",
         "minimum_bandwidth_mbps": 0,
     }
     assert listed_recipe["expected_download_bytes"] == 10
+    assert listed_recipe["temporary_build_bytes_per_node"] == 536_870_912
+    assert listed_recipe["artifact_identities"] == [
+        {
+            "artifact_id": "fixture-contract",
+            "identity_sha256": "162dbf0f1bd267d26fe53d7aec9097e53072907e2979f54e798062ca2f3cd126",
+            "download_bytes": 10,
+            "installed_bytes": 10,
+            "roles": ["entrypoint"],
+        }
+    ]
     assert listed_recipe["maximum_installed_bytes_per_node"] > 0
     assert listed_recipe["maximum_runtime_memory_bytes_per_node"] > 0
     assert preview_recipe["model_slug"] == listed_recipe["model_slug"]
@@ -1155,6 +1190,11 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert preview_recipe["execution_readiness_basis"] == listed_recipe["execution_readiness_basis"]
     assert preview_recipe["execution_readiness_detail"] == listed_recipe["execution_readiness_detail"]
     assert preview_recipe["topology_roles"] == listed_recipe["topology_roles"]
+    assert preview_recipe["artifact_identities"] == listed_recipe["artifact_identities"]
+    assert (
+        preview_recipe["temporary_build_bytes_per_node"]
+        == listed_recipe["temporary_build_bytes_per_node"]
+    )
     assert preview_recipe["fabric"] == listed_recipe["fabric"]
     assert imported.json()["origin"] == "recipe_library"
     assert len(service.entities.list_entities(limit=100)[0]) == 5

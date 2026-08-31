@@ -5732,6 +5732,48 @@
         "title": "PublicImportRequest",
         "type": "object"
       },
+      "PublicRecipeArtifactIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "download_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "identity_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Identity Sha256",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "identity_sha256",
+          "download_bytes",
+          "installed_bytes",
+          "roles"
+        ],
+        "title": "PublicRecipeArtifactIdentity",
+        "type": "object"
+      },
       "PublicRecipeChange": {
         "additionalProperties": false,
         "properties": {
@@ -5786,6 +5828,51 @@
         "title": "PublicRecipeChange",
         "type": "object"
       },
+      "PublicRecipeDiskRequirements": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_bytes": {
+            "minimum": 0.0,
+            "title": "Artifact Bytes",
+            "type": "integer"
+          },
+          "cache_bytes": {
+            "minimum": 0.0,
+            "title": "Cache Bytes",
+            "type": "integer"
+          },
+          "image_bytes": {
+            "minimum": 0.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "rollback_bytes": {
+            "minimum": 0.0,
+            "title": "Rollback Bytes",
+            "type": "integer"
+          },
+          "safety_margin_bytes": {
+            "minimum": 0.0,
+            "title": "Safety Margin Bytes",
+            "type": "integer"
+          },
+          "staging_bytes": {
+            "minimum": 0.0,
+            "title": "Staging Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "image_bytes",
+          "artifact_bytes",
+          "staging_bytes",
+          "cache_bytes",
+          "rollback_bytes",
+          "safety_margin_bytes"
+        ],
+        "title": "PublicRecipeDiskRequirements",
+        "type": "object"
+      },
       "PublicRecipeFabric": {
         "additionalProperties": false,
         "properties": {
@@ -5820,6 +5907,14 @@
             "minimum": 0.0,
             "title": "Artifact Count",
             "type": "integer"
+          },
+          "artifact_identities": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeArtifactIdentity"
+            },
+            "maxItems": 32,
+            "title": "Artifact Identities",
+            "type": "array"
           },
           "capabilities": {
             "items": {
@@ -6065,6 +6160,11 @@
             "title": "Tags",
             "type": "array"
           },
+          "temporary_build_bytes_per_node": {
+            "minimum": 0.0,
+            "title": "Temporary Build Bytes Per Node",
+            "type": "integer"
+          },
           "title": {
             "maxLength": 120,
             "minLength": 1,
@@ -6125,6 +6225,7 @@
           "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
+          "artifact_identities",
           "topology_name",
           "topology_mode",
           "node_count",
@@ -6132,6 +6233,7 @@
           "fabric",
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
+          "temporary_build_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
           "local"
         ],
@@ -6248,6 +6350,14 @@
             "minimum": 0.0,
             "title": "Artifact Count",
             "type": "integer"
+          },
+          "artifact_identities": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeArtifactIdentity"
+            },
+            "maxItems": 32,
+            "title": "Artifact Identities",
+            "type": "array"
           },
           "capabilities": {
             "items": {
@@ -6509,6 +6619,11 @@
             "title": "Tags",
             "type": "array"
           },
+          "temporary_build_bytes_per_node": {
+            "minimum": 0.0,
+            "title": "Temporary Build Bytes Per Node",
+            "type": "integer"
+          },
           "title": {
             "maxLength": 120,
             "minLength": 1,
@@ -6569,6 +6684,7 @@
           "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
+          "artifact_identities",
           "topology_name",
           "topology_mode",
           "node_count",
@@ -6576,6 +6692,7 @@
           "fabric",
           "expected_download_bytes",
           "maximum_installed_bytes_per_node",
+          "temporary_build_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
           "local",
           "source",
@@ -6642,6 +6759,9 @@
             "title": "Count",
             "type": "integer"
           },
+          "disk": {
+            "$ref": "#/components/schemas/PublicRecipeDiskRequirements"
+          },
           "endpoint_owner": {
             "title": "Endpoint Owner",
             "type": "boolean"
@@ -6655,7 +6775,8 @@
         "required": [
           "name",
           "count",
-          "endpoint_owner"
+          "endpoint_owner",
+          "disk"
         ],
         "title": "PublicRecipeTopologyRole",
         "type": "object"
