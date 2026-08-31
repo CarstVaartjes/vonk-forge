@@ -434,7 +434,8 @@ class Spark3542CompatibilityRecoveryAbandonResponse(BaseModel):
     operation_id: Literal["d54e0b56-e465-41bd-9627-c81f37352dfd"]
     retry_attempt: Literal[4]
     blocked_at: datetime
-    identity_deadline: datetime
+    identity_deadline: datetime | None
+    grant_disposition: Literal["never-issued", "issued-and-expired"]
     contact_certificate_serial: str = Field(min_length=1, max_length=128)
     source_identity: Spark3542CompatibilityRecoverySourceIdentity
     queued_mutations: list[Spark3542CompatibilityRecoveryQueuedMutation]

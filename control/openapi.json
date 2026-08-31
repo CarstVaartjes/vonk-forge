@@ -8364,10 +8364,25 @@
             "title": "Contact Certificate Serial",
             "type": "string"
           },
-          "identity_deadline": {
-            "format": "date-time",
-            "title": "Identity Deadline",
+          "grant_disposition": {
+            "enum": [
+              "never-issued",
+              "issued-and-expired"
+            ],
+            "title": "Grant Disposition",
             "type": "string"
+          },
+          "identity_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Deadline"
           },
           "job_id": {
             "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
@@ -8427,6 +8442,7 @@
           "retry_attempt",
           "blocked_at",
           "identity_deadline",
+          "grant_disposition",
           "contact_certificate_serial",
           "source_identity",
           "queued_mutations",
@@ -8461,10 +8477,25 @@
             "title": "Contact Certificate Serial",
             "type": "string"
           },
-          "identity_deadline": {
-            "format": "date-time",
-            "title": "Identity Deadline",
+          "grant_disposition": {
+            "enum": [
+              "never-issued",
+              "issued-and-expired"
+            ],
+            "title": "Grant Disposition",
             "type": "string"
+          },
+          "identity_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Deadline"
           },
           "job_id": {
             "const": "6b945136-1be6-47e4-8ba0-5c5f815304ad",
@@ -8519,6 +8550,7 @@
           "retry_attempt",
           "blocked_at",
           "identity_deadline",
+          "grant_disposition",
           "contact_certificate_serial",
           "source_identity",
           "queued_mutations",

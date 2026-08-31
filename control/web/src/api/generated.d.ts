@@ -4144,10 +4144,12 @@ export interface components {
             /** Contact Certificate Serial */
             contact_certificate_serial: string;
             /**
-             * Identity Deadline
-             * Format: date-time
+             * Grant Disposition
+             * @enum {string}
              */
-            identity_deadline: string;
+            grant_disposition: "never-issued" | "issued-and-expired";
+            /** Identity Deadline */
+            identity_deadline: string | null;
             /**
              * Job Id
              * @constant
@@ -4204,10 +4206,12 @@ export interface components {
             /** Contact Certificate Serial */
             contact_certificate_serial: string;
             /**
-             * Identity Deadline
-             * Format: date-time
+             * Grant Disposition
+             * @enum {string}
              */
-            identity_deadline: string;
+            grant_disposition: "never-issued" | "issued-and-expired";
+            /** Identity Deadline */
+            identity_deadline: string | null;
             /**
              * Job Id
              * @constant

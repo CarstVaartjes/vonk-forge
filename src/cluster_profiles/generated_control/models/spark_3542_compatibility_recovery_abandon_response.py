@@ -6,10 +6,13 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.spark_3542_compatibility_recovery_abandon_response_grant_disposition import check_spark_3542_compatibility_recovery_abandon_response_grant_disposition
+from ..models.spark_3542_compatibility_recovery_abandon_response_grant_disposition import Spark3542CompatibilityRecoveryAbandonResponseGrantDisposition
 from ..models.spark_3542_compatibility_recovery_abandon_response_state import check_spark_3542_compatibility_recovery_abandon_response_state
 from ..models.spark_3542_compatibility_recovery_abandon_response_state import Spark3542CompatibilityRecoveryAbandonResponseState
 from dateutil.parser import isoparse
 from typing import cast
+from typing import cast, Union
 from typing import Literal, cast
 import datetime
 
@@ -33,7 +36,8 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
             blocked_at (datetime.datetime):
             compatibility_recovery_id (Literal['spark3542-a122-scheduled-reboot-v1']):
             contact_certificate_serial (str):
-            identity_deadline (datetime.datetime):
+            grant_disposition (Spark3542CompatibilityRecoveryAbandonResponseGrantDisposition):
+            identity_deadline (Union[None, datetime.datetime]):
             job_id (Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']):
             node_id (Literal['spk_2818d189042b4c77aefa7796f4befd23']):
             operation_id (Literal['d54e0b56-e465-41bd-9627-c81f37352dfd']):
@@ -48,7 +52,8 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
     blocked_at: datetime.datetime
     compatibility_recovery_id: Literal['spark3542-a122-scheduled-reboot-v1']
     contact_certificate_serial: str
-    identity_deadline: datetime.datetime
+    grant_disposition: Spark3542CompatibilityRecoveryAbandonResponseGrantDisposition
+    identity_deadline: Union[None, datetime.datetime]
     job_id: Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad']
     node_id: Literal['spk_2818d189042b4c77aefa7796f4befd23']
     operation_id: Literal['d54e0b56-e465-41bd-9627-c81f37352dfd']
@@ -73,7 +78,13 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
 
         contact_certificate_serial = self.contact_certificate_serial
 
-        identity_deadline = self.identity_deadline.isoformat()
+        grant_disposition: str = self.grant_disposition
+
+        identity_deadline: Union[None, str]
+        if isinstance(self.identity_deadline, datetime.datetime):
+            identity_deadline = self.identity_deadline.isoformat()
+        else:
+            identity_deadline = self.identity_deadline
 
         job_id = self.job_id
 
@@ -104,6 +115,7 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
             "blocked_at": blocked_at,
             "compatibility_recovery_id": compatibility_recovery_id,
             "contact_certificate_serial": contact_certificate_serial,
+            "grant_disposition": grant_disposition,
             "identity_deadline": identity_deadline,
             "job_id": job_id,
             "node_id": node_id,
@@ -139,9 +151,27 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
 
         contact_certificate_serial = d.pop("contact_certificate_serial")
 
-        identity_deadline = isoparse(d.pop("identity_deadline"))
+        grant_disposition = check_spark_3542_compatibility_recovery_abandon_response_grant_disposition(d.pop("grant_disposition"))
 
 
+
+
+        def _parse_identity_deadline(data: object) -> Union[None, datetime.datetime]:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                identity_deadline_type_0 = isoparse(data)
+
+
+
+                return identity_deadline_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, datetime.datetime], data)
+
+        identity_deadline = _parse_identity_deadline(d.pop("identity_deadline"))
 
 
         job_id = cast(Literal['6b945136-1be6-47e4-8ba0-5c5f815304ad'] , d.pop("job_id"))
@@ -187,6 +217,7 @@ class Spark3542CompatibilityRecoveryAbandonResponse:
             blocked_at=blocked_at,
             compatibility_recovery_id=compatibility_recovery_id,
             contact_certificate_serial=contact_certificate_serial,
+            grant_disposition=grant_disposition,
             identity_deadline=identity_deadline,
             job_id=job_id,
             node_id=node_id,
