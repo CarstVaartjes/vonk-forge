@@ -230,6 +230,7 @@ def seed_grantless_operator_blocked_retry(sessions) -> None:
                 result={
                     "error_code": "agent_upgrade_failed",
                     "reason": "agent upgrade authority is unavailable",
+                    "status": "failed",
                 },
             )
         )
@@ -288,6 +289,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         assert retry.result == {
             "error_code": "agent_upgrade_failed",
             "reason": "agent upgrade authority is unavailable",
+            "status": "failed",
         }
         assert retry.lease_deadline.replace(tzinfo=UTC) == NOW + timedelta(seconds=60)
         assert operation is not None and operation.state == "running"
@@ -519,7 +521,15 @@ def test_grantless_rearm_can_repeat_after_another_dispatch_timeout(tmp_path):
 
 @pytest.mark.parametrize(
     "drift",
-    ("failure", "protocol", "capabilities", "self-test", "certificate", "payload"),
+    (
+        "failure",
+        "failure-status",
+        "protocol",
+        "capabilities",
+        "self-test",
+        "certificate",
+        "payload",
+    ),
 )
 def test_grantless_operator_blocked_rearm_rejects_every_drift(tmp_path, drift):
     sessions, service, _ = seeded_services(tmp_path)
@@ -547,6 +557,12 @@ def test_grantless_operator_blocked_rearm_rejects_every_drift(tmp_path, drift):
             retry.result = {
                 "error_code": "agent_upgrade_failed",
                 "reason": "different failure",
+                "status": "failed",
+            }
+        elif drift == "failure-status":
+            retry.result = {
+                "error_code": "agent_upgrade_failed",
+                "reason": "agent upgrade authority is unavailable",
             }
         elif drift == "protocol":
             node.protocol_version = 2

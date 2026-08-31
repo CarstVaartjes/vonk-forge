@@ -66,6 +66,7 @@ _REARM_LEASE = timedelta(seconds=60)
 _GRANTLESS_RETRY_FAILURE = {
     "error_code": "agent_upgrade_failed",
     "reason": "agent upgrade authority is unavailable",
+    "status": "failed",
 }
 
 
