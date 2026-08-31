@@ -148,6 +148,23 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     assert created.profile_digest == loaded.profile_digest
 
 
+def test_direct_placement_profile_is_deterministic_and_hidden_from_saved_profiles() -> (
+    None
+):
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile_id = _uuid(30)
+    assignment = _input(revision_id).assignments[0]
+
+    first = service.ensure_internal_placement(profile_id, assignment, actor="admin")
+    replay = service.ensure_internal_placement(profile_id, assignment, actor="admin")
+
+    assert first == replay
+    assert first.id == profile_id
+    assert service.list().profiles == []
+
+
 def test_profile_delete_removes_terminal_application_history() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -282,12 +299,18 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
     service = FleetProfileService(sessions, clock=lambda: NOW)
     profile = service.create(_input(revision_id), actor="admin")
 
-    blocked = service.preview(profile.id)
-    assert blocked.allowed is False
-    assert blocked.summary.blockers == 1
-    assert blocked.assignments[0].current_state == "not-placed"
-    assert blocked.assignments[0].actions == ["create-placement", "start"]
-    assert blocked.reasons[0].code == "profile.build_missing"
+    build_plan = service.preview(profile.id)
+    assert build_plan.allowed is True
+    assert build_plan.summary.blockers == 0
+    assert build_plan.summary.builds == 1
+    assert build_plan.assignments[0].current_state == "not-placed"
+    assert build_plan.assignments[0].actions == [
+        "create-placement",
+        "build",
+        "distribute-image",
+        "install",
+        "start",
+    ]
 
     with sessions.begin() as session:
         session.add(
@@ -313,6 +336,7 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
     assert preview.summary.model_dump() == {
         "already_correct": 0,
         "placements": 1,
+        "builds": 0,
         "distributions": 1,
         "installs": 1,
         "starts": 1,
@@ -351,7 +375,7 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
     service = FleetProfileService(sessions, clock=lambda: NOW)
     profile = service.create(_input(revision_id), actor="admin")
 
-    with pytest.raises(FleetProfileConflict, match="blocked"):
+    with pytest.raises(FleetProfileConflict, match="stale"):
         service.apply(
             profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
         )

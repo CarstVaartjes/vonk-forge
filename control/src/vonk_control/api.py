@@ -79,6 +79,7 @@ from .fleet_projection import (
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
 from .library_api import install_library_routes
+from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
 from .operation_api import (
     AgentsResponse,
@@ -465,6 +466,7 @@ def create_app(
     recipe_operations: RecipeOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
+    library_placements: Any | None = None,
     agent_upgrades: Any | None = None,
     compatibility_recovery: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
@@ -714,6 +716,12 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         projection=library_projection,
+    )
+    install_library_placement_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=library_placements,
+        audits=audits,
     )
     install_fleet_profile_routes(
         app,
@@ -1420,6 +1428,9 @@ def production_app() -> FastAPI:
         clock=clock,
         recipe_operations=recipe_operations,
     )
+    from .library_placements import LibraryPlacementService
+
+    library_placements = LibraryPlacementService(visual_library, fleet_profiles)
     agent_upgrades = AgentUpgradeService(
         sessions,
         agent_services.operations,
@@ -1540,6 +1551,7 @@ def production_app() -> FastAPI:
         recipe_operations=recipe_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
+        library_placements=library_placements,
         agent_upgrades=agent_upgrades,
         compatibility_recovery=compatibility_recovery,
     )

@@ -55,6 +55,8 @@ _CHILD_PENDING_STATES = frozenset(
 _CHILD_FAILED_STATES = frozenset(
     {"failed", "expired", "cancelled", "waiting-for-operator"}
 )
+_INTERNAL_PLACEMENT_PREFIX = "~placement-"
+_INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
 
 
 class FleetProfileConflict(RuntimeError):
@@ -141,6 +143,7 @@ class FleetProfileService:
             rows = tuple(
                 session.scalars(
                     select(FleetProfile)
+                    .where(FleetProfile.name.not_like(f"{_INTERNAL_PLACEMENT_PREFIX}%"))
                     .order_by(
                         FleetProfile.favorite.desc(), FleetProfile.name, FleetProfile.id
                     )
@@ -182,6 +185,115 @@ class FleetProfileService:
                 ) from error
             result = self._view(session, row)
         return result
+
+    def ensure_internal_placement(
+        self,
+        profile_id: str,
+        assignment: FleetProfileAssignmentInput,
+        *,
+        actor: str,
+    ) -> FleetProfileView:
+        """Materialize one hidden, deterministic profile for a direct placement.
+
+        The profile coordinator remains the sole multi-step lifecycle engine.  A
+        direct Library placement only supplies a one-assignment desired state and
+        is deliberately omitted from the saved-profile collection.
+        """
+
+        now = _aware(self._clock())
+        name = f"{_INTERNAL_PLACEMENT_PREFIX}{profile_id[:12]}"
+        with self._sessions.begin() as session:
+            assignments = self._validated_assignments(session, (assignment,))
+            existing = session.get(FleetProfile, profile_id, with_for_update=True)
+            if existing is None:
+                existing = FleetProfile(
+                    id=profile_id,
+                    name=name,
+                    description="Direct Library placement",
+                    installation_policy="keep-cached",
+                    labels={_INTERNAL_PLACEMENT_LABEL: "true"},
+                    favorite=False,
+                    assignments=assignments,
+                    created_by=actor,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(existing)
+                try:
+                    session.flush()
+                except IntegrityError as error:
+                    raise FleetProfileConflict(
+                        "direct placement identity conflicts with saved Fleet state"
+                    ) from error
+            elif (
+                existing.name != name
+                or existing.labels.get(_INTERNAL_PLACEMENT_LABEL) != "true"
+                or existing.installation_policy != "keep-cached"
+                or existing.assignments != assignments
+            ):
+                raise FleetProfileConflict(
+                    "direct placement identity conflicts with saved Fleet state"
+                )
+            return self._view(session, existing)
+
+    def apply_internal_placement(
+        self,
+        profile_id: str,
+        *,
+        profile_plan_digest: str,
+        placement_plan_digest: str,
+        request_key: str,
+        actor: str,
+        metadata: Mapping[str, object],
+    ) -> FleetProfileApplicationView:
+        """Apply through the profile coordinator and bind direct-placement metadata."""
+
+        result = self.apply(
+            profile_id,
+            plan_digest=profile_plan_digest,
+            request_key=request_key,
+            actor=actor,
+        )
+        with self._sessions.begin() as session:
+            row = session.get(FleetProfileApplication, result.id, with_for_update=True)
+            if row is None:
+                raise FleetProfileConflict(
+                    "direct placement application is unavailable"
+                )
+            progress = dict(row.progress)
+            existing = progress.get("library_placement")
+            placement = {
+                **dict(metadata),
+                "plan_digest": placement_plan_digest,
+            }
+            if existing is not None and existing != placement:
+                raise FleetProfileConflict(
+                    "direct placement request key was reused for another plan"
+                )
+            progress["library_placement"] = placement
+            row.progress = progress
+            row.updated_at = _aware(self._clock())
+            session.flush()
+            return self._application_view(row)
+
+    def replay_internal_placement(
+        self, request_key: str
+    ) -> FleetProfileApplicationView | None:
+        """Return an exact direct-placement replay before live state is re-previewed."""
+
+        with self._sessions() as session:
+            row = session.scalar(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+            if row is None:
+                return None
+            if not isinstance(row.progress.get("library_placement"), Mapping):
+                raise FleetProfileConflict(
+                    "direct placement request key was used by another operation"
+                )
+            return self._application_view(row)
 
     def update(
         self, profile_id: str, value: FleetProfileInput, *, actor: str
@@ -295,37 +407,41 @@ class FleetProfileService:
                         "degraded",
                     }:
                         if state.build is None:
-                            item_reasons.append(
-                                FleetProfileReason(
-                                    code="profile.build_missing",
-                                    detail=f"{assignment.recipe_title} needs a successful build before this profile can install it.",
-                                    severity="error",
-                                )
+                            actions.append("build")
+                            assignment_steps.append(
+                                {
+                                    "kind": "build",
+                                    "assignment_id": assignment.id,
+                                    "recipe_revision_id": assignment.recipe_revision_id,
+                                    "node_ids": [
+                                        node.node_id for node in assignment.nodes
+                                    ],
+                                    "label": f"Build {assignment.recipe_title}",
+                                }
                             )
-                        else:
-                            actions.extend(("distribute-image", "install"))
-                            assignment_steps.extend(
-                                (
-                                    {
-                                        "kind": "distribute-image",
-                                        "assignment_id": assignment.id,
-                                        "recipe_revision_id": assignment.recipe_revision_id,
-                                        "node_ids": [
-                                            node.node_id for node in assignment.nodes
-                                        ],
-                                        "label": f"Prepare {assignment.recipe_title} image",
-                                    },
-                                    {
-                                        "kind": "install",
-                                        "assignment_id": assignment.id,
-                                        "recipe_revision_id": assignment.recipe_revision_id,
-                                        "node_ids": [
-                                            node.node_id for node in assignment.nodes
-                                        ],
-                                        "label": f"Install {assignment.recipe_title}",
-                                    },
-                                )
+                        actions.extend(("distribute-image", "install"))
+                        assignment_steps.extend(
+                            (
+                                {
+                                    "kind": "distribute-image",
+                                    "assignment_id": assignment.id,
+                                    "recipe_revision_id": assignment.recipe_revision_id,
+                                    "node_ids": [
+                                        node.node_id for node in assignment.nodes
+                                    ],
+                                    "label": f"Prepare {assignment.recipe_title} image",
+                                },
+                                {
+                                    "kind": "install",
+                                    "assignment_id": assignment.id,
+                                    "recipe_revision_id": assignment.recipe_revision_id,
+                                    "node_ids": [
+                                        node.node_id for node in assignment.nodes
+                                    ],
+                                    "label": f"Install {assignment.recipe_title}",
+                                },
                             )
+                        )
                     if (
                         assignment.desired_state == "running"
                         and state.current_state != "running"
@@ -425,6 +541,7 @@ class FleetProfileService:
                     item.actions == ["keep"] for item in assignment_previews
                 ),
                 placements=sum(step.kind == "create-placement" for step in steps),
+                builds=sum(step.kind == "build" for step in steps),
                 distributions=sum(step.kind == "distribute-image" for step in steps),
                 installs=sum(step.kind == "install" for step in steps),
                 starts=sum(step.kind == "start" for step in steps),
@@ -700,6 +817,18 @@ class FleetProfileService:
                 },
             )
             return None, True
+        if kind == "build":
+            builder_node_id = min(node_ids)
+            plan = self._recipe_operations.preview_build(
+                assignment.recipe_revision_id, builder_node_id
+            )
+            operation = self._recipe_operations.build(
+                plan,
+                build_input_sha256=plan.build_input_sha256,
+                actor=actor,
+                request_id=request_id,
+            )
+            return operation.id, False
         mapping_id, generation = self._mapping_identity(assignment, context)
         build_id = self._successful_build_id(assignment.recipe_revision_id)
         if kind == "distribute-image":

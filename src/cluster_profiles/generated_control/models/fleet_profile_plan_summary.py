@@ -22,6 +22,7 @@ class FleetProfilePlanSummary:
         Attributes:
             already_correct (int):
             blockers (int):
+            builds (int):
             distributions (int):
             installs (int):
             placements (int):
@@ -32,6 +33,7 @@ class FleetProfilePlanSummary:
 
     already_correct: int
     blockers: int
+    builds: int
     distributions: int
     installs: int
     placements: int
@@ -47,6 +49,8 @@ class FleetProfilePlanSummary:
         already_correct = self.already_correct
 
         blockers = self.blockers
+
+        builds = self.builds
 
         distributions = self.distributions
 
@@ -66,6 +70,7 @@ class FleetProfilePlanSummary:
         field_dict.update({
             "already_correct": already_correct,
             "blockers": blockers,
+            "builds": builds,
             "distributions": distributions,
             "installs": installs,
             "placements": placements,
@@ -85,6 +90,8 @@ class FleetProfilePlanSummary:
 
         blockers = d.pop("blockers")
 
+        builds = d.pop("builds")
+
         distributions = d.pop("distributions")
 
         installs = d.pop("installs")
@@ -100,6 +107,7 @@ class FleetProfilePlanSummary:
         fleet_profile_plan_summary = cls(
             already_correct=already_correct,
             blockers=blockers,
+            builds=builds,
             distributions=distributions,
             installs=installs,
             placements=placements,

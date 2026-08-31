@@ -116,6 +116,25 @@ from .jobs_response import JobsResponse
 from .library_installation_summary import LibraryInstallationSummary
 from .library_installation_summary_state import LibraryInstallationSummaryState
 from .library_model import LibraryModel
+from .library_placement_application import LibraryPlacementApplication
+from .library_placement_application_desired_state import LibraryPlacementApplicationDesiredState
+from .library_placement_application_progress import LibraryPlacementApplicationProgress
+from .library_placement_application_state import LibraryPlacementApplicationState
+from .library_placement_apply_request import LibraryPlacementApplyRequest
+from .library_placement_apply_request_desired_state import LibraryPlacementApplyRequestDesiredState
+from .library_placement_apply_request_invocation import LibraryPlacementApplyRequestInvocation
+from .library_placement_locations import LibraryPlacementLocations
+from .library_placement_node import LibraryPlacementNode
+from .library_placement_preview import LibraryPlacementPreview
+from .library_placement_preview_desired_state import LibraryPlacementPreviewDesiredState
+from .library_placement_preview_invocation import LibraryPlacementPreviewInvocation
+from .library_placement_preview_request import LibraryPlacementPreviewRequest
+from .library_placement_preview_request_desired_state import LibraryPlacementPreviewRequestDesiredState
+from .library_placement_preview_request_invocation import LibraryPlacementPreviewRequestInvocation
+from .library_placement_reason import LibraryPlacementReason
+from .library_placement_reason_severity import LibraryPlacementReasonSeverity
+from .library_placement_step import LibraryPlacementStep
+from .library_placement_step_kind import LibraryPlacementStepKind
 from .library_projection_reason import LibraryProjectionReason
 from .library_projection_reason_severity import LibraryProjectionReasonSeverity
 from .library_recipe_detail import LibraryRecipeDetail
@@ -452,6 +471,25 @@ __all__ = (
     "LibraryInstallationSummary",
     "LibraryInstallationSummaryState",
     "LibraryModel",
+    "LibraryPlacementApplication",
+    "LibraryPlacementApplicationDesiredState",
+    "LibraryPlacementApplicationProgress",
+    "LibraryPlacementApplicationState",
+    "LibraryPlacementApplyRequest",
+    "LibraryPlacementApplyRequestDesiredState",
+    "LibraryPlacementApplyRequestInvocation",
+    "LibraryPlacementLocations",
+    "LibraryPlacementNode",
+    "LibraryPlacementPreview",
+    "LibraryPlacementPreviewDesiredState",
+    "LibraryPlacementPreviewInvocation",
+    "LibraryPlacementPreviewRequest",
+    "LibraryPlacementPreviewRequestDesiredState",
+    "LibraryPlacementPreviewRequestInvocation",
+    "LibraryPlacementReason",
+    "LibraryPlacementReasonSeverity",
+    "LibraryPlacementStep",
+    "LibraryPlacementStepKind",
     "LibraryProjectionReason",
     "LibraryProjectionReasonSeverity",
     "LibraryRecipeDetail",

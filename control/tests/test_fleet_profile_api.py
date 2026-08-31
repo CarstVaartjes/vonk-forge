@@ -169,10 +169,17 @@ def test_profile_preview_exposes_blockers_and_apply_rejects_stale_plan() -> None
     )
 
     assert preview.status_code == 200
-    assert preview.json()["allowed"] is False
-    assert preview.json()["reasons"][0]["code"] == "profile.build_missing"
+    assert preview.json()["allowed"] is True
+    assert preview.json()["summary"]["builds"] == 1
+    assert preview.json()["assignments"][0]["actions"] == [
+        "create-placement",
+        "build",
+        "distribute-image",
+        "install",
+        "start",
+    ]
     assert applied.status_code == 409
-    assert "blocked" in applied.json()["detail"]
+    assert "stale" in applied.json()["detail"]
 
 
 def test_profile_routes_have_stable_openapi_operation_ids() -> None:

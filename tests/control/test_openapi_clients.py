@@ -122,6 +122,48 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
 
 
+def test_generated_library_placement_is_digest_bound_and_transport_neutral() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operations = _operations(schema)
+    components = schema["components"]["schemas"]
+
+    assert {
+        "previewLibraryPlacement",
+        "applyLibraryPlacement",
+        "getLibraryPlacement",
+    } <= set(operations)
+    assert operations["applyLibraryPlacement"]["responses"]["202"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/LibraryPlacementApplication"}
+    apply = components["LibraryPlacementApplyRequest"]
+    assert {"recipe_id", "node_ids", "plan_digest", "request_key"} <= set(
+        apply["required"]
+    )
+    assert set(apply["properties"]["invocation"]["enum"]) == {
+        "drag-drop",
+        "keyboard",
+        "button",
+    }
+    preview = components["LibraryPlacementPreview"]
+    assert {"selected_node_ids", "selected_nodes", "blockers", "locations"} <= set(
+        preview["required"]
+    )
+
+    from cluster_profiles.generated_control.models.library_placement_apply_request import (
+        LibraryPlacementApplyRequest,
+    )
+    request = LibraryPlacementApplyRequest(
+        recipe_id="00000000-0000-4000-8000-000000000001",
+        node_ids=["spk_" + "1" * 32],
+        desired_state="installed",
+        alias=None,
+        invocation="keyboard",
+        plan_digest="a" * 64,
+        request_key="00000000-0000-4000-8000-000000000002",
+    )
+    assert request.to_dict()["invocation"] == "keyboard"
+
+
 def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> None:
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
