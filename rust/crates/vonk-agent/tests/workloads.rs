@@ -385,6 +385,47 @@ fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16
     .unwrap();
 }
 
+fn write_managed_distributed_worker_run(root: &Path, run_id: &str, installation_id: &str) {
+    let installation = root.join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    let mut workload = spec();
+    bind_distributed_placement(&mut workload);
+    workload.security.host_network = true;
+    workload.topology = TopologySpec {
+        name: "dual".to_owned(),
+        node_count: 2,
+        rank: 1,
+        role: "worker".to_owned(),
+    };
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&workload).unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("runs").join(run_id)).unwrap();
+    let metadata = root.join("run-metadata").join(run_id);
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(
+        metadata.join("lifecycle.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "installation_id": installation_id,
+            "placement": {
+                "endpoint_address": "192.168.1.212",
+                "rank": 1,
+                "role": "worker",
+                "world_size": 2,
+                "local_address": "192.168.100.11",
+                "master_address": "192.168.100.10",
+                "master_port": 29500,
+                "port": 8101,
+                "reserved_memory_bytes": 1024
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 fn one_response_server(status: u16) -> (u16, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -2586,6 +2627,59 @@ fn start_keeps_agent_metadata_outside_workload_writable_state() {
 }
 
 #[test]
+fn collective_readiness_reconstructs_only_the_exact_retained_start() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let workload = spec();
+    let installation = directory.path().join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&workload).unwrap(),
+    )
+    .unwrap();
+    let placement = Placement {
+        endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
+        rank: 0,
+        role: "entrypoint".to_owned(),
+        world_size: 1,
+        local_address: None,
+        master_address: None,
+        master_port: None,
+        port: 8101,
+        reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+    };
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+    let launched = runtime
+        .prepare_start(&workload, installation_id, run_id, &placement)
+        .unwrap();
+    let retained = runtime
+        .prepare_retained_start(&workload, installation_id, run_id, &placement)
+        .unwrap();
+
+    assert_eq!(retained.image_digest, launched.image_digest);
+    assert_eq!(retained.main, launched.main);
+    assert!(retained.pre_start.is_empty());
+
+    let mut changed = placement;
+    changed.port += 1;
+    assert!(
+        runtime
+            .prepare_retained_start(&workload, installation_id, run_id, &changed)
+            .is_err()
+    );
+}
+
+#[test]
 fn managed_recipe_run_observation_reports_running_healthy_container() {
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
@@ -2669,6 +2763,51 @@ fn managed_recipe_run_observation_reports_running_unhealthy_container() {
     assert_eq!(observations.len(), 1);
     assert!(!observations[0].ready);
     server.join().unwrap();
+}
+
+#[test]
+fn distributed_worker_observes_collective_endpoint_owner() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_managed_distributed_worker_run(
+        directory.path(),
+        run_id,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+    );
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: true,
+            stdout: b"204".to_vec(),
+            stderr: vec![],
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(observations.len(), 1);
+    assert!(observations[0].ready);
+    let calls = runner.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, Program::Curl);
+    assert!(
+        calls[0]
+            .1
+            .iter()
+            .any(|value| value == "http://192.168.100.10:8101/v1/models")
+    );
+    assert!(
+        calls[0]
+            .1
+            .iter()
+            .all(|value| value != "http://192.168.100.11:8101/v1/models")
+    );
 }
 
 #[test]

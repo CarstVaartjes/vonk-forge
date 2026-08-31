@@ -21,6 +21,7 @@ from .distributed_lifecycle import DistributedLifecycleError
 from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
+    AgentNode,
     AgentOperation,
     AgentPresence,
     ArtifactJob,
@@ -72,6 +73,9 @@ class AgentJobQueue(Protocol):
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
+
+
+_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -644,10 +648,96 @@ class RecipeOperationService:
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
             start_order = _topology_order(revision.document, "start_order")
+            topology = recipe_topology(revision.document)
+            two_phase_start = world_size > 1 and topology.get("mode") == "distributed"
+            start_deadline = (
+                _distributed_start_deadline(revision.document, now=now)
+                if two_phase_start
+                else None
+            )
+            if two_phase_start:
+                advertised = {
+                    node.node_id: set(node.capabilities or ())
+                    for node in session.scalars(
+                        select(AgentNode).where(
+                            AgentNode.node_id.in_(
+                                [planned.node_id for planned in plan.nodes]
+                            )
+                        )
+                    )
+                }
+                if any(
+                    _DISTRIBUTED_START_CAPABILITY
+                    not in advertised.get(planned.node_id, set())
+                    for planned in plan.nodes
+                ):
+                    raise RecipeOperationConflict(
+                        "distributed start requires two-phase agent support"
+                    )
             run.state = "starting"
             run.updated_at = now
             recipe_digest = revision.content_sha256
             assert recipe_digest is not None
+            start_payloads = tuple(
+                (
+                    node.node_id,
+                    {
+                        "schema_version": 1,
+                        "run_id": run_id,
+                        "installation_id": plan.installation_id,
+                        "recipe_revision_id": plan.recipe_revision_id,
+                        "recipe_content_sha256": recipe_digest,
+                        "mapping_id": plan.mapping_id,
+                        "mapping_generation": plan.mapping_generation,
+                        "image_digest": installation.image_digest,
+                        "plan_digest": plan.plan_digest,
+                        "alias": plan.alias,
+                        "rank": node.rank,
+                        "role": node.role,
+                        "port": node.port,
+                        "reserved_memory_bytes": node.required_memory_bytes,
+                        "endpoint_address": (
+                            presences[node.node_id]
+                            if node.endpoint_owner
+                            else node.fabric_address
+                        ),
+                        "world_size": world_size,
+                        "local_address": (
+                            node.fabric_address if world_size > 1 else None
+                        ),
+                        "master_address": master_address,
+                        "master_port": master_port,
+                        **(
+                            {
+                                "phase": "rank-launch",
+                                "start_deadline": start_deadline,
+                            }
+                            if start_deadline is not None
+                            else {}
+                        ),
+                    },
+                )
+                for node in plan.nodes
+            )
+            phases = _role_phases(start_order, start_payloads)
+            if start_deadline is not None:
+                owner_payload = next(
+                    payload
+                    for node_id, payload in start_payloads
+                    if node_id == master.node_id
+                )
+                phases = (
+                    *phases,
+                    (
+                        (
+                            master.node_id,
+                            {
+                                **owner_payload,
+                                "phase": "collective-readiness",
+                            },
+                        ),
+                    ),
+                )
             job = self._queue_in_session(
                 session,
                 kind="recipe.start",
@@ -656,77 +746,15 @@ class RecipeOperationService:
                 plan_digest=plan.plan_digest,
                 actor=actor,
                 request_id=request_id,
-                node_payloads=tuple(
-                    (
-                        node.node_id,
-                        {
-                            "schema_version": 1,
-                            "run_id": run_id,
-                            "installation_id": plan.installation_id,
-                            "recipe_revision_id": plan.recipe_revision_id,
-                            "recipe_content_sha256": recipe_digest,
-                            "mapping_id": plan.mapping_id,
-                            "mapping_generation": plan.mapping_generation,
-                            "image_digest": installation.image_digest,
-                            "plan_digest": plan.plan_digest,
-                            "alias": plan.alias,
-                            "rank": node.rank,
-                            "role": node.role,
-                            "port": node.port,
-                            "reserved_memory_bytes": node.required_memory_bytes,
-                            "endpoint_address": (
-                                presences[node.node_id]
-                                if node.endpoint_owner
-                                else node.fabric_address
-                            ),
-                            "world_size": world_size,
-                            "local_address": node.fabric_address
-                            if world_size > 1
-                            else None,
-                            "master_address": master_address,
-                            "master_port": master_port,
-                        },
-                    )
-                    for node in plan.nodes
-                ),
-                phases=_role_phases(
-                    start_order,
-                    tuple(
-                        (
-                            node.node_id,
-                            {
-                                "schema_version": 1,
-                                "run_id": run_id,
-                                "installation_id": plan.installation_id,
-                                "recipe_revision_id": plan.recipe_revision_id,
-                                "recipe_content_sha256": recipe_digest,
-                                "mapping_id": plan.mapping_id,
-                                "mapping_generation": plan.mapping_generation,
-                                "image_digest": installation.image_digest,
-                                "plan_digest": plan.plan_digest,
-                                "alias": plan.alias,
-                                "rank": node.rank,
-                                "role": node.role,
-                                "port": node.port,
-                                "reserved_memory_bytes": node.required_memory_bytes,
-                                "endpoint_address": (
-                                    presences[node.node_id]
-                                    if node.endpoint_owner
-                                    else node.fabric_address
-                                ),
-                                "world_size": world_size,
-                                "local_address": node.fabric_address
-                                if world_size > 1
-                                else None,
-                                "master_address": master_address,
-                                "master_port": master_port,
-                            },
-                        )
-                        for node in plan.nodes
-                    ),
-                ),
+                node_payloads=start_payloads,
+                phases=phases,
                 authority_digest=recipe_digest,
                 now=now,
+                job_context=(
+                    {"start_deadline": start_deadline}
+                    if start_deadline is not None
+                    else None
+                ),
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -1449,11 +1477,23 @@ class RecipeOperationService:
             job = session.get(Job, operation_id)
             if job is None or not job.kind.startswith("recipe."):
                 raise KeyError(operation_id)
-            operation = session.scalar(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == job.id,
-                    AgentOperation.node_id == node_id,
+            operations = tuple(
+                session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == job.id,
+                        AgentOperation.node_id == node_id,
+                    )
                 )
+            )
+            active_operations = tuple(
+                item for item in operations if item.state not in _TERMINAL_JOB_STATES
+            )
+            operation = (
+                active_operations[0]
+                if len(active_operations) == 1
+                else operations[0]
+                if len(operations) == 1
+                else None
             )
             if operation is None:
                 raise RecipeOperationConflict("node is not part of operation group")
@@ -1560,20 +1600,52 @@ class RecipeOperationService:
                 )
             )
             assert node is not None
-            node.state = (
-                "running"
-                if job.kind == "recipe.start" and succeeded
-                else "stopped"
-                if succeeded
-                else "failed"
+            start_phase = (
+                operation.payload.get("phase") if job.kind == "recipe.start" else None
             )
-            if job.kind == "recipe.start" and succeeded:
-                endpoint, digest = _validate_start_evidence(
-                    session, owner_id, operation, evidence
+            if start_phase == "rank-launch":
+                node.state = "starting" if succeeded else "failed"
+                if succeeded:
+                    node.evidence_digest = _validate_rank_launch_evidence(
+                        session, owner_id, operation, evidence
+                    )
+                node.updated_at = now
+            elif start_phase == "collective-readiness":
+                node.state = "running" if succeeded else "failed"
+                if succeeded:
+                    endpoint, digest = _validate_start_evidence(
+                        session, owner_id, operation, evidence
+                    )
+                    for started_node in session.scalars(
+                        select(RunNode).where(RunNode.run_id == owner_id)
+                    ):
+                        if (
+                            started_node.state != "starting"
+                            and started_node.id != node.id
+                        ):
+                            raise RecipeOperationConflict(
+                                "collective readiness preceded rank launch"
+                            )
+                        started_node.state = "running"
+                        started_node.updated_at = now
+                    node.endpoint = {"url": endpoint}
+                    node.evidence_digest = digest
+                node.updated_at = now
+            else:
+                node.state = (
+                    "running"
+                    if job.kind == "recipe.start" and succeeded
+                    else "stopped"
+                    if succeeded
+                    else "failed"
                 )
-                node.endpoint = {"url": endpoint}
-                node.evidence_digest = digest
-            node.updated_at = now
+                if job.kind == "recipe.start" and succeeded:
+                    endpoint, digest = _validate_start_evidence(
+                        session, owner_id, operation, evidence
+                    )
+                    node.endpoint = {"url": endpoint}
+                    node.evidence_digest = digest
+                node.updated_at = now
         elif job.kind == "recipe.uninstall":
             node = session.scalar(
                 select(InstallationNode).where(
@@ -1625,7 +1697,13 @@ class RecipeOperationService:
                 node.state = "uninstalled" if succeeded else "failed"
                 node.updated_at = now
         recorded_result = dict(job.result) if isinstance(job.result, Mapping) else {}
-        raw_node_evidence = recorded_result.get("node_evidence", {})
+        evidence_field = (
+            "launch_evidence"
+            if job.kind == "recipe.start"
+            and operation.payload.get("phase") == "rank-launch"
+            else "node_evidence"
+        )
+        raw_node_evidence = recorded_result.get(evidence_field, {})
         if not isinstance(raw_node_evidence, Mapping):
             raise RecipeOperationConflict("recipe operation evidence is invalid")
         node_evidence = {
@@ -1639,7 +1717,7 @@ class RecipeOperationService:
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
             raise RecipeOperationConflict("recipe node evidence changed")
         node_evidence[node_id] = observed_evidence
-        job.result = {**recorded_result, "node_evidence": node_evidence}
+        job.result = {**recorded_result, evidence_field: node_evidence}
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
@@ -1650,9 +1728,22 @@ class RecipeOperationService:
         if phases:
             phase_index = _current_phase_index(children, phases)
             if phase_index is not None:
-                phase_nodes = {node_id for node_id, _payload in phases[phase_index]}
+                phase_operations = {
+                    operation_id
+                    for operation_id, _node_id, _payload in phases[phase_index]
+                    if operation_id
+                }
+                phase_nodes = {
+                    node_id for _operation_id, node_id, _payload in phases[phase_index]
+                }
                 phase_children = tuple(
-                    child for child in children if child.node_id in phase_nodes
+                    child
+                    for child in children
+                    if (
+                        child.id in phase_operations
+                        if phase_operations
+                        else child.node_id in phase_nodes
+                    )
                 )
                 if any(
                     child.state not in _TERMINAL_JOB_STATES for child in phase_children
@@ -1664,11 +1755,16 @@ class RecipeOperationService:
                     phase_index + 1 < len(phases)
                 ):
                     try:
+                        _enforce_start_deadline(job.payload, now=now)
                         enforce_recovery_deadline(job.payload, now=now)
                     except DistributedLifecycleError as error:
                         recovery_error = error
                     if recovery_error is None:
-                        for next_node_id, next_payload in phases[phase_index + 1]:
+                        for (
+                            next_operation_id,
+                            next_node_id,
+                            next_payload,
+                        ) in phases[phase_index + 1]:
                             self._agent_jobs.enqueue_in_session(
                                 session,
                                 job.id,
@@ -1676,7 +1772,7 @@ class RecipeOperationService:
                                 job.kind,
                                 job.authority_revision,
                                 next_payload,
-                                operation_id=str(uuid.uuid4()),
+                                operation_id=next_operation_id or str(uuid.uuid4()),
                             )
                         job.state = "running"
                         job.updated_at = now
@@ -1684,23 +1780,30 @@ class RecipeOperationService:
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
         if terminal:
             successful = sorted(
-                child.node_id for child in children if child.state == "succeeded"
+                {child.node_id for child in children if child.state == "succeeded"}
             )
             failed = sorted(
-                child.node_id for child in children if child.state == "failed"
+                {child.node_id for child in children if child.state == "failed"}
             )
             if job.kind == "recipe.start" and recovery_error is None:
                 try:
+                    _enforce_start_deadline(job.payload, now=now)
                     enforce_recovery_deadline(job.payload, now=now)
                 except DistributedLifecycleError as error:
                     recovery_error = error
             start_failed = bool(failed) or recovery_error is not None
             job.state = "failed" if start_failed else "succeeded"
-            job.result = {
+            projected_result = (
+                dict(job.result) if isinstance(job.result, Mapping) else {}
+            )
+            final_result = {
                 "successful_nodes": successful,
                 "failed_nodes": failed,
-                "node_evidence": node_evidence,
+                "node_evidence": projected_result.get("node_evidence", {}),
             }
+            if "launch_evidence" in projected_result:
+                final_result["launch_evidence"] = projected_result["launch_evidence"]
+            job.result = final_result
             if recovery_error is not None:
                 job.result = {
                     **job.result,
@@ -1822,6 +1925,12 @@ class RecipeOperationService:
                             "distributed recovery authority is unavailable"
                         )
                     flattened = tuple(item for phase in phases for item in phase)
+                    unique_payloads = tuple(
+                        {
+                            node_id: (node_id, payload)
+                            for node_id, payload in reversed(flattened)
+                        }.values()
+                    )
                     self._queue_in_session(
                         session,
                         kind="recipe.start",
@@ -1835,11 +1944,14 @@ class RecipeOperationService:
                                 f"vonk:distributed-recovery-start:{job.id}",
                             )
                         ),
-                        node_payloads=flattened,
+                        node_payloads=unique_payloads,
                         phases=phases,
                         authority_digest=revision.content_sha256,
                         now=now,
-                        job_context={"recovery": marker},
+                        job_context={
+                            "recovery": marker,
+                            "start_deadline": marker["deadline"],
+                        },
                     )
                     run.state = "starting"
                     run.route_state = "withdrawn"
@@ -2653,19 +2765,29 @@ class RecipeOperationService:
         if session.scalar(select(Job.id).where(Job.request_id == request_id)):
             raise RecipeOperationConflict("request key was already used differently")
         job_id = str(uuid.uuid4())
-        phase_groups = (
+        requested_phase_groups = (
             tuple(tuple(group) for group in phases)
             if phases is not None
             else (tuple(node_payloads),)
         )
-        if not phase_groups or any(not group for group in phase_groups):
+        if not requested_phase_groups or any(
+            not group for group in requested_phase_groups
+        ):
             raise RecipeOperationConflict("operation phases are invalid")
-        flattened = tuple(item for group in phase_groups for item in group)
+        flattened = tuple(item for group in requested_phase_groups for item in group)
         if {node_id for node_id, _payload in flattened} != {
             node_id for node_id, _payload in node_payloads
-        } or len({node_id for node_id, _payload in flattened}) != len(flattened):
+        } or len({node_id for node_id, _payload in node_payloads}) != len(
+            node_payloads
+        ):
             raise RecipeOperationConflict("operation phases do not match target nodes")
-        targets = sorted(node_id for node_id, _payload in flattened)
+        phase_groups = tuple(
+            tuple((str(uuid.uuid4()), node_id, payload) for node_id, payload in group)
+            for group in requested_phase_groups
+        )
+        targets = sorted(
+            {node_id for _operation_id, node_id, _payload in sum(phase_groups, ())}
+        )
         job_payload: dict[str, object] = {
             "schema_version": 1,
             "owner_kind": owner_kind,
@@ -2675,8 +2797,12 @@ class RecipeOperationService:
         if phases is not None:
             job_payload["phases"] = [
                 [
-                    {"node_id": node_id, "payload": dict(payload)}
-                    for node_id, payload in group
+                    {
+                        "operation_id": operation_id,
+                        "node_id": node_id,
+                        "payload": dict(payload),
+                    }
+                    for operation_id, node_id, payload in group
                 ]
                 for group in phase_groups
             ]
@@ -2699,7 +2825,7 @@ class RecipeOperationService:
         )
         session.add(job)
         session.flush()
-        for node_id, payload in phase_groups[0]:
+        for operation_id, node_id, payload in phase_groups[0]:
             self._agent_jobs.enqueue_in_session(
                 session,
                 job_id,
@@ -2707,7 +2833,7 @@ class RecipeOperationService:
                 kind,
                 authority_digest.removeprefix("sha256:"),
                 payload,
-                operation_id=str(uuid.uuid4()),
+                operation_id=operation_id,
             )
         return job
 
@@ -2810,6 +2936,39 @@ def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]
     return tuple(order)
 
 
+def _distributed_start_deadline(
+    document: Mapping[str, object], *, now: datetime
+) -> str:
+    runtime = document.get("runtime")
+    lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
+    readiness = lifecycle.get("readiness") if isinstance(lifecycle, Mapping) else None
+    timeout = (
+        readiness.get("timeout_seconds") if isinstance(readiness, Mapping) else None
+    )
+    if type(timeout) is not int or not 1 <= timeout <= 3600:
+        raise RecipeOperationConflict("distributed readiness timeout is invalid")
+    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+
+
+def _enforce_start_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:
+    value = payload.get("start_deadline")
+    if value is None:
+        return False
+    if not isinstance(value, str):
+        raise DistributedLifecycleError("distributed start deadline is invalid")
+    try:
+        deadline = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise DistributedLifecycleError(
+            "distributed start deadline is invalid"
+        ) from error
+    if deadline.tzinfo is None or deadline.utcoffset() is None:
+        raise DistributedLifecycleError("distributed start deadline is invalid")
+    if _aware(now) >= _aware(deadline):
+        raise DistributedLifecycleError("distributed start deadline elapsed")
+    return True
+
+
 def _role_phases(
     order: Sequence[str],
     node_payloads: Sequence[tuple[str, Mapping[str, object]]],
@@ -2834,42 +2993,66 @@ def _role_phases(
 
 def _stored_phases(
     payload: Mapping[str, object],
-) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
+) -> tuple[tuple[tuple[str, str, Mapping[str, object]], ...], ...]:
     raw_phases = payload.get("phases")
     if raw_phases is None:
         return ()
     if not isinstance(raw_phases, list) or not raw_phases:
         raise RecipeOperationConflict("stored operation phases are invalid")
-    phases: list[tuple[tuple[str, Mapping[str, object]], ...]] = []
-    seen: set[str] = set()
+    phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
+    seen_operations: set[str] = set()
+    seen_legacy_nodes: set[str] = set()
+    legacy_storage: bool | None = None
     for raw_phase in raw_phases:
         if not isinstance(raw_phase, list) or not raw_phase:
             raise RecipeOperationConflict("stored operation phases are invalid")
-        group: list[tuple[str, Mapping[str, object]]] = []
+        group: list[tuple[str, str, Mapping[str, object]]] = []
         for raw_item in raw_phase:
             if not isinstance(raw_item, Mapping):
                 raise RecipeOperationConflict("stored operation phases are invalid")
+            operation_id = raw_item.get("operation_id")
             node_id = raw_item.get("node_id")
             item_payload = raw_item.get("payload")
             if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
                 raise RecipeOperationConflict("stored operation phases are invalid")
-            if node_id in seen:
+            if operation_id is None:
+                if legacy_storage is False or node_id in seen_legacy_nodes:
+                    raise RecipeOperationConflict("stored operation phases are invalid")
+                legacy_storage = True
+                seen_legacy_nodes.add(node_id)
+                operation_id = ""
+            elif isinstance(operation_id, str):
+                if legacy_storage is True or operation_id in seen_operations:
+                    raise RecipeOperationConflict("stored operation phases are invalid")
+                legacy_storage = False
+                try:
+                    uuid.UUID(operation_id)
+                except ValueError:
+                    raise RecipeOperationConflict("stored operation phases are invalid")
+                seen_operations.add(operation_id)
+            else:
                 raise RecipeOperationConflict("stored operation phases are invalid")
-            seen.add(node_id)
-            group.append((node_id, dict(item_payload)))
+            group.append((operation_id, node_id, dict(item_payload)))
         phases.append(tuple(group))
     return tuple(phases)
 
 
 def _current_phase_index(
     children: Sequence[AgentOperation],
-    phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]],
+    phases: Sequence[Sequence[tuple[str, str, Mapping[str, object]]]],
 ) -> int | None:
-    child_nodes = {child.node_id for child in children}
+    child_operations = {child.id for child in children}
     for index in range(len(phases) - 1, -1, -1):
         phase = phases[index]
-        phase_nodes = {node_id for node_id, _payload in phase}
-        if phase_nodes <= child_nodes:
+        phase_operations = {
+            operation_id for operation_id, _node_id, _payload in phase if operation_id
+        }
+        phase_nodes = {node_id for _operation_id, node_id, _payload in phase}
+        if (
+            phase_operations <= child_operations
+            if phase_operations
+            else phase_nodes <= {child.node_id for child in children}
+        ):
             return index
     return None
 
@@ -3022,6 +3205,93 @@ def _record_image_import_evidence(
         )
 
 
+def _validate_rank_launch_evidence(
+    session: Session,
+    run_id: str,
+    operation: AgentOperation,
+    evidence: Mapping[str, object],
+) -> str:
+    expected_fields = {
+        "phase",
+        "run_id",
+        "recipe_revision_id",
+        "recipe_content_sha256",
+        "image_digest",
+        "artifact_set_digest",
+        "model_identity",
+        "rank",
+        "role",
+        "world_size",
+        "local_address",
+        "master_address",
+        "master_port",
+        "memory_reservation_bytes",
+        "process_running",
+        "fabric_projection_bound",
+        "launched",
+        "evidence_digest",
+    }
+    if (
+        set(evidence) != expected_fields
+        or evidence.get("phase") != "rank-launch"
+        or evidence.get("process_running") is not True
+        or evidence.get("fabric_projection_bound") is not True
+        or evidence.get("launched") is not True
+    ):
+        raise RecipeOperationConflict("rank launch evidence is invalid")
+    run = session.get(RecipeRun, run_id)
+    installation = (
+        session.get(RecipeInstallation, run.installation_id)
+        if run is not None
+        else None
+    )
+    revision = (
+        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        if installation is not None
+        else None
+    )
+    if revision is None or installation is None:
+        raise RecipeOperationConflict("start evidence authority is unavailable")
+    artifacts = revision.document.get("artifacts")
+    first = artifacts[0] if isinstance(artifacts, list) and artifacts else None
+    if not isinstance(first, Mapping):
+        raise RecipeOperationConflict("start evidence authority is invalid")
+    comparisons = {
+        "phase": "rank-launch",
+        "run_id": run_id,
+        "recipe_revision_id": operation.payload.get("recipe_revision_id"),
+        "recipe_content_sha256": operation.payload.get("recipe_content_sha256"),
+        "image_digest": installation.image_digest.removeprefix("sha256:"),
+        "model_identity": f"{first.get('repository')}@{first.get('revision')}",
+        "rank": operation.payload.get("rank"),
+        "role": operation.payload.get("role"),
+        "world_size": operation.payload.get("world_size"),
+        "local_address": str(operation.payload.get("local_address")),
+        "master_address": str(operation.payload.get("master_address")),
+        "master_port": operation.payload.get("master_port"),
+        "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
+    }
+    if any(evidence.get(key) != value for key, value in comparisons.items()):
+        raise RecipeOperationConflict(
+            "rank launch evidence does not match its fenced request"
+        )
+    artifact_set_digest = evidence.get("artifact_set_digest")
+    if (
+        not isinstance(artifact_set_digest, str)
+        or len(artifact_set_digest) != 64
+        or any(character not in "0123456789abcdef" for character in artifact_set_digest)
+    ):
+        raise RecipeOperationConflict("start artifact evidence is invalid")
+    digest = evidence.get("evidence_digest")
+    identity = {
+        key: value for key, value in evidence.items() if key != "evidence_digest"
+    }
+    observed_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
+    if not isinstance(digest, str) or digest != observed_digest:
+        raise RecipeOperationConflict("start evidence digest is invalid")
+    return digest
+
+
 def _validate_start_evidence(
     session: Session,
     run_id: str,
@@ -3041,6 +3311,9 @@ def _validate_start_evidence(
         "ready",
         "evidence_digest",
     }
+    phase = operation.payload.get("phase")
+    if phase == "collective-readiness":
+        expected_fields |= {"phase", "run_id", "role"}
     if set(evidence) != expected_fields or evidence.get("ready") is not True:
         raise RecipeOperationConflict("start evidence is invalid")
     run = session.get(RecipeRun, run_id)
@@ -3080,6 +3353,14 @@ def _validate_start_evidence(
         "endpoint": expected_endpoint,
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
+    if phase == "collective-readiness":
+        comparisons.update(
+            {
+                "phase": "collective-readiness",
+                "run_id": run_id,
+                "role": operation.payload.get("role"),
+            }
+        )
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "start evidence does not match its fenced request"

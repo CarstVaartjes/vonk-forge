@@ -658,6 +658,42 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         })
     }
 
+    /// Reconstruct the exact runtime plan for a previously launched service.
+    ///
+    /// Collective readiness is deliberately a separate, non-starting phase for
+    /// distributed workloads.  It may inspect only the run identity retained
+    /// by `prepare_start`; a changed request, installation, specification, or
+    /// placement fails closed instead of being allowed to inspect a different
+    /// container under the same run id.
+    pub fn prepare_retained_start(
+        &self,
+        spec: &WorkloadSpec,
+        installation_id: &str,
+        run_id: &str,
+        placement: &Placement,
+    ) -> Result<RuntimeStartPlan, OciError> {
+        self.verify_image(spec)?;
+        let Some((retained_spec, retained_installation_id, retained_placement)) =
+            self.load_run_lifecycle(run_id)?
+        else {
+            return Err(OciError::Runtime);
+        };
+        if retained_spec != *spec
+            || retained_installation_id != installation_id
+            || retained_placement != *placement
+        {
+            return Err(OciError::Runtime);
+        }
+        Ok(RuntimeStartPlan {
+            image_digest: format!(
+                "sha256:{}",
+                image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
+            ),
+            pre_start: Vec::new(),
+            main: self.start_arguments(spec, installation_id, run_id, placement)?,
+        })
+    }
+
     pub fn prepare_job_start(
         &self,
         spec: &WorkloadSpec,
@@ -797,9 +833,19 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             probes.push(RecipeRunProbe {
                 run_id,
-                address: placement
-                    .endpoint_address
-                    .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+                // A distributed run is admitted as one collective service and
+                // exposes readiness only on the retained endpoint owner. This
+                // avoids deterministically failing a healthy headless worker.
+                // Rank-loss detection here depends on that collective endpoint
+                // becoming unhealthy; exact per-rank liveness requires a future
+                // separately authorized host-runtime observation protocol.
+                address: if placement.world_size > 1 {
+                    placement.master_address.ok_or(OciError::Artifact)?
+                } else {
+                    placement
+                        .endpoint_address
+                        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+                },
                 port: placement.port,
                 health_path: endpoint.health_path.clone(),
             });

@@ -32,6 +32,8 @@ from .recipe_contract import recipe_topology
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .topology import Placement, TopologyError, validate_topology
 
+_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
+
 
 class RunPlanConflict(RuntimeError):
     pass
@@ -138,6 +140,16 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
+            agent_capabilities = {
+                node.node_id: tuple(node.capabilities or ())
+                for node in session.scalars(
+                    select(AgentNode).where(
+                        AgentNode.node_id.in_(
+                            [mapping_node.node_id for mapping_node in mapping_nodes]
+                        )
+                    )
+                )
+            }
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
                 for row in session.scalars(
@@ -206,6 +218,7 @@ class RunAdmissionService:
         else:
             port = int(interface["port"])
         multi_node = len(ordered) > 1
+        two_phase_start = multi_node and topology.get("mode") == "distributed"
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
@@ -243,6 +256,17 @@ class RunAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         "run.stale_inventory", "GPU node memory inventory is stale."
+                    )
+                )
+            if (
+                two_phase_start
+                and _DISTRIBUTED_START_CAPABILITY
+                not in agent_capabilities.get(placement.node_id, ())
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        "run.distributed_start_capability_missing",
+                        "Spark agent does not support two-phase distributed start.",
                     )
                 )
             role = role_by_name.get(placement.role)

@@ -14,7 +14,7 @@ use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{AgentHttpClient, ClientError},
-    health::{HealthEvidence, wait_ready},
+    health::{HealthEvidence, wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
     oci::OciRuntime,
@@ -26,7 +26,7 @@ use crate::{
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, RecipeJobEvidence,
     RecipeJobFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunResult, RecipeOperationRequest, canonical_json, hex_sha256,
+    RecipeJobRunResult, RecipeOperationRequest, RecipeStartPhase, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -212,6 +212,88 @@ where
     tokio::select! {
         result = readiness => result.is_ok(),
         running = runtime_guard => running,
+    }
+}
+
+async fn wait_ready_with_runtime_guard_and_cancellation<R, G>(
+    readiness: R,
+    runtime_guard: G,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+) -> bool
+where
+    R: Future<Output = Result<(), crate::health::HealthError>>,
+    G: Future<Output = bool>,
+{
+    if *cancellation.borrow() {
+        return false;
+    }
+    tokio::select! {
+        result = readiness => result.is_ok(),
+        running = runtime_guard => running,
+        _ = cancellation.changed() => false,
+    }
+}
+
+fn evidence_with_digest(mut evidence: Value) -> (Value, String) {
+    let evidence_digest = canonical_json(&evidence)
+        .map(|value| hex_sha256(&value))
+        .unwrap_or_default();
+    if let Some(document) = evidence.as_object_mut() {
+        document.insert(
+            "evidence_digest".to_owned(),
+            Value::String(evidence_digest.clone()),
+        );
+    }
+    (evidence, evidence_digest)
+}
+
+fn before_phase_deadline(
+    lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    start_deadline: Option<&DateTime<FixedOffset>>,
+) -> bool {
+    let lease = lease_deadline.borrow().with_timezone(&Utc);
+    let effective = start_deadline
+        .map(|value| value.with_timezone(&Utc).min(lease))
+        .unwrap_or(lease);
+    Utc::now() < effective
+}
+
+async fn wait_for_launch_stability(
+    mut lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    start_deadline: Option<DateTime<FixedOffset>>,
+    duration: Duration,
+) -> bool {
+    let stable_at = tokio::time::Instant::now() + duration;
+    loop {
+        if *cancellation.borrow()
+            || !before_phase_deadline(&lease_deadline, start_deadline.as_ref())
+        {
+            return false;
+        }
+        let lease = lease_deadline.borrow().with_timezone(&Utc);
+        let effective = start_deadline
+            .as_ref()
+            .map(|value| value.with_timezone(&Utc).min(lease))
+            .unwrap_or(lease);
+        let until_deadline = (effective - Utc::now()).to_std().unwrap_or(Duration::ZERO);
+        tokio::select! {
+            _ = tokio::time::sleep_until(stable_at) => {
+                return before_phase_deadline(&lease_deadline, start_deadline.as_ref())
+                    && !*cancellation.borrow();
+            }
+            _ = tokio::time::sleep(until_deadline) => return false,
+            changed = lease_deadline.changed() => {
+                if changed.is_err() {
+                    return false;
+                }
+            }
+            changed = cancellation.changed() => {
+                if changed.is_err() || *cancellation.borrow() {
+                    return false;
+                }
+            }
+        }
     }
 }
 
@@ -780,16 +862,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
-                if self
-                    .runtime
-                    .ensure_memory_available(
-                        request.reserved_memory_bytes,
-                        Path::new("/proc/meminfo"),
-                    )
-                    .is_err()
-                {
-                    return failed("local memory capacity changed after run admission");
-                }
                 let placement = Placement {
                     endpoint_address: Some(request.endpoint_address),
                     rank: request.rank,
@@ -802,7 +874,39 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     reserved_memory_bytes: request.reserved_memory_bytes,
                 };
                 let run_id = request.run_id.to_string();
-                let plan =
+                let collective_readiness =
+                    matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
+                let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
+                if request.phase.is_some()
+                    && !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                {
+                    return failed("distributed start deadline elapsed before execution");
+                }
+                let plan = if collective_readiness {
+                    match self.runtime.prepare_retained_start(
+                        &spec,
+                        &installation_id,
+                        &run_id,
+                        &placement,
+                    ) {
+                        Ok(plan) => plan,
+                        Err(_) => {
+                            return failed(
+                                "retained workload identity does not match collective readiness",
+                            );
+                        }
+                    }
+                } else {
+                    if self
+                        .runtime
+                        .ensure_memory_available(
+                            request.reserved_memory_bytes,
+                            Path::new("/proc/meminfo"),
+                        )
+                        .is_err()
+                    {
+                        return failed("local memory capacity changed after run admission");
+                    }
                     match self
                         .runtime
                         .prepare_start(&spec, &installation_id, &run_id, &placement)
@@ -811,7 +915,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Err(_) => {
                             return failed("container runtime could not prepare the workload");
                         }
-                    };
+                    }
+                };
+                if collective_readiness && !plan.pre_start.is_empty() {
+                    return failed("retained workload unexpectedly contains start hooks");
+                }
                 for hook in plan.pre_start {
                     let mut arguments = vec![plan.image_digest.clone()];
                     arguments.extend(hook);
@@ -827,13 +935,119 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let mut arguments = vec![plan.image_digest];
                 arguments.extend(plan.main);
                 let runtime_guard_arguments = arguments.clone();
-                if self
+                if collective_readiness {
+                    if self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::RunInspect,
+                            runtime_guard_arguments.clone(),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        return failed("collective workload is not running with exact identity");
+                    }
+                } else if self
                     .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                     .await
                     .is_err()
                 {
                     let _ = self.runtime.complete_stop(&run_id);
                     return failed("container runtime could not start the workload");
+                }
+                if rank_launch {
+                    let first_inspect = self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::RunInspect,
+                            runtime_guard_arguments.clone(),
+                        )
+                        .await;
+                    let stable = if first_inspect.is_err()
+                        || *cancellation.borrow()
+                        || !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                    {
+                        false
+                    } else {
+                        wait_for_launch_stability(
+                            lease_deadline.clone(),
+                            cancellation.clone(),
+                            request.start_deadline.clone(),
+                            Duration::from_secs(2),
+                        )
+                        .await
+                            && self
+                                .execute_host_runtime(
+                                    claim,
+                                    HostRuntimeAction::RunInspect,
+                                    runtime_guard_arguments.clone(),
+                                )
+                                .await
+                                .is_ok()
+                            && before_phase_deadline(
+                                &lease_deadline,
+                                request.start_deadline.as_ref(),
+                            )
+                    };
+                    if !stable {
+                        let _ = self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::Stop,
+                                vec![
+                                    run_id.clone(),
+                                    spec.lifecycle.stop_timeout_seconds.to_string(),
+                                ],
+                            )
+                            .await;
+                        let _ = self.runtime.complete_stop(&run_id);
+                        return failed("rank process did not remain stable after launch");
+                    }
+                    let artifact_set_digest =
+                        match self.runtime.artifact_set_digest(&installation_id) {
+                            Ok(digest) => digest,
+                            Err(_) => {
+                                let _ = self
+                                    .execute_host_runtime(
+                                        claim,
+                                        HostRuntimeAction::Stop,
+                                        vec![
+                                            run_id.clone(),
+                                            spec.lifecycle.stop_timeout_seconds.to_string(),
+                                        ],
+                                    )
+                                    .await;
+                                let _ = self.runtime.complete_stop(&run_id);
+                                return failed("rank launch evidence is unavailable");
+                            }
+                        };
+                    let evidence = json!({
+                        "phase": "rank-launch",
+                        "run_id": run_id,
+                        "recipe_revision_id": request.recipe_revision_id.to_string(),
+                        "recipe_content_sha256": request.recipe_content_sha256,
+                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
+                        "artifact_set_digest": artifact_set_digest,
+                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
+                        "rank": request.rank,
+                        "role": request.role,
+                        "world_size": request.world_size,
+                        "local_address": request.local_address,
+                        "master_address": request.master_address,
+                        "master_port": request.master_port,
+                        "memory_reservation_bytes": request.reserved_memory_bytes,
+                        "process_running": true,
+                        "fabric_projection_bound": true,
+                        "launched": true,
+                    });
+                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
+                    return ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "evidence": evidence,
+                            "evidence_digest": evidence_digest,
+                        }),
+                    };
                 }
                 let runtime_guard = async {
                     loop {
@@ -851,29 +1065,87 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }
                     }
                 };
-                if !wait_ready_with_runtime_guard(
-                    wait_ready(
-                        request.endpoint_address,
-                        request.port,
-                        &endpoint.health_path,
-                        lease_deadline,
-                    ),
-                    runtime_guard,
-                )
-                .await
-                {
-                    let _ = self
-                        .execute_host_runtime(
-                            claim,
-                            HostRuntimeAction::Stop,
-                            vec![
-                                run_id.clone(),
-                                spec.lifecycle.stop_timeout_seconds.to_string(),
-                            ],
-                        )
-                        .await;
-                    let _ = self.runtime.complete_stop(&run_id);
+                let ready = if collective_readiness {
+                    wait_ready_with_runtime_guard_and_cancellation(
+                        wait_ready_until(
+                            request.endpoint_address,
+                            request.port,
+                            &endpoint.health_path,
+                            lease_deadline,
+                            request.start_deadline.clone(),
+                        ),
+                        runtime_guard,
+                        cancellation.clone(),
+                    )
+                    .await
+                } else {
+                    wait_ready_with_runtime_guard(
+                        wait_ready(
+                            request.endpoint_address,
+                            request.port,
+                            &endpoint.health_path,
+                            lease_deadline,
+                        ),
+                        runtime_guard,
+                    )
+                    .await
+                };
+                if !ready {
+                    if !collective_readiness {
+                        let _ = self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::Stop,
+                                vec![
+                                    run_id.clone(),
+                                    spec.lifecycle.stop_timeout_seconds.to_string(),
+                                ],
+                            )
+                            .await;
+                        let _ = self.runtime.complete_stop(&run_id);
+                    }
                     return failed("workload did not become ready before its deadline");
+                }
+                if collective_readiness {
+                    let artifact_set_digest =
+                        match self.runtime.artifact_set_digest(&installation_id) {
+                            Ok(digest) => digest,
+                            Err(_) => {
+                                return failed("collective readiness evidence is unavailable");
+                            }
+                        };
+                    let endpoint_url = format!(
+                        "http://{}:{}",
+                        match request.endpoint_address {
+                            std::net::IpAddr::V4(address) => address.to_string(),
+                            std::net::IpAddr::V6(address) => format!("[{address}]"),
+                        },
+                        request.port
+                    );
+                    let evidence = json!({
+                        "phase": "collective-readiness",
+                        "run_id": run_id,
+                        "recipe_revision_id": request.recipe_revision_id.to_string(),
+                        "recipe_content_sha256": request.recipe_content_sha256,
+                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
+                        "artifact_set_digest": artifact_set_digest,
+                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
+                        "rank": request.rank,
+                        "role": request.role,
+                        "world_size": request.world_size,
+                        "endpoint": endpoint_url,
+                        "memory_reservation_bytes": request.reserved_memory_bytes,
+                        "ready": true,
+                    });
+                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
+                    return ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "endpoint": endpoint_url,
+                            "evidence": evidence,
+                            "evidence_digest": evidence_digest,
+                        }),
+                    };
                 }
                 let evidence = HealthEvidence {
                     recipe_revision_id: request.recipe_revision_id.to_string(),
@@ -1496,7 +1768,8 @@ mod tests {
     use super::{
         ExecutionResult, Executor, InterruptibleJob, LoopClient, RunOncePolicy,
         normalize_execution_result, output_media_type, run_interruptible_job,
-        run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_ready_with_runtime_guard,
+        wait_for_launch_stability, wait_ready_with_runtime_guard,
+        run_once_with_claim_hook, run_once_with_heartbeat_interval,
     };
     use crate::{client::ClientError, runtime_identity::AgentRuntimeIdentity, state::StateStore};
     use async_trait::async_trait;
@@ -1642,6 +1915,26 @@ mod tests {
         let runtime_guard = std::future::pending::<bool>();
 
         assert!(wait_ready_with_runtime_guard(async { Ok(()) }, runtime_guard).await);
+    }
+
+    #[tokio::test]
+    async fn rank_launch_stability_is_capped_by_the_signed_deadline() {
+        let lease = (Utc::now() + ChronoDuration::minutes(5))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let immutable = (Utc::now() - ChronoDuration::milliseconds(1))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let (_lease_sender, lease_receiver) = tokio::sync::watch::channel(lease);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+
+        assert!(
+            !wait_for_launch_stability(
+                lease_receiver,
+                cancellation,
+                Some(immutable),
+                Duration::from_secs(30),
+            )
+            .await
+        );
     }
 
     #[derive(Clone)]

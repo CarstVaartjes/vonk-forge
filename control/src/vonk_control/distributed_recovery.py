@@ -15,6 +15,7 @@ from vonk_agent_protocol import canonical_message
 
 from .distributed_lifecycle import DistributedLifecycleError
 from .models import (
+    AgentNode,
     AgentOperation,
     AgentPresence,
     Job,
@@ -24,6 +25,8 @@ from .models import (
     RunNode,
 )
 from .recipe_contract import recipe_topology
+
+_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 
 
 class _RecoveryJobQueue(Protocol):
@@ -97,9 +100,7 @@ class DistributedRecoveryCoordinator:
                         break
                     continue
                 try:
-                    authority = _recovery_authority(
-                        session, run, now, failed[0].rank
-                    )
+                    authority = _recovery_authority(session, run, now, failed[0].rank)
                 except DistributedLifecycleError as error:
                     run.state = "failed"
                     run.route_state = "withdrawn"
@@ -177,9 +178,7 @@ def recovery_start_plan(
     return phases, marker
 
 
-def enforce_recovery_deadline(
-    payload: Mapping[str, object], *, now: datetime
-) -> bool:
+def enforce_recovery_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:
     """Validate and enforce a retained recovery marker at a trust boundary."""
 
     value = payload.get("recovery")
@@ -297,6 +296,24 @@ def _recovery_authority(
                 "distributed recovery endpoint evidence is missing"
             )
         presences[node.node_id] = presence.management_address
+    start_deadline = (
+        now + timedelta(seconds=min(readiness_timeout, stop_timeout))
+    ).isoformat()
+    advertised = {
+        node.node_id: set(node.capabilities or ())
+        for node in session.scalars(
+            select(AgentNode).where(
+                AgentNode.node_id.in_([run_node.node_id for run_node in nodes])
+            )
+        )
+    }
+    if any(
+        _DISTRIBUTED_START_CAPABILITY not in advertised.get(run_node.node_id, set())
+        for run_node in nodes
+    ):
+        raise DistributedLifecycleError(
+            "distributed recovery requires two-phase agent support"
+        )
     start_payloads: dict[str, tuple[str, dict[str, object]]] = {}
     for node in nodes:
         plan = by_rank[node.rank]
@@ -328,6 +345,8 @@ def _recovery_authority(
                 "local_address": local_address,
                 "master_address": master_address,
                 "master_port": master_port,
+                "phase": "rank-launch",
+                "start_deadline": start_deadline,
             },
         )
     start_order = topology.get("start_order")
@@ -342,13 +361,23 @@ def _recovery_authority(
         or len(stop_order) != len(roles)
     ):
         raise DistributedLifecycleError("distributed recovery order is invalid")
+    owner_role = owner.get("role")
+    if not isinstance(owner_role, str) or owner_role not in start_payloads:
+        raise DistributedLifecycleError("distributed recovery endpoint is invalid")
+    owner_node_id, owner_payload = start_payloads[owner_role]
     return {
-        "deadline": (
-            now + timedelta(seconds=min(readiness_timeout, stop_timeout))
-        ).isoformat(),
+        "deadline": start_deadline,
         "failed_rank": failed_rank,
         "recipe_content_sha256": revision.content_sha256,
-        "start_phases": [[start_payloads[str(role)]] for role in start_order],
+        "start_phases": [
+            *[[start_payloads[str(role)]] for role in start_order],
+            [
+                (
+                    owner_node_id,
+                    {**owner_payload, "phase": "collective-readiness"},
+                )
+            ],
+        ],
         "stop_phases": [
             [
                 (
@@ -398,12 +427,26 @@ def _enqueue_recovery_stop(
     if session.scalar(select(Job.id).where(Job.request_id == request_id)):
         raise DistributedLifecycleError("distributed recovery is already queued")
     job_id = str(uuid.uuid4())
+    stop_phase_operations = tuple(
+        tuple((str(uuid.uuid4()), node_id, payload) for node_id, payload in group)
+        for group in stop_phases
+    )
     job_payload = {
         "schema_version": 1,
         "owner_kind": "run",
         "owner_id": run.id,
         "plan_digest": run.plan_digest,
-        "phases": _encode_phases(stop_phases),
+        "phases": [
+            [
+                {
+                    "operation_id": operation_id,
+                    "node_id": node_id,
+                    "payload": json.loads(canonical_message(payload)),
+                }
+                for operation_id, node_id, payload in group
+            ]
+            for group in stop_phase_operations
+        ],
         "recovery": {
             "schema_version": 1,
             "failed_rank": failed_rank,
@@ -427,7 +470,7 @@ def _enqueue_recovery_stop(
     )
     session.add(job)
     session.flush()
-    for node_id, payload in stop_phases[0]:
+    for operation_id, node_id, payload in stop_phase_operations[0]:
         queue.enqueue_in_session(
             session,
             job.id,
@@ -435,7 +478,7 @@ def _enqueue_recovery_stop(
             "recipe.stop",
             recipe_digest.removeprefix("sha256:"),
             payload,
-            operation_id=str(uuid.uuid4()),
+            operation_id=operation_id,
         )
     return job
 
@@ -458,7 +501,6 @@ def _decode_phases(
     if not isinstance(value, list) or not value:
         raise DistributedLifecycleError("distributed recovery phases are invalid")
     phases: list[tuple[tuple[str, Mapping[str, object]], ...]] = []
-    seen: set[str] = set()
     for raw_group in value:
         if not isinstance(raw_group, list) or not raw_group:
             raise DistributedLifecycleError("distributed recovery phases are invalid")
@@ -470,15 +512,10 @@ def _decode_phases(
                 )
             node_id = item.get("node_id")
             item_payload = item.get("payload")
-            if (
-                not isinstance(node_id, str)
-                or node_id in seen
-                or not isinstance(item_payload, Mapping)
-            ):
+            if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
                 raise DistributedLifecycleError(
                     "distributed recovery phases are invalid"
                 )
-            seen.add(node_id)
             group.append((node_id, dict(item_payload)))
         phases.append(tuple(group))
     return tuple(phases)

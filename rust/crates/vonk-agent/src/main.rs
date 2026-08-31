@@ -189,6 +189,7 @@ async fn run_control_lane(
         "recipe.job.run.v1",
         "recipe.install",
         "recipe.start",
+        "recipe.start.two-phase.v1",
         "recipe.stop",
         "recipe.uninstall",
         "recipe.model-uninstall.v1",

@@ -508,6 +508,15 @@ pub struct RecipeInstallRequest {
     pub schema_version: u8,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum RecipeStartPhase {
+    #[serde(rename = "rank-launch")]
+    RankLaunch,
+    #[serde(rename = "collective-readiness")]
+    CollectiveReadiness,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeStartRequest {
@@ -520,6 +529,8 @@ pub struct RecipeStartRequest {
     pub master_port: Option<u16>,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<RecipeStartPhase>,
     pub plan_digest: String,
     pub port: u16,
     pub rank: u32,
@@ -529,6 +540,8 @@ pub struct RecipeStartRequest {
     pub role: String,
     pub run_id: Uuid,
     pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_deadline: Option<DateTime<FixedOffset>>,
     pub world_size: u32,
 }
 
@@ -618,6 +631,19 @@ impl RecipeOperationRequest {
                     && valid_role(&value.role)
             }
             Self::Start(value) => {
+                let valid_phase = match (&value.phase, &value.start_deadline) {
+                    (None, None) => true,
+                    (Some(RecipeStartPhase::RankLaunch), Some(deadline)) => {
+                        value.world_size > 1 && deadline.offset().local_minus_utc() == 0
+                    }
+                    (Some(RecipeStartPhase::CollectiveReadiness), Some(deadline)) => {
+                        value.world_size > 1
+                            && value.local_address.is_some()
+                            && value.local_address == value.master_address
+                            && deadline.offset().local_minus_utc() == 0
+                    }
+                    _ => false,
+                };
                 valid_common(value.schema_version, &value.plan_digest)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && valid_oci_digest(&value.image_digest)
@@ -632,6 +658,7 @@ impl RecipeOperationRequest {
                     && !value.endpoint_address.is_unspecified()
                     && !value.endpoint_address.is_multicast()
                     && !link_local(value.endpoint_address)
+                    && valid_phase
                     && if value.world_size == 1 {
                         value.rank == 0
                             && value.local_address.is_none()
@@ -676,6 +703,180 @@ impl RecipeOperationRequest {
         } else {
             Err(ProtocolError::Identity("recipe payload"))
         }
+    }
+}
+
+#[cfg(test)]
+mod recipe_start_tests {
+    use super::*;
+
+    fn start_payload(
+        world_size: u32,
+        rank: u32,
+        local_address: Option<&str>,
+        master_address: Option<&str>,
+        phase: Option<&str>,
+    ) -> Value {
+        let mut payload = serde_json::json!({
+            "alias": "distributed-model",
+            "endpoint_address": "100.100.20.30",
+            "image_digest": format!("sha256:{}", "a".repeat(64)),
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "local_address": local_address,
+            "master_address": master_address,
+            "master_port": if world_size > 1 { Some(29500) } else { None },
+            "mapping_generation": 1,
+            "mapping_id": "00000000-0000-4000-8000-000000000002",
+            "plan_digest": "b".repeat(64),
+            "port": 8000,
+            "rank": rank,
+            "recipe_content_sha256": "c".repeat(64),
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
+            "reserved_memory_bytes": 1024,
+            "role": if rank == 0 { "entrypoint" } else { "worker" },
+            "run_id": "00000000-0000-4000-8000-000000000004",
+            "schema_version": 1,
+            "world_size": world_size,
+        });
+        if let Some(phase) = phase {
+            let document = payload.as_object_mut().unwrap();
+            document.insert("phase".to_owned(), Value::String(phase.to_owned()));
+            document.insert(
+                "start_deadline".to_owned(),
+                Value::String("2026-09-01T12:00:00+00:00".to_owned()),
+            );
+        }
+        payload
+    }
+
+    fn claim(payload: Value) -> AgentClaim {
+        AgentClaim {
+            attempt: 1,
+            authority_revision: "d".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
+            job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.start".to_owned(),
+            operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        }
+    }
+
+    fn parsed_start(payload: Value) -> Result<RecipeStartRequest, ProtocolError> {
+        match RecipeOperationRequest::parse(&claim(payload))? {
+            RecipeOperationRequest::Start(request) => Ok(request),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn legacy_start_payloads_without_a_phase_remain_accepted_and_omit_the_field() {
+        let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
+        assert_eq!(single.phase, None);
+        assert_eq!(single.start_deadline, None);
+        let legacy_wire = serde_json::to_value(single).unwrap();
+        assert!(legacy_wire.get("phase").is_none());
+        assert!(legacy_wire.get("start_deadline").is_none());
+
+        let distributed = parsed_start(start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(distributed.phase, None);
+        assert_eq!(distributed.start_deadline, None);
+    }
+
+    #[test]
+    fn distributed_start_accepts_rank_launch_and_exact_owner_collective_readiness() {
+        let launch = parsed_start(start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        ))
+        .unwrap();
+        assert_eq!(launch.phase, Some(RecipeStartPhase::RankLaunch));
+
+        // Endpoint ownership is identified by the rank's exact local fabric
+        // address matching the signed rendezvous address; it need not be rank zero.
+        let collective = parsed_start(start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.3"),
+            Some("collective-readiness"),
+        ))
+        .unwrap();
+        assert_eq!(
+            collective.phase,
+            Some(RecipeStartPhase::CollectiveReadiness)
+        );
+    }
+
+    #[test]
+    fn phased_start_rejects_unknown_single_node_and_non_owner_phases() {
+        for payload in [
+            start_payload(1, 0, None, None, Some("rank-launch")),
+            start_payload(1, 0, None, None, Some("collective-readiness")),
+            start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("collective-readiness"),
+            ),
+            start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("launch"),
+            ),
+        ] {
+            assert!(parsed_start(payload).is_err());
+        }
+
+        let mut missing_deadline = start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        );
+        missing_deadline
+            .as_object_mut()
+            .unwrap()
+            .remove("start_deadline");
+        assert!(parsed_start(missing_deadline).is_err());
+
+        let mut legacy_with_deadline =
+            start_payload(2, 1, Some("192.168.100.3"), Some("192.168.100.2"), None);
+        legacy_with_deadline.as_object_mut().unwrap().insert(
+            "start_deadline".to_owned(),
+            Value::String("2026-09-01T12:00:00+00:00".to_owned()),
+        );
+        assert!(parsed_start(legacy_with_deadline).is_err());
+
+        let mut non_utc_deadline = start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        );
+        non_utc_deadline.as_object_mut().unwrap().insert(
+            "start_deadline".to_owned(),
+            Value::String("2026-09-01T14:00:00+02:00".to_owned()),
+        );
+        assert!(parsed_start(non_utc_deadline).is_err());
     }
 }
 

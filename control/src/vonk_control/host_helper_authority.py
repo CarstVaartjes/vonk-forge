@@ -627,6 +627,10 @@ class HostRuntimeAuthorityService:
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
+                or (
+                    operation.payload.get("phase") == "collective-readiness"
+                    and action is not ContainerRuntimeAction.RUN_INSPECT
+                )
             ):
                 raise HostHelperAuthorityError(
                     "container runtime action authority is stale"
