@@ -405,7 +405,7 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
         "lfm2-5-vl-3b-vllm028",
     )
     assert (glm_nvfp4.content_sha256, glm_nvfp4.alias) == (
-        "44678c6c6a86bca5a70dd10144278d98e1e9e9f8dd56bfcec3dc16df52bd2351",
+        "713ef2a7f87998e2a99447e6dabc3838114c41c2ee2977dc47c79d5bd298b059",
         "glm-5.3-flash",
     )
     assert glm_nvfp4.higher_tiers["stress"] == (
