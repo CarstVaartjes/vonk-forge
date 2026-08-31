@@ -1564,7 +1564,7 @@
       ]
     },
     "vonk-forge/wan-dancer-14b-pytorch-single": {
-      "content_sha256": "a025b2b3d701f60857370a783041e18356d639b1d61f38b8eab816c7f2d0601b",
+      "content_sha256": "950296d999671c60362fecb5623d0bf4ad15cbf2d3b6863a9c87ef2cf9fdd940",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1644,7 +1644,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": {
-      "content_sha256": "aa04af6689b07c224aca55cbb3cd163e5126a553e636cc230c631f428bb33f23",
+      "content_sha256": "a8f88e67bdb9846f378ccca6afe8f6e3dccf724360d61ce4ed68a85f9a07db9b",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -1711,7 +1711,7 @@
       ]
     },
     "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": {
-      "content_sha256": "b458ed9412c5c8036ba79f2210dead04f0843dae56fcf1e6bd1bd4baef6576a5",
+      "content_sha256": "06b3a57766d29b92544870a51879b9fc7f22a09784b0402d7f31a9182ce99c03",
       "interface": "video-job",
       "parameters": {},
       "inputs": [
@@ -3543,7 +3543,7 @@
       }
     },
     "vonk-forge/ling-3-0-flash-dspark-sglang-single": {
-      "content_sha256": "33c74b6ce92abd19597f28a6783f882fc5ad9115a2a92e96f93c588f573f1aed",
+      "content_sha256": "9aeb0fccb4e32eab73e51b2bf82e46be00bc1cd6cd436d31cbd9c20f3975b2df",
       "alias": "ling-3-0-flash",
       "smoke_cases": [
         "M0",

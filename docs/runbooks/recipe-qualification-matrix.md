@@ -26,9 +26,9 @@ relay. SSH is not part of qualification or recovery.
 
 The settled recipe-library checkout contains **77** `recipes/*.json` documents
 and **242** catalog entities. This matrix is bound to recipe-library commit
-`da0fd92d3ccfdde5fc42059ea60d88d1d9fd15eb` and the generated
+`9b5cf001864b82793fc4841895f4b115134eb94e` and the generated
 `catalog-index.json` SHA-256
-`a131c9b8933584202fd91cbb780950529b25537c968dc4d82273da74df6c8050`.
+`90a3a2293323459159670f84f15cb33cd56e1f017bea0850105e0bda6c5ed4e1`.
 
 The repository gates are green for this snapshot:
 
@@ -120,7 +120,7 @@ explicit and are never bypassed to reach that state.
 | `laguna-xs-2-1-nvfp4-vllm-single` | 1 Spark | Current safer Laguna XS baseline | EC, repository-green | Prove model parser/tool path and memory envelope | Yes, 1 Spark | qualify |
 | `lfm2-5-vl-3b-vllm-single` | 1 Spark | Current small vision-language/OCR baseline | EC, repository-green | Retains its specialized vLLM 0.27.1 runtime; prove multimodal preprocessing, OCR/layout, grounding, and parsed tool calls | Yes, 1 Spark | qualify |
 | `lfm2-5-vl-3b-vllm028-single` | 1 Spark | Current stable-vLLM LFM 2.5 VL profile | EC, repository-green, new candidate | vLLM 0.28 uses an exact distinct alias while preserving OCR, grounding, multimodal preprocessing, and parsed-tool smoke coverage | Yes, 1 Spark | qualify |
-| `ling-3-0-flash-dspark-sglang-single` | 1 Spark | Current Ling INT4 DSpark/SGLang profile | EC, focused fix; capacity-blocked | Exact DSpark dependency and immutable ledger revision corrected, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
+| `ling-3-0-flash-dspark-sglang-single` | 1 Spark | Current Ling INT4 DSpark/SGLang profile | EC, focused fit correction | Pinned upstream telemetry supports 0.80 static memory, the full 262,144-token limit, and a 126 GB admission envelope | Yes, 1 Spark | qualify |
 | `muse-glimmer-30b-bf16-vllm-single` | 1 Spark | Current multimodal/agentic specialist | EC, repository-green, upstream-pending tag | Uses its official Muse-specific CUDA 13 vLLM image; prove image, reasoning, and tool behavior on GB10 | Yes, 1 Spark | qualify |
 | `nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single` | 1 Spark | Current speculative low-concurrency latency profile | EC, focused harness fix; capacity-blocked | Typed attention/chunked-prefill/media options landed; the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
 | `nemotron-3-5-lightning-30b-a3b-vllm-single` | 1 Spark | Current target-only Lightning baseline | EC, focused harness fix | Use as control for DSpark latency delta; verify tool and reasoning parsers | Yes, 1 Spark | qualify |
@@ -159,8 +159,8 @@ Both GLBs are structurally validated before upload and again by their adapters.
 | `hunyuan-video-foley-xxl-pytorch-single` | 1 Spark | Foley XXL higher-quality variant | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; the Netherlands campaign must reject it before mutation | No in this jurisdiction | legal-blocked |
 | `hunyuan3d-omni-pytorch-single` | 1 Spark | Current Hunyuan multimodal 3D profile | EC, focused fix, build-unvalidated; artifact lane green; legal block | Offline DINOv2 companion, seeded sampling, and strict GLB validation landed, but upstream license excludes EU, UK, and South Korea; Netherlands fleet must reject admission | No in this jurisdiction | legal-blocked |
 | `hunyuanocr-1-5-vllm-dflash-single` | 1 Spark | Pending-tag DFlash OCR artifact-job specialist | EC, repository-green; artifact fixture current; legal block | Exact Tencent model authority excludes the EU, UK, and South Korea; HunyuanOCR must not be actionable in the Netherlands campaign | No in this jurisdiction | legal-blocked |
-| `ltx-2-19b-dev-bf16-diffusers-single` | 1 Spark | Legacy LTX-2 development/fidelity reference | EC, build-unvalidated; capacity-blocked | Old LTX generation and the checked fleet memory envelope is 1,053,716,480 bytes short | No; qualify 2.5 after capacity rises | capacity-blocked |
-| `ltx-2-19b-dev-fp4-pytorch-single` | 1 Spark | Legacy LTX-2 FP4 memory variant | EC, build-unvalidated; capacity-blocked | Old native path and the checked fleet memory envelope is 1,053,716,480 bytes short | No; qualify 2.5 after capacity rises | capacity-blocked |
+| `ltx-2-19b-dev-bf16-diffusers-single` | 1 Spark | Legacy LTX-2 development/fidelity reference | EC, focused disk-offload fit correction; build-unvalidated | Uses the pinned runtime's separate disk-offload path and a conservative 97 GB admission envelope; expect higher latency and disk I/O | Yes, 1 Spark | qualify |
+| `ltx-2-19b-dev-fp4-pytorch-single` | 1 Spark | Legacy LTX-2 FP4 memory variant | EC, focused disk-offload fit correction; build-unvalidated | Recipe-exclusive adapter now selects disk offload with a conservative 97 GB admission envelope; expect higher latency and disk I/O | Yes, 1 Spark | qualify |
 | `ltx-2-19b-distilled-diffusers-single` | 1 Spark | Legacy LTX-2 distilled baseline | EC, focused adapter fix | Upscaler resolution was corrected, but the generation is superseded by LTX-2.5 | No; qualify 2.5 first | superseded |
 | `ltx-2-19b-distilled-fp8-diffusers-single` | 1 Spark | Legacy lower-memory FP8 variant | EC, focused adapter fix | Upscaler resolution was corrected, but the generation is superseded by LTX-2.5 | No; qualify 2.5 first | superseded |
 | `ltx-2-3-22b-distilled-1-1-diffusers-single` | 1 Spark | Recent 2.3 compatibility profile | EC, focused adapter fix | Hard-coded upscaler slug fixed; authenticated filtered 2.5 recipe is the primary target | No; qualify 2.5 first | superseded |
@@ -191,7 +191,7 @@ Both GLBs are structurally validated before upload and again by their adapters.
 | `wan-2-2-i2v-14b-comfyui-single` | 1 Spark | Current Wan 2.2 image-to-video quality profile | EC, focused fix; artifact lane green | Exact 640x640, 81-frame, 16 fps contract and strict MP4 validation landed | Yes, 1 Spark | qualify |
 | `wan-2-2-t2v-14b-comfyui-single` | 1 Spark | Current Wan 2.2 text-to-video quality profile | EC, focused fix; artifact lane green | Exact 640x640, 81-frame, 16 fps contract and strict MP4 validation landed | Yes, 1 Spark | qualify |
 | `wan-2-2-ti2v-5b-comfyui-single` | 1 Spark | Current smaller TI2V efficiency profile | EC, focused fix; artifact lane green | Exact 1280x704, 121-frame, 24 fps H.264 contract and strict output validation landed | Yes, 1 Spark | qualify |
-| `wan-dancer-14b-pytorch-single` | 1 Spark | Current music-conditioned dance specialist | EC, repository-green; artifact fixture current; capacity-blocked | Manifest uses a deterministic digest-pinned one-second PCM music fixture, but the checked fleet memory envelope is 1,053,716,480 bytes short | No on current free memory | capacity-blocked |
+| `wan-dancer-14b-pytorch-single` | 1 Spark | Current music-conditioned dance specialist | EC, focused input hardening; capacity-blocked | Canvas is now bounded to 921,600 pixels so 1280x1280 cannot exceed the declared benchmark; the 128 GB memory envelope still needs a peak-memory canary | No until a safe memory peak is proved | capacity-blocked |
 
 ## Generic acceptance procedure
 
