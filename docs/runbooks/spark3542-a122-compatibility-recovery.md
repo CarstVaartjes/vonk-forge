@@ -13,7 +13,8 @@ target digests.
 
 ## Preconditions
 
-- Deploy the Controller build containing this runbook and migration `0006`.
+- Deploy the Controller build containing this runbook and migrations through
+  `0009_compat_abandoned_at`.
 - Leave the ordinary current-version upgrade for Spark3542 in
   `waiting-for-operator`; do not resume it.
 - Do not start an upgrade or repair on Spark2297 while recovering Spark3542.
@@ -59,6 +60,16 @@ Apply is idempotent for the same plan digest. A different digest is rejected.
 Once armed, the recovery is deliberately fail-closed and cannot be cancelled
 or retargeted through this API. The Spark will reboot approximately 60 seconds
 after the legacy agent accepts the grant.
+
+If an operator previously used the abandonment endpoint to release the
+mutation lane, run preview again. The Controller may offer a new digest-bound
+preview only when the abandoned recovery is still grantless, the exact fourth
+attempt and current authenticated dev335 identity still match, the historical
+job and operation remain cancelled, and every other mutation is stopped or
+waiting for an operator. Applying that fresh digest reopens the same attempt;
+it does not create or re-enable a grant. The durable `abandoned_at` timestamp
+is retained, and any paused mutation identity or payload-digest drift makes the
+preview stale.
 
 ## Observe and finish
 

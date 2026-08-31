@@ -419,6 +419,191 @@ def test_grantless_terminal_abandonment_rejects_inexact_dispatch_certificate(
         service.preview_abandon()
 
 
+def test_grantless_abandoned_recovery_reauthorizes_exact_attempt_without_grant(
+    tmp_path,
+):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    paused_job_id = "ac238c29-d66e-49bc-a480-b7f11fdc8d6c"
+    paused_operation_id = "31e67068-461a-4c92-b407-df10a11d6632"
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert node is not None and recovery is not None and retry is not None
+        session.add(
+            AgentCertificate(
+                serial=ROTATED_DISPATCH_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(minutes=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="rotated-dispatch-fingerprint",
+                generation=4,
+            )
+        )
+        node.contact_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        recovery.rearm_attempt_certificate_serial = GRANTLESS_RETRY_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        retry.state = "waiting-for-operator"
+        session.add(
+            Job(
+                id=paused_job_id,
+                request_id=str(uuid.uuid4()),
+                kind="agent-upgrade",
+                state="waiting-for-operator",
+                actor="admin",
+                authority_revision="c" * 64,
+                targets=[NODE_ID],
+                payload_digest="d" * 64,
+                payload={"node_order": [NODE_ID]},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=paused_operation_id,
+                parent_job_id=paused_job_id,
+                node_id=NODE_ID,
+                kind="agent.upgrade.v1",
+                payload_digest="e" * 64,
+                payload={"schema_version": 1},
+                authority_revision="c" * 64,
+                state="waiting-for-operator",
+                current_attempt=2,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    abandonment = service.preview_abandon()
+    service.abandon(
+        plan_digest=abandonment.plan_digest,
+        confirmation=ABANDON_CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    preview = service.preview()
+    assert preview.state == "preview"
+    assert preview.plan_digest not in {original.plan_digest, abandonment.plan_digest}
+    assert (
+        preview.document["dispatch_certificate_serial"] == ROTATED_DISPATCH_CERTIFICATE
+    )
+    with sessions.begin() as session:
+        paused = session.get(AgentOperation, paused_operation_id)
+        assert paused is not None
+        paused.payload_digest = "f" * 64
+    with pytest.raises(CompatibilityRecoveryConflict, match="preview is stale"):
+        service.apply(
+            plan_digest=preview.plan_digest,
+            confirmation=CONFIRMATION,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+        )
+    refreshed = service.preview()
+    assert refreshed.plan_digest != preview.plan_digest
+    applied = service.apply(
+        plan_digest=refreshed.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+
+    assert applied.state == "armed"
+    assert notifications == [True, True, True]
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        operation = session.get(AgentOperation, OPERATION_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        job = session.get(Job, JOB_ID)
+        paused = session.get(AgentOperation, paused_operation_id)
+        assert recovery is not None and recovery.state == "armed"
+        assert recovery.abandoned_at is not None
+        assert recovery.abandoned_at.replace(tzinfo=UTC) == NOW
+        assert recovery.completed_at is None and recovery.blocked_at is None
+        assert recovery.signed_grant is None
+        assert recovery.retry_fence is None
+        assert recovery.retry_certificate_serial is None
+        assert recovery.grant_request_id is None
+        assert recovery.grant_expires_at is None
+        assert recovery.identity_deadline is None
+        assert recovery.issued_at is None
+        assert operation is not None and operation.state == "running"
+        assert retry is not None and retry.state == "running"
+        assert retry.attempt == RETRY_ATTEMPT and retry.fence == RETRY_FENCE
+        assert job is not None and job.state == "running"
+        assert paused is not None and paused.state == "waiting-for-operator"
+
+
+def test_grantless_abandoned_recovery_rejects_dispatch_identity_drift(tmp_path):
+    sessions, service, _ = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        retry = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == OPERATION_ID,
+                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
+            )
+        )
+        assert node is not None and recovery is not None and retry is not None
+        session.add(
+            AgentCertificate(
+                serial=ROTATED_DISPATCH_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(minutes=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="rotated-dispatch-fingerprint",
+                generation=4,
+            )
+        )
+        node.contact_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        recovery.rearm_attempt_certificate_serial = GRANTLESS_RETRY_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        retry.state = "waiting-for-operator"
+
+    abandonment = service.preview_abandon()
+    service.abandon(
+        plan_digest=abandonment.plan_digest,
+        confirmation=ABANDON_CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        assert node is not None
+        node.binary_digest = "0" * 64
+
+    with pytest.raises(CompatibilityRecoveryConflict, match="no longer recoverable"):
+        service.preview()
+
+
 def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, caplog):
     sessions, service, notifications = seeded_services(tmp_path)
     original = service.preview()
