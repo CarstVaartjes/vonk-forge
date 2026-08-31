@@ -36,12 +36,15 @@ JOB_ID = "6b945136-1be6-47e4-8ba0-5c5f815304ad"
 OPERATION_ID = "d54e0b56-e465-41bd-9627-c81f37352dfd"
 SOURCE_ATTEMPT = 3
 RETRY_ATTEMPT = SOURCE_ATTEMPT + 1
+GRANTLESS_RETRY_FENCE = "3e4a96ab-375a-4604-b86b-7d44f634a5b6"
 SOURCE_ATTEMPT_CERTIFICATE_SERIAL = "45537549826457139242802212060416390279"
 # Attempt 4 was originally claimed under this now-historical certificate.  The
 # row is immutable audit evidence and must not be rewritten when an
 # administrator re-arms the exact grantless failure.
-GRANTLESS_RETRY_CERTIFICATE_SERIAL = "4088040328001011815331063771942676957"
-DISPATCH_CERTIFICATE_SERIAL = "40880403280010118153316063771942676957"
+GRANTLESS_RETRY_CERTIFICATE_SERIAL = "40880403280010118153316063771942676957"
+# This certificate is part of the immutable digest of the original recovery
+# plan.  It is historical evidence, not authority for a later re-arm.
+ORIGINAL_DISPATCH_CERTIFICATE_SERIAL = GRANTLESS_RETRY_CERTIFICATE_SERIAL
 SOURCE_SEMANTIC_VERSION = "0.1.0"
 SOURCE_BINARY_DIGEST = (
     "dcad0a7bac861ad929e287112dedf09f6b845037979f17ca3cd7b8c5fcb0045e"
@@ -110,7 +113,12 @@ class Spark3542CompatibilityRecoveryService:
                         plan_digest=hashlib.sha256(
                             canonical_message(binding)
                         ).hexdigest(),
-                        document=self._stored_document(existing),
+                        document=self._stored_document(
+                            existing,
+                            dispatch_certificate_serial=str(
+                                binding["rearm_dispatch_certificate_serial"]
+                            ),
+                        ),
                         state="preview",
                     )
                 if self._grantless_rearm_applied_candidate(session, existing):
@@ -119,7 +127,12 @@ class Spark3542CompatibilityRecoveryService:
                         plan_digest=hashlib.sha256(
                             canonical_message(binding)
                         ).hexdigest(),
-                        document=self._stored_document(existing),
+                        document=self._stored_document(
+                            existing,
+                            dispatch_certificate_serial=str(
+                                binding["rearm_dispatch_certificate_serial"]
+                            ),
+                        ),
                         state="armed",
                     )
                 return CompatibilityRecoveryPlan(
@@ -175,6 +188,12 @@ class Spark3542CompatibilityRecoveryService:
                     # Reopen the exact failed attempt. Its fence, certificate,
                     # and failure result remain durable; this transition neither
                     # constructs nor persists a host-helper grant.
+                    existing.rearm_attempt_certificate_serial = str(
+                        binding["rearm_attempt_certificate_serial"]
+                    )
+                    existing.rearm_dispatch_certificate_serial = str(
+                        binding["rearm_dispatch_certificate_serial"]
+                    )
                     existing.state = "armed"
                     existing.blocked_at = None
                     retry.state = "running"
@@ -185,7 +204,12 @@ class Spark3542CompatibilityRecoveryService:
                     job.status_reason = None
                     job.updated_at = now
                     notify = True
-                    document = self._stored_document(existing)
+                    document = self._stored_document(
+                        existing,
+                        dispatch_certificate_serial=(
+                            existing.rearm_dispatch_certificate_serial
+                        ),
+                    )
                     result = CompatibilityRecoveryPlan(rearm_digest, document, "armed")
                 elif self._grantless_rearm_applied_candidate(session, existing):
                     binding = self._rearm_snapshot(session, now, lock=True)
@@ -198,7 +222,12 @@ class Spark3542CompatibilityRecoveryService:
                         )
                     return CompatibilityRecoveryPlan(
                         rearm_digest,
-                        self._stored_document(existing),
+                        self._stored_document(
+                            existing,
+                            dispatch_certificate_serial=(
+                                existing.rearm_dispatch_certificate_serial
+                            ),
+                        ),
                         "armed",
                     )
                 else:
@@ -325,6 +354,8 @@ class Spark3542CompatibilityRecoveryService:
             and recovery.grant_expires_at is None
             and recovery.identity_deadline is None
             and recovery.issued_at is None
+            and recovery.rearm_attempt_certificate_serial is not None
+            and recovery.rearm_dispatch_certificate_serial is not None
         ):
             return False
         retry = session.scalar(
@@ -359,9 +390,6 @@ class Spark3542CompatibilityRecoveryService:
             "recovery": select(AgentUpgradeCompatibilityRecovery).where(
                 AgentUpgradeCompatibilityRecovery.id == RECOVERY_ID
             ),
-            "dispatch_certificate": select(AgentCertificate).where(
-                AgentCertificate.serial == DISPATCH_CERTIFICATE_SERIAL
-            ),
         }
         if lock:
             queries = {name: query.with_for_update() for name, query in queries.items()}
@@ -372,7 +400,16 @@ class Spark3542CompatibilityRecoveryService:
         source = rows["source"]
         retry = rows["retry"]
         recovery = rows["recovery"]
-        dispatch_certificate = rows["dispatch_certificate"]
+        dispatch_certificate = None
+        if isinstance(node, AgentNode) and node.contact_certificate_serial is not None:
+            dispatch_certificate_query = select(AgentCertificate).where(
+                AgentCertificate.serial == node.contact_certificate_serial
+            )
+            if lock:
+                dispatch_certificate_query = dispatch_certificate_query.with_for_update(
+                    of=AgentCertificate
+                )
+            dispatch_certificate = session.scalar(dispatch_certificate_query)
         if not (
             isinstance(node, AgentNode)
             and isinstance(job, Job)
@@ -406,6 +443,10 @@ class Spark3542CompatibilityRecoveryService:
             and recovery.grant_expires_at is None
             and recovery.identity_deadline is None
             and recovery.issued_at is None
+            and recovery.rearm_attempt_certificate_serial
+            == retry.agent_certificate_serial
+            and recovery.rearm_dispatch_certificate_serial
+            == node.contact_certificate_serial
             and operation.state == "running"
             and job.state == "running"
             and retry.state == "running"
@@ -435,8 +476,8 @@ class Spark3542CompatibilityRecoveryService:
             and source.attempt == SOURCE_ATTEMPT
             and source.state in _TERMINAL_ATTEMPT_STATES
             and retry.attempt == RETRY_ATTEMPT
-            and retry.agent_certificate_serial
-            == GRANTLESS_RETRY_CERTIFICATE_SERIAL
+            and retry.fence == GRANTLESS_RETRY_FENCE
+            and retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE_SERIAL
             and retry.result == _GRANTLESS_RETRY_FAILURE
             and operation.id == OPERATION_ID
             and operation.parent_job_id == JOB_ID
@@ -471,7 +512,7 @@ class Spark3542CompatibilityRecoveryService:
             and node.build_digest == SOURCE_BUILD_DIGEST
             and node.self_test_passed is True
             and node.protocol_version == 3
-            and node.contact_certificate_serial == DISPATCH_CERTIFICATE_SERIAL
+            and node.contact_certificate_serial == dispatch_certificate.serial
             and {"agent.runtime.rust.v1", "agent.upgrade.v1"}.issubset(
                 set(node.capabilities or ())
             )
@@ -507,8 +548,8 @@ class Spark3542CompatibilityRecoveryService:
             "recovery_plan_digest": recovery.plan_digest,
             "replay_attempt": RETRY_ATTEMPT,
             "replay_fence": retry.fence,
-            "historical_retry_certificate_serial": retry.agent_certificate_serial,
-            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
+            "rearm_attempt_certificate_serial": retry.agent_certificate_serial,
+            "rearm_dispatch_certificate_serial": dispatch_certificate.serial,
             "failure": dict(_GRANTLESS_RETRY_FAILURE),
         }
 
@@ -545,7 +586,7 @@ class Spark3542CompatibilityRecoveryService:
             AgentCertificate.serial == source.agent_certificate_serial
         )
         dispatch_certificate_query = select(AgentCertificate).where(
-            AgentCertificate.serial == DISPATCH_CERTIFICATE_SERIAL
+            AgentCertificate.serial == node.contact_certificate_serial
         )
         if lock:
             source_certificate_query = source_certificate_query.with_for_update(
@@ -570,7 +611,6 @@ class Spark3542CompatibilityRecoveryService:
             or node.self_test_passed is not True
             or node.protocol_version != 3
             or source.agent_certificate_serial != SOURCE_ATTEMPT_CERTIFICATE_SERIAL
-            or node.contact_certificate_serial != DISPATCH_CERTIFICATE_SERIAL
             or "agent.upgrade.v1" not in set(node.capabilities or ())
             or "agent.runtime.rust.v1" not in set(node.capabilities or ())
             or node.last_seen_at is None
@@ -665,7 +705,7 @@ class Spark3542CompatibilityRecoveryService:
             "source_attempt": SOURCE_ATTEMPT,
             "source_fence": source.fence,
             "source_certificate_serial": source.agent_certificate_serial,
-            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
+            "dispatch_certificate_serial": dispatch_certificate.serial,
             "expected_retry_attempt": SOURCE_ATTEMPT + 1,
             "authority_revision": operation.authority_revision,
             "upgrade_payload_sha256": upgrade_payload_sha256,
@@ -736,6 +776,8 @@ class Spark3542CompatibilityRecoveryService:
     @staticmethod
     def _stored_document(
         recovery: AgentUpgradeCompatibilityRecovery,
+        *,
+        dispatch_certificate_serial: str = ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
     ) -> dict[str, object]:
         return {
             "action": "schedule-reboot",
@@ -754,7 +796,7 @@ class Spark3542CompatibilityRecoveryService:
             "source_attempt": recovery.source_attempt,
             "source_fence": recovery.source_fence,
             "source_certificate_serial": recovery.source_certificate_serial,
-            "dispatch_certificate_serial": DISPATCH_CERTIFICATE_SERIAL,
+            "dispatch_certificate_serial": dispatch_certificate_serial,
             "expected_retry_attempt": recovery.expected_retry_attempt,
             "authority_revision": recovery.authority_revision,
             "upgrade_payload_sha256": recovery.upgrade_payload_sha256,

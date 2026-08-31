@@ -14,12 +14,13 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.compat_recovery import (
     CONFIRMATION,
-    DISPATCH_CERTIFICATE_SERIAL,
     FOLLOWING_NODE_ID,
     GRANTLESS_RETRY_CERTIFICATE_SERIAL,
+    GRANTLESS_RETRY_FENCE,
     JOB_ID,
     NODE_ID,
     OPERATION_ID,
+    ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
     RECOVERY_ID,
     RETRY_ATTEMPT,
     SOURCE_ATTEMPT,
@@ -51,8 +52,9 @@ from vonk_control.models import (
 
 NOW = datetime(2026, 8, 29, 15, 0, tzinfo=UTC)
 SOURCE_FENCE = "10000000-0000-4000-8000-000000000001"
-RETRY_FENCE = "20000000-0000-4000-8000-000000000002"
-SOURCE_CERTIFICATE = DISPATCH_CERTIFICATE_SERIAL
+RETRY_FENCE = GRANTLESS_RETRY_FENCE
+SOURCE_CERTIFICATE = ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
+ROTATED_DISPATCH_CERTIFICATE = "205226603666808797593500589744536484673"
 GRANTLESS_RETRY_CERTIFICATE = GRANTLESS_RETRY_CERTIFICATE_SERIAL
 SOURCE_ATTEMPT_CERTIFICATE = SOURCE_ATTEMPT_CERTIFICATE_SERIAL
 PACKAGE_SIGNATURE = "a" * 128
@@ -117,18 +119,19 @@ def seeded_services(tmp_path, *, engine=None):
                 revoked_at=NOW - timedelta(minutes=1),
             )
         )
-        session.add(
-            AgentCertificate(
-                serial=GRANTLESS_RETRY_CERTIFICATE,
-                node_id=NODE_ID,
-                not_before=NOW - timedelta(days=1),
-                not_after=NOW + timedelta(days=1),
-                fingerprint="grantless-retry-fingerprint",
-                state="revoked",
-                generation=2,
-                revoked_at=NOW - timedelta(seconds=1),
+        if GRANTLESS_RETRY_CERTIFICATE != SOURCE_CERTIFICATE:
+            session.add(
+                AgentCertificate(
+                    serial=GRANTLESS_RETRY_CERTIFICATE,
+                    node_id=NODE_ID,
+                    not_before=NOW - timedelta(days=1),
+                    not_after=NOW + timedelta(days=1),
+                    fingerprint="grantless-retry-fingerprint",
+                    state="revoked",
+                    generation=2,
+                    revoked_at=NOW - timedelta(seconds=1),
+                )
             )
-        )
         session.add(
             AgentCertificate(
                 serial=SOURCE_CERTIFICATE,
@@ -247,10 +250,30 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         request_id=str(uuid.uuid4()),
     )
     seed_grantless_operator_blocked_retry(sessions)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        historical = session.get(AgentCertificate, GRANTLESS_RETRY_CERTIFICATE)
+        assert node is not None and historical is not None
+        historical.state = "revoked"
+        historical.revoked_at = NOW - timedelta(milliseconds=1)
+        node.contact_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        session.add(
+            AgentCertificate(
+                serial=ROTATED_DISPATCH_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(minutes=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="rotated-dispatch-fingerprint",
+                generation=4,
+            )
+        )
 
     preview = service.preview()
     assert preview.state == "preview"
     assert preview.plan_digest != original.plan_digest
+    assert (
+        preview.document["dispatch_certificate_serial"] == ROTATED_DISPATCH_CERTIFICATE
+    )
     applied = service.apply(
         plan_digest=preview.plan_digest,
         confirmation=CONFIRMATION,
@@ -279,6 +302,10 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         assert recovery.grant_expires_at is None
         assert recovery.identity_deadline is None
         assert recovery.issued_at is None
+        assert recovery.rearm_attempt_certificate_serial == GRANTLESS_RETRY_CERTIFICATE
+        assert (
+            recovery.rearm_dispatch_certificate_serial == ROTATED_DISPATCH_CERTIFICATE
+        )
         assert [attempt.attempt for attempt in attempts] == [
             SOURCE_ATTEMPT,
             RETRY_ATTEMPT,
@@ -299,7 +326,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
     operations = AgentJobService(sessions, clock=lambda: NOW)
     replay = operations.claim(
         NODE_ID,
-        SOURCE_CERTIFICATE,
+        ROTATED_DISPATCH_CERTIFICATE,
         30,
         protocol_version=3,
         capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
@@ -343,7 +370,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
             fence=RETRY_FENCE,
             package_sha256=TARGET_PACKAGE_SHA256,
             package_signature=PACKAGE_SIGNATURE,
-            certificate_serial=SOURCE_CERTIFICATE,
+            certificate_serial=ROTATED_DISPATCH_CERTIFICATE,
             expires_in_seconds=30,
         )
     rejection = next(
@@ -375,7 +402,7 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         fence=RETRY_FENCE,
         package_sha256=TARGET_PACKAGE_SHA256,
         package_signature=PACKAGE_SIGNATURE,
-        certificate_serial=SOURCE_CERTIFICATE,
+        certificate_serial=ROTATED_DISPATCH_CERTIFICATE,
         expires_in_seconds=10,
     )
     assert grant.claims.expires_at - grant.claims.issued_at == 10
@@ -383,13 +410,13 @@ def test_grantless_operator_blocked_rearm_replays_exact_attempt_four(tmp_path, c
         recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         assert recovery is not None and recovery.state == "issued"
         assert recovery.retry_fence == RETRY_FENCE
-        assert recovery.retry_certificate_serial == SOURCE_CERTIFICATE
+        assert recovery.retry_certificate_serial == ROTATED_DISPATCH_CERTIFICATE
         assert recovery.signed_grant == grant.to_mapping()
 
     assert (
         operations.claim(
             NODE_ID,
-            SOURCE_CERTIFICATE,
+            ROTATED_DISPATCH_CERTIFICATE,
             30,
             protocol_version=3,
             capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
@@ -447,6 +474,68 @@ def test_grantless_rearm_apply_is_idempotent_after_lost_response(tmp_path):
     assert first.state == repeated_preview.state == repeated.state == "armed"
     assert first.plan_digest == repeated_preview.plan_digest == repeated.plan_digest
     assert notifications == [True, True]
+
+
+def test_grantless_rearm_rejects_certificate_renewal_between_preview_and_apply(
+    tmp_path,
+):
+    sessions, service, notifications = seeded_services(tmp_path)
+    original = service.preview()
+    service.apply(
+        plan_digest=original.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    seed_grantless_operator_blocked_retry(sessions)
+    stale = service.preview()
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        assert node is not None
+        node.contact_certificate_serial = ROTATED_DISPATCH_CERTIFICATE
+        session.add(
+            AgentCertificate(
+                serial=ROTATED_DISPATCH_CERTIFICATE,
+                node_id=NODE_ID,
+                not_before=NOW - timedelta(minutes=1),
+                not_after=NOW + timedelta(days=1),
+                fingerprint="renewal-race-fingerprint",
+                generation=4,
+            )
+        )
+
+    with pytest.raises(CompatibilityRecoveryConflict, match="preview is stale"):
+        service.apply(
+            plan_digest=stale.plan_digest,
+            confirmation=CONFIRMATION,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+        )
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None and recovery.state == "operator-blocked"
+        assert recovery.rearm_attempt_certificate_serial is None
+        assert recovery.rearm_dispatch_certificate_serial is None
+
+    fresh = service.preview()
+    assert fresh.plan_digest != stale.plan_digest
+    assert fresh.document["dispatch_certificate_serial"] == ROTATED_DISPATCH_CERTIFICATE
+    applied = service.apply(
+        plan_digest=fresh.plan_digest,
+        confirmation=CONFIRMATION,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert applied.state == "armed"
+    assert notifications == [True, True]
+    with sessions() as session:
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert recovery is not None
+        assert recovery.rearm_attempt_certificate_serial == GRANTLESS_RETRY_CERTIFICATE
+        assert (
+            recovery.rearm_dispatch_certificate_serial == ROTATED_DISPATCH_CERTIFICATE
+        )
     with sessions() as session:
         recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         attempts = session.scalars(
@@ -603,9 +692,13 @@ def test_postgres_accepts_awaiting_identity_and_enforces_grant_shape(
     )
     with sessions.begin() as session:
         operation = session.get(AgentOperation, OPERATION_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         assert operation is not None
+        assert recovery is not None
         operation.state = "running"
         operation.current_attempt = 4
+        recovery.rearm_attempt_certificate_serial = SOURCE_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = SOURCE_CERTIFICATE
         session.add(
             AgentOperationAttempt(
                 operation_id=OPERATION_ID,
@@ -842,16 +935,19 @@ def test_grant_is_one_persisted_scheduled_reboot_and_never_an_install(tmp_path):
     )
     with sessions.begin() as session:
         operation = session.get(AgentOperation, OPERATION_ID)
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
         source = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == OPERATION_ID,
                 AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
             )
         )
-        assert operation is not None and source is not None
+        assert operation is not None and source is not None and recovery is not None
         source.state = "expired"
         operation.state = "running"
         operation.current_attempt = 4
+        recovery.rearm_attempt_certificate_serial = SOURCE_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = SOURCE_CERTIFICATE
         session.add(
             AgentOperationAttempt(
                 operation_id=OPERATION_ID,
@@ -1142,9 +1238,12 @@ def test_lost_response_or_agent_death_times_out_operator_blocked(tmp_path):
     deadline = NOW + timedelta(seconds=60)
     with sessions.begin() as session:
         operation = session.get(AgentOperation, OPERATION_ID)
-        assert operation is not None
+        recovery = session.get(AgentUpgradeCompatibilityRecovery, RECOVERY_ID)
+        assert operation is not None and recovery is not None
         operation.state = "running"
         operation.current_attempt = 4
+        recovery.rearm_attempt_certificate_serial = SOURCE_CERTIFICATE
+        recovery.rearm_dispatch_certificate_serial = SOURCE_CERTIFICATE
         session.add(
             AgentOperationAttempt(
                 operation_id=OPERATION_ID,
