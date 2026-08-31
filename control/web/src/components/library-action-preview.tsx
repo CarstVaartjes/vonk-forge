@@ -17,6 +17,14 @@ import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details"
 
 export type LibraryActionPlan = LibraryBuildPlan | LibraryMappingPlan | LibraryImageDistributionPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
 
+type LibraryUninstallModelImpact = {
+  model_impact?: {
+    dependent_recipe_ids?: string[];
+    effect: "recipe-only" | "recipe-and-unused-model";
+    model_title?: string;
+  };
+};
+
 export function BuildPreview({plan}: {plan: LibraryBuildPlan}) {
   const nodeName = useLibraryNodeName();
   return <div className="action-preview">
@@ -159,8 +167,12 @@ export function StopPreview({plan}: {plan: LibraryStopPlan}) {
 
 export function UninstallPreview({plan}: {plan: LibraryUninstallPlan}) {
   const nodeName = useLibraryNodeName();
+  const modelImpact = (plan as LibraryUninstallPlan & LibraryUninstallModelImpact).model_impact;
   return <div className="action-preview">
     <p>{plan.bytes_removed == null ? "Exact removable bytes are unknown." : `${formatBytes(plan.bytes_removed)} will be removed.`}</p>
+    {modelImpact?.effect === "recipe-only" && <section aria-label="Model impact"><h4>Recipe only</h4><p>{modelImpact.model_title ?? "The shared model"} remains installed because another recipe still depends on it.</p></section>}
+    {modelImpact?.effect === "recipe-and-unused-model" && <section aria-label="Model impact"><h4>Recipe and unused model</h4><p>{modelImpact.model_title ?? "The model"} has no other dependent recipes and will be removed with this recipe.</p></section>}
+    {!modelImpact && <section aria-label="Model impact"><h4>Model dependency impact unavailable</h4><p>The Controller must report shared model dependencies before Forge can promise whether model files stay or are removed.</p></section>}
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
       <strong>Rank {node.rank} · {humanizeIdentifier(node.role)} · {humanizeIdentifier(node.state)} · {nodeName(node.node_id)}</strong><span>{node.installed_bytes == null ? "Installed bytes unknown" : `${formatBytes(node.installed_bytes)} installed`}</span><TechnicalDetails compact items={[{label: "Node ID", value: node.node_id}]}/>
     </li>)}</ol>

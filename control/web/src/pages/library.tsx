@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe} from "../api/types";
+import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, VisualFleetSnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
 import {nodeDisplayName} from "../lib/fleet";
@@ -14,6 +14,12 @@ const LIBRARY_RECIPE_WINDOW = 50;
 type RouteParent =
   | {kind: "model"; model: Omit<LibraryModel, "recipes">; recipe: LibraryRecipeSummary}
   | {kind: "unlinked"; recipe: LibraryRecipeSummary};
+
+export type ManagedCatalogSyncResult = {state: string; imported_count?: number; updated_count?: number; withdrawn_count?: number};
+
+type ManagedCatalogSyncApi = {
+  syncManagedRecipeCatalog?(signal?: AbortSignal): Promise<ManagedCatalogSyncResult>;
+};
 
 function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
   if (items.length <= limit) return {items, truncated: false};
@@ -130,10 +136,19 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const [nodeDisplayNames, setNodeDisplayNames] = useState<Record<string, string>>({});
+  const [fleet, setFleet] = useState<VisualFleetSnapshot>();
+  const [fleetError, setFleetError] = useState("");
+  const [fleetAttempt, setFleetAttempt] = useState(0);
   const [publicRecipes, setPublicRecipes] = useState<PublicRecipe[]>([]);
+  const [catalogRepository, setCatalogRepository] = useState("");
+  const [catalogCommit, setCatalogCommit] = useState("");
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [syncSummary, setSyncSummary] = useState<ManagedCatalogSyncResult>();
+  const automaticSyncAttempted = useRef(false);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -153,17 +168,29 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
 
   useEffect(() => {
     const fleetApi = api as LibraryApi & Partial<Pick<ControlApi, "visualFleet">>;
-    if (!fleetApi.visualFleet) return;
+    if (!fleetApi.visualFleet) {
+      setFleet(undefined);
+      setFleetError("");
+      return;
+    }
     const controller = new AbortController();
+    setFleetError("");
     void fleetApi.visualFleet(controller.signal)
       .then(value => {
-        if (!controller.signal.aborted) setNodeDisplayNames(Object.fromEntries(value.nodes.map(node => [node.id, nodeDisplayName(node)])));
+        if (!controller.signal.aborted) {
+          setFleet(value);
+          setNodeDisplayNames(Object.fromEntries(value.nodes.map(node => [node.id, nodeDisplayName(node)])));
+        }
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setNodeDisplayNames({});
+      .catch(value => {
+        if (!controller.signal.aborted) {
+          setFleet(undefined);
+          setFleetError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load live Spark state");
+          setNodeDisplayNames({});
+        }
       });
     return () => controller.abort();
-  }, [api]);
+  }, [api, fleetAttempt]);
 
   const catalogSupported = typeof (api as Partial<CatalogApi>).listPublicRecipes === "function";
   useEffect(() => {
@@ -181,7 +208,11 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     void (async () => {
       try {
         const value = await catalogApi.listPublicRecipes?.(controller.signal);
-        if (!controller.signal.aborted && value) setPublicRecipes(value.recipes);
+        if (!controller.signal.aborted && value) {
+          setPublicRecipes(value.recipes);
+          setCatalogRepository(value.repository);
+          setCatalogCommit(value.commit);
+        }
       } catch (value) {
         if (!controller.signal.aborted) {
           setCatalogError(value instanceof Error ? value.message.slice(0, 256) : "Unable to check recipe updates");
@@ -192,6 +223,29 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     })();
     return () => controller.abort();
   }, [api, catalogAttempt]);
+
+  const syncAvailable = typeof (api as LibraryApi & ManagedCatalogSyncApi).syncManagedRecipeCatalog === "function";
+  const syncManagedCatalog = useCallback(async () => {
+    const syncApi = api as LibraryApi & ManagedCatalogSyncApi;
+    if (!syncApi.syncManagedRecipeCatalog || syncing) return;
+    const controller = new AbortController();
+    setSyncing(true);
+    setSyncError("");
+    try {
+      setSyncSummary(await syncApi.syncManagedRecipeCatalog(controller.signal));
+      setCatalogAttempt(value => value + 1);
+      setSnapshotAttempt(value => value + 1);
+    } catch (value) {
+      setSyncError(value instanceof Error ? value.message.slice(0, 256) : "Managed recipe synchronization failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [api, syncing]);
+  useEffect(() => {
+    if (!syncAvailable || automaticSyncAttempted.current) return;
+    automaticSyncAttempted.current = true;
+    void syncManagedCatalog();
+  }, [syncAvailable, syncManagedCatalog]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -300,7 +354,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         <p>Exact models, installable recipes, placement, and release state in one command surface.</p>
       </div>
       <nav className="library-toolbar-actions" aria-label="Recipe authoring">
-        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Import recipe</a>
+        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Browse catalog</a>
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom</a>
       </nav>
     </header>
@@ -344,17 +398,27 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         detailLoading={detailLoading}
         catalogError={catalogError}
         catalogLoading={catalogLoading}
+        catalogRepository={catalogRepository}
+        catalogCommit={catalogCommit}
+        fleet={fleet}
+        fleetError={fleetError}
         onClearSearch={() => setQuery("")}
         onNavigate={contextualNavigate}
         onBusyChange={onBusyChange}
         onRefresh={refreshDetail}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
         onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
+        onRetryFleet={() => setFleetAttempt(value => value + 1)}
+        onSyncNow={() => void syncManagedCatalog()}
         publicRecipes={publicRecipes}
         preferredNodeId={preferredNodeId}
         query={query}
         route={route}
         snapshot={browserSnapshot}
+        syncAvailable={syncAvailable}
+        syncError={syncError}
+        syncing={syncing}
+        syncSummary={syncSummary}
         windowed={paginationWindowed}
       /></LibraryNodeNamesProvider>}
     {snapshot && (snapshot.next_cursor || paginationWindowed) && <div className="library-pagination">

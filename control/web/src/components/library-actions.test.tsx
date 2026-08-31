@@ -636,7 +636,7 @@ test("previews Stop and Remove consequences without implying released capacity o
     nodes: [{installed_bytes: null, node_id: "node-alpha", rank: 0, role: "leader", state: "installed"}, {installed_bytes: 60 * GIB, node_id: "node-beta", rank: 1, role: "worker", state: "installed"}],
     original_plan_digest: "install-plan", plan_digest: "uninstall-plan", recipe_content: {}, recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", warnings: [],
   };
-  const allowedUninstallPlan = {...uninstallPlan, active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * GIB};
+  const allowedUninstallPlan = {...uninstallPlan, active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * GIB, model_impact: {effect: "recipe-and-unused-model", model_title: "Qwen 3"}};
   const previewLibraryUninstall = vi.fn().mockResolvedValueOnce(uninstallPlan).mockResolvedValueOnce(allowedUninstallPlan);
   const applyLibraryStop = vi.fn(async () => ({...operation("succeeded"), id: "operation-stop", kind: "stop", owner_id: "run-chat", plan_digest: "stop-plan"}));
   const applyLibraryUninstall = vi.fn(async () => ({...operation("succeeded"), id: "operation-remove", kind: "uninstall", owner_id: "installation-chat", plan_digest: "uninstall-plan"}));
@@ -672,12 +672,15 @@ test("previews Stop and Remove consequences without implying released capacity o
   expect(within(remove).getByText("Forge will not stop active runs automatically.")).toBeVisible();
   expect(within(remove).getByText("The local catalog recipe is retained.")).toBeVisible();
   expect(within(remove).getByText("Reinstall is required to restore removed content.")).toBeVisible();
+  expect(within(remove).getByRole("heading", {name: "Model dependency impact unavailable"})).toBeVisible();
   expect(within(remove).getByRole("button", {name: "Remove selected installation"})).toBeDisabled();
   await user.click(within(remove).getByRole("button", {name: "Close review"}));
 
   await user.click(screen.getByRole("button", {name: "Review removal of installation 1"}));
   const allowedRemove = await screen.findByRole("dialog", {name: "Review Remove"});
   expect(within(allowedRemove).getByText("120.0 GiB will be removed.")).toBeVisible();
+  expect(within(allowedRemove).getByRole("heading", {name: "Recipe and unused model"})).toBeVisible();
+  expect(within(allowedRemove).getByText("Qwen 3 has no other dependent recipes and will be removed with this recipe.")).toBeVisible();
   await user.click(within(allowedRemove).getByRole("button", {name: "Remove selected installation"}));
   expect(applyLibraryUninstall).toHaveBeenCalledWith("installation-chat", {plan_digest: "uninstall-plan", request_key: expect.any(String)}, expect.any(AbortSignal));
   expect(await screen.findByRole("region", {name: "Remove operation progress"})).toHaveTextContent("Operation complete");
