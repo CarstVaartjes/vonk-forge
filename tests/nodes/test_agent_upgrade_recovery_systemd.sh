@@ -568,11 +568,36 @@ printf '%s\n' \
                           ;;
                       esac
                     fi
+                    safe_d_state=0
                     if [[ "$helper_pid_exe" != /usr/bin/sync \
                       || "${#helper_pid_argv[@]}" -ne 3 \
                       || "${helper_pid_argv[0]}" != /usr/bin/sync \
                       || "${helper_pid_argv[1]}" != -f \
                       || "$safe_sync_target" -ne 1 ]]; then
+                      :
+                    else
+                      safe_d_state=1
+                    fi
+                    # dpkg may have a maintainer shell blocked in uninterruptible
+                    # I/O while its own service stop waits on this frozen helper
+                    # cgroup. The queued SIGSTOP is delivered before userspace can
+                    # resume. Accept only the exact root-owned target preinst and
+                    # exact upgrade arguments produced by this package fixture.
+                    if [[ "$helper_pid_exe" == /usr/bin/dash \
+                      && "${#helper_pid_argv[@]}" -eq 5 \
+                      && "${helper_pid_argv[0]}" == /bin/sh \
+                      && "${helper_pid_argv[1]}" == /var/lib/dpkg/tmp.ci/preinst \
+                      && "${helper_pid_argv[2]}" == upgrade \
+                      && "${helper_pid_argv[3]}" == "$baseline_version" \
+                      && "${helper_pid_argv[4]}" == "$version" \
+                      && -f /var/lib/dpkg/tmp.ci/preinst \
+                      && ! -L /var/lib/dpkg/tmp.ci/preinst \
+                      && "$(stat -c %u:%g:%a:%h \
+                        /var/lib/dpkg/tmp.ci/preinst 2>/dev/null || true)" \
+                        == '0:0:755:1' ]]; then
+                      safe_d_state=1
+                    fi
+                    if [[ "$safe_d_state" -ne 1 ]]; then
                       all_helper_pids_quiescent=0
                     fi
                     ;;
@@ -584,6 +609,9 @@ printf '%s\n' \
             sleep 0.005
           done
           if (( all_helper_pids_quiescent != 1 )); then
+            printf 'captured preinst stat=%s\n' \
+              "$(stat -c %u:%g:%a:%h /var/lib/dpkg/tmp.ci/preinst \
+                2>/dev/null || true)" >&2
             for helper_pid in "${helper_pids[@]}"; do
               [[ -r "/proc/$helper_pid/status" ]] || continue
               helper_pid_state=
