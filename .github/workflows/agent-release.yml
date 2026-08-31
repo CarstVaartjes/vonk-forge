@@ -361,6 +361,14 @@ jobs:
             tests/nodes/test_agent_upgrade_recovery_systemd.sh
           sudo tests/scripts/test_docker_firewall.sh
           tests/nodes/test_agent_package_native_lifecycle.sh
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
+          build_egress=$(realpath target/release/vonk-build-egress)
+          build_egress_staged="$build_egress.root-owned"
+          sudo install -o root -g root -m 0755 \
+            "$build_egress" "$build_egress_staged"
+          sudo mv -f "$build_egress_staged" "$build_egress"
+          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
           compatibility_cargo_dir=$(dirname "$(command -v cargo)")
           compatibility_cargo_home=$(dirname "$compatibility_cargo_dir")
           compatibility_rustup_home=$(rustup show home)
@@ -368,16 +376,20 @@ jobs:
             PATH="$compatibility_cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             CARGO_HOME="$compatibility_cargo_home" \
             RUSTUP_HOME="$compatibility_rustup_home" \
+            BUILD_EGRESS_BINARY="$build_egress" \
             VERSION="$VERSION" STALE_PENDING_FORMAT=legacy2 \
             CRASH_MODE=full-cgroup \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh
-          sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          sudo env BUILD_EGRESS_BINARY="$build_egress" \
+            VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
             CRASH_MODE=full-cgroup \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh
-          sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          sudo env BUILD_EGRESS_BINARY="$build_egress" \
+            VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
             CRASH_MODE=dpkg-only \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh
-          sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          sudo env BUILD_EGRESS_BINARY="$build_egress" \
+            VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
             CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh
           sudo scripts/test-agent-package-native-lifecycle \
