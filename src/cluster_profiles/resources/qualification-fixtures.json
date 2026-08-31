@@ -1643,6 +1643,86 @@
         }
       ]
     },
+    "vonk-forge/wan-dancer-14b-disk-offload-pytorch-single": {
+      "content_sha256": "84dc412a64fc5d9011ffde30a034077c203da273428fa9fb16ef27421b4c0c5a",
+      "interface": "video-job",
+      "parameters": {},
+      "inputs": [
+        {
+          "slot": "prompt",
+          "fixture": "generic-prompt-text"
+        },
+        {
+          "slot": "reference-image",
+          "fixture": "generic-image-png"
+        },
+        {
+          "slot": "music",
+          "fixture": "wan-dancer-music-1s"
+        }
+      ],
+      "output_limits": {
+        "max_files": 1,
+        "max_file_bytes": 536870912,
+        "max_total_bytes": 536870912,
+        "allowed_media_types": [
+          "video/mp4"
+        ]
+      },
+      "timeout_seconds": 3600,
+      "assertions": [
+        {
+          "kind": "file-count",
+          "exact": 1
+        },
+        {
+          "kind": "media-type",
+          "allowed": [
+            "video/mp4"
+          ]
+        },
+        {
+          "kind": "minimum-bytes",
+          "value": 1024
+        },
+        {
+          "kind": "format",
+          "format": "mp4"
+        },
+        {
+          "kind": "video-metadata",
+          "media_type": "video/mp4",
+          "width": 720,
+          "height": 720,
+          "fps": 30,
+          "fps_tolerance": 0.01,
+          "frame_count": 24,
+          "minimum_duration_seconds": 0.766666667,
+          "maximum_duration_seconds": 0.833333333,
+          "codec": "h264",
+          "stream_count": 2,
+          "audio_streams": 1,
+          "audio_codec": "aac",
+          "audio_sample_rate": 44100,
+          "minimum_audio_duration_seconds": 0.7,
+          "maximum_audio_duration_seconds": 0.9,
+          "minimum_container_duration_seconds": 0.7,
+          "maximum_container_duration_seconds": 0.9,
+          "maximum_av_sync_delta_seconds": 0.1
+        }
+      ],
+      "cases": [
+        {
+          "id": "optional-controls",
+          "inputs": [
+            {"slot": "prompt", "fixture": "generic-prompt-text"},
+            {"slot": "reference-image", "fixture": "generic-image-png"},
+            {"slot": "music", "fixture": "wan-dancer-music-1s"},
+            {"slot": "controls", "fixture": "wan-dancer-controls-v1"}
+          ]
+        }
+      ]
+    },
     "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": {
       "content_sha256": "a8f88e67bdb9846f378ccca6afe8f6e3dccf724360d61ce4ed68a85f9a07db9b",
       "interface": "video-job",
@@ -2136,6 +2216,84 @@
             {"slot": "prompt", "fixture": "generic-prompt-text"},
             {"slot": "request", "fixture": "ltx25-fp8-sequential-offload-request"}
           ]
+        }
+      ]
+    },
+    "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single": {
+      "content_sha256": "412f01ef4bc380b409b73eab9a340a9b37464cd119028111903ed57b39bb1edc",
+      "interface": "video-job",
+      "parameters": {},
+      "inputs": [
+        {
+          "slot": "prompt",
+          "fixture": "generic-prompt-text"
+        }
+      ],
+      "output_limits": {
+        "max_files": 2,
+        "max_file_bytes": 1073741824,
+        "max_total_bytes": 1074790400,
+        "allowed_media_types": [
+          "video/mp4",
+          "application/json"
+        ]
+      },
+      "timeout_seconds": 3600,
+      "assertions": [
+        {
+          "kind": "file-count",
+          "exact": 2
+        },
+        {
+          "kind": "media-type",
+          "allowed": [
+            "video/mp4",
+            "application/json"
+          ]
+        },
+        {
+          "kind": "minimum-bytes",
+          "value": 16
+        },
+        {
+          "kind": "file-names",
+          "exact": [
+            "ltx-2.5.mp4",
+            "ltx-2.5-receipt.json"
+          ]
+        },
+        {
+          "kind": "media-type-counts",
+          "counts": {
+            "video/mp4": 1,
+            "application/json": 1
+          }
+        },
+        {
+          "kind": "video-metadata",
+          "media_type": "video/mp4",
+          "width": 768,
+          "height": 512,
+          "fps": 24,
+          "fps_tolerance": 0.001,
+          "frame_count": 65,
+          "minimum_duration_seconds": 2.708,
+          "maximum_duration_seconds": 2.709,
+          "codec": "h264",
+          "pixel_format": "yuv420p",
+          "stream_count": 2,
+          "audio_streams": 1,
+          "audio_codec": "aac",
+          "audio_channels": 2,
+          "audio_sample_rate": 48000,
+          "minimum_audio_duration_seconds": 2.666666666,
+          "maximum_audio_duration_seconds": 2.75,
+          "maximum_av_sync_delta_seconds": 0.041666667
+        },
+        {
+          "kind": "semantic-receipt",
+          "media_type": "application/json",
+          "profile": "fp8-cast-sequential-offload"
         }
       ]
     },
@@ -3815,6 +3973,24 @@
         ]
       }
     },
+    "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single": {
+      "content_sha256": "87c61bb4c3cc3fda60aa510370ebd44af482da235de1b741aba7a0d964cae561",
+      "alias": "nemotron-3-5-lightning-dspark-low-memory-canary",
+      "smoke_cases": [
+        "M0",
+        "NEM_A391_OFF",
+        "NEM_REASON",
+        "NEM_TOOL"
+      ],
+      "higher_tiers": {
+        "stress": [
+          "Physical 256K context, 4 GB FP8 KV cache, FP16 Mamba state, DSpark acceptance-rate, latency, and unified-memory canaries"
+        ],
+        "recovery": [
+          "Controller stop/start, alias stability, no redownload, DSpark companion binding, and parser revalidation"
+        ]
+      }
+    },
     "vonk-forge/nemotron-3-nano-30b-a3b-vllm-single": {
       "content_sha256": "fadadffcff1fda26e64d0a52f89765c24b94185b7bb2a83d465bed24dc20531f",
       "alias": "nemotron-3-nano",
@@ -3883,6 +4059,23 @@
         ],
         "recovery": [
           "Controller stop/start, bounded malformed-input recovery, exact alias, and offline warm-cache restart"
+        ]
+      }
+    },
+    "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single": {
+      "content_sha256": "c384397f261aba1328f6e167041f04975cca67f111bcf89afaae41c1a0ffecf0",
+      "alias": "laguna-s-2-1-low-memory-canary",
+      "smoke_cases": [
+        "M0",
+        "A323",
+        "T_PRODUCT"
+      ],
+      "higher_tiers": {
+        "stress": [
+          "Physical 32K context, 3 GB FP8 KV cache, single-sequence concurrency, latency, and unified-memory canaries"
+        ],
+        "recovery": [
+          "Controller stop/start, bounded malformed-input recovery, exact canary alias, and offline warm-cache restart"
         ]
       }
     },

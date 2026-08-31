@@ -106,10 +106,10 @@ def test_packaged_generic_fixtures_are_digest_and_format_valid() -> None:
         hashlib.sha256(value.content).hexdigest() == value.sha256
         for value in registry.fixtures.values()
     )
-    assert len(registry.recipes) == 42
+    assert len(registry.recipes) == 44
     assert len(registry.special) == 0
-    assert len(registry.service_recipes) == 32
-    assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 56
+    assert len(registry.service_recipes) == 34
+    assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 59
     qwen_cases = registry.recipes[
         "vonk-forge/qwen-image-edit-2511-comfyui-single"
     ].all_cases
@@ -383,7 +383,7 @@ def test_packaged_recipe_bindings_match_the_campaign_matrix_exactly() -> None:
         set(registry.recipes) | set(registry.special) | set(registry.service_recipes)
     )
 
-    assert len(catalog_keys) == 78
+    assert len(catalog_keys) == 82
     assert fixture_keys == catalog_keys - unsupported_topologies
 
 
@@ -420,7 +420,7 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
     )
 
 
-def test_deepseek_target_only_canary_binding_is_exact() -> None:
+def test_below_envelope_canary_bindings_are_exact() -> None:
     registry = FixtureRegistry.packaged()
     canary = registry.service_recipes[
         "vonk-forge/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single"
@@ -437,6 +437,48 @@ def test_deepseek_target_only_canary_binding_is_exact() -> None:
     )
     assert canary.higher_tiers["stress"] == (
         "Physical memory headroom, 252K cold-prefill, and bounded concurrency canaries",
+    )
+
+    laguna = registry.service_recipes[
+        "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single"
+    ]
+    assert (laguna.content_sha256, laguna.alias) == (
+        "c384397f261aba1328f6e167041f04975cca67f111bcf89afaae41c1a0ffecf0",
+        "laguna-s-2-1-low-memory-canary",
+    )
+
+    nemotron = registry.service_recipes[
+        "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single"
+    ]
+    assert (nemotron.content_sha256, nemotron.alias) == (
+        "87c61bb4c3cc3fda60aa510370ebd44af482da235de1b741aba7a0d964cae561",
+        "nemotron-3-5-lightning-dspark-low-memory-canary",
+    )
+
+    ltx = registry.recipes["vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single"]
+    assert ltx.content_sha256 == (
+        "412f01ef4bc380b409b73eab9a340a9b37464cd119028111903ed57b39bb1edc"
+    )
+    assert tuple(fixture.fixture_id for _, fixture in ltx.inputs) == (
+        "generic-prompt-text",
+    )
+    assert ltx.assertions[-1] == {
+        "kind": "semantic-receipt",
+        "media_type": "application/json",
+        "profile": "fp8-cast-sequential-offload",
+    }
+
+    wan = registry.recipes["vonk-forge/wan-dancer-14b-disk-offload-pytorch-single"]
+    original_wan = registry.recipes["vonk-forge/wan-dancer-14b-pytorch-single"]
+    assert wan.content_sha256 == (
+        "84dc412a64fc5d9011ffde30a034077c203da273428fa9fb16ef27421b4c0c5a"
+    )
+    assert wan.inputs == original_wan.inputs
+    assert wan.output_limits == original_wan.output_limits
+    assert wan.assertions == original_wan.assertions
+    assert tuple(case.case_id for case in wan.all_cases) == (
+        "default",
+        "optional-controls",
     )
 
     expected_artifacts = {
