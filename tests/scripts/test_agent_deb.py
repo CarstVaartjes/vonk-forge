@@ -913,7 +913,7 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     assert "helper sandbox write probes have unsafe metadata" in preinst
     namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
     recovery_arm = preinst.index("arm_controller_recovery ||")
-    assert namespace_probe < recovery_arm
+    assert recovery_arm < namespace_probe
     assert "Bootstrap trust boundary" in preinst
     assert "old-protocol TOCTOU" in preinst
 
