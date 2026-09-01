@@ -613,9 +613,8 @@ class AgentUpgradeService:
         package: Mapping[str, object],
         message: AgentResult,
     ) -> bool:
-        semantic_version = cls._target_semantic_version(package)
         last_seen = node.last_seen_at
-        if semantic_version is None or last_seen is None:
+        if last_seen is None:
             return False
         observed = (
             last_seen if last_seen.tzinfo is not None else last_seen.replace(tzinfo=UTC)
@@ -634,7 +633,9 @@ class AgentUpgradeService:
             and "agent.runtime.rust.v1" in set(node.capabilities or ())
             and "agent.upgrade.v1" in set(node.capabilities or ())
             and node.architecture == package.get("architecture")
-            and node.semantic_version == semantic_version
+            # Signed package and binary/build digests are the compatibility
+            # identity.  Version strings remain audit metadata and may differ
+            # across packaging schemes without invalidating an exact upgrade.
             and node.build_digest == package.get("target_build_digest")
             and node.binary_digest == package.get("target_binary_digest")
             and node.self_test_passed is True
@@ -642,18 +643,9 @@ class AgentUpgradeService:
             and evidence.get("build_digest") == package.get("target_build_digest")
             and evidence.get("binary_digest") == package.get("target_binary_digest")
             and evidence.get("package_sha256") == package.get("package_sha256")
-            and evidence.get("package_version") == package.get("package_version")
             and evidence.get("self_test_passed") is True
             and evidence.get("status") == "upgraded"
         )
-
-    @staticmethod
-    def _target_semantic_version(package: Mapping[str, object]) -> str | None:
-        version = package.get("package_version")
-        if not isinstance(version, str):
-            return None
-        match = re.match(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
-        return None if match is None else match.group(0)
 
     @staticmethod
     def _safe_to_retry(

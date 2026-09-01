@@ -1176,9 +1176,8 @@ def test_resume_continues_succeeded_sequential_prefix_after_late_worker_failure(
     [
         {**NEW_IDENTITY, "build_digest": OLD_IDENTITY["build_digest"]},
         {**NEW_IDENTITY, "binary_digest": OLD_IDENTITY["binary_digest"]},
-        {**NEW_IDENTITY, "semantic_version": "0.1.1"},
     ],
-    ids=["mismatched-build", "mismatched-binary", "mismatched-semantic"],
+    ids=["mismatched-build", "mismatched-binary"],
 )
 def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
     tmp_path, reported_identity
@@ -1207,6 +1206,38 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         stored = session.get(Job, job.id)
         assert operation is not None and operation.state == "waiting-for-operator"
         assert stored is not None and stored.state == "waiting-for-operator"
+
+
+def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> None:
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "version-metadata-drift"
+    )
+    claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+
+    evidence = _target_evidence()
+    evidence["package_version"] = "0.0.1-local"
+    operations.succeed(claim, evidence)
+    runtime_identity = {**NEW_IDENTITY, "semantic_version": "0.0.1"}
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=runtime_identity,
+        )
+        is None
+    )
+
+    with sessions() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.id
+            )
+        )
+        stored = session.get(Job, job.id)
+        assert operation is not None and operation.state == "succeeded"
+        assert stored is not None and stored.state == "queued"
 
 
 def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) -> None:
