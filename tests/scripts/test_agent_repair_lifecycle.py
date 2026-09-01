@@ -61,6 +61,10 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
+    assert "binary_source_root=$test_root/binary-source" in harness
+    assert 'archive "$binary_revision" | tar -x -C "$binary_source_root"' in harness
+    assert '"$test_root/target-dist" "$binary_source_root" "$binary_revision"' in harness
+    assert "source_capsule_unit_file=$binary_source_root/packaging/systemd/" in harness
 
 
 def _assert_frozen_runtime_and_old_runner() -> None:

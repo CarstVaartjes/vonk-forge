@@ -497,6 +497,13 @@ esac
 SYSTEMD_OFFLINE=1 dpkg --unpack --force-confold "$baseline_package"
 test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent | cut -c1-2)" = iU
 test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$baseline_version"
+# The disposable runner image is not an upgrade authority. Normalize these
+# package-owned parents to the root-owned, non-writable-by-group state present
+# on an enrolled Spark before the inherited helper creates its mount namespace.
+install -d -o root -g root -m 0755 \
+  /usr/share/keyrings /usr/share/doc/vonk-forge-agent
+test "$(stat -c %u:%g:%a /usr/share/keyrings)" = 0:0:755
+test "$(stat -c %u:%g:%a /usr/share/doc/vonk-forge-agent)" = 0:0:755
 cp -- "$old_helper_unit" "$test_root/installed-helper.service"
 cp -- "$old_socket_unit" "$test_root/installed-helper.socket"
 

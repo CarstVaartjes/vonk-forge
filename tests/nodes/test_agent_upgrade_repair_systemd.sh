@@ -658,10 +658,12 @@ build_package() {
   generation=$2
   digest=$3
   output=$4
-  shift 4
-  VONK_SOURCE_REVISION="$packaging_revision" \
+  package_source_root=$5
+  package_source_revision=$6
+  shift 6
+  VONK_SOURCE_REVISION="$package_source_revision" \
   VONK_SOURCE_REPOSITORY=https://github.com/CarstVaartjes/vonk-forge \
-    "$repo_root/scripts/build-agent-deb" \
+    "$package_source_root/scripts/build-agent-deb" \
       --version "$version" \
       --architecture linux-arm64 \
       --build-digest "$digest" \
@@ -671,8 +673,14 @@ build_package() {
       --output-dir "$output" "$@" >/dev/null
 }
 
-build_package "$installed_version" old "$build_digest_old" "$test_root/old-dist"
-build_package "$source_version" target "$build_digest_target" "$test_root/target-dist"
+binary_source_root=$test_root/binary-source
+mkdir -p "$binary_source_root"
+git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" \
+  archive "$binary_revision" | tar -x -C "$binary_source_root"
+build_package "$installed_version" old "$build_digest_old" \
+  "$test_root/old-dist" "$repo_root" "$packaging_revision"
+build_package "$source_version" target "$build_digest_target" \
+  "$test_root/target-dist" "$binary_source_root" "$binary_revision"
 old_package="$test_root/old-dist/vonk-forge-agent_${installed_version}_arm64.deb"
 source_package="$test_root/target-dist/vonk-forge-agent_${source_version}_arm64.deb"
 "$repo_root/scripts/verify-agent-deb" --json "$old_package" >/dev/null
@@ -736,9 +744,9 @@ source_helper_sha="$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -
 source_runner_file=$source_payload/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
 source_unit_file=$source_payload/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_gate_file=$source_payload/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
-source_capsule_unit_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
-source_capsule_gate_file=$repo_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
-source_capsule_suppression_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
+source_capsule_unit_file=$binary_source_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_gate_file=$binary_source_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression_file=$binary_source_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
 source_runner_sha="$(sha256sum "$source_runner_file" | cut -d' ' -f1)"
 source_unit_sha="$(sha256sum "$source_unit_file" | cut -d' ' -f1)"
 source_gate_sha="$(sha256sum "$source_gate_file" | cut -d' ' -f1)"
