@@ -73,8 +73,9 @@ function validateDocument(value: unknown): VisualRecipeDocument {
   if (root.schema_version !== 1) throw new DocumentValidationError("$.schema_version must equal 1.");
   const recipeIdentity = object(root.identity, "$.identity", ["publisher", "slug"]);
   string(recipeIdentity.publisher, "$.identity.publisher"); string(recipeIdentity.slug, "$.identity.slug");
-  const metadata = object(root.metadata, "$.metadata", ["title", "description", "tags"]);
+  const metadata = object(root.metadata, "$.metadata", ["title", "description", "tags", "alignment"]);
   string(metadata.title, "$.metadata.title"); string(metadata.description, "$.metadata.description"); strings(metadata.tags, "$.metadata.tags");
+  if (metadata.alignment !== undefined && !["standard", "abliterated", "derisked", "other-modified", "unspecified"].includes(metadata.alignment as string)) throw new DocumentValidationError("$.metadata.alignment is not a supported alignment.");
   identity(root.model, "$.model", ["model-version"]);
   if (root.model_license !== null) {
     const modelLicense = object(root.model_license, "$.model_license", ["territorial_restrictions"]);

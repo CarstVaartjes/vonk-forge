@@ -18,7 +18,7 @@ const apiFixture = {
 const importRecipe: PublicRecipe = {
   publisher: "vonk-forge", slug: "locked-import", title: "Locked import recipe", description: "A recipe used to verify locked navigation.", tags: ["test"],
   uri: `vonk://catalog/vonk-forge/locked-import@sha256:${"1".repeat(64)}`, content_sha256: "1".repeat(64),
-  model_publisher: "models", model_slug: "locked", model_title: "Locked model", model_version_publisher: "models", model_version_slug: "locked-bf16", model_version_title: "Locked model BF16", source_owner: "Vonk Forge", source_repository: "https://example.test/vonk-forge",
+  model_publisher: "models", model_slug: "locked", model_title: "Locked model", model_version_publisher: "models", model_version_slug: "locked-bf16", model_version_title: "Locked model BF16", source_owner: "Vonk Forge", source_repository: "https://example.test/vonk-forge", alignment: "standard",
   capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata", qualification_detail: "Explicit candidate test evidence.", precision: "BF16", quantizations: ["BF16"],
   execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Execution is declared for this shell navigation test.",
   execution_harness: "vllm-openai", runtime_distribution: "vllm-test", source_bundle_sha256: "2".repeat(64), artifact_count: 1,

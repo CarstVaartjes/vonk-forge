@@ -3817,7 +3817,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual": {
-      "content_sha256": "9892cf5b96978bdbb736b96ab7f7b2b97b47552138182adccfea2b9c95358694",
+      "content_sha256": "a1fb226732c5e750096ae68cc5c97e35e7c768c72f0a1bd226efc0550fee1d84",
       "alias": "glm-5.3-flash-nvfp4",
       "smoke_cases": [
         "M0",

@@ -6,6 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.public_recipe_preview_response_alignment import check_public_recipe_preview_response_alignment
+from ..models.public_recipe_preview_response_alignment import PublicRecipePreviewResponseAlignment
 from ..models.public_recipe_preview_response_capabilities_item import check_public_recipe_preview_response_capabilities_item
 from ..models.public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
 from ..models.public_recipe_preview_response_execution_readiness import check_public_recipe_preview_response_execution_readiness
@@ -42,6 +44,7 @@ T = TypeVar("T", bound="PublicRecipePreviewResponse")
 class PublicRecipePreviewResponse:
     """
         Attributes:
+            alignment (PublicRecipePreviewResponseAlignment):
             artifact_count (int):
             artifact_identities (list['PublicRecipeArtifactIdentity']):
             capabilities (list[PublicRecipePreviewResponseCapabilitiesItem]):
@@ -87,6 +90,7 @@ class PublicRecipePreviewResponse:
             source_repository (Union[None, Unset, str]):
      """
 
+    alignment: PublicRecipePreviewResponseAlignment
     artifact_count: int
     artifact_identities: list['PublicRecipeArtifactIdentity']
     capabilities: list[PublicRecipePreviewResponseCapabilitiesItem]
@@ -141,6 +145,8 @@ class PublicRecipePreviewResponse:
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         from ..models.public_recipe_release import PublicRecipeRelease
         from ..models.public_recipe_fabric import PublicRecipeFabric
+        alignment: str = self.alignment
+
         artifact_count = self.artifact_count
 
         artifact_identities = []
@@ -275,6 +281,7 @@ class PublicRecipePreviewResponse:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "alignment": alignment,
             "artifact_count": artifact_count,
             "artifact_identities": artifact_identities,
             "capabilities": capabilities,
@@ -337,6 +344,11 @@ class PublicRecipePreviewResponse:
         from ..models.public_recipe_release import PublicRecipeRelease
         from ..models.public_recipe_fabric import PublicRecipeFabric
         d = dict(src_dict)
+        alignment = check_public_recipe_preview_response_alignment(d.pop("alignment"))
+
+
+
+
         artifact_count = d.pop("artifact_count")
 
         artifact_identities = []
@@ -519,6 +531,7 @@ class PublicRecipePreviewResponse:
 
 
         public_recipe_preview_response = cls(
+            alignment=alignment,
             artifact_count=artifact_count,
             artifact_identities=artifact_identities,
             capabilities=capabilities,

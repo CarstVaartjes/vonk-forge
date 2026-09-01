@@ -138,6 +138,7 @@ export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-ge
 export type PublicRecipeExecutionReadiness = "executable" | "not-executable" | "integration-required" | "not-declared";
 export type PublicRecipeExecutionReadinessBasis = "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
 export type PublicRecipeQualificationBasis = "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
+export type PublicRecipeAlignment = "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
 export type PublicRecipeChange = {kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata"; summary: string; details: string | null; references: string[]};
 export type PublicRecipeRelease = {version: string; released_at: string; content_sha256: string; upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild"; changes: PublicRecipeChange[]};
 export type PublicRecipeLocalState = {status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict"; recipe_id: string | null; revision_number: number | null; content_sha256: string | null; release_version: string | null};
@@ -147,6 +148,7 @@ export type PublicRecipe = {
   model_publisher: string; model_slug: string; model_title: string;
   model_version_publisher: string; model_version_slug: string; model_version_title: string;
   source_owner: string | null; source_repository: string | null;
+  alignment: PublicRecipeAlignment;
   capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged";
   qualification_basis: PublicRecipeQualificationBasis; qualification_detail: string; precision: string | null;
   quantizations: string[];

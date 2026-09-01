@@ -5,7 +5,7 @@ import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {PublicRecipeImportPage, parsePublicRecipeImportUrl, publicRecipeImportUrl, publicRecipeMatches, type PublicRecipeFilters} from "./public-recipe-import";
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", modelType: "", model: "", modelVersion: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
+  query: "", modelType: "", model: "", modelVersion: "", alignment: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
@@ -16,6 +16,7 @@ function recipe(slug: string, overrides: Partial<PublicRecipe> = {}): PublicReci
     content_sha256: slug.padEnd(64, "0").slice(0, 64), model_publisher: "models", model_slug: slug,
     model_title: slug, model_version_publisher: "models", model_version_slug: `${slug}-v1`, model_version_title: `${slug} v1`,
     source_owner: "MiaLabs", source_repository: `https://github.com/MiaLabs/${slug}`,
+    alignment: "standard",
     capabilities: ["chat"], qualification: "candidate", qualification_basis: "explicit-candidate-metadata",
     qualification_detail: "This immutable recipe explicitly declares candidate qualification.", precision: "BF16", quantizations: ["BF16"],
     execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
@@ -69,9 +70,9 @@ async function advanceRequestTime(milliseconds: number) {
 }
 
 it("round-trips the shared catalog filter vocabulary", () => {
-  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&creator=MiaLabs&quantization=NVFP4&updated=30&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", model: "models/glm", modelVersion: "models/glm-v1", sourceOwner: "MiaLabs", quantization: "NVFP4", updated: "30", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&creator=MiaLabs&sparks=4%2B&quantization=NVFP4&updated=30&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&alignment=abliterated&creator=MiaLabs&quantization=NVFP4&updated=30&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", model: "models/glm", modelVersion: "models/glm-v1", alignment: "abliterated", sourceOwner: "MiaLabs", quantization: "NVFP4", updated: "30", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&alignment=abliterated&creator=MiaLabs&sparks=4%2B&quantization=NVFP4&updated=30&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
   expect(parsePublicRecipeImportUrl("/library/import?model_type=bogus").filters.modelType).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
@@ -84,6 +85,7 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   render(<Harness api={apiFor([both, chat])}/>);
   expect(await screen.findByRole("combobox", {name: "Filter by model version"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by quantization"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by alignment"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by recipe creator"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by updated date"})).toBeVisible();
   await userEvent.click(await screen.findByRole("button", {name: "More filters"}));
@@ -94,6 +96,13 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   await userEvent.click(screen.getByRole("checkbox", {name: /Vision/}));
   expect(screen.getByRole("heading", {name: "both", level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: "chat", level: 3})).not.toBeInTheDocument();
+});
+
+it("keeps alignment variants independently selectable", () => {
+  const standard = recipe("standard", {alignment: "standard"});
+  const abliterated = recipe("abliterated", {alignment: "abliterated"});
+  expect(publicRecipeMatches(standard, {...EMPTY_FILTERS, alignment: "standard"})).toBe(true);
+  expect(publicRecipeMatches(abliterated, {...EMPTY_FILTERS, alignment: "standard"})).toBe(false);
 });
 
 it("puts broad model type first and limits model identities without hiding overlapping categories", async () => {

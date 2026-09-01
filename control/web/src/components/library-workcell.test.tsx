@@ -17,7 +17,7 @@ function catalogRecipe(overrides: Partial<PublicRecipe> & Pick<PublicRecipe, "sl
   return {
     publisher: "vonk-forge", description: `${overrides.title} description`, tags: [], uri: `vonk://catalog/vonk-forge/${overrides.slug}@sha256:${"b".repeat(64)}`,
     content_sha256: "b".repeat(64), model_publisher: "qwen", model_slug: "qwen", model_title: "Qwen", model_version_publisher: "qwen", model_version_slug: "qwen-3", model_version_title: "Qwen 3",
-    source_owner: "QwenLM", source_repository: "https://github.com/QwenLM/Qwen3", capabilities: ["chat"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata",
+    source_owner: "QwenLM", source_repository: "https://github.com/QwenLM/Qwen3", capabilities: ["chat"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", alignment: "standard",
     qualification_detail: "Accepted by the catalog gate.", precision: "BF16", quantizations: ["BF16"], execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata",
     execution_readiness_detail: "Complete executable contract.", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1,
     topology_name: "single", topology_mode: "single", node_count: 1, topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},

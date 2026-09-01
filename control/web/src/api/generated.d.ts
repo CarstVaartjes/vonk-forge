@@ -3874,6 +3874,11 @@ export interface components {
         };
         /** PublicRecipeListItem */
         PublicRecipeListItem: {
+            /**
+             * Alignment
+             * @enum {string}
+             */
+            alignment: "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
             /** Artifact Count */
             artifact_count: number;
             /** Artifact Identities */
@@ -3994,6 +3999,11 @@ export interface components {
         };
         /** PublicRecipePreviewResponse */
         PublicRecipePreviewResponse: {
+            /**
+             * Alignment
+             * @enum {string}
+             */
+            alignment: "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
             /** Artifact Count */
             artifact_count: number;
             /** Artifact Identities */
