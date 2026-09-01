@@ -1,53 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vonkforge.ai/schemas/install-release-manifest.schema.json",
-  "title": "Vonk Forge immutable installer release",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "accepted_evidence_sha256",
-    "artifacts",
-    "bootstraps",
-    "channel",
-    "generation",
-    "images",
-    "schema_version",
-    "source_sha",
-    "version"
+  "title": "Vonk Forge immutable installer release manifest",
+  "oneOf": [
+    {"$ref": "#/$defs/candidate_release"},
+    {"$ref": "#/$defs/acceptance_baseline_release"}
   ],
-  "properties": {
-    "accepted_evidence_sha256": {"$ref": "#/$defs/digest"},
-    "artifacts": {
-      "type": "object",
-      "minProperties": 9,
-      "maxProperties": 9,
-      "additionalProperties": {"$ref": "#/$defs/object"}
-    },
-    "bootstraps": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["nas", "spark"],
-      "properties": {
-        "nas": {"$ref": "#/$defs/object"},
-        "spark": {"$ref": "#/$defs/object"}
-      }
-    },
-    "channel": {"enum": ["dev", "stable"]},
-    "generation": {"$ref": "#/$defs/digest"},
-    "images": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["api", "hermes", "worker"],
-      "properties": {
-        "api": {"$ref": "#/$defs/image"},
-        "hermes": {"$ref": "#/$defs/image"},
-        "worker": {"$ref": "#/$defs/image"}
-      }
-    },
-    "schema_version": {"const": 1},
-    "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "version": {"type": "string", "minLength": 1, "maxLength": 128}
-  },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "image": {
@@ -63,6 +21,135 @@
         "sha256": {"$ref": "#/$defs/digest"},
         "size": {"type": "integer", "minimum": 1, "maximum": 1073741824}
       }
+    },
+    "base_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifacts",
+        "bootstraps",
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version"
+      ],
+      "properties": {
+        "acceptance_only": {"const": true},
+        "artifacts": {"type": "object"},
+        "bootstraps": {"type": "object"},
+        "channel": {"enum": ["dev", "stable"]},
+        "generation": {"$ref": "#/$defs/digest"},
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["api", "hermes", "worker"],
+          "properties": {
+            "api": {"$ref": "#/$defs/image"},
+            "hermes": {"$ref": "#/$defs/image"},
+            "worker": {"$ref": "#/$defs/image"}
+          }
+        },
+        "schema_version": {"const": 2},
+        "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "candidate_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent-package-linux-amd64",
+        "agent-package-linux-arm64",
+        "agent-package-signature-linux-amd64",
+        "agent-package-signature-linux-arm64",
+        "nas-payload",
+        "nas-setup-darwin-amd64",
+        "nas-setup-darwin-arm64",
+        "nas-setup-linux-amd64",
+        "nas-setup-linux-arm64",
+        "spark-setup-linux-amd64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-amd64",
+        "spark-setup-signature-linux-arm64"
+      ],
+      "properties": {
+        "agent-package-linux-amd64": {"$ref": "#/$defs/object"},
+        "agent-package-linux-arm64": {"$ref": "#/$defs/object"},
+        "agent-package-signature-linux-amd64": {"$ref": "#/$defs/object"},
+        "agent-package-signature-linux-arm64": {"$ref": "#/$defs/object"},
+        "nas-payload": {"$ref": "#/$defs/object"},
+        "nas-setup-darwin-amd64": {"$ref": "#/$defs/object"},
+        "nas-setup-darwin-arm64": {"$ref": "#/$defs/object"},
+        "nas-setup-linux-amd64": {"$ref": "#/$defs/object"},
+        "nas-setup-linux-arm64": {"$ref": "#/$defs/object"},
+        "spark-setup-linux-amd64": {"$ref": "#/$defs/object"},
+        "spark-setup-linux-arm64": {"$ref": "#/$defs/object"},
+        "spark-setup-signature-linux-amd64": {"$ref": "#/$defs/object"},
+        "spark-setup-signature-linux-arm64": {"$ref": "#/$defs/object"}
+      }
+    },
+    "baseline_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent-package-linux-amd64",
+        "agent-package-linux-arm64",
+        "spark-setup-linux-amd64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-amd64",
+        "spark-setup-signature-linux-arm64"
+      ],
+      "properties": {
+        "agent-package-linux-amd64": {"$ref": "#/$defs/object"},
+        "agent-package-linux-arm64": {"$ref": "#/$defs/object"},
+        "spark-setup-linux-amd64": {"$ref": "#/$defs/object"},
+        "spark-setup-linux-arm64": {"$ref": "#/$defs/object"},
+        "spark-setup-signature-linux-amd64": {"$ref": "#/$defs/object"},
+        "spark-setup-signature-linux-arm64": {"$ref": "#/$defs/object"}
+      }
+    },
+    "candidate_bootstraps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nas", "spark"],
+      "properties": {
+        "nas": {"$ref": "#/$defs/object"},
+        "spark": {"$ref": "#/$defs/object"}
+      }
+    },
+    "baseline_bootstraps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spark"],
+      "properties": {
+        "spark": {"$ref": "#/$defs/object"}
+      }
+    },
+    "candidate_release": {
+      "allOf": [
+        {"$ref": "#/$defs/base_release"},
+        {
+          "properties": {
+            "artifacts": {"$ref": "#/$defs/candidate_artifacts"},
+            "bootstraps": {"$ref": "#/$defs/candidate_bootstraps"}
+          }
+        }
+      ]
+    },
+    "acceptance_baseline_release": {
+      "allOf": [
+        {"$ref": "#/$defs/base_release"},
+        {
+          "required": ["acceptance_only"],
+          "properties": {
+            "acceptance_only": {"const": true},
+            "artifacts": {"$ref": "#/$defs/baseline_artifacts"},
+            "bootstraps": {"$ref": "#/$defs/baseline_bootstraps"}
+          }
+        }
+      ]
     }
   }
 }

@@ -53,25 +53,23 @@ exactly one lane, and no other recipe is accepted. The two lane names, exact
 `spk_...` node IDs, ledgers, and plan outputs must all be distinct. Unknown
 fields and duplicate JSON keys fail closed.
 
-The current `nl-single-spark-224c4cc7` authority is bound to jurisdiction `NL`,
-merged recipe-library commit `224c4cc72a9aab2cb1ed9c0f439036451ea22b1b`, and
+The sole current `nl-single-spark-e6a8e750` authority is bound to jurisdiction
+`NL`, merged recipe-library commit
+`e6a8e75029ad85216b22e2d5e41d26a5689fcf6b`, and
 catalog-index SHA-256
-`068921e7e7a104bff144a2c6e99ea042a3ce4f0fcb4b356ae5802d04dcb850f1`.
+`24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352`.
 The canonical authority SHA-256 is
-`439514622665e34b376a657f65c20c556afaf0fb60f2d0704680fe8b1ee9c47b`.
-Its reviewed 83-recipe closure classifies every recipe exactly once: 57
+`94b308b39c10d5e853fdfd8a6c4c61394dc6e44c229788716839368790b3cbd2`.
+Its reviewed 84-recipe closure classifies every recipe exactly once: 58
 actionable single-Spark recipes, five single-Spark recipes retained as original
 above-envelope controls, nine single-Spark recipes blocked in NL, eight
 dual-Spark recipes, and four recipes wider than the present fleet. The v2
 authority names every non-actionable key, so an omission or overlap fails
 closed instead of disappearing behind aggregate counts. The NL legal set
 includes Hunyuan3D-Omni, HunyuanOCR, the five Hunyuan video/Foley recipes, and
-both MiniMax H3 variants. The historical `nl-single-spark-9a6c7516`,
-`nl-single-spark-f8d43aac`,
-`nl-single-spark-d24bc1c8`,
-`nl-single-spark-745a42b5`, `nl-single-spark-02ae8bb5`, and
-`nl-single-spark-e996f025` authorities remain immutable for existing evidence;
-do not use them against the refreshed catalog.
+both MiniMax H3 variants. Superseded authority snapshots and campaign manifests
+are deliberately not shipped: a greenfield Controller can select only the
+current reviewed catalog closure.
 
 A later catalog, recipe, or license update requires a new reviewed authority
 file and ID; do not edit an authority already named by evidence. The coordinator
@@ -79,14 +77,20 @@ rejects catalog repository or commit drift before publishing plans or applying
 work.
 
 The executable reviewed partition is
-`config/qualification/nl-single-spark-224c4cc7.json`: 29 recipes on Spark3542
-and 28 on Spark2297. It excludes every v2 legal- and capacity-blocked key while
+`config/qualification/nl-single-spark-e6a8e750.json`: 29 recipes on Spark3542
+and 29 on Spark2297. It excludes every v2 legal- and capacity-blocked key while
 keeping shared artifact families together. Lower-cost controls precede their
 larger variants, MOVA 360p precedes 720p, and Step1X geometry precedes labeled
 geometry and texture. Both lanes retain stopped installations and caches, but
 the apply-time capacity plan remains authoritative for current disk fit.
 The canonical manifest SHA-256 is
-`fb04211029a15eaab57ba00516b2d6dd0353bb8ef38d9f43a7bde27568e7af0f`.
+`951522a6ca644931c6c35d279e88fd30d8aa822b6d5ae313bc1eec46eb3d1ca5`.
+
+The authority document and campaign manifest are different contracts. The
+authority is schema 2 because it classifies the complete catalog by disposition.
+The campaign manifest remains schema 1 because that is the sole current
+two-lane execution-plan format; there is no legacy schema-2 campaign format to
+select or migrate from.
 
 Obtain the exact node identities with `vonkctl fleet list --json`, then create a
 manifest. Relative ledger and plan paths are resolved from the manifest's
@@ -96,7 +100,7 @@ with an explicitly reviewed partition of every key in the named authority:
 ```jsonc
 {
   "schema_version": 1,
-  "qualification_authority": "nl-single-spark-224c4cc7",
+  "qualification_authority": "nl-single-spark-e6a8e750",
   "options": {
     "jurisdiction": "NL",
     "cleanup": "stop",
@@ -130,7 +134,7 @@ Preview both lane plans in one operation:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-224c4cc7.json \
+  --manifest config/qualification/nl-single-spark-e6a8e750.json \
   > campaign-preview.json
 ```
 
@@ -141,7 +145,7 @@ single `campaign_digest` from the preview:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-224c4cc7.json \
+  --manifest config/qualification/nl-single-spark-e6a8e750.json \
   --campaign-digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --apply
 ```

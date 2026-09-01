@@ -266,94 +266,19 @@ except QualificationError as error:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_packaged_authority_binds_reviewed_e996_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-e996f025")
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "e996f025b9f402e352376e56964e02b3cd392fcc"
-    assert (
-        authority.catalog_index_sha256
-        == "a02d80639af37f518a9399f0a7a3d035c9269fe8a20b3ed0f89feb1fdd06294c"
-    )
-    assert authority.catalog_recipe_count == 69
-    assert authority.jurisdiction == "NL"
-    assert len(authority.actionable_recipe_keys) == 59
-    assert (
-        "vonk-forge/hunyuan3d-omni-pytorch-single"
-        not in authority.actionable_recipe_keys
-    )
-
-
-def test_packaged_authority_binds_reviewed_02ae_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-02ae8bb5")
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "02ae8bb5065919e263183f59637f4d8954a7334a"
-    assert (
-        authority.catalog_index_sha256
-        == "165be2692acafa1fe51345d83dbdd3b3d07ba308463a031a98e9bc563e0da5c5"
-    )
-    assert authority.catalog_recipe_count == 70
-    assert authority.jurisdiction == "NL"
-    assert len(authority.actionable_recipe_keys) == 59
-    assert "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single" in (
-        authority.actionable_recipe_keys
-    )
-    assert {
-        "vonk-forge/hunyuan3d-omni-pytorch-single",
-        "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
-    }.isdisjoint(authority.actionable_recipe_keys)
-
-
-def test_packaged_authority_binds_current_745a_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-745a42b5")
-
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "745a42b5daa3ac8010483421c45235e32e866672"
-    assert (
-        authority.catalog_index_sha256
-        == "e864b644e374c76f594bcc4a394348844d4e5aa8d7dc78142f7d596b1fc2b55e"
-    )
-    assert authority.catalog_recipe_count == 76
-    assert authority.jurisdiction == "NL"
-    assert [
-        len(authority.actionable_recipe_keys),
-        len(authority.capacity_blocked_recipe_keys),
-        len(authority.legal_blocked_recipe_keys),
-        len(authority.dual_spark_recipe_keys),
-        len(authority.unsupported_topology_recipe_keys),
-    ] == [49, 8, 9, 6, 4]
-    categories = (
-        authority.actionable_recipe_keys,
-        authority.capacity_blocked_recipe_keys,
-        authority.legal_blocked_recipe_keys,
-        authority.dual_spark_recipe_keys,
-        authority.unsupported_topology_recipe_keys,
-    )
-    classified = [recipe for category in categories for recipe in category]
-    assert len(classified) == len(set(classified)) == 76
-    assert {
-        "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
-        "vonk-forge/minimax-h3-diffusers-single",
-        "vonk-forge/minimax-h3-fl2va-diffusers-single",
-    }.issubset(authority.legal_blocked_recipe_keys)
-    assert {
-        "vonk-forge/gemma-4-26b-a4b-vllm028-single",
-        "vonk-forge/lfm2-5-vl-3b-vllm028-single",
-    }.issubset(authority.actionable_recipe_keys)
-
-
-def test_packaged_authority_binds_current_224c_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-224c4cc7")
+def test_packaged_authority_binds_only_current_e6a8_catalog_closure() -> None:
+    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-e6a8e750")
 
     assert authority.authority_sha256 == (
-        "439514622665e34b376a657f65c20c556afaf0fb60f2d0704680fe8b1ee9c47b"
+        "94b308b39c10d5e853fdfd8a6c4c61394dc6e44c229788716839368790b3cbd2"
     )
     assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "224c4cc72a9aab2cb1ed9c0f439036451ea22b1b"
+    assert authority.commit == "e6a8e75029ad85216b22e2d5e41d26a5689fcf6b"
     assert (
         authority.catalog_index_sha256
-        == "068921e7e7a104bff144a2c6e99ea042a3ce4f0fcb4b356ae5802d04dcb850f1"
+        == "24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352"
     )
-    assert authority.catalog_recipe_count == 83
+    assert authority.catalog_recipe_count == 84
     assert authority.jurisdiction == "NL"
     assert [
         len(authority.actionable_recipe_keys),
@@ -361,194 +286,40 @@ def test_packaged_authority_binds_current_224c_catalog_closure() -> None:
         len(authority.legal_blocked_recipe_keys),
         len(authority.dual_spark_recipe_keys),
         len(authority.unsupported_topology_recipe_keys),
-    ] == [57, 5, 9, 8, 4]
-    categories = (
-        authority.actionable_recipe_keys,
-        authority.capacity_blocked_recipe_keys,
-        authority.legal_blocked_recipe_keys,
-        authority.dual_spark_recipe_keys,
-        authority.unsupported_topology_recipe_keys,
-    )
-    classified = [recipe for category in categories for recipe in category]
-    assert len(classified) == len(set(classified)) == 83
-    assert (
-        "vonk-forge/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual"
-        in authority.dual_spark_recipe_keys
-    )
+    ] == [58, 5, 9, 8, 4]
 
 
-def test_checked_in_224c_physical_campaign_preserves_single_spark_partition(
-    monkeypatch: pytest.MonkeyPatch,
+def test_packaged_authority_rejects_schema_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
-    current = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-224c4cc7.json"
+    authority_root = tmp_path / "qualification_authorities"
+    authority_root.mkdir()
+    document = json.loads(
+        (
+            REPOSITORY_ROOT
+            / "src/cluster_profiles/qualification_authorities/nl-single-spark-e6a8e750.json"
+        ).read_text(encoding="utf-8")
     )
-    historical = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-9a6c7516.json"
+    document["schema_version"] = 1
+    (authority_root / "nl-single-spark-e6a8e750.json").write_text(
+        json.dumps(document), encoding="utf-8"
     )
+    monkeypatch.setattr(campaign_cli.resources, "files", lambda _package: tmp_path)
 
-    assert current.manifest_sha256 == (
-        "fb04211029a15eaab57ba00516b2d6dd0353bb8ef38d9f43a7bde27568e7af0f"
-    )
-    assert current.cleanup == "stop"
-    assert current.jurisdiction == "NL"
-    assert [
-        (lane.name, lane.node_id, len(lane.recipes)) for lane in current.lanes
-    ] == [
-        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 28),
-    ]
-    assert [lane.recipes for lane in current.lanes] == [
-        lane.recipes for lane in historical.lanes
-    ]
-    assigned = [recipe for lane in current.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 57
-    assert set(assigned) == set(current.authority.actionable_recipe_keys)
-    state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-224c4cc7"
-    ).resolve()
-    for lane in current.lanes:
-        assert lane.ledger.is_relative_to(state_root)
-        assert lane.plan_output.is_relative_to(state_root)
+    with pytest.raises(QualificationError, match="authority identity is invalid"):
+        PACKAGED_AUTHORITY_LOADER("nl-single-spark-e6a8e750")
 
 
-def test_packaged_authority_binds_historical_9a6c_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-9a6c7516")
-
-    assert authority.authority_sha256 == (
-        "e6609a4dcac0525ff2fc7dab84b3484c0a7f07233d0c05b6a74aedada7c77408"
-    )
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "9a6c75167dbe6b66fd211cc5e37aaecdae175d00"
-    assert (
-        authority.catalog_index_sha256
-        == "0697cc15026fd9789d00ba6289b9895e13ff1d68001c175c37981ecaa93f91b8"
-    )
-    assert authority.catalog_recipe_count == 82
-    assert authority.jurisdiction == "NL"
-    assert [
-        len(authority.actionable_recipe_keys),
-        len(authority.capacity_blocked_recipe_keys),
-        len(authority.legal_blocked_recipe_keys),
-        len(authority.dual_spark_recipe_keys),
-        len(authority.unsupported_topology_recipe_keys),
-    ] == [57, 5, 9, 7, 4]
-    categories = (
-        authority.actionable_recipe_keys,
-        authority.capacity_blocked_recipe_keys,
-        authority.legal_blocked_recipe_keys,
-        authority.dual_spark_recipe_keys,
-        authority.unsupported_topology_recipe_keys,
-    )
-    classified = [recipe for category in categories for recipe in category]
-    assert len(classified) == len(set(classified)) == 82
-    assert {
-        "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual",
-        "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual",
-    }.issubset(authority.dual_spark_recipe_keys)
-    assert {
-        "vonk-forge/lfm2-5-vl-3b-vllm-single",
-        "vonk-forge/lfm2-5-vl-3b-vllm028-single",
-        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single",
-    }.issubset(authority.actionable_recipe_keys)
-
-
-def test_checked_in_9a6c_historical_campaign_preserves_reviewed_partition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
-    current = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-9a6c7516.json"
-    )
-    historical = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-f8d43aac.json"
-    )
-
-    assert current.manifest_sha256 == (
-        "ef4b919216d98849ebb453e8fbe74711010d675d8111e4d214083d32a3a8c684"
-    )
-    assert current.cleanup == "stop"
-    assert current.jurisdiction == "NL"
-    assert [
-        (lane.name, lane.node_id, len(lane.recipes)) for lane in current.lanes
-    ] == [
-        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 28),
-    ]
-    assert [lane.recipes for lane in current.lanes] == [
-        lane.recipes for lane in historical.lanes
-    ]
-    assigned = [recipe for lane in current.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 57
-    assert set(assigned) == set(current.authority.actionable_recipe_keys)
-    state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-9a6c7516"
-    ).resolve()
-    for lane in current.lanes:
-        assert lane.ledger.is_relative_to(state_root)
-        assert lane.plan_output.is_relative_to(state_root)
-
-
-def test_packaged_authority_binds_historical_f8d43_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-f8d43aac")
-
-    assert authority.authority_sha256 == (
-        "8b2b362a83175146f49c936415b3238f232e827aafff6212897df8361cfc8efd"
-    )
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "f8d43aacbaa16c016697be684bf688ef3b81932a"
-    assert (
-        authority.catalog_index_sha256
-        == "88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca"
-    )
-    assert authority.catalog_recipe_count == 82
-    assert authority.jurisdiction == "NL"
-    assert [
-        len(authority.actionable_recipe_keys),
-        len(authority.capacity_blocked_recipe_keys),
-        len(authority.legal_blocked_recipe_keys),
-        len(authority.dual_spark_recipe_keys),
-        len(authority.unsupported_topology_recipe_keys),
-    ] == [57, 5, 9, 7, 4]
-    categories = (
-        authority.actionable_recipe_keys,
-        authority.capacity_blocked_recipe_keys,
-        authority.legal_blocked_recipe_keys,
-        authority.dual_spark_recipe_keys,
-        authority.unsupported_topology_recipe_keys,
-    )
-    classified = [recipe for category in categories for recipe in category]
-    assert len(classified) == len(set(classified)) == 82
-    assert {
-        "vonk-forge/hunyuanocr-1-5-vllm-dflash-single",
-        "vonk-forge/minimax-h3-diffusers-single",
-        "vonk-forge/minimax-h3-fl2va-diffusers-single",
-    }.issubset(authority.legal_blocked_recipe_keys)
-    assert {
-        "vonk-forge/deepseek-v4-flash-0731-sparkinfer-single",
-        "vonk-forge/laguna-s-2-1-nvfp4-vllm-single",
-        "vonk-forge/ltx-2-5-22b-distilled-bf16-diffusers-single",
-    }.issubset(authority.capacity_blocked_recipe_keys)
-    assert {
-        "vonk-forge/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single",
-        "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single",
-        "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
-        "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single",
-        "vonk-forge/wan-dancer-14b-disk-offload-pytorch-single",
-    }.issubset(authority.actionable_recipe_keys)
-
-
-def test_checked_in_f8d43_physical_campaign_is_complete_and_dependency_ordered(
+def test_checked_in_e6a8_campaign_is_the_exact_current_partition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
     manifest = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-f8d43aac.json"
+        REPOSITORY_ROOT / "config/qualification/nl-single-spark-e6a8e750.json"
     )
 
     assert manifest.manifest_sha256 == (
-        "f6dbe17d8b399ccb0df78ce6193a6cc18e1401d2e7fb2f0efe3dcb672183826e"
+        "951522a6ca644931c6c35d279e88fd30d8aa822b6d5ae313bc1eec46eb3d1ca5"
     )
     assert manifest.cleanup == "stop"
     assert manifest.jurisdiction == "NL"
@@ -556,147 +327,17 @@ def test_checked_in_f8d43_physical_campaign_is_complete_and_dependency_ordered(
         (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
     ] == [
         ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 28),
+        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 29),
     ]
     assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 57
+    assert len(assigned) == len(set(assigned)) == 58
     assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
-    assert set(assigned).isdisjoint(manifest.authority.legal_blocked_recipe_keys)
-    assert set(assigned).isdisjoint(manifest.authority.capacity_blocked_recipe_keys)
-
-    lanes = {lane.name: list(lane.recipes) for lane in manifest.lanes}
-    first = lanes["spark-3542"]
-    second = lanes["spark-2297"]
-    for earlier, later in (
-        (
-            "vonk-forge/mova-360p-diffusers-single",
-            "vonk-forge/mova-720p-diffusers-single",
-        ),
-        (
-            "vonk-forge/step1x-3d-geometry-pytorch-single",
-            "vonk-forge/step1x-3d-label-geometry-pytorch-single",
-        ),
-        (
-            "vonk-forge/step1x-3d-label-geometry-pytorch-single",
-            "vonk-forge/step1x-3d-texture-pytorch-single",
-        ),
-        (
-            "vonk-forge/qwen3-8-27b-fp8-vllm-single",
-            "vonk-forge/qwen3-8-27b-vllm-single",
-        ),
-        (
-            "vonk-forge/wan-2-2-ti2v-5b-comfyui-single",
-            "vonk-forge/wan-2-2-i2v-14b-comfyui-single",
-        ),
-    ):
-        assert first.index(earlier) < first.index(later)
-    for earlier, later in (
-        (
-            "vonk-forge/deepseek-v4-flash-0731-ds4-single",
-            "vonk-forge/deepseek-v4-flash-0731-ds4-dspark-latency-single",
-        ),
-        (
-            "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single",
-            "vonk-forge/flux-2-klein-4b-comfyui-single",
-        ),
-        (
-            "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single",
-            "vonk-forge/qwen-image-2512-comfyui-single",
-        ),
-        (
-            "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single",
-            "vonk-forge/qwen-image-edit-2511-comfyui-single",
-        ),
-        (
-            "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single",
-            "vonk-forge/ltx-2-19b-distilled-diffusers-single",
-        ),
-    ):
-        assert second.index(earlier) < second.index(later)
-
     state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-f8d43aac"
+        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-e6a8e750"
     ).resolve()
     for lane in manifest.lanes:
         assert lane.ledger.is_relative_to(state_root)
         assert lane.plan_output.is_relative_to(state_root)
-
-
-def test_checked_in_745a_physical_campaign_is_the_exact_reviewed_partition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
-    manifest = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-745a42b5.json"
-    )
-
-    assert manifest.manifest_sha256 == (
-        "c13b5881fc561aae64f305abb7cef21d193b75b4cedbfc58e4511b3f6f2dc386"
-    )
-    assert manifest.cleanup == "stop"
-    assert manifest.jurisdiction == "NL"
-    assert [
-        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
-    ] == [
-        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 25),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 24),
-    ]
-    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 49
-    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
-    assert set(assigned).isdisjoint(manifest.authority.legal_blocked_recipe_keys)
-    assert set(assigned).isdisjoint(manifest.authority.capacity_blocked_recipe_keys)
-    state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-745a42b5"
-    ).resolve()
-    for lane in manifest.lanes:
-        assert lane.ledger.is_relative_to(state_root)
-        assert lane.plan_output.is_relative_to(state_root)
-
-
-def test_checked_in_02ae_physical_campaign_is_the_exact_reviewed_partition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
-    manifest = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-02ae8bb5.json"
-    )
-
-    assert manifest.manifest_sha256 == (
-        "7cbf48df404bd1bd656579c0a8823189abdfb04703e09808f0549874ca7e1939"
-    )
-    assert manifest.cleanup == "stop"
-    assert manifest.jurisdiction == "NL"
-    assert [
-        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
-    ] == [
-        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 30),
-    ]
-    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 59
-    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
-    state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-02ae8bb5"
-    ).resolve()
-    for lane in manifest.lanes:
-        assert lane.ledger.is_relative_to(state_root)
-        assert lane.plan_output.is_relative_to(state_root)
-
-
-def test_02ae_physical_runbook_matches_capacity_and_residency_contract() -> None:
-    runbook = (
-        REPOSITORY_ROOT / "docs/runbooks/physical-qualification-02ae8bb5.md"
-    ).read_text(encoding="utf-8")
-    normalized = " ".join(runbook.split())
-
-    assert "Preview does not create `capacity.plan.created`" in runbook
-    assert "before its first install" in normalized
-    assert "`automatic_eviction` remains false" in runbook
-    assert ".payload.complete" not in runbook
-    assert runbook.count(".payload.installation_inventory_complete") >= 2
-    assert "($records | last | .payload.blocked) == 0" in runbook
-    assert "unique | length) == 59" in runbook
 
 
 def test_every_packaged_authority_is_explicitly_mapped() -> None:

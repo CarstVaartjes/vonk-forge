@@ -53,7 +53,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     nas = public / prefix / "bootstraps/nas"
     for path in (release, signature, bootstrap, nas):
         path.parent.mkdir(parents=True, exist_ok=True)
-    release.write_text('{"schema_version":1,"signed":"immutable"}\n')
+    release.write_text('{"schema_version":2,"signed":"immutable"}\n')
     _sign(private_key, release, signature)
     receipt = tmp_path / "receipt"
     bootstrap.write_text(
@@ -68,7 +68,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     claims = public / "artifacts/stable/current.claims"
     claims.parent.mkdir(parents=True, exist_ok=True)
     claims.write_text(
-        "schema_version=1\n"
+        "schema_version=2\n"
         "channel=stable\n"
         f"generation={generation}\n"
         "version=1.0.0\n"

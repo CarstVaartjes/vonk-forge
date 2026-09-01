@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "qualification_authority": "nl-single-spark-9a6c7516",
+  "qualification_authority": "nl-single-spark-e6a8e750",
   "options": {
     "jurisdiction": "NL",
     "cleanup": "stop",
@@ -42,8 +42,8 @@
         "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single",
         "vonk-forge/wan-dancer-14b-disk-offload-pytorch-single"
       ],
-      "ledger": "../../.state/qualification/nl-single-spark-9a6c7516/evidence/spark-3542.jsonl",
-      "plan_output": "../../.state/qualification/nl-single-spark-9a6c7516/plans/spark-3542.json"
+      "ledger": "../../.state/qualification/nl-single-spark-e6a8e750/evidence/spark-3542.jsonl",
+      "plan_output": "../../.state/qualification/nl-single-spark-e6a8e750/plans/spark-3542.json"
     },
     {
       "name": "spark-2297",
@@ -76,10 +76,11 @@
         "vonk-forge/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single",
         "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single",
         "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single",
-        "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single"
+        "vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
+        "vonk-forge/ornith-1-5-35b-a3b-nvfp4-vllm-single"
       ],
-      "ledger": "../../.state/qualification/nl-single-spark-9a6c7516/evidence/spark-2297.jsonl",
-      "plan_output": "../../.state/qualification/nl-single-spark-9a6c7516/plans/spark-2297.json"
+      "ledger": "../../.state/qualification/nl-single-spark-e6a8e750/evidence/spark-2297.jsonl",
+      "plan_output": "../../.state/qualification/nl-single-spark-e6a8e750/plans/spark-2297.json"
     }
   ]
 }

@@ -281,7 +281,7 @@ def recompute_publication_graphs(
     expected_identity = {
         "channel": channel,
         "generation": generation,
-        "schema_version": 1,
+        "schema_version": 2,
         "source_sha": source_sha,
     }
     if (

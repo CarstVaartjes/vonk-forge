@@ -1,18 +1,18 @@
 {
   "schema_version": 2,
-  "authority_id": "nl-single-spark-f8d43aac",
+  "authority_id": "nl-single-spark-e6a8e750",
   "catalog": {
     "repository": "CarstVaartjes/vonk-forge-recipes",
-    "commit": "f8d43aacbaa16c016697be684bf688ef3b81932a",
-    "catalog_index_sha256": "88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca",
-    "recipe_count": 82
+    "commit": "e6a8e75029ad85216b22e2d5e41d26a5689fcf6b",
+    "catalog_index_sha256": "24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352",
+    "recipe_count": 84
   },
   "jurisdiction": "NL",
   "reviewed_disposition": {
-    "actionable_single_spark_count": 57,
+    "actionable_single_spark_count": 58,
     "capacity_blocked_single_spark_count": 5,
     "legal_blocked_single_spark_count": 9,
-    "dual_spark_count": 7,
+    "dual_spark_count": 8,
     "unsupported_topology_count": 4
   },
   "actionable_recipe_keys": [
@@ -45,6 +45,7 @@
     "vonk-forge/nemotron-3-nano-omni-30b-a3b-vllm-single",
     "vonk-forge/nemotron-3-super-120b-a12b-vllm-single",
     "vonk-forge/nvidia-qwen-image-flash-diffusers-single",
+    "vonk-forge/ornith-1-5-35b-a3b-nvfp4-vllm-single",
     "vonk-forge/pixal3d-pytorch-single",
     "vonk-forge/qwen-image-2512-comfyui-single",
     "vonk-forge/qwen-image-2512-diffusers-single",
@@ -96,6 +97,7 @@
     "vonk-forge/deepseek-v4-flash-0731-mia-dual",
     "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual",
     "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual",
+    "vonk-forge/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual",
     "vonk-forge/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual",
     "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual",
     "vonk-forge/inkling-small-nvfp4-sglang-dual",
@@ -108,4 +110,3 @@
     "vonk-forge/inkling-975b-a41b-nvfp4-sglang-eight"
   ]
 }
-

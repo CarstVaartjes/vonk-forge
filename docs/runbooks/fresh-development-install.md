@@ -3,6 +3,12 @@
 Development uses the production topology with immutable development release
 identities. It is not a second stack and does not use local images, alternate
 ports, synthetic deployment behavior, repository mounts, or a separate PKI.
+It also uses the normal unsuffixed Tailscale Service names; do not create a
+`-dev` or `-acceptance` Service. Complete the one-time Tailscale preparation in
+[`tailscale.md`](tailscale.md#fresh-install-checklist) before running the NAS
+installer.
+The installer publication path accepts schema 2 only; schema-1 release
+manifests are intentionally rejected.
 
 ## Prepare the NAS upload
 
