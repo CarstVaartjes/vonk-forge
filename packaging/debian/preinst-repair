@@ -742,7 +742,7 @@ prove_probe_wrapper() {
     probe_wrapper_output=$("$repair_probe" check-wrapper \
         "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
     [ "$(printf '%s\n' "$probe_wrapper_output" | /usr/bin/wc -l)" -eq 1 ] \
-        && [ "$probe_wrapper_output" = "schema_version=1 setpriv_sha256=$authority_setpriv_sha256 probe_sha256=$repair_probe_sha256" ]
+        && [ "$probe_wrapper_output" = "schema_version=2 setpriv_sha256=$authority_setpriv_sha256 probe_sha256=$repair_probe_sha256" ]
 }
 
 prove_helper_with_manager() {
@@ -811,7 +811,7 @@ prove_helper_with_manager() {
         "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
     [ "$(printf '%s\n' "$probe_output" | /usr/bin/wc -l)" -eq 1 ] \
         && printf '%s\n' "$probe_output" | grep -Eq \
-            "^schema_version=1 nonce=$probe_nonce authority_sha256=$authority_sha256 helper_pid=$old_helper_pid helper_start=$old_helper_start helper_sha256=$authority_installed_helper_sha256 boot_id=$old_boot_id invocation_id=$old_helper_invocation exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000080000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
+            "^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 helper_pid=$old_helper_pid helper_start=$old_helper_start helper_sha256=$authority_installed_helper_sha256 boot_id=$old_boot_id invocation_id=$old_helper_invocation exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000080000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
     agent_probe_output=$(/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
         --service-type=exec --unit="$agent_probe_unit" \
         --property=User=vonk-agent --property=Group=vonk-agent \
@@ -857,7 +857,7 @@ prove_helper_with_manager() {
         "$authority_setpriv_sha256" "$repair_probe_sha256") || return 1
     [ "$(printf '%s\n' "$agent_probe_output" | /usr/bin/wc -l)" -eq 1 ] \
         && printf '%s\n' "$agent_probe_output" | grep -Eq \
-            "^schema_version=1 nonce=$probe_nonce authority_sha256=$authority_sha256 agent_pid=$old_agent_pid agent_start=$old_agent_start agent_sha256=$authority_installed_agent_sha256 boot_id=$old_boot_id invocation_id=$old_agent_invocation agent_uid=$vonk_agent_uid agent_gid=$vonk_agent_gid agent_groups=$old_agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
+            "^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 agent_pid=$old_agent_pid agent_start=$old_agent_start agent_sha256=$authority_installed_agent_sha256 boot_id=$old_boot_id invocation_id=$old_agent_invocation agent_uid=$vonk_agent_uid agent_gid=$vonk_agent_gid agent_groups=$old_agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" || return 1
     prove_probe_wrapper || return 1
     capture_running_old_metadata || return 1
     [ "$old_agent_pid" = "$probe_agent_pid" ] \
@@ -2173,8 +2173,8 @@ agent_sha256=$target_agent_sha256
     write_phase armed || temporary_failure 'repair phase commit failed'
     repair_tree_exact "$repair_build" \
         || unsafe_state 'complete hidden repair staging'
-    # Linearization invariant: until atomic_install below, every a122-owned
-    # byte is unchanged and the exact a122 runner does not observe either the
+    # Linearization invariant: until atomic_install below, every source-release
+    # byte is unchanged and the exact source runner does not observe either the
     # standard sidecar or .repair-build.*. After atomic_install, this prepared
     # tree is already durable and is the only state the unified runner may
     # promote. Thus both sides of the single runner-rename commit are safe.

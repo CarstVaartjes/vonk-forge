@@ -1004,7 +1004,7 @@ if [[ "$transient_status" -ne 0 ]]; then
   exit 1
 fi
 grep -Eq \
-  "^schema_version=1 nonce=$native_nonce authority_sha256=$authority_sha agent_pid=$old_agent_pid agent_start=$agent_start agent_sha256=$old_agent_sha boot_id=$agent_boot invocation_id=$agent_invocation agent_uid=$agent_uid agent_gid=$agent_gid agent_groups=$agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" \
+  "^schema_version=2 nonce=$native_nonce authority_sha256=$authority_sha agent_pid=$old_agent_pid agent_start=$agent_start agent_sha256=$old_agent_sha boot_id=$agent_boot invocation_id=$agent_invocation agent_uid=$agent_uid agent_gid=$agent_gid agent_groups=$agent_groups exe_dev=[1-9][0-9]* exe_ino=[1-9][0-9]* cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2$" \
   <<< "$transient_output"
 
 wrong_boot=00000000-0000-0000-0000-000000000001

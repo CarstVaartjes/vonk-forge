@@ -260,8 +260,6 @@ grep -Fx \
   "$helper_unit" >/dev/null
 env SYSTEMD_OFFLINE=1 "$dpkg" --configure -a
 test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$next_version"
-test ! -e "$(path /run/vonk-forge-package-helper/upgrade-bridge)"
-test ! -e "$(path /lib/systemd/system/vonk-forge-package-helper.service.d/20-package-upgrade-bridge.conf)"
 test ! -e "$(path /var/lib/vonk-forge/helper-upgrade.pending)"
 if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
   test "$(stat -c '%U:%G:%a' "$data_dir/machine-evidence")" = root:vonk-agent:640

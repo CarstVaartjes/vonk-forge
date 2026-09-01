@@ -56,11 +56,6 @@ pub struct OciRuntime<'a, R> {
 pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 const MAX_HTTP_FILE_NAME_BYTES: usize = 255;
-const LEGACY_DS4_TARGET_FILE: &str =
-    "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf";
-const LEGACY_DS4_DRAFTER_FILE: &str = "DeepSeek-V4-Flash-DSpark-support-0731.gguf";
-const LEGACY_DS4_MODEL_SHA256: &str =
-    "a54f12dd8653ff220efed3d5b1efa667ab95f060e16211f1cdba7e0a2dcfeafb";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -993,14 +988,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         probes
             .into_iter()
             .map(|probe| {
-                // Legacy distributed lifecycles have no controller-bound,
-                // helper-signed local-container identity.  In particular, a
-                // worker probing the shared endpoint owner only proves that
-                // the owner is healthy; it says nothing about the worker's
-                // local rank.  Fail those headless legacy ranks closed so the
-                // Controller can recover them onto the exact-v2 observation
-                // protocol.  Exact lifecycles are filtered above and combine
-                // helper-signed local liveness with owner-only HTTP readiness.
                 let ready = probe.address.is_some_and(|address| {
                     self.readiness_request(address, probe.port, &probe.health_path)
                 });
@@ -1053,6 +1040,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             if observation.is_some() {
                 continue;
             }
+            if placement.world_size > 1 {
+                return Err(OciError::Artifact);
+            }
             let Some(endpoint) = spec.endpoint.as_ref() else {
                 continue;
             };
@@ -1069,19 +1059,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             probes.push(RecipeRunProbe {
                 run_id,
-                // No distributed v1 rank may project endpoint-only health as
-                // rank readiness.  Even on the endpoint owner that signal is
-                // insufficient to prove every local rank; Controller recovery
-                // will relaunch the run with exact-v2 observations.
-                address: if placement.world_size > 1 {
-                    None
-                } else {
-                    Some(
-                        placement
-                            .endpoint_address
-                            .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
-                    )
-                },
+                address: Some(
+                    placement
+                        .endpoint_address
+                        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+                ),
                 port: placement.port,
                 health_path: endpoint.health_path.clone(),
             });
@@ -1350,15 +1332,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
     ) -> Result<(WorkloadSpec, WorkloadSpec), OciError> {
         let persisted = self.read_persisted_spec(installation_id)?;
-        let spec = if persisted.validate().is_ok() {
-            persisted.clone()
-        } else {
-            if self.recipe_digest(installation_id)? != persisted.identity.recipe_revision_sha256 {
-                return Err(OciError::Artifact);
-            }
-            normalize_legacy_ds4_spec(persisted.clone())?
-        };
-        Ok((spec, persisted))
+        persisted.validate()?;
+        Ok((persisted.clone(), persisted))
     }
 
     fn read_persisted_spec(&self, installation_id: &str) -> Result<WorkloadSpec, OciError> {
@@ -1403,7 +1378,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let destination = models.join(artifact_key(storage_artifact)?);
             if artifact.kind == "http.file" {
                 let (_, file_name) = http_file_url(&artifact.repository)?;
-                verify_or_migrate_cached_http_file(&destination, &file_name, artifact)?;
+                verify_cached_http_file(&destination, &file_name, artifact)?;
             } else {
                 verify_manifest(&destination)?;
             }
@@ -1567,9 +1542,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         };
         if destination.exists() {
             return match &http_file {
-                Some((_, file_name)) => {
-                    verify_or_migrate_cached_http_file(&destination, file_name, artifact)
-                }
+                Some((_, file_name)) => verify_cached_http_file(&destination, file_name, artifact),
                 None => verify_manifest(&destination),
             };
         }
@@ -1840,253 +1813,23 @@ fn http_file_url(value: &str) -> Result<(Url, String), OciError> {
     Ok((url, file_name))
 }
 
-fn normalize_legacy_ds4_spec(mut spec: WorkloadSpec) -> Result<WorkloadSpec, OciError> {
-    let invalid = || OciError::Workload(WorkloadError::Invalid("legacy artifact mounts"));
-    let authority = match spec.identity.recipe_revision_sha256.as_str() {
-        "373169b0ef24f8d21b0aa40e918e13554bb4d788b4bd426df9f14b64b47d184a" => (
-            "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3",
-            "337c9d850a70b6a8907e588d4fee1d447f770bc004cb15bbc45283d017dca389",
-            8080,
-        ),
-        "32f09e39052ec5c13292c9bec5577d8536690d74576a4c3ac6c8ef4cf493927e" => (
-            "a1dbca13724678dbce47a1caff4a7ae4b6c557a6ac6ca5c0e3a99733fcc3f2b0",
-            "73e2ec403510447cfbc067d0bdba20cfd941bd741e8b90a764edef3bae83c12a",
-            8080,
-        ),
-        _ => return Err(invalid()),
-    };
-    if spec.identity.model_version_sha256 != LEGACY_DS4_MODEL_SHA256
-        || spec.identity.harness_sha256 != authority.0
-        || spec.identity.runtime_distribution_sha256 != authority.1
-        || spec.identity.patch_bundle_sha256.is_some()
-        || !spec.model_dependencies.is_empty()
-        || spec.runtime.adapter != "ds4"
-        || spec.runtime.adapter_version != 1
-        || !spec.runtime.arguments.is_empty()
-        || spec.runtime.placement_environment.is_some()
-        || spec.runtime.environment.len() != 2
-        || spec.runtime.environment[0].name != "DS4_LOG_LEVEL"
-        || !matches!(
-            &spec.runtime.environment[0].value,
-            Some(ArgumentValue::String(value)) if value == "INFO"
-        )
-        || spec.runtime.environment[0].secret.is_some()
-        || spec.runtime.environment[1].name != "HF_HUB_OFFLINE"
-        || !matches!(
-            &spec.runtime.environment[1].value,
-            Some(ArgumentValue::String(value)) if value == "1"
-        )
-        || spec.runtime.environment[1].secret.is_some()
-        || spec.artifacts.len() != 2
-        || spec.endpoint.as_ref().is_none_or(|endpoint| {
-            endpoint.protocol != "openai"
-                || endpoint.port != authority.2
-                || endpoint.model_aliases != ["deepseek-v4-flash"]
-                || endpoint.health_path != "/v1/models"
-        })
-        || spec.job.is_some()
-        || spec.topology.name != "solo"
-        || spec.topology.node_count != 1
-        || spec.topology.rank != 0
-        || spec.topology.role != "entrypoint"
-        || spec.security.devices != ["nvidia.com/gpu=all"]
-        || spec.security.host_network
-        || spec.security.privileged
-        || !spec.security.capabilities.is_empty()
-        || spec.security.user != "10001:10001"
-        || !spec.lifecycle.pre_start.is_empty()
-        || !spec.lifecycle.post_stop.is_empty()
-        || spec.lifecycle.stop_timeout_seconds != 120
-    {
-        return Err(invalid());
-    }
-
-    let expected_artifacts = [
-        (
-            "target",
-            LEGACY_DS4_TARGET_FILE,
-            "sha256:ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
-            86_720_111_488,
-        ),
-        (
-            "drafter",
-            LEGACY_DS4_DRAFTER_FILE,
-            "sha256:7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360",
-            5_989_114_272,
-        ),
-    ];
-    let source_revision = "e7f04037032990db0346398d249baf9fb9df1ccc";
-    for (artifact, (id, expected_file, revision, bytes)) in
-        spec.artifacts.iter().zip(expected_artifacts)
-    {
-        let (url, file_name) = http_file_url(&artifact.repository)?;
-        if file_name != expected_file
-            || url.as_str() != artifact.repository
-            || artifact.id != id
-            || artifact.kind != "http.file"
-            || artifact.repository
-                != format!(
-                    "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/{source_revision}/{expected_file}"
-                )
-            || artifact.revision != revision
-            || artifact.download_bytes != bytes
-            || artifact.installed_bytes != bytes
-            || artifact.mount.target != "/models"
-            || !artifact.mount.read_only
-            || artifact.roles != ["entrypoint"]
-        {
-            return Err(invalid());
-        }
-    }
-    let expected_entrypoint = [
-        "/opt/vonk/bin/ds4-serve",
-        "--model",
-        LEGACY_DS4_TARGET_FILE,
-        "--mtp",
-        LEGACY_DS4_DRAFTER_FILE,
-        "--ctx",
-        "131072",
-        "--batched-session",
-        "2",
-        "--dspark",
-        "--cuda",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "",
-    ]
-    .map(str::to_owned);
-    let mut expected_entrypoint = expected_entrypoint.to_vec();
-    expected_entrypoint[2] = format!("/models/{LEGACY_DS4_TARGET_FILE}");
-    expected_entrypoint[4] = format!("/models/{LEGACY_DS4_DRAFTER_FILE}");
-    *expected_entrypoint.last_mut().ok_or_else(&invalid)? = authority.2.to_string();
-    if spec.runtime.entrypoint != expected_entrypoint {
-        return Err(invalid());
-    }
-    spec.runtime.entrypoint[2] = format!("/models/target/{LEGACY_DS4_TARGET_FILE}");
-    spec.runtime.entrypoint[4] = format!("/models/drafter/{LEGACY_DS4_DRAFTER_FILE}");
-    for artifact in &mut spec.artifacts {
-        artifact.mount.target = format!("/models/{}", artifact.id);
-    }
-    spec.validate()?;
-    Ok(spec)
-}
-
-fn verify_or_migrate_cached_http_file(
+fn verify_cached_http_file(
     root: &Path,
     file_name: &str,
     artifact: &crate::workloads::ArtifactSpec,
 ) -> Result<(), OciError> {
     let manifest = read_manifest(root)?;
-    remove_legacy_manifest_orphan(root)?;
-    let observed = create_manifest(root)?;
     let expected_digest = artifact
         .revision
         .strip_prefix("sha256:")
         .ok_or(OciError::Artifact)?;
-    // The payload rename and manifest replacement are individually atomic. A restart may observe
-    // either name on either side, but both must still describe exactly the immutable artifact.
-    let exact_file_is_current = |manifest: &ArtifactManifest| {
-        if manifest.total_bytes != artifact.download_bytes || manifest.files.len() != 1 {
-            return None;
-        }
-        let (name, digest) = manifest.files.first_key_value()?;
-        if digest != expected_digest
-            || (name != file_name && (file_name == "artifact" || name != "artifact"))
-        {
-            return None;
-        }
-        Some(name == file_name)
-    };
-    let manifest_is_current = exact_file_is_current(&manifest).ok_or(OciError::Artifact)?;
-    let observed_is_current = exact_file_is_current(&observed).ok_or(OciError::Artifact)?;
-
-    if !observed_is_current {
-        let migrated_path = root.join(file_name);
-        match fs::symlink_metadata(&migrated_path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            _ => return Err(OciError::Artifact),
-        }
-        fs::rename(root.join("artifact"), migrated_path)?;
-    }
-
-    let migrated_manifest = create_manifest(root)?;
-    if exact_file_is_current(&migrated_manifest) != Some(true) {
+    if manifest.total_bytes != artifact.download_bytes
+        || manifest.files.len() != 1
+        || manifest.files.get(file_name).map(String::as_str) != Some(expected_digest)
+    {
         return Err(OciError::Artifact);
     }
-    if !manifest_is_current {
-        atomic_write_artifact_manifest(root, &serde_json::to_vec(&migrated_manifest)?)?;
-    }
-    verify_manifest(root)?;
-    File::open(root)?.sync_all()?;
-    Ok(())
-}
-
-fn remove_legacy_manifest_orphan(root: &Path) -> Result<(), OciError> {
-    let mut orphan = None;
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let Some(pid) = name
-            .strip_prefix("..vonk-manifest.json.")
-            .and_then(|value| value.strip_suffix(".tmp"))
-        else {
-            continue;
-        };
-        if pid
-            .parse::<u32>()
-            .ok()
-            .is_none_or(|value| value == 0 || value.to_string() != pid)
-            || orphan.is_some()
-        {
-            return Err(OciError::Artifact);
-        }
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if !metadata.file_type().is_file()
-            || metadata.file_type().is_symlink()
-            || metadata.len() > 64 * 1024
-        {
-            return Err(OciError::Artifact);
-        }
-        orphan = Some(entry.path());
-    }
-    if let Some(path) = orphan {
-        fs::remove_file(path)?;
-        File::open(root)?.sync_all()?;
-    }
-    Ok(())
-}
-
-fn atomic_write_artifact_manifest(root: &Path, value: &[u8]) -> Result<(), OciError> {
-    atomic_write_artifact_manifest_with(root, value, |directory| {
-        File::open(directory)?.sync_all()?;
-        Ok(())
-    })
-}
-
-fn atomic_write_artifact_manifest_with<F>(
-    root: &Path,
-    value: &[u8],
-    mut sync_directory: F,
-) -> Result<(), OciError>
-where
-    F: FnMut(&Path) -> Result<(), OciError>,
-{
-    let parent = root.parent().ok_or(OciError::Artifact)?;
-    let temporary = parent.join(format!(".vonk-manifest.{}.tmp", uuid::Uuid::new_v4()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    file.write_all(value)?;
-    file.sync_all()?;
-    fs::rename(temporary, root.join(".vonk-manifest.json"))?;
-    sync_directory(root)?;
-    sync_directory(parent)?;
-    Ok(())
+    verify_manifest(root)
 }
 
 fn safe_relative_path(value: &str) -> Result<PathBuf, OciError> {
@@ -2430,35 +2173,9 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        OciError, atomic_write_artifact_manifest_with, is_public_ip, public_https_endpoint_with,
-    };
-    use std::{cell::RefCell, collections::VecDeque, fs, net::IpAddr};
-    use tempfile::tempdir;
+    use super::{OciError, is_public_ip, public_https_endpoint_with};
+    use std::{collections::VecDeque, net::IpAddr};
     use url::Url;
-
-    #[test]
-    fn artifact_manifest_syncs_destination_before_source_parent() {
-        let directory = tempdir().unwrap();
-        let artifact = directory.path().join("artifact");
-        fs::create_dir(&artifact).unwrap();
-        let synced = RefCell::new(Vec::new());
-
-        atomic_write_artifact_manifest_with(&artifact, b"manifest", |path| {
-            synced.borrow_mut().push(path.to_owned());
-            Ok(())
-        })
-        .unwrap();
-
-        assert_eq!(
-            synced.into_inner(),
-            vec![artifact.clone(), directory.path().to_owned()]
-        );
-        assert_eq!(
-            fs::read(artifact.join(".vonk-manifest.json")).unwrap(),
-            b"manifest"
-        );
-    }
 
     #[test]
     fn only_globally_routable_ipv6_is_public() {

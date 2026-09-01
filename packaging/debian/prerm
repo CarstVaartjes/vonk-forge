@@ -49,20 +49,13 @@ recovery_remove_binding() {
 safe_pending() {
     [ -f "$pending" ] && [ ! -L "$pending" ] \
         && [ "$(/usr/bin/stat -c %u:%a "$pending")" = 0:600 ] \
+        && [ "$(/usr/bin/wc -l < "$pending")" -eq 3 ] \
         && /usr/bin/sed -n '1p' "$pending" \
-            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-    lines=$(/usr/bin/wc -l < "$pending")
-    if [ "$lines" -eq 2 ]; then
-        /usr/bin/sed -n '2p' "$pending" \
-            | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$'
-    elif [ "$lines" -eq 3 ]; then
-        /usr/bin/sed -n '2p' "$pending" \
+            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' \
+        && /usr/bin/sed -n '2p' "$pending" \
             | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
-            && /usr/bin/sed -n '3p' "$pending" \
-                | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
-    else
-        return 1
-    fi
+        && /usr/bin/sed -n '3p' "$pending" \
+            | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
 }
 
 safe_receipt() {

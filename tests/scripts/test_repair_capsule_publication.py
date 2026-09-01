@@ -19,10 +19,10 @@ LOADER.exec_module(PUBLICATION)
 
 NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 AUTHORITY = "a" * 64
-BINARY_SOURCE = "a122909feaa3" + "1" * 28
+BINARY_SOURCE = "d" * 40
 PACKAGING_SOURCE = "b" * 40
 RELEASE_KEY = "f" * 64
-VERSION = "0.1.0~dev.381+ga122909feaa3+repair.spk2818d189042b4c77aefa7796f4befd23.1"
+VERSION = f"0.1.0~dev.700+g{BINARY_SOURCE[:12]}+repair.spk2818d189042b4c77aefa7796f4befd23.1"
 SIGNATURE = "c" * 128
 TARGET_BINARY = "d" * 64
 TARGET_BUILD = f"sha256:{'e' * 64}"
@@ -236,7 +236,7 @@ def test_assemble_rejects_inconsistent_verifier_output(
     (
         {"expected_release_key_sha256": "0" * 64},
         {
-            "expected_binary_source_revision": "a122909feaa3" + "2" * 28,
+            "expected_binary_source_revision": "c" * 40,
         },
         {"expected_packaging_source_revision": "3" * 40},
     ),

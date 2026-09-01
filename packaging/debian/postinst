@@ -7,11 +7,6 @@ agent_semver=${package_version%%~*}
 agent_semver=${agent_semver%%+*}
 
 helper_unit_path=/lib/systemd/system/vonk-forge-package-helper.service
-bridge_root=/run/vonk-forge-package-helper/upgrade-bridge
-bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
-bridge_dropin=$bridge_dropin_dir/20-package-upgrade-bridge.conf
-bridge_main_pid=$bridge_root/previous-main-pid
-bridge_retired=$bridge_dropin_dir/20-package-upgrade-bridge.conf.retired
 helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
 helper_receipt=/var/lib/vonk-forge/helper-upgrade.receipt
 upgrade_intent=/var/lib/vonk-forge/package-upgrade/intent
@@ -144,19 +139,11 @@ write_helper_pending() {
             && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
             && /usr/bin/sed -n '1p' "$helper_pending" \
                 | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-        pending_lines=$(/usr/bin/wc -l < "$helper_pending")
-        if [ "$pending_lines" -eq 2 ]; then
-            /usr/bin/sed -n '2p' "$helper_pending" \
-                | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
-                || return 1
-        elif [ "$pending_lines" -eq 3 ]; then
-            /usr/bin/sed -n '2p' "$helper_pending" \
-                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
-            /usr/bin/sed -n '3p' "$helper_pending" \
+        [ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ] \
+            && /usr/bin/sed -n '2p' "$helper_pending" \
+                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
+            && /usr/bin/sed -n '3p' "$helper_pending" \
                 | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
-        else
-            return 1
-        fi
     fi
     pending_new=$(/usr/bin/mktemp /var/lib/vonk-forge/.helper-upgrade.XXXXXX)
     trap '/usr/bin/rm -f -- "$pending_new"' EXIT HUP INT TERM
@@ -181,19 +168,11 @@ pending_is_safe() {
         && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
         && /usr/bin/sed -n '1p' "$helper_pending" \
             | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-    pending_lines=$(/usr/bin/wc -l < "$helper_pending")
-    if [ "$pending_lines" -eq 2 ]; then
-        /usr/bin/sed -n '2p' "$helper_pending" \
-            | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$' \
-            || return 1
-    elif [ "$pending_lines" -eq 3 ]; then
-        /usr/bin/sed -n '2p' "$helper_pending" \
-            | grep -Eq '^helper_sha256=[0-9a-f]{64}$' || return 1
-        /usr/bin/sed -n '3p' "$helper_pending" \
-            | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
-    else
-        return 1
-    fi
+    [ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ] \
+        && /usr/bin/sed -n '2p' "$helper_pending" \
+            | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '3p' "$helper_pending" \
+            | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
 }
 
 activate_permanent_helper_unit() {
@@ -201,55 +180,7 @@ activate_permanent_helper_unit() {
         && grep -Fq \
             'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
             "$helper_unit_path" || return 1
-    retired=0
-    if [ -e "$bridge_dropin" ] || [ -L "$bridge_dropin" ]; then
-        [ -d "$bridge_dropin_dir" ] && [ ! -L "$bridge_dropin_dir" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin_dir")" = 0:755 ] \
-            && [ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin")" = 0:644 ] \
-            && [ "$(/usr/bin/wc -l < "$bridge_dropin")" -eq 2 ] \
-            && grep -Fxq '[Service]' "$bridge_dropin" \
-            && grep -Fxq \
-                'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-                "$bridge_dropin" \
-            && [ ! -e "$bridge_retired" ] && [ ! -L "$bridge_retired" ] \
-            || return 1
-        /usr/bin/mv -- "$bridge_dropin" "$bridge_retired"
-        retired=1
-    elif [ -e "$bridge_retired" ] || [ -L "$bridge_retired" ]; then
-        [ -d "$bridge_dropin_dir" ] && [ ! -L "$bridge_dropin_dir" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_dropin_dir")" = 0:755 ] \
-            && [ -f "$bridge_retired" ] && [ ! -L "$bridge_retired" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_retired")" = 0:644 ] \
-            && [ "$(/usr/bin/wc -l < "$bridge_retired")" -eq 2 ] \
-            && grep -Fxq '[Service]' "$bridge_retired" \
-            && grep -Fxq \
-                'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-                "$bridge_retired" || return 1
-        retired=1
-    fi
-    if ! /usr/bin/systemctl --system daemon-reload >/dev/null; then
-        if [ "$retired" -eq 1 ]; then
-            /usr/bin/mv -- "$bridge_retired" "$bridge_dropin"
-            /usr/bin/systemctl --system daemon-reload >/dev/null || true
-        fi
-        return 1
-    fi
-    if [ "$retired" -eq 1 ]; then
-        /usr/bin/rm -f -- "$bridge_retired"
-    fi
-    if [ -e "$bridge_main_pid" ] || [ -L "$bridge_main_pid" ]; then
-        [ -d "$bridge_root" ] && [ ! -L "$bridge_root" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_root")" = 0:700 ] \
-            && [ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$bridge_main_pid")" = 0:600 ] \
-            || return 1
-        /usr/bin/rm -f -- "$bridge_main_pid"
-        /usr/bin/rmdir --ignore-fail-on-non-empty "$bridge_root" 2>/dev/null \
-            || true
-    fi
-    /usr/bin/rmdir --ignore-fail-on-non-empty "$bridge_dropin_dir" 2>/dev/null \
-        || true
+    /usr/bin/systemctl --system daemon-reload >/dev/null
 }
 
 schedule_permanent_helper_restart() {

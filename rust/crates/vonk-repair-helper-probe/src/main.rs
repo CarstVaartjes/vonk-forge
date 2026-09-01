@@ -365,7 +365,7 @@ mod linux {
         validate_authority_file(Path::new(SETPRIV), &args[0])?;
         validate_authority_file(Path::new(PROBE), &args[1])?;
         println!(
-            "schema_version=1 setpriv_sha256={} probe_sha256={}",
+            "schema_version=2 setpriv_sha256={} probe_sha256={}",
             args[0], args[1]
         );
         Ok(())
@@ -414,7 +414,7 @@ mod linux {
             return Err("target tuple changed during probe".to_string());
         }
         println!(
-            "schema_version=1 nonce={} authority_sha256={} helper_pid={} helper_start={} helper_sha256={} boot_id={} invocation_id={} exe_dev={} exe_ino={} cap_eff=0000000000080000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2",
+            "schema_version=2 nonce={} authority_sha256={} helper_pid={} helper_start={} helper_sha256={} boot_id={} invocation_id={} exe_dev={} exe_ino={} cap_eff=0000000000080000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2",
             args[2],
             args[3],
             args[0],
@@ -474,7 +474,7 @@ mod linux {
             return Err("target tuple changed during probe".to_string());
         }
         println!(
-            "schema_version=1 nonce={} authority_sha256={} agent_pid={} agent_start={} agent_sha256={} boot_id={} invocation_id={} agent_uid={} agent_gid={} agent_groups={} exe_dev={} exe_ino={} cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2",
+            "schema_version=2 nonce={} authority_sha256={} agent_pid={} agent_start={} agent_sha256={} boot_id={} invocation_id={} agent_uid={} agent_gid={} agent_groups={} exe_dev={} exe_ino={} cap_eff=0000000000000000 cap_ambient=0000000000000000 no_new_privs=1 seccomp=2",
             args[2],
             args[3],
             args[0],

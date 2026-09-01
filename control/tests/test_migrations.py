@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import pytest
 from alembic import command
@@ -83,7 +84,9 @@ RETAINED_LEGACY_TABLES = {"agent_upgrade_compatibility_recoveries"}
 def _metadata_differences_without_retained_legacy(connection: object) -> list[object]:
     from vonk_control.models import Base
 
-    differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    differences = compare_metadata(
+        MigrationContext.configure(connection), Base.metadata
+    )
     return [
         difference
         for difference in differences
@@ -183,11 +186,160 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     )
     assert "agent_upgrade_compatibility_recoveries" not in Base.metadata.tables
 
+    timestamp = "2026-08-29 12:00:00+00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO jobs "
+                "(id, request_id, kind, state, actor, authority_revision, targets, "
+                "payload_digest, payload, current_attempt, created_at, updated_at) "
+                "VALUES "
+                "(:id, :request_id, :kind, :state, :actor, :authority_revision, "
+                ":targets, :payload_digest, :payload, :current_attempt, :created_at, "
+                ":updated_at)"
+            ),
+            {
+                "id": "legacy-job",
+                "request_id": "legacy-job-request",
+                "kind": "agent.upgrade.v1",
+                "state": "failed",
+                "actor": "migration-regression",
+                "authority_revision": "legacy-authority",
+                "targets": '["legacy-node"]',
+                "payload_digest": "1" * 64,
+                "payload": "{}",
+                "current_attempt": 1,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_nodes "
+                "(node_id, state, self_test_passed, capabilities) "
+                "VALUES (:node_id, :state, :self_test_passed, :capabilities)"
+            ),
+            {
+                "node_id": "legacy-node",
+                "state": "active",
+                "self_test_passed": True,
+                "capabilities": '["agent.upgrade.v1"]',
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_operations "
+                "(id, parent_job_id, node_id, kind, payload_digest, payload, "
+                "authority_revision, state, current_attempt, created_at, updated_at) "
+                "VALUES "
+                "(:id, :parent_job_id, :node_id, :kind, :payload_digest, :payload, "
+                ":authority_revision, :state, :current_attempt, :created_at, "
+                ":updated_at)"
+            ),
+            {
+                "id": "legacy-operation",
+                "parent_job_id": "legacy-job",
+                "node_id": "legacy-node",
+                "kind": "agent.upgrade.v1",
+                "payload_digest": "2" * 64,
+                "payload": "{}",
+                "authority_revision": "legacy-authority",
+                "state": "failed",
+                "current_attempt": 1,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_upgrade_compatibility_recoveries "
+                "(id, node_id, job_id, operation_id, source_attempt, source_fence, "
+                "source_certificate_serial, expected_retry_attempt, "
+                "source_semantic_version, source_build_digest, source_binary_digest, "
+                "upgrade_payload_sha256, package_sha256, target_package_version, "
+                "target_build_digest, target_binary_digest, authority_revision, "
+                "plan_digest, state, actor, request_id, created_at, completed_at, "
+                "blocked_at, abandoned_at) "
+                "VALUES "
+                "(:id, :node_id, :job_id, :operation_id, :source_attempt, "
+                ":source_fence, :source_certificate_serial, :expected_retry_attempt, "
+                ":source_semantic_version, :source_build_digest, "
+                ":source_binary_digest, :upgrade_payload_sha256, :package_sha256, "
+                ":target_package_version, :target_build_digest, "
+                ":target_binary_digest, :authority_revision, :plan_digest, :state, "
+                ":actor, :request_id, :created_at, :completed_at, :blocked_at, "
+                ":abandoned_at)"
+            ),
+            {
+                "id": "legacy-recovery",
+                "node_id": "legacy-node",
+                "job_id": "legacy-job",
+                "operation_id": "legacy-operation",
+                "source_attempt": 1,
+                "source_fence": "legacy-source-fence",
+                "source_certificate_serial": "legacy-certificate",
+                "expected_retry_attempt": 2,
+                "source_semantic_version": "0.1.0",
+                "source_build_digest": f"sha256:{'3' * 64}",
+                "source_binary_digest": "4" * 64,
+                "upgrade_payload_sha256": "5" * 64,
+                "package_sha256": "6" * 64,
+                "target_package_version": "0.1.1",
+                "target_build_digest": f"sha256:{'7' * 64}",
+                "target_binary_digest": "8" * 64,
+                "authority_revision": "legacy-authority",
+                "plan_digest": "9" * 64,
+                "state": "abandoned",
+                "actor": "migration-regression",
+                "request_id": "legacy-recovery-request",
+                "created_at": timestamp,
+                "completed_at": timestamp,
+                "blocked_at": timestamp,
+                "abandoned_at": timestamp,
+            },
+        )
+
     command.upgrade(config, "head")
 
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() \
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
             == "0012_recipe_run_generation"
+        )
+        assert "agent_upgrade_compatibility_recoveries" in set(
+            inspect(connection).get_table_names()
+        )
+        assert connection.execute(
+            text(
+                "SELECT id, state, plan_digest "
+                "FROM agent_upgrade_compatibility_recoveries WHERE id = :id"
+            ),
+            {"id": "legacy-recovery"},
+        ).one() == ("legacy-recovery", "abandoned", "9" * 64)
+
+
+def test_alembic_autogenerate_ignores_only_retained_legacy_storage(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'autogenerate.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+
+    migrations = tmp_path / "migrations"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "migrations", migrations)
+    config.set_main_option("script_location", str(migrations))
+    revision = command.revision(
+        config,
+        message="verify retained legacy exclusion",
+        autogenerate=True,
+        rev_id="retained_legacy_guard",
+    )
+
+    assert revision is not None
+    generated = Path(revision.path).read_text()
+    assert "agent_upgrade_compatibility_recoveries" not in generated
+    assert "op.drop_table" not in generated
+    assert "op.drop_index" not in generated
 
 
 def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(

@@ -34,11 +34,12 @@ Do not publish, dispatch, or retry an ordinary upgrade while any gate is open.
 Before signing, bind the two source authorities independently. In a clean,
 reviewed checkout, `REPAIR_PACKAGING_SOURCE_REVISION` must equal
 `git rev-parse HEAD`, and `git status --porcelain` must be empty. Derive
-`REPAIR_BINARY_SOURCE_REVISION` from the already-verified immutable a122 release
-provenance, not from a repair build environment variable. Verify the a122 DEB,
-release signature, binary digest, and full source revision before supplying its
-binaries to the repair builder. A full SHA that merely shares a 12-character
-version prefix is not sufficient authority.
+`REPAIR_BINARY_SOURCE_REVISION` from the already-verified immutable ordinary
+target release selected by the reviewed preflight, not from a repair build
+environment variable. Verify that release's DEB, release signature, binary
+digest, full source revision, and schema-2 capsule-capable recovery runner
+before supplying its binaries to the repair builder. A full SHA that merely
+shares a 12-character version prefix is not sufficient authority.
 
 ## Assemble the immutable publication bundle
 
