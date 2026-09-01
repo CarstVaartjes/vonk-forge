@@ -462,6 +462,7 @@ jobs:
     name: Exercise clean NAS candidate (${{ matrix.lane }})
     needs: [authority, candidate]
     if: >-
+      always() &&
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
     strategy:
@@ -477,18 +478,20 @@ jobs:
           - lane: docker-29.4.3
             tailscale_mode: disabled
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
       contents: read
     steps:
       - name: Check out exact candidate acceptance suite
+        timeout-minutes: 5
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.authority.outputs.source_sha }}
 
       - name: Install uv and Python
+        timeout-minutes: 5
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
@@ -496,6 +499,7 @@ jobs:
           enable-cache: true
 
       - name: Download verified Compose parser fixtures
+        timeout-minutes: 5
         shell: bash
         env:
           COMPOSE_LOWER_SHA256: eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310
@@ -517,8 +521,23 @@ jobs:
           chmod 0755 "$fixture_dir/docker-compose-v5.1.3" \
             "$fixture_dir/docker-compose-v2.24.6"
 
+      - name: Create isolated disposable Tailscale tailnet
+        if: matrix.lane == 'native'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python scripts/tailscale-acceptance-tailnet create \
+            --display-name "Vonk Forge CI $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT" \
+            --github-env "$GITHUB_ENV" \
+            --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
+
       - name: Run literal clean NAS and Tailscale configuration acceptance
         if: matrix.lane == 'native'
+        timeout-minutes: 25
         shell: bash
         env:
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
@@ -537,24 +556,30 @@ jobs:
           # here; physical M2 and NAS acceptance owns external HTTPS.
           VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
-          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
-          # Must be set only in an environment whose credentials belong to a
-          # dedicated disposable test tailnet, never an operator tailnet.
-          VONK_ACCEPTANCE_TAILNET_KIND: ${{ vars.VONK_ACCEPTANCE_TAILNET_KIND }}
-          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
+          # The namespace boundary is the disposable tailnet itself. Keep the
+          # exact production Service identities so this is a parity test and
+          # no `-acceptance` names can leak into an operator installation.
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
           VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
           VONK_ACCEPTANCE_TAILSCALE_MODE: full
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID }}
-          VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
         run: |
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           uv run python tests/acceptance/test_fresh_nas_install.py
+
+      - name: Delete isolated disposable Tailscale tailnet
+        if: always() && matrix.lane == 'native'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/tailscale-acceptance-tailnet delete \
+            --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
 
       - name: Start Docker 29.4.3 compatibility daemon
         if: matrix.lane == 'docker-29.4.3'
@@ -604,10 +629,9 @@ jobs:
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
-          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: ${{ vars.VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX }}
-          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api-acceptance
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard-acceptance
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
           VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
