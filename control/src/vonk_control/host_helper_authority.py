@@ -42,6 +42,7 @@ from .models import (
 from .models import AgentOperation as StoredAgentOperation
 from .workload_helper_authority import _load_private_key
 
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 

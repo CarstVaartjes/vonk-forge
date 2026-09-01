@@ -38,7 +38,6 @@ from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.host_helper_authority import HostHelperAuthorityError
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
