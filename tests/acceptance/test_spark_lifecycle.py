@@ -1713,21 +1713,30 @@ class SparkLifecycle:
             document = json.loads(result.stdout)
         except json.JSONDecodeError as error:
             raise LifecycleError("direct Rust agent self-test is invalid") from error
+        identity_fields = {
+            "architecture",
+            "binary_digest",
+            "build_digest",
+            "self_test_passed",
+            "semantic_version",
+        }
+        receipt_key = document.get("observation_receipt_public_key")
         if (
             not isinstance(document, dict)
-            or set(document)
-            != {
-                "architecture",
-                "binary_digest",
-                "build_digest",
-                "self_test_passed",
-                "semantic_version",
-            }
+            or not identity_fields <= set(document)
+            or bool(set(document) - identity_fields - {"observation_receipt_public_key"})
             or document.get("self_test_passed") is not True
             or not isinstance(document.get("build_digest"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
             or not isinstance(document.get("binary_digest"), str)
             or SHA256.fullmatch(document["binary_digest"]) is None
+            or (
+                receipt_key is not None
+                and (
+                    not isinstance(receipt_key, str)
+                    or SHA256.fullmatch(receipt_key) is None
+                )
+            )
         ):
             raise LifecycleError("direct Rust agent self-test is invalid")
         binary = self._hash_path(AGENT_BINARY)
