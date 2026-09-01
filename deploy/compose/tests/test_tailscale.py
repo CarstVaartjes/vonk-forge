@@ -740,7 +740,11 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
         f"    print({json.dumps(DEFAULT_MAP, separators=(',', ':'))!r})\n"
-        "elif args[:3] == ['serve', 'set-config', '--all']:\n"
+        "elif args == ['serve', 'drain', 'svc:vonk-forge']:\n"
+        "    pass\n"
+        "elif args == ['serve', 'advertise', 'svc:vonk-forge']:\n"
+        "    pass\n"
+        "elif args[:3] == ['serve', '--service=svc:vonk-forge', '--https=443']:\n"
         "    repaired.touch()\n",
         encoding="utf-8",
     )
