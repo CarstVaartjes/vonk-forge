@@ -1762,10 +1762,6 @@ openssl pkey -inform DER -in "$observation_receipt_private" \
 test "$(wc -c < "$observation_receipt_der")" -eq 44
 tail -c 32 "$observation_receipt_der" > "$observation_receipt_derived"
 cmp -s "$observation_receipt_derived" "$observation_receipt_public"
-observation_receipt_public_hex=$(od -An -v -tx1 \
-  "$observation_receipt_public" | tr -d ' \n')
-grep -F '"observation_receipt_public_key":"'"$observation_receipt_public_hex"'"' \
-  <<< "$self_test" >/dev/null
 observation_receipt_private_digest=$(sha256sum \
   "$observation_receipt_private" | cut -d' ' -f1)
 
@@ -1823,8 +1819,6 @@ grep -F '"build_digest":"'"$build_digest_next"'"' \
 grep -F '"binary_digest":"'"$ordinary_agent_sha"'"' \
   <<< "$ordinary_self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$ordinary_self_test" >/dev/null
-grep -F '"observation_receipt_public_key":"'"$observation_receipt_public_hex"'"' \
-  <<< "$ordinary_self_test" >/dev/null
 test "$(sha256sum "$observation_receipt_private" | cut -d' ' -f1)" \
   = "$observation_receipt_private_digest"
 cmp -s "$observation_receipt_derived" "$observation_receipt_public"

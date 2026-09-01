@@ -3799,15 +3799,14 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
 
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == restart.id,
-                    AgentOperation.node_id == nodes[0],
-                )
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
             )
-            is None
         )
+        assert owner_start is not None
+        assert owner_start.state == "failed"
         assert session.get(Job, restart.id).state == "failed"  # type: ignore[union-attr]
         assert session.get(RecipeRun, started.owner_id).state == "stopping"  # type: ignore[union-attr]
 
