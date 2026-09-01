@@ -177,6 +177,10 @@ configure_services() {
     # asynchronous implicit advertisement reaching control.
     ts serve set-config --all "${empty_service_map}" >/dev/null
     ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
+    advertise_services
+}
+
+advertise_services() {
     ts serve advertise "${control_service}" >/dev/null
     if [ "${include_hermes}" = "1" ]; then
         ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
@@ -379,10 +383,13 @@ while [ "${remaining}" -gt 0 ]; do
     if service_host_is_active "${include_hermes}"; then
         break
     fi
-    if [ "${route_repair_remaining}" -le 0 ] \
-        && service_host_is_approved "${include_hermes}"; then
-        configure_services "${include_hermes}"
-        wait_for_exact_services "${include_hermes}" || exit 1
+    if [ "${route_repair_remaining}" -le 0 ]; then
+        # The first advertisement can race tailnet policy propagation. A
+        # pending advertisement is not represented by service-host, so waiting
+        # for that mapping before retrying would deadlock until this container
+        # is recreated. Re-advertise the exact local Serve entries periodically;
+        # control still approves them only through the tag-scoped policy.
+        advertise_services || true
         route_repair_remaining=30
     fi
     sleep 2

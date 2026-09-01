@@ -671,7 +671,7 @@ def test_service_host_mapping_without_primary_routes_is_unhealthy(
     assert result.returncode != 0
 
 
-def test_configurator_readvertises_mapped_service_without_primary_route(
+def test_configurator_re_advertises_pending_service_host(
     tmp_path: Path,
 ) -> None:
     socket_path = tmp_path / "tailscaled.sock"
@@ -685,12 +685,15 @@ def test_configurator_readvertises_mapped_service_without_primary_route(
         f"repaired = pathlib.Path({os.fspath(repaired)!r})\n"
         "args = [value for value in sys.argv[1:] if not value.startswith('--socket=')]\n"
         "if args == ['status', '--json']:\n"
+        "    mappings = {'svc:vonk-forge': ['100.70.230.202']} if repaired.exists() else {}\n"
         "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
-        "    print(json.dumps({'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.70.230.202']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "    print(json.dumps({'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
         f"    print({json.dumps(DEFAULT_MAP, separators=(',', ':'))!r})\n"
+        "elif args == ['serve', 'advertise', 'svc:vonk-forge']:\n"
+        "    repaired.touch()\n"
         "elif args[:3] == ['serve', 'set-config', '--all']:\n"
         "    repaired.touch()\n",
         encoding="utf-8",
