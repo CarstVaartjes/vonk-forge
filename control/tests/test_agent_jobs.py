@@ -423,7 +423,7 @@ def test_package_capabilities_are_not_control_plane_agent_capabilities(
 ) -> None:
     jobs, _sessions, _clock = service
 
-    with pytest.raises(ValueError, match="agent capabilities"):
+    with pytest.raises(ValueError, match="capability negotiation is incomplete"):
         claim_agent(
             jobs,
             NODE_A,

@@ -1468,7 +1468,9 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
         assert node.architecture is None
 
 
-def test_unknown_claim_capability_is_rejected_without_contact(agent_system) -> None:
+def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
+    agent_system,
+) -> None:
     client, services, _, _ = agent_system
 
     response = client.post(
@@ -1483,14 +1485,14 @@ def test_unknown_claim_capability_is_rejected_without_contact(agent_system) -> N
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 204
     with services.sessions() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        assert node.capabilities == []
-        assert node.protocol_version is None
-        assert node.last_seen_at is None
-        assert session.get(AgentPresence, NODE_A) is None
+        assert node.capabilities == CAPABILITIES
+        assert node.protocol_version == 3
+        assert node.last_seen_at is not None
+        assert session.get(AgentPresence, NODE_A) is not None
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
