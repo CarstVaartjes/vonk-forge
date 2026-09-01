@@ -35,6 +35,7 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
+"src/cluster_profiles/qualification_authorities/nl-single-spark-224c4cc7.json" = "cluster_profiles/qualification_authorities/nl-single-spark-224c4cc7.json"
 "src/cluster_profiles/qualification_authorities/nl-single-spark-9a6c7516.json" = "cluster_profiles/qualification_authorities/nl-single-spark-9a6c7516.json"
 "src/cluster_profiles/qualification_authorities/nl-single-spark-e996f025.json" = "cluster_profiles/qualification_authorities/nl-single-spark-e996f025.json"
 "src/cluster_profiles/qualification_authorities/nl-single-spark-02ae8bb5.json" = "cluster_profiles/qualification_authorities/nl-single-spark-02ae8bb5.json"
