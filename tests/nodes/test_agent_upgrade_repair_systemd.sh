@@ -362,7 +362,7 @@ trap 'exit 143' TERM
 
 mkdir -p "$test_root"/{old,target,next}-{bin,dist} "$test_root/extracted"
 build_digest_old="sha256:$(printf old-dev335 | sha256sum | cut -d' ' -f1)"
-build_digest_target="sha256:$(printf exact-a122 | sha256sum | cut -d' ' -f1)"
+build_digest_target="sha256:$(printf exact-schema2 | sha256sum | cut -d' ' -f1)"
 build_digest_next="sha256:$(printf ordinary-next | sha256sum | cut -d' ' -f1)"
 
 build_agent() {
@@ -1713,7 +1713,7 @@ if [[ "$crash_phase" = pre-runner-rename ]]; then
   snapshot_prepared_objects "$test_root/prepared-after"
   cmp -s "$test_root/prepared-before" "$test_root/prepared-after"
   printf '%s\n' \
-    'pre-runner-rename boot preserves ignored prepared objects and baseline a122 recovery: PASS'
+    'pre-runner-rename boot preserves ignored prepared objects and baseline schema2 recovery: PASS'
   exit 0
 fi
 
@@ -1897,5 +1897,5 @@ test "$(sha256sum "$observation_receipt_private" | cut -d' ' -f1)" \
   = "$observation_receipt_private_digest"
 cmp -s "$observation_receipt_derived" "$observation_receipt_public"
 
-printf 'dev335 -> a122 node repair phase=%s and ordinary helper upgrade: PASS\n' \
+printf 'dev335 -> schema2 node repair phase=%s and ordinary helper upgrade: PASS\n' \
   "$crash_phase"

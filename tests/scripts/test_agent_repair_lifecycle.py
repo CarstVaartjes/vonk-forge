@@ -70,10 +70,10 @@ def _assert_frozen_runtime_and_old_runner() -> None:
     # does not authenticate it.
     expected = {
             ROOT / "packaging/debian/preinst-repair": (
-                "72d271b2862b1d0bda5fd32ef622351c3b600fbc94abce08c32f2140748dc500"
+                "9c38aa4379e3b5b9d78c73510cb3917beae5dfd507967e5fd7616464e6db5b27"
             ),
             ROOT / "packaging/debian/postinst-repair": (
-                "f4bb3071071c9a5dbc618539370841d6cad655fd5a1e6b57e28d363cb0636833"
+                "89efc936dce626184d3faaa6534c98e1eaa93b99103a4e0eb3af3063b605be02"
             ),
             ROOT / "scripts/build-agent-deb": (
                 "41b2573022156dd8e9231b8862df19cf1d6c7408a422d4fa0fe1d9512e064f5e"
@@ -179,8 +179,8 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     _assert_frozen_runtime_and_old_runner()
 
     assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
-    assert "0.1.0~dev.381+ga122909feaa3" in harness
-    assert "a122909feaa3b64d7b15371285e727965c3d7e9a" in harness
+    assert "0.1.0~dev.381+g9162cae286d1" in harness
+    assert "rev-parse 9162cae2" in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness
     assert harness.count('submit_helper_install "$') == 2
     submit = harness[

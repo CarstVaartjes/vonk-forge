@@ -1026,6 +1026,7 @@ source_capsule_exact() {
 }
 
 source_state_core_exact() {
+    capsule_expected_runner=${1:-$source_runner_sha256}
     source_cache=$source_state/$source_package_sha256.deb
     safe_root_file "$source_lock" 600 \
         && safe_root_file "$source_cache" 600 \
@@ -1056,7 +1057,8 @@ source_state_core_exact() {
             = "$authority_source_target_version" ] \
         && [ "$(/usr/bin/dpkg-deb --field "$source_cache" Architecture)" \
             = "$authority_source_architecture" ] \
-        && { [ "$source_schema" = 1 ] || source_capsule_exact; }
+        && { [ "$source_schema" = 1 ] \
+            || source_capsule_exact "$capsule_expected_runner"; }
 }
 
 source_file_exact_or_absent() {
@@ -1367,7 +1369,7 @@ promote_hidden_repair() {
         && safe_node_identity \
         && read_source_intent \
         && source_snapshot \
-        && source_state_core_exact \
+        && source_state_core_exact "$repair_runner_sha" \
         && safe_root_file "$source_blocker" 600 \
         && [ "$(/usr/bin/sha256sum "$source_blocker" \
             | /usr/bin/cut -d' ' -f1)" \
@@ -2072,7 +2074,7 @@ load_active_repair() {
     read_source_intent || return 1
     source_snapshot || return 1
     repair_state_complete || return 1
-    source_state_core_exact || return 1
+    source_state_core_exact "$repair_runner_sha" || return 1
     source_volatile_state_matches_phase || return 1
     [ "$repair_candidate_sha" = "$(/usr/bin/sha256sum "$repair_candidate" \
         | /usr/bin/cut -d' ' -f1)" ]
