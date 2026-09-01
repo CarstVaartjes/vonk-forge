@@ -268,7 +268,7 @@ def repair_preview_document() -> dict[str, object]:
         "target_build_digest": "sha256:" + "5" * 64,
     }
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "agent-upgrade-repair",
         "node_id": node_id,
         "authority_sha256": authority,
@@ -464,6 +464,22 @@ def test_browser_admin_can_preview_node_bound_repair_with_matching_csrf() -> Non
             "one-at-a-time",
         )
     ]
+
+
+def test_browser_repair_preview_rejects_legacy_schema_one() -> None:
+    upgrades = RepairPreviewUpgrades()
+    client, headers, *_ = _client("administrator", agent_upgrades=upgrades)
+    document = repair_preview_document()
+    document["repair_manifest"]["schema_version"] = 1
+
+    response = client.post(
+        "/api/v1/agents/upgrades/preview",
+        headers=headers,
+        json=document,
+    )
+
+    assert response.status_code == 422
+    assert upgrades.calls == []
 
 
 def test_browser_repair_preview_requires_csrf_and_administrator_role() -> None:

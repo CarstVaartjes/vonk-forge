@@ -782,7 +782,7 @@ class AgentUpgradeService:
                 "package",
                 "schema_version",
             }
-            or document.get("schema_version") != 1
+            or document.get("schema_version") != 2
             or document.get("kind") != "agent-upgrade-repair"
             or not isinstance(document.get("node_id"), str)
             or _NODE_ID.fullmatch(str(document["node_id"])) is None

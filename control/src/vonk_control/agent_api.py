@@ -341,7 +341,7 @@ class AgentUpgradePackageRequest(BaseModel):
 
 class AgentRepairManifestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     kind: Literal["agent-upgrade-repair"]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

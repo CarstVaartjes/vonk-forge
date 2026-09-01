@@ -122,7 +122,7 @@ def test_assemble_derives_exact_manifest_and_provenance_from_verifier(
         "package_sha256": package_sha256,
         "packaging_source_revision": PACKAGING_SOURCE,
         "release_key_sha256": RELEASE_KEY,
-        "schema_version": 1,
+        "schema_version": 2,
     }
     manifest = json.loads(manifest_path.read_text())
     assert manifest == {
@@ -140,7 +140,7 @@ def test_assemble_derives_exact_manifest_and_provenance_from_verifier(
             "target_binary_digest": TARGET_BINARY,
             "target_build_digest": TARGET_BUILD,
         },
-        "schema_version": 1,
+        "schema_version": 2,
     }
     assert manifest_path.read_bytes() == _canonical(manifest)
     assert not any(
@@ -148,6 +148,50 @@ def test_assemble_derives_exact_manifest_and_provenance_from_verifier(
         for entry in plan["objects"]
         for part in entry["key"].split("/")
     )
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    (
+        ("plan", "publication plan identity is invalid"),
+        ("manifest", "repair package descriptor identity is invalid"),
+    ),
+)
+def test_publish_rejects_legacy_top_level_schema_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    message: str,
+) -> None:
+    bundle, raw = _assemble(tmp_path, monkeypatch)
+    plan_path = bundle / "publication-plan.json"
+    plan, _, manifest_path = _bundle_files(bundle)
+    if target == "plan":
+        plan["schema_version"] = 1
+    else:
+        manifest = json.loads(manifest_path.read_text())
+        manifest["schema_version"] = 1
+        manifest_path.write_bytes(_canonical(manifest))
+        plan["objects"][1]["sha256"] = hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest()
+        plan["objects"][1]["size"] = len(manifest_path.read_bytes())
+    plan_path.write_bytes(_canonical(plan))
+    monkeypatch.setattr(
+        PUBLICATION,
+        "_invoke_verifier",
+        lambda *_arguments: _verified(raw),
+    )
+
+    with pytest.raises(PUBLICATION.PublicationError, match=message):
+        PUBLICATION.publish(
+            argparse.Namespace(
+                bundle=bundle,
+                filesystem=tmp_path / "published",
+                rclone_remote=None,
+                **_authority_args(),
+            )
+        )
 
 
 @pytest.mark.parametrize(

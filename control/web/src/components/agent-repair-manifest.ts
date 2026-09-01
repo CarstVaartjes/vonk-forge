@@ -40,7 +40,7 @@ export function parseAgentRepairManifest(text: string, selectedNodeId: string): 
   if (!record(value) || !exactKeys(value, ["schema_version", "kind", "node_id", "authority_sha256", "package"])) {
     return {ok: false, error: "The repair manifest has missing or unknown top-level fields."};
   }
-  if (value.schema_version !== 1 || value.kind !== "agent-upgrade-repair" || typeof value.node_id !== "string" || !NODE_ID.test(value.node_id) || typeof value.authority_sha256 !== "string" || !SHA256.test(value.authority_sha256)) {
+  if (value.schema_version !== 2 || value.kind !== "agent-upgrade-repair" || typeof value.node_id !== "string" || !NODE_ID.test(value.node_id) || typeof value.authority_sha256 !== "string" || !SHA256.test(value.authority_sha256)) {
     return {ok: false, error: "The repair manifest identity is invalid."};
   }
   if (value.node_id !== selectedNodeId) return {ok: false, error: `This repair manifest is bound to ${value.node_id}, not ${selectedNodeId}.`};

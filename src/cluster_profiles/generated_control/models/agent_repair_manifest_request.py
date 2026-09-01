@@ -28,14 +28,14 @@ class AgentRepairManifestRequest:
             kind (Literal['agent-upgrade-repair']):
             node_id (str):
             package (AgentUpgradePackageRequest):
-            schema_version (Literal[1]):
+            schema_version (Literal[2]):
      """
 
     authority_sha256: str
     kind: Literal['agent-upgrade-repair']
     node_id: str
     package: 'AgentUpgradePackageRequest'
-    schema_version: Literal[1]
+    schema_version: Literal[2]
 
 
 
@@ -85,9 +85,9 @@ class AgentRepairManifestRequest:
 
 
 
-        schema_version = cast(Literal[1] , d.pop("schema_version"))
-        if schema_version != 1:
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
+        schema_version = cast(Literal[2] , d.pop("schema_version"))
+        if schema_version != 2:
+            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         agent_repair_manifest_request = cls(
             authority_sha256=authority_sha256,

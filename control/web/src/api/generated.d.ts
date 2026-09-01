@@ -1581,7 +1581,7 @@ export interface components {
              * Schema Version
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
         };
         /** AgentSummary */
         AgentSummary: {

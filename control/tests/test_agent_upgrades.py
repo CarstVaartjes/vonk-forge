@@ -59,7 +59,7 @@ REPAIR_PACKAGE = {
     "target_build_digest": "sha256:" + "5" * 64,
 }
 REPAIR_MANIFEST = {
-    "schema_version": 1,
+    "schema_version": 2,
     "kind": "agent-upgrade-repair",
     "node_id": NODE_A,
     "authority_sha256": REPAIR_AUTHORITY_SHA256,
@@ -213,6 +213,11 @@ def test_repair_manifest_requires_canonical_immutable_url_and_stales_on_change(
     )
     with pytest.raises(AgentUpgradeConflict, match="URL is not canonical"):
         upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=mutable)
+
+    legacy = json.loads(json.dumps(REPAIR_MANIFEST))
+    legacy["schema_version"] = 1
+    with pytest.raises(AgentUpgradeConflict, match="manifest is invalid"):
+        upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=legacy)
 
     plan = upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=REPAIR_MANIFEST)
     changed = json.loads(json.dumps(REPAIR_MANIFEST))

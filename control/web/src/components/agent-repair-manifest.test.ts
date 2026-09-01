@@ -7,7 +7,7 @@ const PACKAGE_SHA = "2".repeat(64);
 
 function manifest(): AgentRepairManifest {
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: "agent-upgrade-repair",
     node_id: NODE,
     authority_sha256: AUTHORITY,
@@ -33,6 +33,7 @@ it.each([
   ["malformed JSON", "{", "not valid JSON"],
   ["wrong node", JSON.stringify({...manifest(), node_id: `spk_${"b".repeat(32)}`}), "not spk_aaaaaaaa"],
   ["unknown field", JSON.stringify({...manifest(), unexpected: true}), "missing or unknown"],
+  ["legacy schema", JSON.stringify({...manifest(), schema_version: 1}), "identity is invalid"],
   ["mutable URL", JSON.stringify({...manifest(), package: {...manifest().package, package_url: "https://install.vonkforge.ai/repair-capsules/latest/vonk-forge-agent.deb"}}), "not the canonical"],
 ])("rejects %s", (_name, document, message) => {
   const result = parseAgentRepairManifest(document, NODE);

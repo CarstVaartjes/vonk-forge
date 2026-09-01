@@ -18,7 +18,7 @@ export type AgentUpgradePackage = {
   schema_version: 1; target_binary_digest: string; target_build_digest: string;
 };
 export type AgentRepairManifest = {
-  schema_version: 1;
+  schema_version: 2;
   kind: "agent-upgrade-repair";
   node_id: string;
   authority_sha256: string;

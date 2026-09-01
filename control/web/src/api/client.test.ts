@@ -6,7 +6,7 @@ const REPAIR_NODE = `spk_${"a".repeat(32)}`;
 const REPAIR_AUTHORITY = "1".repeat(64);
 const REPAIR_PACKAGE_SHA = "2".repeat(64);
 const REPAIR_MANIFEST: AgentRepairManifest = {
-  schema_version: 1,
+  schema_version: 2,
   kind: "agent-upgrade-repair",
   node_id: REPAIR_NODE,
   authority_sha256: REPAIR_AUTHORITY,
