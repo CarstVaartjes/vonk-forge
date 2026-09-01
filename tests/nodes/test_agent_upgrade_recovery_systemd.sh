@@ -1096,6 +1096,10 @@ PY
       "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
       >/dev/null 2>&1 || true
     systemctl --system start "$socket_unit"
+    # Schema-v2 capsule ownership suppresses the package-owned recovery unit
+    # while intent exists. Start the capsule explicitly to exercise its
+    # bounded retry against the held dpkg lock.
+    systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
     for _ in {1..150}; do
       recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
         "$recovery_unit")
