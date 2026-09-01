@@ -105,7 +105,7 @@ helper_receipt=/var/lib/vonk-forge/package-repair-helper.receipt
 agent_unit=vonk-forge-agent.service
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
-agent_enablement=/lib/systemd/system/multi-user.target.wants/$agent_unit
+agent_enablement=/etc/systemd/system/multi-user.target.wants/$agent_unit
 recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 firewall_name=vonk-forge-docker-firewall.service
 lock_holder=
@@ -230,7 +230,8 @@ cleanup() {
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.service.d
   rm -f -- "$source_capsule_enablement" "$source_capsule_unit" \
-    "$source_capsule_gate" "$source_capsule_suppression" "$repair_gate"
+    "$source_capsule_gate" "$source_capsule_suppression" "$repair_gate" \
+    "$agent_enablement"
   rmdir --ignore-fail-on-non-empty \
     "${source_capsule_gate%/*}" "${source_capsule_suppression%/*}" \
     >/dev/null 2>&1 || true
@@ -726,7 +727,7 @@ install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 systemctl --system daemon-reload
 systemctl --system enable --now "$socket_unit" >/dev/null
 systemctl --system start "$helper_unit"
-systemctl --system start "$agent_unit"
+systemctl --system enable --now "$agent_unit" >/dev/null
 
 old_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 old_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
@@ -793,7 +794,7 @@ chown root:root "$source_dropin"
 chmod 0644 "$source_dropin"
 source_dropin_sha="$(sha256sum "$source_dropin" | cut -d' ' -f1)"
 printf '%s\n' \
-  'schema_version=2' \
+  'schema_version=1' \
   "target_version=$source_version" \
   "helper_sha256=$source_helper_sha" \
   "agent_sha256=$source_agent_sha" > "$source_blocker"
@@ -1734,15 +1735,39 @@ if [[ "$crash_phase" = pre-runner-rename ]]; then
     fi
     sleep 0.1
   done
+  test ! -e "$source_intent"
   test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = 'ii '
   test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$source_version"
   test ! -e "$repair_state"
   test ! -e "$repair_receipt"
   test ! -e "$helper_receipt"
   assert_repair_probe_not_persisted
-  test "$(sha256sum "$source_runner" | cut -d' ' -f1)" = "$source_runner_sha"
-  source_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
-  source_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
+  test ! -e "$source_capsule_dir"
+  test ! -e "$source_capsule_unit"
+  test ! -e "$source_capsule_gate"
+  test ! -e "$source_capsule_suppression"
+  test ! -e "$source_capsule_enablement"
+  test "$(sha256sum "$source_package_runner" | cut -d' ' -f1)" \
+    = "$source_runner_sha"
+  test "$(systemctl --system is-enabled "$agent_unit")" = enabled
+  systemctl --system start "$helper_unit"
+  source_agent_pid=0
+  source_helper_pid=0
+  for _ in {1..400}; do
+    source_agent_pid="$(systemctl --system show --property=MainPID \
+      --value "$agent_unit")"
+    source_helper_pid="$(systemctl --system show --property=MainPID \
+      --value "$helper_unit")"
+    if [[ "$source_agent_pid" =~ ^[1-9][0-9]*$ \
+      && "$source_helper_pid" =~ ^[1-9][0-9]*$ \
+      && -e "/proc/$source_agent_pid/exe" \
+      && -e "/proc/$source_helper_pid/exe" ]]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [[ "$source_agent_pid" =~ ^[1-9][0-9]*$ ]]
+  [[ "$source_helper_pid" =~ ^[1-9][0-9]*$ ]]
   test "$(sha256sum "/proc/$source_agent_pid/exe" | cut -d' ' -f1)" \
     = "$source_agent_sha"
   test "$(sha256sum "/proc/$source_helper_pid/exe" | cut -d' ' -f1)" \
