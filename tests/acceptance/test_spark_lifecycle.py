@@ -1835,7 +1835,8 @@ class SparkLifecycle:
                                 "self_test_passed",
                             )
                         )
-                        if len(rows[0]) <= index or rows[0][index] != expected_row[index]
+                        if len(rows[0]) <= index
+                        or rows[0][index] != expected_row[index]
                     )
                 if len(rows) == 1 and len(rows[0]) != 6:
                     row_mismatches.append("column_count")
