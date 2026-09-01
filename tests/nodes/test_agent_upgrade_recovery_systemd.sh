@@ -976,6 +976,12 @@ test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" 
   | cut -d' ' -f1)" = "$capsule_runner_digest"
 
   systemctl --system daemon-reload
+  target_wants=" $(systemctl --system show --property=Wants --value \
+    multi-user.target) "
+  case "$target_wants" in
+    *" $recovery_unit "*) ;;
+    *) printf '%s\n' 'capsule boot dependency is absent' >&2; exit 1 ;;
+  esac
   systemctl --system reset-failed "$agent_unit" "$recovery_unit" \
     >/dev/null 2>&1 || true
   # A failed ExecCondition skips the service without failing the start job, so
@@ -994,14 +1000,12 @@ test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" 
   test "$agent_pre_recovery_state" != active
   test "$agent_pre_recovery_pid" = 0
 
-  # Restarting the target forces systemd to traverse the vendor Wants edge,
-  # which models the next boot transaction without rebooting the CI host.
-  # Do not start the capsule directly: this assertion must prove boot pickup.
-  # A Wanted dependency may transiently fail the target restart while its
-  # Restart=on-failure policy schedules the next bounded recovery attempt.
-  # A real boot does not abort multi-user.target for an optional Wants edge,
-  # so preserve that behavior here and prove convergence below.
-  systemctl --system restart multi-user.target >/dev/null 2>&1 || true
+  # The target is already active on the CI host. Restarting an active target
+  # does not re-enqueue its dependencies, so it cannot model a fresh boot.
+  # The exact Wants assertion above proves the durable boot graph. Starting
+  # that dependency now models the job a fresh multi-user.target transaction
+  # would enqueue after the preinst dispatcher was killed before D-Bus receipt.
+  systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
   test "$(systemctl --system show --property=ActiveState --value \
     multi-user.target)" = active
 fi
