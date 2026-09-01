@@ -1459,9 +1459,18 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'test -f "$recovery_unit_path"',
         'test -L "$recovery_enablement"',
         "agent unexpectedly started before capsule recovery",
-        "systemctl --system restart multi-user.target",
+        "systemctl --system show --property=Wants --value",
+        'systemctl --system start "$recovery_unit"',
     ):
         assert durable_proof in post_remove
+    wants_proof = post_remove.index(
+        "systemctl --system show --property=Wants --value"
+    )
+    simulated_boot_start = post_remove.index(
+        'systemctl --system start "$recovery_unit"'
+    )
+    assert wants_proof < simulated_boot_start
+    assert "systemctl --system restart multi-user.target" not in post_remove
     assert (
         '"$recovery_load_state" == "$expected_recovery_load_state"'
         in lifecycle[convergence:convergence_break]
