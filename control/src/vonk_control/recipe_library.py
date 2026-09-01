@@ -288,37 +288,12 @@ class RecipeLibraryClient:
 
     def _load_snapshot(self) -> RecipeLibrarySnapshot:
         commit = self._current_revision()
-        try:
-            items = self._indexed_items(commit)
-        except RecipeLibraryError as error:
-            if error.code != "recipe_library.not_found":
-                raise
-            items = self._legacy_items(commit)
+        items = self._indexed_items(commit)
         return RecipeLibrarySnapshot(
             commit=commit,
             items=items,
             repository=self._repository,
         )
-
-    def _legacy_items(self, commit: str) -> tuple[RecipeLibraryItem, ...]:
-        tree = self._get_json(
-            f"/repos/{self._repository}/git/trees/{commit}?recursive=1"
-        )
-        entries = tree.get("tree")
-        if not isinstance(entries, list) or tree.get("truncated") is True:
-            raise RecipeLibraryError(
-                "recipe_library.response_invalid",
-                "recipe library tree is incomplete",
-            )
-        paths = sorted(
-            str(entry["path"])
-            for entry in entries
-            if isinstance(entry, dict)
-            and entry.get("type") == "blob"
-            and isinstance(entry.get("path"), str)
-            and re.fullmatch(r"recipes/[a-z0-9][a-z0-9-]{1,62}\.json", entry["path"])
-        )
-        return tuple(self._item(commit, path) for path in paths)
 
     def _indexed_items(self, commit: str) -> tuple[RecipeLibraryItem, ...]:
         encoded = self._get_json(
@@ -333,7 +308,7 @@ class RecipeLibraryClient:
         )
         recipes = document.get("recipes")
         if (
-            document.get("schema_version") not in {1, 2}
+            document.get("schema_version") != 2
             or document.get("repository") != self._repository
             or not isinstance(recipes, list)
             or len(recipes) > _MAX_RECIPES
@@ -342,11 +317,8 @@ class RecipeLibraryClient:
                 "recipe_library.response_invalid",
                 "recipe library index is invalid",
             )
-        entities: dict[CatalogReference, dict[str, object]] = {}
-        contexts: dict[str, RecipeLibrarySourceContext] = {}
-        if document["schema_version"] == 2:
-            entities = self._indexed_entities(document)
-            contexts = self._indexed_source_contexts(document)
+        entities = self._indexed_entities(document)
+        contexts = self._indexed_source_contexts(document)
         items: list[RecipeLibraryItem] = []
         for entry in recipes:
             if not isinstance(entry, dict):
@@ -921,19 +893,6 @@ class RecipeLibraryClient:
                 "recipe library commit is invalid",
             )
         return commit
-
-    def _item(self, commit: str, source_path: str) -> RecipeLibraryItem:
-        encoded = self._get_json(
-            f"/repos/{self._repository}/contents/{quote(source_path, safe='/')}"
-            f"?ref={quote(commit, safe='')}"
-        )
-        document = self._decode_document(encoded, "recipe library recipe")
-        return self._item_from_document(commit, source_path, document)
-
-    @staticmethod
-    def _decode_document(encoded: dict[str, Any], label: str) -> dict[str, object]:
-        decoded = RecipeLibraryClient._decode_base64(encoded, label)
-        return RecipeLibraryClient._parse_document(decoded, label)
 
     def _decode_contents_document(
         self,

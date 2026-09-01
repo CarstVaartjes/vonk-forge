@@ -118,13 +118,6 @@ class DistributedRecoveryCoordinator:
                     run.updated_at = now
                     worked = True
                     break
-                # `_recovery_authority` has now proved that every rank agent
-                # supports two-phase start and exact local inspection. Persist
-                # the protocol migration under the locked run before enqueueing
-                # the relaunch; otherwise a recovered legacy-v1 run could start
-                # exact lifecycles whose signed receipts and route publication
-                # the Controller would continue to reject as schema v1.
-                run.plan = {**run.plan, "observation_schema_version": 2}
                 job = _enqueue_recovery_stop(
                     session,
                     self._agent_jobs,

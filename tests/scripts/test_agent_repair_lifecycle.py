@@ -89,7 +89,7 @@ def _assert_frozen_schema2_runtime() -> None:
     # These digests force review of every privileged repair contract change.
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "8418b3bc5621b76fe504e7974d26faae2f1b3ddd4f3b11078d286e52619ba8cb"
+            "81d7d1ba132485368bcf10aeab1634dbda5910e1f38692cfc376bc06b00a1ca0"
         ),
         ROOT / "packaging/debian/postinst-repair": (
             "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
@@ -360,13 +360,30 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "let held = File::open(&exe_link)" in probe
     assert "let digest = hash_reader(&held)?;" in probe
     assert "if before != after" in probe
-    assert "schema_version=1 nonce=" in probe
+    assert "schema_version=1" not in probe
+    assert (
+        '"schema_version=2 setpriv_sha256={} probe_sha256={}"' in probe
+    )
+    assert probe.count('"schema_version=2 nonce={}') == 2
 
     manager = runner[
         runner.index("prove_helper_with_manager() {") : runner.index(
             "write_helper_receipt() {"
         )
     ]
+    assert "schema_version=1" not in manager
+    assert (
+        '"schema_version=2 setpriv_sha256=$authority_setpriv_sha256 '
+        'probe_sha256=$repair_probe_sha256"' in runner
+    )
+    assert (
+        '"^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 '
+        'helper_pid=' in manager
+    )
+    assert (
+        '"^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 '
+        'agent_pid=' in manager
+    )
     assert manager.index('probe_unit_absent "$probe_unit"') < manager.index(
         "probe_output=$(/usr/bin/systemd-run"
     )

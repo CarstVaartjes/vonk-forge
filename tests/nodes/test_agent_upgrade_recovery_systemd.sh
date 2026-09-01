@@ -16,16 +16,10 @@ semantic_version=${version%%~*}
 semantic_version=${semantic_version%%+*}
 baseline_version=0.0.0~acceptance.1+g0123456789ab
 baseline_semantic=0.0.0
-stale_pending_format=${STALE_PENDING_FORMAT:-prior3}
 crash_mode=${CRASH_MODE:-post-remove}
-candidate_custody=${CANDIDATE_CUSTODY:-root}
 case "$crash_mode" in
   full-cgroup|dpkg-only|post-remove) ;;
   *) printf 'unknown crash mode fixture: %s\n' "$crash_mode" >&2; exit 64 ;;
-esac
-case "$candidate_custody" in
-  legacy|root) ;;
-  *) printf 'unknown candidate custody fixture: %s\n' "$candidate_custody" >&2; exit 64 ;;
 esac
 case "$(dpkg --print-architecture)" in
   amd64) build_arch=linux-amd64 ;;
@@ -357,22 +351,9 @@ id -u vonk-agent >/dev/null 2>&1 \
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
-case "$candidate_custody" in
-  legacy)
-    candidate=/var/lib/vonk-forge/incoming/$package_digest.deb
-    helper_runtime_directory=vonk-forge-package-helper
-    helper_runtime_mode=0711
-    helper_runtime_preserve=yes
-    ;;
-  root)
-    custody_root=/run/vonk-forge-package-candidates
-    custody_invocation=0123456789abcdef0123456789abcdef
-    candidate=$custody_root/$custody_invocation/$package_digest.deb
-    helper_runtime_directory=vonk-forge-package-candidates
-    helper_runtime_mode=0700
-    helper_runtime_preserve=restart
-    ;;
-esac
+custody_root=/run/vonk-forge-package-candidates
+custody_invocation=0123456789abcdef0123456789abcdef
+candidate=$custody_root/$custody_invocation/$package_digest.deb
 
 # Install the synthetic lower version before creating the old helper mount
 # namespace. This makes every baseline ReadWritePaths target exist on a clean
@@ -406,21 +387,13 @@ assert_interrupted_baseline_state() {
 }
 
 stage_candidate() {
-  case "$candidate_custody" in
-    legacy)
-      install -o vonk-agent -g vonk-agent -m 0600 "$package" "$candidate"
-      test "$(stat -c %U:%G:%a:%h "$candidate")" = vonk-agent:vonk-agent:600:1
-      ;;
-    root)
-      test "$(stat -c %u:%g:%a "$custody_root")" = 0:0:700
-      install -d -o root -g root -m 0700 "$custody_root/$custody_invocation"
-      install -o root -g root -m 0600 "$package" "$candidate"
-      test "$(stat -c %u:%g:%a "$custody_root/$custody_invocation")" = 0:0:700
-      test "$(stat -c %u:%g:%a:%h "$candidate")" = 0:0:600:1
-      test "$candidate" \
-        = "/run/vonk-forge-package-candidates/$custody_invocation/$package_digest.deb"
-      ;;
-  esac
+  test "$(stat -c %u:%g:%a "$custody_root")" = 0:0:700
+  install -d -o root -g root -m 0700 "$custody_root/$custody_invocation"
+  install -o root -g root -m 0600 "$package" "$candidate"
+  test "$(stat -c %u:%g:%a "$custody_root/$custody_invocation")" = 0:0:700
+  test "$(stat -c %u:%g:%a:%h "$candidate")" = 0:0:600:1
+  test "$candidate" \
+    = "/run/vonk-forge-package-candidates/$custody_invocation/$package_digest.deb"
   test "$(basename "$candidate")" = "$package_digest.deb"
 }
 
@@ -470,9 +443,9 @@ SystemCallFilter=~@mount @raw-io @obsolete @debug
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_NET_ADMIN CAP_SETGID CAP_SETUID
 AmbientCapabilities=
-RuntimeDirectory=$helper_runtime_directory
-RuntimeDirectoryMode=$helper_runtime_mode
-RuntimeDirectoryPreserve=$helper_runtime_preserve
+RuntimeDirectory=vonk-forge-package-candidates
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
 ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent
 BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports
@@ -507,25 +480,11 @@ install -o root -g root -m 0644 "$test_root/installed-helper.socket" \
   "$old_socket_unit"
 stage_candidate
 
-case "$stale_pending_format" in
-  legacy2)
-    printf '%s\n' \
-      "version=$baseline_version" \
-      'state=pre-unpack' \
-      > /var/lib/vonk-forge/helper-upgrade.pending
-    ;;
-  prior3)
-    printf '%s\n' \
-      "version=$baseline_version" \
-      "helper_sha256=$helper_digest" \
-      "agent_sha256=$baseline_agent_digest" \
-      > /var/lib/vonk-forge/helper-upgrade.pending
-    ;;
-  *)
-    printf 'unknown stale pending fixture: %s\n' "$stale_pending_format" >&2
-    exit 64
-    ;;
-esac
+printf '%s\n' \
+  "version=$baseline_version" \
+  "helper_sha256=$helper_digest" \
+  "agent_sha256=$baseline_agent_digest" \
+  > /var/lib/vonk-forge/helper-upgrade.pending
 chown root:root /var/lib/vonk-forge/helper-upgrade.pending
 chmod 0600 /var/lib/vonk-forge/helper-upgrade.pending
 cp -- /var/lib/vonk-forge/helper-upgrade.pending "$test_root/stale-pending"
@@ -1095,4 +1054,4 @@ dpkg --remove vonk-forge-agent
 test ! -e /var/lib/vonk-forge/helper-upgrade.receipt
 
 printf '%s\n' \
-  "durable lower-interrupted $stale_pending_format $crash_mode $candidate_custody recovery/normal-upgrade/remove lifecycle: PASS"
+  "durable lower-interrupted schema2-pending $crash_mode root-custody recovery/normal-upgrade/remove lifecycle: PASS"

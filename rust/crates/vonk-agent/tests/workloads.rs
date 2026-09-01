@@ -15,20 +15,18 @@ use std::{
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_agent::{
-    oci::{OciRuntime, RecipeRunStartIdentity},
+    oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
         ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, JobSpec, LifecycleSpec,
         ModelDependencySpec, MountSpec, Placement, PlacementEnvironmentSpec, RuntimeArgument,
-        RuntimeEnvironment, RuntimeSpec, SecuritySpec, TopologySpec, WorkloadIdentitySpec,
-        WorkloadSpec,
+        RuntimeSpec, SecuritySpec, TopologySpec, WorkloadIdentitySpec, WorkloadSpec,
     },
 };
 
 const DIGEST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DS4_FILE: &str =
     "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf";
-const DS4_DRAFTER_FILE: &str = "DeepSeek-V4-Flash-DSpark-support-0731.gguf";
 
 struct FakeRunner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
@@ -232,87 +230,11 @@ fn spec() -> WorkloadSpec {
     }
 }
 
-fn legacy_ds4_spec() -> WorkloadSpec {
-    let mut workload = spec();
-    workload.identity.recipe_revision_sha256 =
-        "373169b0ef24f8d21b0aa40e918e13554bb4d788b4bd426df9f14b64b47d184a".to_owned();
-    workload.identity.model_version_sha256 =
-        "a54f12dd8653ff220efed3d5b1efa667ab95f060e16211f1cdba7e0a2dcfeafb".to_owned();
-    workload.identity.harness_sha256 =
-        "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3".to_owned();
-    workload.identity.runtime_distribution_sha256 =
-        "337c9d850a70b6a8907e588d4fee1d447f770bc004cb15bbc45283d017dca389".to_owned();
-    workload.runtime.adapter = "ds4".to_owned();
-    workload.runtime.entrypoint = vec![
-        "/opt/vonk/bin/ds4-serve".to_owned(),
-        "--model".to_owned(),
-        format!("/models/{DS4_FILE}"),
-        "--mtp".to_owned(),
-        format!("/models/{DS4_DRAFTER_FILE}"),
-        "--ctx".to_owned(),
-        "131072".to_owned(),
-        "--batched-session".to_owned(),
-        "2".to_owned(),
-        "--dspark".to_owned(),
-        "--cuda".to_owned(),
-        "--host".to_owned(),
-        "0.0.0.0".to_owned(),
-        "--port".to_owned(),
-        "8080".to_owned(),
-    ];
-    workload.runtime.arguments.clear();
-    workload.runtime.environment = vec![
-        RuntimeEnvironment {
-            name: "DS4_LOG_LEVEL".to_owned(),
-            value: Some(ArgumentValue::String("INFO".to_owned())),
-            secret: None,
-        },
-        RuntimeEnvironment {
-            name: "HF_HUB_OFFLINE".to_owned(),
-            value: Some(ArgumentValue::String("1".to_owned())),
-            secret: None,
-        },
-    ];
-    workload.endpoint.as_mut().unwrap().port = 8080;
-    workload.endpoint.as_mut().unwrap().model_aliases = vec!["deepseek-v4-flash".to_owned()];
-    workload.lifecycle.stop_timeout_seconds = 120;
-    workload.artifacts[0] = ArtifactSpec {
-        id: "target".to_owned(),
-        kind: "http.file".to_owned(),
-        repository: format!(
-            "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/{}/{DS4_FILE}",
-            "e7f04037032990db0346398d249baf9fb9df1ccc"
-        ),
-        revision: "sha256:ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0"
-            .to_owned(),
-        include_paths: vec![],
-        download_bytes: 86_720_111_488,
-        installed_bytes: 86_720_111_488,
-        mount: ArtifactMountSpec {
-            target: "/models".to_owned(),
-            read_only: true,
-        },
-        roles: vec!["entrypoint".to_owned()],
-    };
-    let mut drafter = workload.artifacts[0].clone();
-    drafter.id = "drafter".to_owned();
-    drafter.repository = format!(
-        "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/{}/{DS4_DRAFTER_FILE}",
-        "e7f04037032990db0346398d249baf9fb9df1ccc"
-    );
-    drafter.revision =
-        "sha256:7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360".to_owned();
-    drafter.download_bytes = 5_989_114_272;
-    drafter.installed_bytes = 5_989_114_272;
-    workload.artifacts.push(drafter);
-    workload
-}
-
 fn artifact_key_for_test(artifact: &ArtifactSpec) -> String {
     hex::encode(Sha256::digest(serde_json::to_vec(artifact).unwrap()))
 }
 
-fn write_legacy_ds4_installation(root: &Path, installation_id: &str, workload: &WorkloadSpec) {
+fn write_persisted_installation(root: &Path, installation_id: &str, workload: &WorkloadSpec) {
     let installation = root.join("installations").join(installation_id);
     fs::create_dir_all(&installation).unwrap();
     fs::write(
@@ -377,47 +299,6 @@ fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16
                 "master_address": null,
                 "master_port": null,
                 "port": port,
-                "reserved_memory_bytes": 1024
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-}
-
-fn write_managed_distributed_worker_run(root: &Path, run_id: &str, installation_id: &str) {
-    let installation = root.join("installations").join(installation_id);
-    fs::create_dir_all(&installation).unwrap();
-    let mut workload = spec();
-    bind_distributed_placement(&mut workload);
-    workload.security.host_network = true;
-    workload.topology = TopologySpec {
-        name: "dual".to_owned(),
-        node_count: 2,
-        rank: 1,
-        role: "worker".to_owned(),
-    };
-    fs::write(
-        installation.join("spec.json"),
-        serde_json::to_vec(&workload).unwrap(),
-    )
-    .unwrap();
-    fs::create_dir_all(root.join("runs").join(run_id)).unwrap();
-    let metadata = root.join("run-metadata").join(run_id);
-    fs::create_dir_all(&metadata).unwrap();
-    fs::write(
-        metadata.join("lifecycle.json"),
-        serde_json::to_vec(&serde_json::json!({
-            "installation_id": installation_id,
-            "placement": {
-                "endpoint_address": "192.168.1.212",
-                "rank": 1,
-                "role": "worker",
-                "world_size": 2,
-                "local_address": "192.168.100.11",
-                "master_address": "192.168.100.10",
-                "master_port": 29500,
-                "port": 8101,
                 "reserved_memory_bytes": 1024
             }
         }))
@@ -1235,304 +1116,27 @@ fn multiple_artifacts_require_and_use_exact_declared_targets() {
 }
 
 #[test]
-fn persisted_legacy_ds4_spec_loads_as_named_mounts_and_rewrites_exact_paths() {
+fn persisted_workload_must_satisfy_the_current_schema() {
+    let directory = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let mut workload = spec();
+    workload.artifacts[0].mount.read_only = false;
+    assert!(workload.validate().is_err());
+    write_persisted_installation(directory.path(), installation_id, &workload);
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::new()),
     };
-    let directory = tempdir().unwrap();
-    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    let legacy = legacy_ds4_spec();
-    assert!(legacy.validate().is_err());
-    write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
 
-    let loaded = OciRuntime {
+    let error = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
     .load_spec(installation_id)
-    .unwrap();
+    .unwrap_err();
 
-    loaded.validate().unwrap();
-    assert_eq!(loaded.artifacts[0].mount.target, "/models/target");
-    assert_eq!(loaded.artifacts[1].mount.target, "/models/drafter");
-    assert!(loaded.runtime.arguments.is_empty());
-    assert!(
-        loaded
-            .runtime
-            .entrypoint
-            .windows(2)
-            .any(|values| { values == ["--model", format!("/models/target/{DS4_FILE}").as_str()] })
-    );
-    assert!(loaded.runtime.entrypoint.windows(2).any(|values| {
-        values
-            == [
-                "--mtp",
-                format!("/models/drafter/{DS4_DRAFTER_FILE}").as_str(),
-            ]
-    }));
-    for preserved in [
-        "--ctx",
-        "131072",
-        "--batched-session",
-        "2",
-        "--dspark",
-        "--cuda",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8080",
-    ] {
-        assert!(
-            loaded
-                .runtime
-                .entrypoint
-                .iter()
-                .any(|value| value == preserved)
-        );
-    }
-    let persisted: WorkloadSpec = serde_json::from_slice(
-        &fs::read(
-            directory
-                .path()
-                .join("installations")
-                .join(installation_id)
-                .join("spec.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    assert!(
-        persisted
-            .artifacts
-            .iter()
-            .all(|artifact| artifact.mount.target == "/models")
-    );
-}
-
-#[test]
-fn persisted_legacy_built_in_ds4_identity_uses_its_exact_port() {
-    let runner = FakeRunner {
-        calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::new()),
-    };
-    let directory = tempdir().unwrap();
-    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    let mut legacy = legacy_ds4_spec();
-    legacy.identity.recipe_revision_sha256 =
-        "32f09e39052ec5c13292c9bec5577d8536690d74576a4c3ac6c8ef4cf493927e".to_owned();
-    legacy.identity.harness_sha256 =
-        "a1dbca13724678dbce47a1caff4a7ae4b6c557a6ac6ca5c0e3a99733fcc3f2b0".to_owned();
-    legacy.identity.runtime_distribution_sha256 =
-        "73e2ec403510447cfbc067d0bdba20cfd941bd741e8b90a764edef3bae83c12a".to_owned();
-    legacy.endpoint.as_mut().unwrap().port = 8080;
-    *legacy.runtime.entrypoint.last_mut().unwrap() = "8080".to_owned();
-    write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
-
-    let loaded = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    }
-    .load_spec(installation_id)
-    .unwrap();
-
-    assert_eq!(loaded.endpoint.unwrap().port, 8080);
-    assert_eq!(loaded.runtime.entrypoint.last().unwrap(), "8080");
-    assert_eq!(loaded.artifacts[0].mount.target, "/models/target");
-    assert_eq!(loaded.artifacts[1].mount.target, "/models/drafter");
-}
-
-#[test]
-fn persisted_legacy_ds4_spec_prepares_restart_with_original_cache_keys() {
-    let runner = FakeRunner {
-        calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::new()),
-    };
-    let directory = tempdir().unwrap();
-    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-    let legacy = legacy_ds4_spec();
-    write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
-    let runtime = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    };
-
-    assert!(runtime.installed_bytes(installation_id).unwrap() >= 92_709_225_760);
-    let artifact_set_digest = runtime.artifact_set_digest(installation_id).unwrap();
-    assert_eq!(artifact_set_digest.len(), 64);
-    assert!(
-        artifact_set_digest
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-    );
-    let loaded = runtime.load_spec(installation_id).unwrap();
-    let plan = runtime
-        .prepare_start(
-            &loaded,
-            installation_id,
-            run_id,
-            &Placement {
-                endpoint_address: None,
-                rank: 0,
-                role: "entrypoint".to_owned(),
-                world_size: 1,
-                local_address: None,
-                master_address: None,
-                master_port: None,
-                port: 8101,
-                reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
-            },
-        )
-        .unwrap();
-
-    for (artifact, target) in [
-        (&legacy.artifacts[0], "/models/target"),
-        (&legacy.artifacts[1], "/models/drafter"),
-    ] {
-        let stored = directory
-            .path()
-            .join("models")
-            .join("sha256")
-            .join(artifact_key_for_test(artifact));
-        assert!(stored.join("artifact").is_file());
-        assert!(plan.main.iter().any(|value| {
-            value.starts_with(&format!("type=bind,src={}", stored.display()))
-                && value.ends_with(&format!("dst={target},readonly"))
-        }));
-    }
-    assert!(
-        plan.main
-            .windows(2)
-            .any(|values| { values == ["--model", format!("/models/target/{DS4_FILE}").as_str()] })
-    );
-    assert!(plan.main.windows(2).any(|values| {
-        values
-            == [
-                "--mtp",
-                format!("/models/drafter/{DS4_DRAFTER_FILE}").as_str(),
-            ]
-    }));
-}
-
-#[test]
-fn persisted_legacy_ds4_spec_can_be_uninstalled() {
-    let runner = FakeRunner {
-        calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::new()),
-    };
-    let directory = tempdir().unwrap();
-    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    let legacy = legacy_ds4_spec();
-    write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
-
-    OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    }
-    .uninstall(installation_id, &legacy.identity.recipe_revision_sha256)
-    .unwrap();
-
-    assert!(
-        !directory
-            .path()
-            .join("installations")
-            .join(installation_id)
-            .exists()
-    );
-}
-
-#[test]
-fn persisted_legacy_mount_compatibility_rejects_non_ds4_or_inexact_paths() {
-    for mutation in [
-        "adapter",
-        "path",
-        "repository",
-        "flag",
-        "arguments",
-        "identity",
-        "stored-digest",
-        "ctx",
-        "batch",
-        "endpoint",
-    ] {
-        let runner = FakeRunner {
-            calls: RefCell::new(vec![]),
-            outputs: RefCell::new(VecDeque::new()),
-        };
-        let directory = tempdir().unwrap();
-        let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-        let mut legacy = legacy_ds4_spec();
-        match mutation {
-            "adapter" => legacy.runtime.adapter = "vllm".to_owned(),
-            "path" => {
-                let model = legacy
-                    .runtime
-                    .entrypoint
-                    .iter()
-                    .position(|value| value == "--model")
-                    .unwrap();
-                legacy.runtime.entrypoint[model + 1] = format!("/models/other/{DS4_FILE}");
-            }
-            "repository" => {
-                legacy.artifacts[0].repository = format!("https://example.com/{DS4_FILE}");
-            }
-            "flag" => legacy.runtime.entrypoint.push("--unknown".to_owned()),
-            "arguments" => legacy.runtime.arguments.push(RuntimeArgument {
-                name: "model".to_owned(),
-                value: ArgumentValue::String(format!("/models/{DS4_FILE}")),
-            }),
-            "identity" => legacy.identity.harness_sha256 = DIGEST.to_owned(),
-            "stored-digest" => {}
-            "ctx" => {
-                let ctx = legacy
-                    .runtime
-                    .entrypoint
-                    .iter()
-                    .position(|value| value == "--ctx")
-                    .unwrap();
-                legacy.runtime.entrypoint[ctx + 1] = "32768".to_owned();
-            }
-            "batch" => {
-                let batch = legacy
-                    .runtime
-                    .entrypoint
-                    .iter()
-                    .position(|value| value == "--batched-session")
-                    .unwrap();
-                legacy.runtime.entrypoint[batch + 1] = "1".to_owned();
-            }
-            "endpoint" => legacy.endpoint.as_mut().unwrap().port = 8000,
-            _ => unreachable!(),
-        }
-        write_legacy_ds4_installation(directory.path(), installation_id, &legacy);
-        if mutation == "stored-digest" {
-            fs::write(
-                directory
-                    .path()
-                    .join("installations")
-                    .join(installation_id)
-                    .join("recipe-content.sha256"),
-                DIGEST,
-            )
-            .unwrap();
-        }
-
-        assert!(
-            OciRuntime {
-                runner: &runner,
-                data_root: directory.path(),
-                huggingface_curl_config: None,
-            }
-            .load_spec(installation_id)
-            .is_err(),
-            "accepted {mutation}"
-        );
-    }
+    assert!(matches!(error, OciError::Workload(_)));
 }
 
 #[test]
@@ -2205,7 +1809,7 @@ fn http_artifacts_use_the_immutable_url_basename_and_manifest_key() {
 }
 
 #[test]
-fn verify_installation_migrates_valid_legacy_http_cache_without_redownloading() {
+fn verify_installation_rejects_obsolete_http_cache_layout_without_mutating_it() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::from([ProcessOutput {
@@ -2249,49 +1853,47 @@ fn verify_installation_migrates_valid_legacy_http_cache_without_redownloading() 
         .path();
     fs::rename(installed.join(DS4_FILE), installed.join("artifact")).unwrap();
     let manifest_path = installed.join(".vonk-manifest.json");
-    let mut legacy_manifest: serde_json::Value =
+    let mut obsolete_manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
-    let digest = legacy_manifest["files"]
+    let digest = obsolete_manifest["files"]
         .as_object_mut()
         .unwrap()
         .remove(DS4_FILE)
         .unwrap();
-    legacy_manifest["files"]
+    obsolete_manifest["files"]
         .as_object_mut()
         .unwrap()
         .insert("artifact".to_owned(), digest);
     fs::write(
         &manifest_path,
-        serde_json::to_vec(&legacy_manifest).unwrap(),
+        serde_json::to_vec(&obsolete_manifest).unwrap(),
     )
     .unwrap();
     runner.calls.borrow_mut().clear();
-    let restarted_runtime = OciRuntime {
+    let runtime = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     };
-    restarted_runtime
+    let error = runtime
         .verify_installation("cb555393-764b-4eb6-8f15-b416d289428f")
-        .unwrap();
+        .unwrap_err();
 
+    assert!(matches!(error, OciError::Artifact));
     assert!(runner.calls.borrow().is_empty());
-    assert_eq!(fs::read(installed.join(DS4_FILE)).unwrap(), b"weights");
-    assert!(!installed.join("artifact").exists());
-    let migrated_manifest: serde_json::Value =
+    assert!(!installed.join(DS4_FILE).exists());
+    assert_eq!(fs::read(installed.join("artifact")).unwrap(), b"weights");
+    let persisted_manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     assert_eq!(
-        migrated_manifest["files"][DS4_FILE],
+        persisted_manifest["files"]["artifact"],
         &workload.artifacts[0].revision[7..]
     );
-    assert!(migrated_manifest["files"].get("artifact").is_none());
-    restarted_runtime
-        .verify_installation("cb555393-764b-4eb6-8f15-b416d289428f")
-        .unwrap();
+    assert!(persisted_manifest["files"].get(DS4_FILE).is_none());
 }
 
 #[test]
-fn verify_installation_repairs_interrupted_http_cache_migration() {
+fn verify_installation_rejects_obsolete_manifest_orphan_without_removing_it() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::from([ProcessOutput {
@@ -2332,51 +1934,19 @@ fn verify_installation_repairs_interrupted_http_cache_migration() {
         .unwrap()
         .unwrap()
         .path();
-    let manifest_path = installed.join(".vonk-manifest.json");
-    let mut interrupted_manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
-    let digest = interrupted_manifest["files"]
-        .as_object_mut()
-        .unwrap()
-        .remove(DS4_FILE)
-        .unwrap();
-    interrupted_manifest["files"]
-        .as_object_mut()
-        .unwrap()
-        .insert("artifact".to_owned(), digest);
-    fs::write(
-        &manifest_path,
-        serde_json::to_vec(&interrupted_manifest).unwrap(),
-    )
-    .unwrap();
     let orphan = installed.join("..vonk-manifest.json.4242.tmp");
     fs::write(&orphan, b"{\"schema_version\":1,\"files\":").unwrap();
     runner.calls.borrow_mut().clear();
-    let restarted_runtime = OciRuntime {
+    let runtime = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     };
-    restarted_runtime
-        .verify_installation(installation_id)
-        .unwrap();
+    let error = runtime.verify_installation(installation_id).unwrap_err();
 
+    assert!(matches!(error, OciError::Artifact));
     assert!(runner.calls.borrow().is_empty());
-    assert!(!orphan.exists());
-    assert_eq!(fs::read(installed.join(DS4_FILE)).unwrap(), b"weights");
-    assert!(!installed.join("artifact").exists());
-    let repaired_manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
-    assert_eq!(
-        repaired_manifest["files"][DS4_FILE],
-        &workload.artifacts[0].revision[7..]
-    );
-    assert!(repaired_manifest["files"].get("artifact").is_none());
-
-    fs::rename(installed.join(DS4_FILE), installed.join("artifact")).unwrap();
-    restarted_runtime
-        .verify_installation(installation_id)
-        .unwrap();
+    assert!(orphan.exists());
     assert_eq!(fs::read(installed.join(DS4_FILE)).unwrap(), b"weights");
     assert!(!installed.join("artifact").exists());
 }
@@ -2766,33 +2336,56 @@ fn managed_recipe_run_observation_reports_running_unhealthy_container() {
 }
 
 #[test]
-fn legacy_distributed_worker_never_substitutes_owner_http_for_local_liveness() {
+fn observation_less_distributed_lifecycle_is_rejected() {
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-    write_managed_distributed_worker_run(
-        directory.path(),
-        run_id,
-        "cb555393-764b-4eb6-8f15-b416d289428f",
-    );
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let mut workload = spec();
+    bind_distributed_placement(&mut workload);
+    workload.security.host_network = true;
+    workload.topology = TopologySpec {
+        name: "dual".to_owned(),
+        node_count: 2,
+        rank: 1,
+        role: "worker".to_owned(),
+    };
+    write_persisted_installation(directory.path(), installation_id, &workload);
+    fs::create_dir_all(directory.path().join("runs").join(run_id)).unwrap();
+    let metadata = directory.path().join("run-metadata").join(run_id);
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(
+        metadata.join("lifecycle.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "installation_id": installation_id,
+            "placement": {
+                "endpoint_address": "192.168.1.212",
+                "rank": 1,
+                "role": "worker",
+                "world_size": 2,
+                "local_address": "192.168.100.11",
+                "master_address": "192.168.100.10",
+                "master_port": 29500,
+                "port": 8101,
+                "reserved_memory_bytes": 1024
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([ProcessOutput {
-            success: true,
-            stdout: b"204".to_vec(),
-            stderr: vec![],
-        }])),
+        outputs: RefCell::new(VecDeque::new()),
     };
 
-    let observations = OciRuntime {
+    let error = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
     .recipe_run_observations()
-    .unwrap();
+    .unwrap_err();
 
-    assert_eq!(observations.len(), 1);
-    assert!(!observations[0].ready);
+    assert!(matches!(error, OciError::Artifact));
     assert!(runner.calls.borrow().is_empty());
 }
 
@@ -2810,7 +2403,7 @@ fn exact_distributed_worker_inspection_reconstructs_local_process_without_http()
         rank: 1,
         role: "worker".to_owned(),
     };
-    write_legacy_ds4_installation(directory.path(), installation_id, &workload);
+    write_persisted_installation(directory.path(), installation_id, &workload);
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::new()),
@@ -2897,7 +2490,7 @@ fn stopped_residue_does_not_hide_a_new_active_exact_run() {
         rank: 1,
         role: "worker".to_owned(),
     };
-    write_legacy_ds4_installation(directory.path(), installation_id, &workload);
+    write_persisted_installation(directory.path(), installation_id, &workload);
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::new()),

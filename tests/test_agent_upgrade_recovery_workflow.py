@@ -26,15 +26,12 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert text.count("\n            tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 1
     assert "Validate current schema2 capsule post-remove boot recovery" in text
     assert "CRASH_MODE=post-remove" in text
-    assert "STALE_PENDING_FORMAT=prior3" in text
-    assert "CANDIDATE_CUSTODY=root" in text
     assert "persist-credentials: false" in text
     assert "contents: read" in text
     for forbidden in (
-        "HISTORICAL_A122",
-        "0.1.0~dev.381+ga122909feaa3",
-        "STALE_PENDING_FORMAT=legacy2",
-        "CANDIDATE_CUSTODY=legacy",
+        "HISTORICAL_RECOVERY",
+        "STALE_PENDING_FORMAT",
+        "CANDIDATE_CUSTODY",
         "environment:",
         "id-token: write",
         "secrets.",
@@ -48,7 +45,8 @@ def test_upgrade_recovery_harness_keeps_only_current_schema2_capsule_lane() -> N
     harness = HARNESS.read_text()
 
     assert 'crash_mode=${CRASH_MODE:-post-remove}' in harness
-    assert 'candidate_custody=${CANDIDATE_CUSTODY:-root}' in harness
+    assert "STALE_PENDING_FORMAT" not in harness
+    assert "CANDIDATE_CUSTODY" not in harness
     assert "recovery_unit=vonk-forge-package-upgrade-recover-capsule.service" in harness
     assert "test-post-remove-preinst-entered" in harness
     wants_proof = harness.index(
@@ -65,10 +63,8 @@ def test_upgrade_recovery_harness_keeps_only_current_schema2_capsule_lane() -> N
     assert 'sha256sum "/proc/$helper_pid/exe"' in harness
     assert 'sha256sum "/proc/$agent_pid/exe"' in harness
     for forbidden in (
-        "HISTORICAL_A122",
+        "HISTORICAL_RECOVERY",
         "compatibility_trigger",
-        "a122909feaa3b64d7b15371285e727965c3d7e9a",
-        "target_source_root=$test_root/a122-source",
         "spark3542_compat_reboot_fixture",
     ):
         assert forbidden not in harness

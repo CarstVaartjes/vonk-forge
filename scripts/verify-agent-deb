@@ -551,7 +551,6 @@ def _verify_control(
             "/usr/bin/sync -f /var/lib/vonk-forge",
             "vonk-forge-agent.service >/dev/null",
             "vonk-forge-package-helper-upgrade-finish.service",
-            "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d",
             "RuntimeMaxSec=240s",
             "/proc/$wait_pid/stat",
             "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",

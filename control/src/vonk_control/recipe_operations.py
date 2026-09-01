@@ -1767,19 +1767,11 @@ class RecipeOperationService:
                 phase_operations = {
                     operation_id
                     for operation_id, _node_id, _payload in phases[phase_index]
-                    if operation_id
-                }
-                phase_nodes = {
-                    node_id for _operation_id, node_id, _payload in phases[phase_index]
                 }
                 phase_children = tuple(
                     child
                     for child in children
-                    if (
-                        child.id in phase_operations
-                        if phase_operations
-                        else child.node_id in phase_nodes
-                    )
+                    if child.id in phase_operations
                 )
                 if any(
                     child.state not in _TERMINAL_JOB_STATES for child in phase_children
@@ -1804,7 +1796,7 @@ class RecipeOperationService:
                             job.kind,
                             job.authority_revision,
                             next_payload,
-                            operation_id=next_operation_id or str(uuid.uuid4()),
+                            operation_id=next_operation_id,
                         )
                     job.state = "running"
                     job.updated_at = now
@@ -3051,8 +3043,6 @@ def _stored_phases(
         raise RecipeOperationConflict("stored operation phases are invalid")
     phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
     seen_operations: set[str] = set()
-    seen_legacy_nodes: set[str] = set()
-    legacy_storage: bool | None = None
     for raw_phase in raw_phases:
         if not isinstance(raw_phase, list) or not raw_phase:
             raise RecipeOperationConflict("stored operation phases are invalid")
@@ -3065,23 +3055,13 @@ def _stored_phases(
             item_payload = raw_item.get("payload")
             if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
                 raise RecipeOperationConflict("stored operation phases are invalid")
-            if operation_id is None:
-                if legacy_storage is False or node_id in seen_legacy_nodes:
-                    raise RecipeOperationConflict("stored operation phases are invalid")
-                legacy_storage = True
-                seen_legacy_nodes.add(node_id)
-                operation_id = ""
-            elif isinstance(operation_id, str):
-                if legacy_storage is True or operation_id in seen_operations:
-                    raise RecipeOperationConflict("stored operation phases are invalid")
-                legacy_storage = False
-                try:
-                    uuid.UUID(operation_id)
-                except ValueError:
-                    raise RecipeOperationConflict("stored operation phases are invalid")
-                seen_operations.add(operation_id)
-            else:
+            if not isinstance(operation_id, str) or operation_id in seen_operations:
                 raise RecipeOperationConflict("stored operation phases are invalid")
+            try:
+                uuid.UUID(operation_id)
+            except ValueError:
+                raise RecipeOperationConflict("stored operation phases are invalid")
+            seen_operations.add(operation_id)
             group.append((operation_id, node_id, dict(item_payload)))
         phases.append(tuple(group))
     return tuple(phases)
@@ -3093,16 +3073,11 @@ def _current_phase_index(
 ) -> int | None:
     child_operations = {child.id for child in children}
     for index in range(len(phases) - 1, -1, -1):
-        phase = phases[index]
         phase_operations = {
-            operation_id for operation_id, _node_id, _payload in phase if operation_id
+            operation_id
+            for operation_id, _node_id, _payload in phases[index]
         }
-        phase_nodes = {node_id for _operation_id, node_id, _payload in phase}
-        if (
-            phase_operations <= child_operations
-            if phase_operations
-            else phase_nodes <= {child.node_id for child in children}
-        ):
+        if phase_operations <= child_operations:
             return index
     return None
 
@@ -3513,22 +3488,8 @@ def record_recipe_run_observations(
                 continue
             if _aware(node.updated_at) > observed:
                 continue
-            rank_count = session.scalar(
-                select(func.count(RunNode.id)).where(RunNode.run_id == node.run_id)
-            )
-            # A v1 distributed observation is only an HTTP probe of the
-            # collective endpoint owner.  It cannot prove this authenticated
-            # node's exact local rank is alive, so accepting `ready=true`
-            # would let a dead worker inherit the owner's health.  Fail all
-            # such legacy ranks closed; recovery starts them again with the
-            # signed exact-v2 local-container protocol.
-            legacy_distributed = (rank_count or 0) > 1
             if node.state != "failed":
-                node.state = (
-                    "running"
-                    if by_run.get(node.run_id, False) and not legacy_distributed
-                    else "failed"
-                )
+                node.state = "running" if by_run.get(node.run_id, False) else "failed"
             node.updated_at = observed
 
 

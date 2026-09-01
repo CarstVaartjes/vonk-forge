@@ -561,20 +561,14 @@ runs:
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
         sudo tests/scripts/test_docker_firewall.sh
         tests/nodes/test_agent_package_native_lifecycle.sh
-        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=legacy2 \
+        sudo env VERSION="$VERSION" \
           CRASH_MODE=full-cgroup \
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
-        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
-          CRASH_MODE=full-cgroup \
-          tests/nodes/test_agent_upgrade_recovery_systemd.sh
-        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+        sudo env VERSION="$VERSION" \
           CRASH_MODE=dpkg-only \
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
-        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
-          CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root \
-          tests/nodes/test_agent_upgrade_recovery_systemd.sh
-        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
-          CRASH_MODE=post-remove CANDIDATE_CUSTODY=root \
+        sudo env VERSION="$VERSION" \
+          CRASH_MODE=post-remove \
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
         sudo scripts/test-agent-package-native-lifecycle \
           linux-arm64 \

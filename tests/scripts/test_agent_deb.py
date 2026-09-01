@@ -29,9 +29,9 @@ DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras")
 BUILD_DIGEST = "sha256:" + "b" * 64
 REPAIR_NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
-REPAIR_SOURCE_VERSION = "0.1.0~dev.381+ga122909feaa3"
+REPAIR_BINARY_REVISION = "e" * 40
+REPAIR_SOURCE_VERSION = f"0.1.0~dev.700+g{REPAIR_BINARY_REVISION[:12]}"
 REPAIR_VERSION = f"{REPAIR_SOURCE_VERSION}+repair.{REPAIR_NODE_ID.replace('_', '')}.1"
-REPAIR_BINARY_REVISION = "a122909feaa3b64d7b15371285e727965c3d7e9a"
 REPAIR_PACKAGING_REVISION = "f" * 40
 
 
@@ -55,19 +55,6 @@ def _load_builder_module():
 
 BUILD_MODULE = _load_builder_module()
 VERIFY_MODULE = _load_verifier_module()
-
-
-def _require_git_object(object_name: str) -> None:
-    available = subprocess.run(
-        ["git", "cat-file", "-e", object_name],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-    )
-    if available.returncode != 0:
-        pytest.skip(
-            f"pinned repair source is absent from shallow checkout: {object_name}"
-        )
 
 
 def test_repair_source_lookup_trusts_only_the_resolved_repository(monkeypatch) -> None:
@@ -793,152 +780,27 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
         assert forbidden not in postinst
 
 
-@pytest.mark.skip(reason="superseded by durable package recovery")
-def test_package_helper_upgrade_bridge_is_narrow_bounded_and_retryable() -> None:
+def test_package_lifecycle_accepts_only_current_pending_and_has_no_bridge() -> None:
     preinst = PREINST.read_text()
     postinst = POSTINST.read_text()
-    helper = (ROOT / "packaging/systemd/vonk-forge-package-helper.service").read_text()
-    exact_paths = "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"
+    prerm = PRERM.read_text()
 
-    assert exact_paths in helper.splitlines()
-    assert "ReadWritePaths=/usr/share" not in helper.splitlines()
-    assert "ReadWritePaths=/usr" not in helper.splitlines()
-    assert "ProtectSystem=strict" in helper.splitlines()
-
-    assert "inside_package_helper" in preinst
-    assert "/proc/self/cgroup" in preinst
-    assert "previous-main-pid" in preinst
-    assert "vonk-forge-package-helper-upgrade-bridge.service" in preinst
-    assert "--property=ActiveState" in preinst
-    assert "--property=LoadState" in preinst
-    assert "reset-failed" in preinst
-    assert "RuntimeMaxSec=180s" in preinst
-    assert 'attempts" -lt 1200' in preinst
-    assert "bridge_dropin_dir=/lib/systemd/system/" in preinst
-    assert "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge" in preinst
-    assert "bridge_dropin_dir=/run/systemd/system/" not in preinst
-    assert exact_paths in preinst
-    assert "stop before dpkg can partially unpack" in preinst
-    assert "retry the signed controller upgrade" in preinst
-    assert preinst.index("schedule_bridge_restart") < preinst.rindex("exit 1")
-    preunpack_gate = preinst.index("write_preunpack_pending ||")
-    bridge_decision = preinst.index("# Development packages predating this bridge")
-    assert preunpack_gate < bridge_decision
-    assert preinst.index('/usr/bin/sync -f "$pending_new"') < preunpack_gate
-    assert preinst.index("/usr/bin/sync -f /var/lib/vonk-forge") < preunpack_gate
-    assert preinst.index("package_action=1") < preunpack_gate
-    assert preinst.index("inside_helper=0") < preunpack_gate
-    assert '[ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]' in preinst
-
-    assert "vonk-forge-package-helper-upgrade-finish.service" in postinst
-    assert "--property=ActiveState" in postinst
-    assert "--property=LoadState" in postinst
-    assert "reset-failed" in postinst
-    assert "schedule_permanent_helper_restart" in postinst
-    assert exact_paths in postinst
-    schedule_call = postinst.index(
-        'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
+    for lifecycle in (preinst, postinst, prerm):
+        assert "state=pre-unpack" not in lifecycle
+    assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in preinst
+    assert postinst.count('[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]') == 3
+    assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in prerm
+    assert "bridge_dropin" not in postinst
+    assert "upgrade-bridge" not in postinst
+    activation = postinst[
+        postinst.index("activate_permanent_helper_unit()") : postinst.index(
+            "schedule_permanent_helper_restart()"
+        )
+    ]
+    assert "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent" in (
+        activation
     )
-    assert postinst.rfind(exact_paths, 0, schedule_call) >= 0
-    helper_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
-    )
-    agent_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
-        helper_restart,
-    )
-    assert helper_restart < agent_restart < schedule_call
-    retire = postinst.index('/usr/bin/mv -- "$bridge_dropin" "$bridge_retired"')
-    permanent_reload = postinst.index(
-        "/usr/bin/systemctl --system daemon-reload", retire
-    )
-    cleanup = postinst.index('/usr/bin/rm -f -- "$bridge_retired"')
-    assert retire < permanent_reload < cleanup < agent_restart < schedule_call
-    assert "RuntimeMaxSec=240s" in postinst
-    assert 'attempts" -lt 1200' in postinst
-    assert "bridge_dropin_dir=/lib/systemd/system/" in postinst
-    assert "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge" in postinst
-    assert "ReadWritePaths=/run/systemd/system" not in postinst
-    assert "helper_has_effective_bridge_paths" in preinst
-    assert "--property=ReadWritePaths --value" in preinst
-
-
-@pytest.mark.skip(reason="superseded by durable package recovery")
-def test_upgrade_bridge_uses_inherited_namespace_not_the_unpacked_unit() -> None:
-    preinst = PREINST.read_text()
-
-    assert "helper_unit_has_package_paths" not in preinst
-    assert "helper_unit_path=" not in preinst
-    assert "helper_namespace_has_package_paths" in preinst
-    assert "keyrings=/usr/share/keyrings" in preinst
-    assert "package_doc=/usr/share/doc/vonk-forge-agent" in preinst
-    assert '"$keyrings/.vonk-package-write.XXXXXX"' in preinst
-    assert '"$package_doc/.vonk-package-write.XXXXXX"' in preinst
-    assert preinst.count("helper_namespace_has_package_paths") >= 3
-    acceptance = preinst.index('if [ "$helper_main_pid" != "$previous_main_pid" ]')
-    acceptance_end = preinst.index("exit 0", acceptance)
-    acceptance_block = preinst[acceptance:acceptance_end]
-    assert "bridge_dropin_is_safe" in acceptance_block
-    assert "helper_has_effective_bridge_paths" in acceptance_block
-    assert "helper_namespace_has_package_paths" in acceptance_block
-    assert "package_action=1\n    old_version=${2:-}" in preinst
-    assert 'if [ -n "$old_version" ]; then' in preinst
-    assert preinst.index('if [ -n "$old_version" ]; then') < preinst.index(
-        "inside_helper=0"
-    )
-    assert '[ -n "$old_version" ] || [ "$inside_helper" -eq 1 ]' in preinst
-
-
-@pytest.mark.skip(reason="superseded by durable package recovery")
-def test_package_helper_upgrade_bridge_fails_closed_on_unsafe_runtime_state() -> None:
-    preinst = PREINST.read_text()
-    postinst = POSTINST.read_text()
-
-    for unsafe_guard in (
-        '[ -L "$directory" ]',
-        '[ -d "$directory" ] && [ ! -L "$directory" ]',
-        "[ $((0$mode & 0022)) -eq 0 ]",
-        '[ -f "$bridge_dropin" ] && [ ! -L "$bridge_dropin" ]',
-        'stat -c %u:%a "$bridge_dropin"',
-        '[ -f "$bridge_main_pid" ] && [ ! -L "$bridge_main_pid" ]',
-        'stat -c %u:%a "$bridge_main_pid"',
-    ):
-        assert unsafe_guard in preinst
-    assert "cannot stage the package-helper upgrade bridge" in preinst
-    assert "cannot schedule the package-helper upgrade bridge" in preinst
-    assert "cannot schedule the permanent package finisher" in postinst
-    assert '[ ! -L "$helper_unit_path" ]' in postinst
-    assert '[ ! -L "$bridge_dropin" ]' in postinst
-    assert '[ ! -L "$bridge_main_pid" ]' in postinst
-
-
-@pytest.mark.skip(reason="superseded by durable package recovery")
-def test_upgrade_bridge_only_uses_dev335_writable_mounts() -> None:
-    preinst = PREINST.read_text()
-    helper = (ROOT / "packaging/systemd/vonk-forge-package-helper.service").read_text()
-    helper_socket = (
-        ROOT / "packaging/systemd/vonk-forge-package-helper.socket"
-    ).read_text()
-
-    assert (
-        "/lib/systemd/system"
-        in next(
-            line
-            for line in helper.splitlines()
-            if line.startswith("ReadWritePaths=/var/lib/vonk-forge ")
-        ).split()
-    )
-    assert "DirectoryMode=0711" in helper_socket.splitlines()
-    assert "RuntimeDirectory=vonk-forge-package-candidates" in helper.splitlines()
-    assert (
-        "bridge_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.service.d"
-    ) in preinst.splitlines()
-    assert (
-        "bridge_root=/run/vonk-forge-package-helper/upgrade-bridge"
-        in preinst.splitlines()
-    )
-    assert "bridge_dropin_dir=/run/systemd/system/" not in preinst
-    assert "bridge_root=/run/vonk-forge-package-helper-upgrade-bridge" not in preinst
+    assert "/usr/bin/systemctl --system daemon-reload" in activation
 
 
 def test_controller_upgrade_commits_recovery_before_pending_gate() -> None:
@@ -968,17 +830,16 @@ def test_controller_upgrade_commits_recovery_before_pending_gate() -> None:
     assert '[ "$durable_recovery" -ne 1 ]' in postinst
 
 
-def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
+def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> None:
     preinst = PREINST.read_text()
 
     assert '"$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg' in preinst
     assert "= --install" in preinst
     assert "= --force-confold" in preinst
-    assert "/var/lib/vonk-forge/incoming/[0-9a-f]*.deb" in preinst
-    assert "expected_candidate_metadata=$agent_uid:$agent_gid:600:1" in preinst
+    assert "/var/lib/vonk-forge/incoming/[0-9a-f]*.deb" not in preinst
     assert "custody_root=/run/vonk-forge-package-candidates" in preinst
     assert '[ "${#invocation}" -eq 32 ]' in preinst
-    assert "expected_candidate_metadata=0:0:600:1" in preinst
+    assert '= 0:0:600:1 ]' in preinst
     assert 'safe_root_directory "$invocation_dir" 700' in preinst
     assert "candidate_before=" in preinst and "candidate_after=" in preinst
     assert "helper_namespace_has_package_paths" in preinst
@@ -995,8 +856,8 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
     recovery_arm = preinst.index("arm_controller_recovery ||")
     assert recovery_arm < namespace_probe
-    assert "Bootstrap trust boundary" in preinst
-    assert "old-protocol TOCTOU" in preinst
+    assert "installed signed helper copies the agent-owned download" in preinst
+    assert "root-only per-invocation custody directory" in preinst
 
 
 def test_durable_recovery_fallback_is_exact_package_scoped_and_nonce_bound() -> None:
@@ -1193,15 +1054,15 @@ def test_recovery_status_is_bounded_stage_only_and_exercised_natively() -> None:
 def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
     lifecycle = RECOVERY_LIFECYCLE.read_text()
 
-    assert "candidate_custody=${CANDIDATE_CUSTODY:-root}" in lifecycle
+    assert "CANDIDATE_CUSTODY" not in lifecycle
     assert "custody_root=/run/vonk-forge-package-candidates" in lifecycle
     assert "custody_invocation=0123456789abcdef0123456789abcdef" in lifecycle
     assert (
         "candidate=$custody_root/$custody_invocation/$package_digest.deb" in lifecycle
     )
-    assert "helper_runtime_directory=vonk-forge-package-candidates" in lifecycle
-    assert "helper_runtime_mode=0700" in lifecycle
-    assert "helper_runtime_preserve=restart" in lifecycle
+    assert "RuntimeDirectory=vonk-forge-package-candidates" in lifecycle
+    assert "RuntimeDirectoryMode=0700" in lifecycle
+    assert "RuntimeDirectoryPreserve=restart" in lifecycle
     assert 'test "$(stat -c %u:%g:%a "$custody_root")" = 0:0:700' in lifecycle
     assert 'test "$(stat -c %u:%g:%a:%h "$candidate")" = 0:0:600:1' in lifecycle
     assert "mapfile -d '' -t dpkg_argv < \"/proc/$dpkg_pid/cmdline\"" in lifecycle
@@ -1550,7 +1411,9 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     stop_agent = preinst.index('stop "$agent_unit"', wait)
     assert normalize < wait < stop_agent
     assert "safe_known_pending" in preinst
-    assert "state=pre-unpack|helper_sha256=" in preinst
+    assert "state=pre-unpack" not in preinst
+    pending_guard = preinst[preinst.index("safe_known_pending()") : normalize]
+    assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in pending_guard
     blocker_retire = preinst.index('/usr/bin/rm -- "$agent_blocker"')
     agent_restart = preinst.index('restart "$agent_unit"', blocker_retire)
     intent_retire = preinst.index('/usr/bin/rm -- "$intent"', agent_restart)
@@ -1564,8 +1427,8 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     assert "intent changed before gate retirement" in preinst
     assert "intent changed before retirement" in preinst
     assert '"/proc/$service_pid/exe"' in preinst
-    assert 'for bridge_file in "$legacy_bridge" "$legacy_bridge_retired"' in preinst
-    assert "retire_legacy_bridge || unsafe_state" in preinst
+    assert "legacy_bridge" not in preinst
+    assert "20-package-upgrade-bridge.conf" not in preinst
 
 
 def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
@@ -2002,7 +1865,7 @@ def test_control_archive_rejects_duplicate_path_alias(
         (
             "version",
             "arm64",
-            REPAIR_VERSION.replace("381", "382", 1),
+            REPAIR_VERSION.replace("700", "701", 1),
             REPAIR_NODE_ID,
             "not canonical",
         ),
@@ -3414,23 +3277,6 @@ def test_repair_hidden_handoff_is_complete_before_unified_runner_swap() -> None:
     )
 
 
-def test_exact_a122_runner_ignores_prepared_repair_objects() -> None:
-    _require_git_object(f"{REPAIR_BINARY_REVISION}:packaging/debian/preinst")
-    old_runner = BUILD_MODULE.source_at_revision(
-        REPAIR_BINARY_REVISION, "packaging/debian/preinst"
-    ).decode("utf-8")
-
-    for repair_only_path in (
-        ".repair-build.",
-        ".standard",
-        "package-repair",
-        "/repair",
-    ):
-        assert repair_only_path not in old_runner
-    assert 'find "$state_dir"' not in old_runner
-    assert 'for path in "$state_dir"/' not in old_runner
-
-
 def test_repair_phase_replay_refreshes_boot_bound_process_receipts() -> None:
     runner = (ROOT / "packaging/debian/preinst-repair").read_text()
     refresh = runner[
@@ -3454,8 +3300,16 @@ def test_repair_phase_replay_refreshes_boot_bound_process_receipts() -> None:
     assert 'if [ "$phase_name" != agent-proven ]' not in recover
 
 
-def test_repair_builder_and_verifier_reject_pre_capsule_source_runner() -> None:
-    _require_git_object(f"{REPAIR_BINARY_REVISION}:packaging/debian/preinst")
+def test_repair_builder_and_verifier_reject_pre_capsule_source_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def pre_capsule_source(_revision: str, relative: str) -> bytes:
+        if relative == "packaging/debian/preinst":
+            return b"#!/bin/sh\nset -eu\n"
+        return f"synthetic pre-capsule source: {relative}\n".encode()
+
+    monkeypatch.setattr(BUILD_MODULE, "source_at_revision", pre_capsule_source)
+    monkeypatch.setattr(VERIFY_MODULE, "_git_source", pre_capsule_source)
     authority = {
         "source_target_version": REPAIR_SOURCE_VERSION,
         "source_architecture": "arm64",

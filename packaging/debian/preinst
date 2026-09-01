@@ -49,12 +49,6 @@ agent_gate=$agent_gate_dir/20-package-upgrade-recovery.conf
 agent_blocker=$state_dir/agent-blocked
 helper_unit=vonk-forge-package-helper.service
 agent_unit=vonk-forge-agent.service
-installed_helper_unit=/lib/systemd/system/vonk-forge-package-helper.service
-legacy_bridge_dir=/lib/systemd/system/vonk-forge-package-helper.service.d
-legacy_bridge=$legacy_bridge_dir/20-package-upgrade-bridge.conf
-legacy_bridge_retired=${legacy_bridge}.retired
-legacy_bridge_runtime=/run/vonk-forge-package-helper/upgrade-bridge
-legacy_bridge_marker=$legacy_bridge_runtime/previous-main-pid
 recovery_stage=dispatch
 
 status_token() {
@@ -276,20 +270,13 @@ safe_agent_blocker() {
 
 safe_known_pending() {
     safe_root_file "$pending" 600 \
+        && [ "$(/usr/bin/wc -l < "$pending")" -eq 3 ] \
         && /usr/bin/sed -n '1p' "$pending" \
-            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-    pending_lines=$(/usr/bin/wc -l < "$pending")
-    if [ "$pending_lines" -eq 2 ]; then
-        /usr/bin/sed -n '2p' "$pending" \
-            | grep -Eq '^(state=pre-unpack|helper_sha256=[0-9a-f]{64})$'
-    elif [ "$pending_lines" -eq 3 ]; then
-        /usr/bin/sed -n '2p' "$pending" \
+            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' \
+        && /usr/bin/sed -n '2p' "$pending" \
             | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
-            && /usr/bin/sed -n '3p' "$pending" \
-                | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
-    else
-        return 1
-    fi
+        && /usr/bin/sed -n '3p' "$pending" \
+            | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
 }
 
 normalize_pending_gate() {
@@ -616,10 +603,10 @@ stage_agent_gate() {
 }
 
 arm_controller_recovery() {
-    # Bootstrap trust boundary: dev335's signed helper verifies this agent-owned
-    # path before dpkg opens it. This script revalidates the opened candidate and
-    # takes a stable root-owned copy, but cannot remove that old-protocol TOCTOU.
-    # See docs/spark-package-upgrade-recovery.md.
+    # The installed signed helper copies the agent-owned download through one
+    # no-follow descriptor into this root-only per-invocation custody directory
+    # before invoking dpkg. Revalidate that exact current protocol here before
+    # taking the durable package cache copy.
     case "$PPID" in ''|*[!0-9]*) return 1 ;; esac
     [ -r "/proc/$PPID/exe" ] && [ -r "/proc/$PPID/cmdline" ] \
         && [ "$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg ] \
@@ -635,10 +622,8 @@ arm_controller_recovery() {
     candidate=$(/usr/bin/sed -n '4p' "$command_file")
     /usr/bin/rm -f -- "$command_file"
     trap - EXIT HUP INT TERM
-    candidate_custody=legacy
     custody_root=/run/vonk-forge-package-candidates
     case "$candidate" in
-        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb) ;;
         "$custody_root"/*/[0-9a-f]*.deb)
             invocation_dir=$(/usr/bin/dirname "$candidate") || return 1
             [ "$(/usr/bin/dirname "$invocation_dir")" = "$custody_root" ] \
@@ -649,7 +634,6 @@ arm_controller_recovery() {
             safe_root_directory "$custody_root" 700 \
                 && safe_root_directory "$invocation_dir" 700 \
                 || return 1
-            candidate_custody=root
             ;;
         *) return 1 ;;
     esac
@@ -659,15 +643,8 @@ arm_controller_recovery() {
     [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
     candidate_before=$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z "$candidate") \
         || return 1
-    if [ "$candidate_custody" = root ]; then
-        expected_candidate_metadata=0:0:600:1
-    else
-        agent_uid=$(/usr/bin/id -u vonk-agent) || return 1
-        agent_gid=$(/usr/bin/id -g vonk-agent) || return 1
-        expected_candidate_metadata=$agent_uid:$agent_gid:600:1
-    fi
-    [ "$(/usr/bin/stat -Lc %u:%g:%a:%h "$candidate")" \
-        = "$expected_candidate_metadata" ] || return 1
+    [ "$(/usr/bin/stat -Lc %u:%g:%a:%h "$candidate")" = 0:0:600:1 ] \
+        || return 1
     package_bytes=$(/usr/bin/stat -Lc %s "$candidate") || return 1
     case "$package_bytes" in ''|*[!0-9]*|0) return 1 ;; esac
     [ "$(/usr/bin/dpkg-deb --field "$candidate" Package)" = "$package_name" ] \
@@ -887,43 +864,6 @@ prove_installed_payload() {
         && safe_recovery_capsule
 }
 
-safe_legacy_bridge_file() {
-    bridge_file=$1
-    safe_root_file "$bridge_file" 644 \
-        && [ "$(/usr/bin/wc -l < "$bridge_file")" -eq 2 ] \
-        && grep -Fxq '[Service]' "$bridge_file" \
-        && grep -Fxq \
-            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-            "$bridge_file"
-}
-
-retire_legacy_bridge() {
-    safe_root_file "$installed_helper_unit" 644 \
-        && grep -Fxq \
-            'ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent' \
-            "$installed_helper_unit" || return 1
-    for bridge_file in "$legacy_bridge" "$legacy_bridge_retired"; do
-        if [ -e "$bridge_file" ] || [ -L "$bridge_file" ]; then
-            safe_legacy_bridge_file "$bridge_file" || return 1
-            /usr/bin/rm -- "$bridge_file"
-        fi
-    done
-    if [ -d "$legacy_bridge_dir" ] && [ ! -L "$legacy_bridge_dir" ]; then
-        /usr/bin/sync -f "$legacy_bridge_dir"
-        /usr/bin/rmdir --ignore-fail-on-non-empty "$legacy_bridge_dir" \
-            2>/dev/null || true
-    fi
-    if [ -e "$legacy_bridge_marker" ] || [ -L "$legacy_bridge_marker" ]; then
-        safe_root_file "$legacy_bridge_marker" 600 \
-            && [ "$(/usr/bin/wc -l < "$legacy_bridge_marker")" -eq 1 ] \
-            && grep -Eq '^[0-9]+$' "$legacy_bridge_marker" || return 1
-        /usr/bin/rm -- "$legacy_bridge_marker"
-        /usr/bin/sync -f "$legacy_bridge_runtime"
-        /usr/bin/rmdir --ignore-fail-on-non-empty "$legacy_bridge_runtime" \
-            2>/dev/null || true
-    fi
-}
-
 prove_running_unit() {
     service=$1
     expected_digest=$2
@@ -1087,7 +1027,6 @@ recover_upgrade() {
         temporary_failure 'named package is not fully installed'
     fi
     prove_installed_payload || unsafe_state 'installed package identity'
-    retire_legacy_bridge || unsafe_state 'legacy bridge evidence'
     /usr/bin/systemctl --system daemon-reload >/dev/null \
         || temporary_failure 'systemd reload failed'
     recovery_stage=helper-restart
