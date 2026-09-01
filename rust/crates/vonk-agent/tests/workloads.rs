@@ -1120,7 +1120,7 @@ fn persisted_workload_must_satisfy_the_current_schema() {
     let directory = tempdir().unwrap();
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
     let mut workload = spec();
-    workload.artifacts[0].mount.target = "/models".to_owned();
+    workload.artifacts[0].mount.read_only = false;
     assert!(workload.validate().is_err());
     write_persisted_installation(directory.path(), installation_id, &workload);
     let runner = FakeRunner {

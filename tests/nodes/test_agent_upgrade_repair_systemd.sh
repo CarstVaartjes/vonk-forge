@@ -1957,8 +1957,7 @@ ordinary_custody=/run/vonk-forge-package-candidates/fedcba9876543210fedcba987654
 install -d -o root -g root -m 0700 "$ordinary_custody"
 install -o root -g root -m 0600 "$ordinary_package" \
   "$ordinary_custody/$ordinary_sha.deb"
-ordinary_dispatch="$(stage_helper_candidate \
-  "$ordinary_custody/$ordinary_sha.deb")"
+ordinary_dispatch=$ordinary_custody/$ordinary_sha.deb
 rm -f -- "$result" "$started"
 submit_helper_install "$ordinary_dispatch"
 for _ in {1..2400}; do
