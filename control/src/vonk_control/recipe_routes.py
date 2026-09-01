@@ -871,6 +871,15 @@ class RecipeRouteService:
                         "recipe rank set does not match accepted plan",
                         run_id=run.id,
                     )
+            exact_observations = (
+                isinstance(run.plan, Mapping)
+                and run.plan.get("observation_schema_version") == 2
+            )
+            if len(nodes) > 1 and not exact_observations:
+                raise RecipeRouteError(
+                    "distributed recipe route requires exact rank observations",
+                    run_id=run.id,
+                )
             mapping = session.get(ClusterMapping, run.mapping_id)
             entrypoints = [node for node in nodes if node.role == "entrypoint"]
             endpoint_owners = (
@@ -892,10 +901,6 @@ class RecipeRouteService:
                     run_id=run.id,
                 )
             endpoint_owner = endpoint_owners[0]
-            exact_observations = (
-                isinstance(run.plan, Mapping)
-                and run.plan.get("observation_schema_version") == 2
-            )
             if exact_observations:
                 observation_deadline = run.observation_deadline_at
                 normalized_deadline = (
