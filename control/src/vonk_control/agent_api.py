@@ -80,12 +80,18 @@ from .models import (
     LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRun,
     RecipeSourceBundle,
+    RunNode,
 )
 from .operation_api import bounded_error_responses
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
-from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
+from .recipe_operations import (
+    RecipeRunObservation,
+    prepare_exact_recipe_run_observation_nodes,
+    record_recipe_run_observations,
+)
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -209,7 +215,7 @@ class EnrollmentSubmitRequest(BaseModel):
     @field_validator("evidence")
     @classmethod
     def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        expected = {
+        legacy = {
             "node_id",
             "csr_public_key_fingerprint",
             "host_key_fingerprint",
@@ -217,10 +223,13 @@ class EnrollmentSubmitRequest(BaseModel):
             "agent_digest",
             "boot_id",
         }
-        if set(evidence) != expected or any(
+        receipt_key = "observation_receipt_public_key"
+        if set(evidence) not in (legacy, legacy | {receipt_key}) or any(
             not value.strip() for value in evidence.values()
         ):
             raise ValueError("evidence fields are invalid")
+        if receipt_key in evidence and _DIGEST.fullmatch(evidence[receipt_key]) is None:
+            raise ValueError("observation receipt public key is invalid")
         if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
             raise ValueError("evidence is too large")
         return evidence
@@ -293,6 +302,9 @@ class AgentRuntimeIdentityRequest(BaseModel):
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     self_test_passed: Literal[True]
+    observation_receipt_public_key: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
 
 
 class ClaimRequest(BaseModel):
@@ -530,14 +542,96 @@ class RecipeRunObservationRequest(BaseModel):
     ready: bool = Field(strict=True)
 
 
-class RecipeRunObservationsRequest(BaseModel):
+class RecipeRunObservationIdentityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[1]
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    run_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    installation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    recipe_revision_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    mapping_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
+    image_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifact_set_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_identity: str = Field(min_length=3, max_length=1024)
+    rank: int = Field(ge=0, le=1023, strict=True)
+    role: str = Field(min_length=1, max_length=64)
+    world_size: int = Field(ge=2, le=1024, strict=True)
+    local_address: str = Field(min_length=2, max_length=45)
+    master_address: str = Field(min_length=2, max_length=45)
+    master_port: int = Field(ge=1024, le=65535, strict=True)
+    port: int = Field(ge=1024, le=65535, strict=True)
+    runtime_arguments_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RecipeRunObservationGrantRequest(RecipeRunObservationIdentityRequest):
+    job_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    operation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
+    fence: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_in_seconds: Literal[10]
+
+    def observation_identity(self) -> dict[str, object]:
+        return self.model_dump(
+            exclude={
+                "job_id",
+                "operation_id",
+                "attempt",
+                "fence",
+                "request_sha256",
+                "expires_in_seconds",
+            }
+        )
+
+
+class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
     observed_at: datetime
-    runs: list[RecipeRunObservationRequest] = Field(max_length=64)
+    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    endpoint_ready: bool | None = Field(default=None, strict=True)
+    grant: dict[str, object]
+    helper_receipt: dict[str, object]
+
+    @field_validator("observed_at")
+    @classmethod
+    def aware_observed_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("recipe run observation time must be timezone-aware")
+        return value
+
+    def observation_identity(self) -> dict[str, object]:
+        return self.model_dump(
+            exclude={
+                "observation_identity_sha256",
+                "observed_at",
+                "process_running",
+                "endpoint_ready",
+                "grant",
+                "helper_receipt",
+            }
+        )
+
+
+class RecipeRunObservationsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1, 2]
+    observed_at: datetime
+    runs: list[RecipeRunObservationRequest | RecipeRunExactObservationRequest] = Field(
+        max_length=64
+    )
 
     @model_validator(mode="after")
     def unique_runs(self) -> RecipeRunObservationsRequest:
+        if self.schema_version == 1 and any(
+            not isinstance(run, RecipeRunObservationRequest) for run in self.runs
+        ):
+            raise ValueError("recipe run observation version is invalid")
+        if self.schema_version == 2 and any(
+            not isinstance(run, RecipeRunExactObservationRequest) for run in self.runs
+        ):
+            raise ValueError("recipe run observation version is invalid")
         identities = [run.run_id for run in self.runs]
         if len(identities) != len(set(identities)):
             raise ValueError("recipe run observation is duplicated")
@@ -1944,15 +2038,158 @@ def install_agent_routes(
                 detail="recipe run observation time is outside the accepted window",
             )
         try:
-            record_recipe_run_observations(
-                required.sessions,
-                identity.node_id,
-                observed_at,
-                tuple(RecipeRunObservation(run.run_id, run.ready) for run in body.runs),
-            )
+            if body.schema_version == 1:
+                legacy = tuple(
+                    RecipeRunObservation(run.run_id, run.ready)
+                    for run in body.runs
+                    if isinstance(run, RecipeRunObservationRequest)
+                )
+                if len(legacy) != len(body.runs):
+                    raise ValueError("recipe run observation version is invalid")
+                record_recipe_run_observations(
+                    required.sessions, identity.node_id, observed_at, legacy
+                )
+            else:
+                authority = host_runtime_service()
+                exact = tuple(
+                    run
+                    for run in body.runs
+                    if isinstance(run, RecipeRunExactObservationRequest)
+                )
+                if len(exact) != len(body.runs):
+                    raise ValueError("recipe run observation version is invalid")
+                by_run = {run.run_id: run for run in exact}
+                with required.sessions.begin() as session:
+                    assigned = prepare_exact_recipe_run_observation_nodes(
+                        session, identity.node_id, observed_at, set(by_run)
+                    )
+                    for node in assigned:
+                        run = session.get(RecipeRun, node.run_id)
+                        assert run is not None
+                        evidence = by_run.get(node.run_id)
+                        if evidence is None:
+                            continue
+                        if (
+                            evidence.observed_at.tzinfo is None
+                            or evidence.observed_at.utcoffset() is None
+                        ):
+                            raise ValueError(
+                                "recipe run observation time must be timezone-aware"
+                            )
+                        evidence_observed_at = evidence.observed_at.astimezone(UTC)
+                        if evidence.run_generation != run.run_generation:
+                            raise ValueError(
+                                "recipe run observation generation is stale"
+                            )
+                        if (
+                            _now(node.updated_at).astimezone(UTC)
+                            >= evidence_observed_at
+                        ):
+                            raise ValueError("recipe run observation was replayed")
+                        try:
+                            (
+                                observed_identity,
+                                process_running,
+                                receipt_sha256,
+                            ) = authority.consume_recipe_run_observation_grant(
+                                session,
+                                node_id=identity.node_id,
+                                certificate_serial=identity.certificate_serial,
+                                identity=evidence.observation_identity(),
+                                observed_at=evidence_observed_at,
+                                received_at=now,
+                                signed_grant=evidence.grant,
+                                helper_receipt=evidence.helper_receipt,
+                            )
+                        except HostHelperAuthorityError:
+                            # An authenticated same-generation identity mismatch is
+                            # rank failure, not permission to keep serving.
+                            node.state = "failed"
+                            node.observed_run_generation = None
+                            node.observation_receipt_sha256 = None
+                            node.observation_endpoint_ready = None
+                            node.updated_at = evidence_observed_at
+                            continue
+                        mapping = session.get(ClusterMapping, run.mapping_id)
+                        owner = (
+                            mapping is not None
+                            and mapping.endpoint_owner_node_id == identity.node_id
+                        )
+                        if (
+                            observed_identity != evidence.observation_identity_sha256
+                            or (owner and type(evidence.endpoint_ready) is not bool)
+                            or (not owner and evidence.endpoint_ready is not None)
+                        ):
+                            node.state = "failed"
+                        elif node.state != "failed":
+                            node.state = (
+                                "running"
+                                if process_running
+                                and (not owner or evidence.endpoint_ready is True)
+                                else "failed"
+                            )
+                        node.observed_run_generation = run.run_generation
+                        node.observation_receipt_sha256 = receipt_sha256
+                        node.observation_endpoint_ready = (
+                            evidence.endpoint_ready if owner else None
+                        )
+                        node.updated_at = evidence_observed_at
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @agent.post("/recipe-runs/observation-grants")
+    def recipe_run_observation_grant(
+        body: RecipeRunObservationGrantRequest, request: Request
+    ) -> Response:
+        identity = workload_helper_identity(request)
+        required = host_runtime_service()
+        if body.node_id != identity.node_id:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe run observation authority rejected request",
+            )
+        with services.sessions() as session:
+            run = session.get(RecipeRun, body.run_id)
+            run_node = session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == body.run_id,
+                    RunNode.node_id == identity.node_id,
+                )
+            )
+            if (
+                run is not None
+                and run_node is not None
+                and (run.state == "starting" or run_node.state == "starting")
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_425_TOO_EARLY,
+                    detail="recipe run observation is not ready",
+                )
+        try:
+            observation_identity, grant = required.issue_recipe_run_observation_grant(
+                node_id=identity.node_id,
+                certificate_serial=identity.certificate_serial,
+                identity=body.observation_identity(),
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                request_sha256=body.request_sha256,
+                expires_in_seconds=body.expires_in_seconds,
+            )
+        except (TypeError, ValueError, HostHelperAuthorityError):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe run observation authority rejected request",
+            ) from None
+        return _json_response(
+            {
+                "schema_version": 1,
+                "observation_identity_sha256": observation_identity,
+                "grant": grant.to_mapping(),
+            }
+        )
 
     @agent.get("/source-bundles/{source_sha256}")
     def source_bundle(source_sha256: str, request: Request) -> Response:

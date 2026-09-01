@@ -34,6 +34,16 @@ pub async fn wait_ready(
     path: &str,
     lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
 ) -> Result<(), HealthError> {
+    wait_ready_until(address, port, path, lease_deadline, None).await
+}
+
+pub async fn wait_ready_until(
+    address: IpAddr,
+    port: u16,
+    path: &str,
+    mut lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    immutable_deadline: Option<DateTime<FixedOffset>>,
+) -> Result<(), HealthError> {
     if port < 1024
         || !path.starts_with('/')
         || path.contains("..")
@@ -48,10 +58,17 @@ pub async fn wait_ready(
         .build()?;
     let endpoint = readiness_endpoint(address, port, path);
     loop {
-        if Utc::now() >= lease_deadline.borrow().with_timezone(&Utc) {
+        let lease = lease_deadline.borrow().with_timezone(&Utc);
+        let deadline = immutable_deadline
+            .as_ref()
+            .map(|value| value.with_timezone(&Utc).min(lease))
+            .unwrap_or(lease);
+        let remaining = (deadline - Utc::now()).to_std().unwrap_or(Duration::ZERO);
+        if remaining.is_zero() {
             return Err(HealthError::Deadline);
         }
-        if let Ok(response) = client.get(&endpoint).send().await
+        if let Ok(Ok(response)) =
+            tokio::time::timeout(remaining, client.get(&endpoint).send()).await
             && response.status().is_success()
             && response
                 .content_length()
@@ -59,7 +76,21 @@ pub async fn wait_ready(
         {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let lease = lease_deadline.borrow().with_timezone(&Utc);
+        let deadline = immutable_deadline
+            .as_ref()
+            .map(|value| value.with_timezone(&Utc).min(lease))
+            .unwrap_or(lease);
+        let until_deadline = (deadline - Utc::now()).to_std().unwrap_or(Duration::ZERO);
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            _ = tokio::time::sleep(until_deadline) => return Err(HealthError::Deadline),
+            changed = lease_deadline.changed() => {
+                if changed.is_err() {
+                    return Err(HealthError::Deadline);
+                }
+            }
+        }
     }
 }
 
@@ -72,7 +103,7 @@ pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{readiness_endpoint, wait_ready};
+    use super::{HealthError, readiness_endpoint, wait_ready, wait_ready_until};
     use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
     use std::{
         io::{Read, Write},
@@ -128,5 +159,26 @@ mod tests {
         .await
         .unwrap();
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn immutable_start_deadline_caps_a_renewed_lease() {
+        let lease = (Utc::now() + ChronoDuration::minutes(5))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let immutable = (Utc::now() - ChronoDuration::milliseconds(1))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let (_sender, receiver) = tokio::sync::watch::channel(lease);
+
+        assert!(matches!(
+            wait_ready_until(
+                "127.0.0.1".parse().unwrap(),
+                65534,
+                "/health",
+                receiver,
+                Some(immutable),
+            )
+            .await,
+            Err(HealthError::Deadline)
+        ));
     }
 }

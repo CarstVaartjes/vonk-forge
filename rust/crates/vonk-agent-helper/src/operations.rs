@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::{
-    HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256, parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, RecipeRunObservationOutcome, canonical_json, hex_sha256,
+    parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -212,6 +213,20 @@ pub struct OperationOutcome {
     pub evidence_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_run_observation: Option<RecipeRunObservationOutcome>,
+}
+
+struct RuntimeRequestOutcome {
+    exit_code: Option<i32>,
+    recipe_run_observation: Option<RecipeRunObservationOutcome>,
+}
+
+struct RuntimeRequestGrantBinding<'a> {
+    job_id: &'a uuid::Uuid,
+    operation_id: &'a uuid::Uuid,
+    attempt: u32,
+    fence: &'a uuid::Uuid,
 }
 
 #[derive(Default)]
@@ -444,11 +459,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     pub fn execute(&self, operation: &HostOperation) -> Result<OperationOutcome, OperationError> {
+        self.execute_for_node(operation, None)
+    }
+
+    pub fn execute_for_node(
+        &self,
+        operation: &HostOperation,
+        observation_node_id: Option<&str>,
+    ) -> Result<OperationOutcome, OperationError> {
         operation
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, evidence, exit_code) = match operation {
+        let (status, evidence, exit_code, recipe_run_observation) = match operation {
             HostOperation::CreateManagedDirectory {
                 area,
                 relative_path,
@@ -458,6 +481,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     "directory-created",
                     path.to_string_lossy().into_owned(),
                     None,
+                    None,
                 )
             }
             HostOperation::InstallVonkDeb {
@@ -465,15 +489,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 package_signature,
             } => {
                 self.install_package(package_sha256, package_signature)?;
-                ("package-installed", package_sha256.clone(), None)
+                ("package-installed", package_sha256.clone(), None, None)
             }
             HostOperation::RestartVonkUnit { unit } => {
                 let unit_name = self.restart_unit(unit)?;
-                ("unit-restarted", unit_name.to_owned(), None)
+                ("unit-restarted", unit_name.to_owned(), None, None)
             }
             HostOperation::ScheduleReboot { delay_seconds } => {
                 self.schedule_reboot(*delay_seconds)?;
-                ("reboot-scheduled", delay_seconds.to_string(), None)
+                ("reboot-scheduled", delay_seconds.to_string(), None, None)
             }
             HostOperation::ExecuteContainerRuntimeRequest {
                 action,
@@ -482,23 +506,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 attempt,
                 fence,
                 request_sha256,
+                observation_identity_sha256,
             } => {
                 let outcome = self.execute_runtime_request(
                     action,
-                    job_id,
-                    operation_id,
-                    *attempt,
-                    fence,
+                    RuntimeRequestGrantBinding {
+                        job_id,
+                        operation_id,
+                        attempt: *attempt,
+                        fence,
+                    },
                     request_sha256,
+                    observation_identity_sha256.as_deref(),
+                    observation_node_id,
                 );
-                let (status, exit_code) = match outcome {
-                    Ok(exit_code) => ("container-runtime-request-executed", exit_code),
+                let (status, exit_code, recipe_run_observation) = match outcome {
+                    Ok(outcome) => (
+                        "container-runtime-request-executed",
+                        outcome.exit_code,
+                        outcome.recipe_run_observation,
+                    ),
                     Err(OperationError::StopUncertain) => {
-                        ("container-runtime-stop-uncertain", Some(124))
+                        ("container-runtime-stop-uncertain", Some(124), None)
                     }
                     Err(error) => return Err(error),
                 };
-                (status, request_sha256.clone(), exit_code)
+                (
+                    status,
+                    request_sha256.clone(),
+                    exit_code,
+                    recipe_run_observation,
+                )
             }
         };
         Ok(OperationOutcome {
@@ -506,6 +544,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             status: status.to_owned(),
             evidence_sha256: hex_sha256(evidence.as_bytes()),
             exit_code,
+            recipe_run_observation,
         })
     }
 
@@ -767,12 +806,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn execute_runtime_request(
         &self,
         action: &ContainerRuntimeAction,
-        job_id: &uuid::Uuid,
-        operation_id: &uuid::Uuid,
-        attempt: u32,
-        fence: &uuid::Uuid,
+        binding: RuntimeRequestGrantBinding<'_>,
         request_sha256: &str,
-    ) -> Result<Option<i32>, OperationError> {
+        observation_identity_sha256: Option<&str>,
+        observation_node_id: Option<&str>,
+    ) -> Result<RuntimeRequestOutcome, OperationError> {
         let request = self.read_runtime_request(request_sha256)?;
         let expected_action = match action {
             ContainerRuntimeAction::ImageImport => HostRuntimeAction::ImageImport,
@@ -782,29 +820,86 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ContainerRuntimeAction::Stop => HostRuntimeAction::Stop,
         };
         if request.action != expected_action
-            || &request.job_id != job_id
-            || &request.operation_id != operation_id
-            || request.attempt != attempt
-            || &request.fence != fence
+            || &request.job_id != binding.job_id
+            || &request.operation_id != binding.operation_id
+            || request.attempt != binding.attempt
+            || &request.fence != binding.fence
         {
             return Err(OperationError::InvalidOperation);
+        }
+        match (
+            request.observation.as_ref(),
+            observation_identity_sha256,
+            observation_node_id,
+        ) {
+            (None, None, _) => {}
+            (Some(binding), Some(expected), Some(node_id)) => {
+                let mut identity = serde_json::to_value(binding)
+                    .map_err(|_| OperationError::InvalidOperation)?
+                    .as_object()
+                    .cloned()
+                    .ok_or(OperationError::InvalidOperation)?;
+                identity.insert("schema_version".to_owned(), serde_json::json!(1));
+                identity.insert("node_id".to_owned(), serde_json::json!(node_id));
+                if hex_sha256(
+                    &canonical_json(&identity).map_err(|_| OperationError::InvalidOperation)?,
+                ) != expected
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+            }
+            _ => return Err(OperationError::InvalidOperation),
         }
         match request.action {
             HostRuntimeAction::ImageImport => self
                 .runtime_image_import(request.operation_id, &request.arguments)
-                .map(|()| None),
-            HostRuntimeAction::ImageInspect => self
-                .runtime_image_inspect(&request.arguments)
-                .map(|()| None),
-            HostRuntimeAction::RunInspect => {
-                self.runtime_run_inspect(&request.arguments).map(|()| None)
+                .map(|()| RuntimeRequestOutcome {
+                    exit_code: None,
+                    recipe_run_observation: None,
+                }),
+            HostRuntimeAction::ImageInspect => {
+                self.runtime_image_inspect(&request.arguments)
+                    .map(|()| RuntimeRequestOutcome {
+                        exit_code: None,
+                        recipe_run_observation: None,
+                    })
             }
-            HostRuntimeAction::Start => self.runtime_start(&request.arguments),
+            HostRuntimeAction::RunInspect => {
+                let running = self.runtime_run_inspect(&request.arguments)?;
+                if request.observation.is_none() && !running {
+                    return Err(OperationError::InvalidArtifact);
+                }
+                Ok(RuntimeRequestOutcome {
+                    exit_code: None,
+                    recipe_run_observation: request.observation.as_ref().map(|_| {
+                        if running {
+                            RecipeRunObservationOutcome::Running
+                        } else {
+                            RecipeRunObservationOutcome::NotRunning
+                        }
+                    }),
+                })
+            }
+            HostRuntimeAction::Start => {
+                self.runtime_start(&request.arguments)
+                    .map(|exit_code| RuntimeRequestOutcome {
+                        exit_code,
+                        recipe_run_observation: None,
+                    })
+            }
             HostRuntimeAction::Stop => {
                 if request.arguments.get(1).map(String::as_str) == Some("run") {
                     self.runtime_start(&request.arguments)
+                        .map(|exit_code| RuntimeRequestOutcome {
+                            exit_code,
+                            recipe_run_observation: None,
+                        })
                 } else {
-                    self.runtime_stop(&request.arguments).map(|()| None)
+                    self.runtime_stop(&request.arguments)
+                        .map(|()| RuntimeRequestOutcome {
+                            exit_code: None,
+                            recipe_run_observation: None,
+                        })
                 }
             }
         }
@@ -1047,7 +1142,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
-    fn runtime_run_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
+    fn runtime_run_inspect(&self, arguments: &[String]) -> Result<bool, OperationError> {
         let (image_digest, docker) = arguments
             .split_first()
             .ok_or(OperationError::InvalidOperation)?;
@@ -1069,12 +1164,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             format!("vonk-{}", validated.run_id),
         ])?;
         let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
-        if !existing.success
-            || std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str())
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
-        Ok(())
+        Ok(existing.success
+            && std::str::from_utf8(&existing.stdout).ok().map(str::trim) == Some(expected.as_str()))
     }
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {

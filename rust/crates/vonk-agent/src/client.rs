@@ -8,7 +8,8 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, canonical_json,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, HostRuntimeRequest,
+    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
     parse_strict,
 };
 
@@ -41,6 +42,8 @@ pub enum ClientError {
     Authentication,
     #[error("controller protocol response is invalid")]
     Protocol,
+    #[error("exact recipe run observation is not ready for authorization")]
+    ObservationNotReady,
     #[error("controller CA pin is invalid")]
     Pin,
 }
@@ -83,6 +86,28 @@ struct RecipeRunObservationsRequest<'a> {
 
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
+struct ExactRecipeRunObservationsRequest<'a> {
+    schema_version: u8,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    runs: &'a [ExactRecipeRunObservation],
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactRecipeRunObservation {
+    pub schema_version: u8,
+    pub node_id: String,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+    #[serde(flatten)]
+    pub binding: RecipeRunInspectionBinding,
+    pub endpoint_ready: Option<bool>,
+    pub grant: serde_json::Value,
+    pub observation_identity_sha256: String,
+    pub helper_receipt: RecipeRunObservationReceipt,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
 struct TelemetryRequest<'a> {
     schema_version: u8,
     samples: &'a [TelemetrySample],
@@ -117,6 +142,21 @@ struct HostRuntimeGrantRequest<'a> {
 
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
+struct RecipeRunInspectionGrantRequest<'a> {
+    schema_version: u8,
+    node_id: &'a str,
+    #[serde(flatten)]
+    binding: &'a RecipeRunInspectionBinding,
+    job_id: uuid::Uuid,
+    operation_id: uuid::Uuid,
+    attempt: u32,
+    fence: uuid::Uuid,
+    request_sha256: &'a str,
+    expires_in_seconds: u16,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
 struct AgentUpgradeGrantRequest<'a> {
     node_id: &'a str,
     job_id: uuid::Uuid,
@@ -134,6 +174,20 @@ struct HostRuntimeGrantResponse {
     grant: serde_json::Value,
 }
 
+#[derive(Debug)]
+pub struct RecipeRunInspectionGrant {
+    pub grant: serde_json::Value,
+    pub observation_identity_sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecipeRunInspectionGrantResponse {
+    schema_version: u8,
+    observation_identity_sha256: String,
+    grant: serde_json::Value,
+}
+
 #[derive(Clone)]
 pub struct AgentHttpClient {
     client: Client,
@@ -142,6 +196,19 @@ pub struct AgentHttpClient {
 }
 
 impl AgentHttpClient {
+    #[cfg(test)]
+    pub(crate) fn for_http_test(controller: &str, node_id: &str) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            controller: Url::parse(controller).expect("test controller URL must be valid"),
+            node_id: node_id.to_owned(),
+        }
+    }
+
+    pub(crate) fn node_id(&self) -> &str {
+        &self.node_id
+    }
+
     pub fn from_config(config: &AgentConfig) -> Result<Self, ClientError> {
         let paths = active_identity_paths(&config.data_dir.join("credentials"))
             .map_err(|_| ClientError::Identity)?;
@@ -293,6 +360,64 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         Ok(response.grant)
+    }
+
+    pub async fn recipe_run_inspection_grant(
+        &self,
+        binding: &RecipeRunInspectionBinding,
+        request: &HostRuntimeRequest,
+        request_sha256: &str,
+    ) -> Result<RecipeRunInspectionGrant, ClientError> {
+        binding.validate().map_err(|_| ClientError::Protocol)?;
+        request.validate().map_err(|_| ClientError::Protocol)?;
+        let expected_attempt =
+            u32::try_from(binding.run_generation).map_err(|_| ClientError::Protocol)?;
+        if request.action != HostRuntimeAction::RunInspect
+            || request.job_id != binding.run_id
+            || request.attempt != expected_attempt
+            || request.observation.as_ref() != Some(binding)
+            || !valid_sha256(request_sha256)
+            || hex_sha256(&canonical_json(request).map_err(|_| ClientError::Protocol)?)
+                != request_sha256
+        {
+            return Err(ClientError::Protocol);
+        }
+        let body = canonical_json(&RecipeRunInspectionGrantRequest {
+            schema_version: 1,
+            node_id: &self.node_id,
+            binding,
+            job_id: request.job_id,
+            operation_id: request.operation_id,
+            attempt: request.attempt,
+            fence: request.fence,
+            request_sha256,
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+        })
+        .map_err(|_| ClientError::Protocol)?;
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/recipe-runs/observation-grants")?)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
+        if response.status() == StatusCode::TOO_EARLY {
+            return Err(ClientError::ObservationNotReady);
+        }
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let response: RecipeRunInspectionGrantResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        if response.schema_version != 1
+            || !valid_sha256(&response.observation_identity_sha256)
+            || !response.grant.is_object()
+        {
+            return Err(ClientError::Protocol);
+        }
+        Ok(RecipeRunInspectionGrant {
+            grant: response.grant,
+            observation_identity_sha256: response.observation_identity_sha256,
+        })
     }
 
     pub async fn agent_upgrade_grant(
@@ -615,6 +740,73 @@ impl AgentHttpClient {
         }
     }
 
+    pub async fn report_exact_recipe_run_observations(
+        &self,
+        observations: &[ExactRecipeRunObservation],
+    ) -> Result<(), ClientError> {
+        if observations.len() > MAX_MANAGED_RECIPE_RUNS {
+            return Err(ClientError::Protocol);
+        }
+        let mut run_ids = std::collections::BTreeSet::new();
+        for observation in observations {
+            observation
+                .binding
+                .validate()
+                .map_err(|_| ClientError::Protocol)?;
+            let grant_claims = observation
+                .grant
+                .get("claims")
+                .and_then(serde_json::Value::as_object)
+                .ok_or(ClientError::Protocol)?;
+            let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
+            if !run_ids.insert(observation.binding.run_id)
+                || observation.schema_version != 1
+                || observation.node_id != self.node_id
+                || !valid_sha256(&observation.observation_identity_sha256)
+                || !observation.grant.is_object()
+                || observation.helper_receipt.validate().is_err()
+                || observation.helper_receipt.claims.node_id != self.node_id
+                || observation
+                    .helper_receipt
+                    .claims
+                    .observation_identity_sha256
+                    != observation.observation_identity_sha256
+                || grant_claims
+                    .get("request_id")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(receipt_request_id.as_str())
+                || grant_claims
+                    .get("request_sha256")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(observation.helper_receipt.claims.request_sha256.as_str())
+                || observation.observed_at.timestamp()
+                    != observation.helper_receipt.claims.observed_at
+                || (observation.binding.local_address == observation.binding.master_address)
+                    != observation.endpoint_ready.is_some()
+            {
+                return Err(ClientError::Protocol);
+            }
+        }
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
+            .json(&ExactRecipeRunObservationsRequest {
+                schema_version: 2,
+                observed_at: chrono::Utc::now(),
+                runs: observations,
+            })
+            .send()
+            .await?;
+        if response.status() == StatusCode::NO_CONTENT
+            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
+        {
+            Ok(())
+        } else {
+            classify_status(response.status())?;
+            Err(ClientError::Protocol)
+        }
+    }
+
     pub async fn report_telemetry(&self, samples: &[TelemetrySample]) -> Result<(), ClientError> {
         if !valid_report_batch(samples) {
             return Err(ClientError::Protocol);
@@ -774,7 +966,7 @@ fn valid_oci_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentHttpClient, ClientError, valid_reported_hostname};
+    use super::{AgentHttpClient, ClientError, ExactRecipeRunObservation, valid_reported_hostname};
     use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
     use std::{
@@ -786,8 +978,65 @@ mod tests {
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::{
-        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, canonical_json, hex_sha256,
+        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
+        RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
+        RecipeRunObservationOutcome, RecipeRunObservationReceipt,
+        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature, canonical_json,
+        hex_sha256,
     };
+
+    fn inspection_binding() -> RecipeRunInspectionBinding {
+        RecipeRunInspectionBinding {
+            artifact_set_digest: "a".repeat(64),
+            image_digest: "b".repeat(64),
+            installation_id: Uuid::new_v4(),
+            local_address: "192.168.100.11".parse().unwrap(),
+            master_address: "192.168.100.10".parse().unwrap(),
+            master_port: 29500,
+            mapping_generation: 4,
+            mapping_id: Uuid::new_v4(),
+            model_identity: "example/model@immutable".to_owned(),
+            port: 8000,
+            rank: 1,
+            recipe_content_sha256: "c".repeat(64),
+            recipe_revision_id: Uuid::new_v4(),
+            role: "worker".to_owned(),
+            run_id: Uuid::new_v4(),
+            run_generation: 3,
+            runtime_arguments_sha256: hex_sha256(
+                &canonical_json(&vec![
+                    format!("sha256:{}", "b".repeat(64)),
+                    "run".to_owned(),
+                ])
+                .unwrap(),
+            ),
+            world_size: 2,
+        }
+    }
+
+    fn observation_receipt(
+        node_id: &str,
+        observation_identity_sha256: &str,
+    ) -> RecipeRunObservationReceipt {
+        RecipeRunObservationReceipt {
+            schema_version: 1,
+            claims: RecipeRunObservationReceiptClaims {
+                schema_version: 1,
+                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+                node_id: node_id.to_owned(),
+                request_id: Uuid::new_v4(),
+                request_sha256: "f".repeat(64),
+                observation_identity_sha256: observation_identity_sha256.to_owned(),
+                outcome: RecipeRunObservationOutcome::NotRunning,
+                observed_at: Utc::now().timestamp(),
+            },
+            signature: RecipeRunObservationReceiptSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "a".repeat(64),
+                value: "b".repeat(128),
+            },
+        }
+    }
 
     fn request_capture_client(
         response_status: u16,
@@ -1065,6 +1314,103 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
 
         assert_eq!(body["expires_in_seconds"], 10);
+    }
+
+    #[tokio::test]
+    async fn exact_inspection_grant_binds_fresh_envelope_and_full_identity() {
+        let binding = inspection_binding();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::RunInspect,
+            job_id: binding.run_id,
+            operation_id: Uuid::new_v4(),
+            attempt: binding.run_generation as u32,
+            fence: Uuid::new_v4(),
+            arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
+            observation: Some(binding.clone()),
+        };
+        let digest = hex_sha256(&canonical_json(&request).unwrap());
+        let response = serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "observation_identity_sha256": "e".repeat(64),
+            "grant": {"claims": {"request_id": Uuid::new_v4()}}
+        }))
+        .unwrap();
+        let (client, server) = request_capture_client(200, vec![], response, None);
+
+        client
+            .recipe_run_inspection_grant(&binding, &request, &digest)
+            .await
+            .unwrap();
+        let raw = server.join().unwrap();
+        let (headers, body) = raw
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| (&raw[..index], &raw[index + 4..]))
+            .unwrap();
+        assert!(
+            std::str::from_utf8(headers)
+                .unwrap()
+                .starts_with("POST /agent/v1/recipe-runs/observation-grants HTTP/1.1\r\n")
+        );
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(body["node_id"], client.node_id);
+        assert_eq!(body["job_id"], binding.run_id.to_string());
+        assert_eq!(body["attempt"], binding.run_generation);
+        assert_eq!(body["run_generation"], binding.run_generation);
+        assert_eq!(body["request_sha256"], digest);
+        assert_eq!(body["expires_in_seconds"], 10);
+
+        let (client, server) = request_capture_client(425, vec![], vec![], None);
+        assert!(matches!(
+            client
+                .recipe_run_inspection_grant(&binding, &request, &digest)
+                .await,
+            Err(ClientError::ObservationNotReady)
+        ));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn exact_worker_observation_reports_process_without_endpoint_result() {
+        let binding = inspection_binding();
+        let helper_receipt =
+            observation_receipt("spk_0123456789abcdef0123456789abcdef", &"e".repeat(64));
+        let observations = vec![ExactRecipeRunObservation {
+            schema_version: 1,
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
+                .unwrap(),
+            binding: binding.clone(),
+            endpoint_ready: None,
+            grant: serde_json::json!({"claims": {
+                "request_id": helper_receipt.claims.request_id,
+                "request_sha256": helper_receipt.claims.request_sha256.clone(),
+            }}),
+            observation_identity_sha256: "e".repeat(64),
+            helper_receipt,
+        }];
+        let (client, server) = observation_client(204);
+        client
+            .report_exact_recipe_run_observations(&observations)
+            .await
+            .unwrap();
+        let raw = server.join().unwrap();
+        let body = raw
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| &raw[index + 4..])
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(body["schema_version"], 2);
+        assert!(body["runs"][0].get("process_running").is_none());
+        assert_eq!(
+            body["runs"][0]["helper_receipt"]["claims"]["outcome"],
+            "not-running"
+        );
+        assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
+        assert_eq!(body["runs"][0]["run_generation"], 3);
+        assert!(body["runs"][0]["observed_at"].is_string());
     }
 
     #[tokio::test]

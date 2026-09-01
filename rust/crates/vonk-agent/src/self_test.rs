@@ -29,11 +29,30 @@ pub fn run(
     executable: &Path,
     runtime_directory: &Path,
 ) -> Result<AgentRuntimeIdentity, SelfTestError> {
+    run_with_observation_receipt_key(config, executable, runtime_directory, None)
+}
+
+/// Test seam for exercising the complete direct self-test contract without
+/// weakening production's root-owned key-custody check.
+#[doc(hidden)]
+pub fn run_with_observation_receipt_key(
+    config: &AgentConfig,
+    executable: &Path,
+    runtime_directory: &Path,
+    observation_receipt_public_key: Option<[u8; 32]>,
+) -> Result<AgentRuntimeIdentity, SelfTestError> {
     verify_private_directory(&config.data_dir, "data")?;
     verify_private_directory(runtime_directory, "runtime")?;
     verify_no_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING))?;
     AgentHttpClient::from_config(config)?;
-    Ok(AgentRuntimeIdentity::from_executable(executable)?.mark_self_test_passed())
+    let identity = AgentRuntimeIdentity::from_executable(executable)?;
+    let identity = match observation_receipt_public_key {
+        Some(key) => identity.with_observation_receipt_public_key_bytes(key),
+        None => identity.with_observation_receipt_public_key(Path::new(
+            crate::runtime_identity::OBSERVATION_RECEIPT_PUBLIC_KEY_PATH,
+        ))?,
+    };
+    Ok(identity.mark_self_test_passed())
 }
 
 fn verify_no_helper_upgrade_pending(path: &Path) -> Result<(), SelfTestError> {

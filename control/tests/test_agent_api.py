@@ -61,11 +61,16 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRun,
     RecipeSourceBundle,
+    Reconciliation,
+    RoutePublication,
+    RunNode,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_contract import recipe_content_sha256
+from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
@@ -1862,7 +1867,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
 def test_enrollment_grant_is_admin_only_and_submission_immediately_issues_idempotently(
     agent_system,
 ) -> None:
-    client, _, codec, _ = agent_system
+    client, services, codec, _ = agent_system
     assert (
         client.post(
             "/api/v1/agents/enrollments/grants",
@@ -1912,6 +1917,7 @@ def test_enrollment_grant_is_admin_only_and_submission_immediately_issues_idempo
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
+            "observation_receipt_public_key": "d" * 64,
         },
     }
     first = client.post("/agent/v1/enroll", json=body)
@@ -1920,6 +1926,8 @@ def test_enrollment_grant_is_admin_only_and_submission_immediately_issues_idempo
     assert first.content == replay.content == canonical_message(first.json())
     assert first.json()["node_id"] == NODE_C
     assert "certificate_pem" in first.json()
+    with services.sessions() as session:
+        assert session.get(AgentNode, NODE_C).observation_receipt_public_key == "d" * 64
 
 
 def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_public_trust(
@@ -2036,6 +2044,180 @@ def test_dev335_agent_upgrade_grant_api_forwards_exact_ten_second_ttl(
     assert [call["expires_in_seconds"] for call in authority.calls] == [10, 30]
 
 
+def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+
+    class Grant:
+        @staticmethod
+        def to_mapping() -> dict[str, object]:
+            return {"schema_version": 1, "test": "exact-rank-inspection"}
+
+    class ExactObservationAuthority:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def issue_recipe_run_observation_grant(self, **values):
+            self.calls.append(values)
+            assert values["certificate_serial"] == "serial-a"
+            assert values["expires_in_seconds"] == 10
+            return "f" * 64, Grant()
+
+    authority = ExactObservationAuthority()
+    object.__setattr__(services, "host_runtime_authority", authority)
+    run_id = "10000000-0000-4000-8000-000000000001"
+    request = {
+        "schema_version": 1,
+        "node_id": NODE_A,
+        "run_id": run_id,
+        "installation_id": "20000000-0000-4000-8000-000000000002",
+        "recipe_revision_id": "30000000-0000-4000-8000-000000000003",
+        "recipe_content_sha256": "a" * 64,
+        "mapping_id": "40000000-0000-4000-8000-000000000004",
+        "mapping_generation": 2,
+        "run_generation": 3,
+        "image_digest": "b" * 64,
+        "artifact_set_digest": "c" * 64,
+        "model_identity": "publisher/model@revision",
+        "rank": 1,
+        "role": "worker",
+        "world_size": 2,
+        "local_address": "192.168.100.3",
+        "master_address": "192.168.100.2",
+        "master_port": 29500,
+        "port": 8888,
+        "runtime_arguments_sha256": "d" * 64,
+        "job_id": run_id,
+        "operation_id": "50000000-0000-4000-8000-000000000005",
+        "attempt": 3,
+        "fence": "60000000-0000-4000-8000-000000000006",
+        "request_sha256": "e" * 64,
+        "expires_in_seconds": 10,
+    }
+
+    accepted = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=request,
+    )
+    wrong_node = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "node_id": NODE_B},
+    )
+    unknown_field = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "command": "docker inspect"},
+    )
+    maximum_model_identity = "p/" + "m" * 951 + "@" + "r" * 70
+    maximum_identity = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "model_identity": maximum_model_identity},
+    )
+    oversized_identity = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={**request, "model_identity": maximum_model_identity + "x"},
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {
+        "schema_version": 1,
+        "observation_identity_sha256": "f" * 64,
+        "grant": {"schema_version": 1, "test": "exact-rank-inspection"},
+    }
+    assert wrong_node.status_code == 409
+    assert unknown_field.status_code == 422
+    assert maximum_identity.status_code == 200
+    assert oversized_identity.status_code == 422
+    assert len(maximum_model_identity) == 1024
+    assert len(authority.calls) == 2
+
+    identity_fields = {
+        key: value
+        for key, value in request.items()
+        if key
+        not in {
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "request_sha256",
+            "expires_in_seconds",
+        }
+    }
+    naive_item_time = client.post(
+        "/agent/v1/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "schema_version": 2,
+            "observed_at": clock.now.isoformat(),
+            "runs": [
+                {
+                    **identity_fields,
+                    "observed_at": clock.now.replace(tzinfo=None).isoformat(),
+                    "observation_identity_sha256": "f" * 64,
+                    "endpoint_ready": None,
+                    "grant": {"schema_version": 1},
+                    "helper_receipt": {"schema_version": 1},
+                }
+            ],
+        },
+    )
+    assert naive_item_time.status_code == 422
+    assert "timezone-aware" in naive_item_time.text
+
+    starting_run_id = "70000000-0000-4000-8000-000000000007"
+    with services.sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=starting_run_id,
+                installation_id="80000000-0000-4000-8000-000000000008",
+                mapping_id="90000000-0000-4000-8000-000000000009",
+                mapping_generation=1,
+                run_generation=1,
+                alias="starting-exact",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="starting",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=starting_run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="starting",
+                port=8888,
+                reserved_memory_bytes=1,
+                updated_at=clock.now,
+            )
+        )
+    starting_request = {
+        **request,
+        "run_id": starting_run_id,
+        "job_id": starting_run_id,
+        "run_generation": 1,
+        "attempt": 1,
+    }
+    too_early = client.post(
+        "/agent/v1/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=starting_request,
+    )
+    assert too_early.status_code == 425
+    assert too_early.json() == {"detail": "recipe run observation is not ready"}
+    assert len(authority.calls) == 2
+
+
 def test_obsolete_enrollment_decision_routes_are_not_exposed(agent_system) -> None:
     client, _, codec, _ = agent_system
     headers = admin_headers(codec)
@@ -2141,6 +2323,116 @@ def test_reenrollment_grant_is_explicit_and_bound_to_the_selected_node(
         json={"ttl_seconds": 60, "purpose": "new-node", "node_id": NODE_A},
     )
     assert invalid.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("new_receipt_key", "invalidated"),
+    (("d" * 64, False), ("e" * 64, True)),
+    ids=("same-key-preserves-evidence", "changed-key-invalidates-evidence"),
+)
+def test_reenrollment_submission_reconciles_observation_receipt_key_through_api(
+    agent_system, new_receipt_key: str, invalidated: bool
+) -> None:
+    client, services, codec, _ = agent_system
+    run_id = "70000000-0000-4000-8000-000000000070"
+    with services.sessions.begin() as session:
+        session.get(AgentNode, NODE_A).observation_receipt_public_key = "d" * 64
+        session.add(
+            Reconciliation(
+                id=RECIPE_ROUTE_AUTHORITY_ID,
+                authority_revision="4" * 64,
+                status="completed",
+                summary={},
+                created_at=services.clock(),
+            )
+        )
+        session.add(
+            RoutePublication(
+                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
+                state="completed",
+                generation=1,
+                plan_digest="5" * 64,
+            )
+        )
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id="80000000-0000-4000-8000-000000000080",
+                mapping_id="90000000-0000-4000-8000-000000000090",
+                mapping_generation=1,
+                run_generation=1,
+                alias="receipt-rotation",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="running",
+                route_state="published",
+                actor="admin",
+                created_at=services.clock(),
+                updated_at=services.clock(),
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="running",
+                port=8888,
+                reserved_memory_bytes=1,
+                evidence_digest="2" * 64,
+                observed_run_generation=1,
+                observation_receipt_sha256="3" * 64,
+                observation_endpoint_ready=True,
+                updated_at=services.clock(),
+            )
+        )
+    grant = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 60, "purpose": "re-enroll", "node_id": NODE_A},
+    ).json()
+    csr = _csr_for(NODE_A)
+
+    response = client.post(
+        "/agent/v1/enroll",
+        json={
+            "grant_token": grant["token"],
+            "csr": csr.decode(),
+            "evidence": {
+                "node_id": NODE_A,
+                "csr_public_key_fingerprint": _csr_fingerprint(csr),
+                "host_key_fingerprint": "host-a",
+                "hardware_fingerprint": "hardware-a",
+                "agent_digest": "a" * 64,
+                "boot_id": "boot-a",
+                "observation_receipt_public_key": new_receipt_key,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["node_id"] == NODE_A
+    assert response.json()["generation"] == 2
+    with services.sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        run = session.get(RecipeRun, run_id)
+        run_node = session.query(RunNode).filter_by(run_id=run_id).one()
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        assert node.observation_receipt_public_key == new_receipt_key
+        assert run.route_state == "published"
+        if invalidated:
+            assert publication.state == "withdrawal-pending"
+            assert run_node.state == "failed"
+            assert run_node.observed_run_generation is None
+            assert run_node.observation_receipt_sha256 is None
+            assert run_node.observation_endpoint_ready is None
+        else:
+            assert publication.state == "completed"
+            assert run_node.state == "running"
+            assert run_node.observed_run_generation == 1
+            assert run_node.observation_receipt_sha256 == "3" * 64
+            assert run_node.observation_endpoint_ready is True
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
@@ -3155,6 +3447,20 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
         },
     )
     assert response.status_code == 403
+
+
+def test_enrollment_rejects_malformed_observation_receipt_public_key(
+    agent_system,
+) -> None:
+    client, services, _, _ = agent_system
+    token = enrollment_grant(services)
+    body = json.loads(valid_enrollment_body(token))
+    body["evidence"]["observation_receipt_public_key"] = "not-lower-hex"
+
+    response = client.post("/agent/v1/enroll", json=body)
+
+    assert response.status_code == 403
+    assert_grant_consumed(services, token)
 
 
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(

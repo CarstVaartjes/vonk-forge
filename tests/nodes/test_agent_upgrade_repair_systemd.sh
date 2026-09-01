@@ -1746,6 +1746,24 @@ grep -F '"build_digest":"'"$build_digest_target"'"' <<< "$self_test" >/dev/null
 grep -F '"binary_digest":"'"$source_agent_sha"'"' <<< "$self_test" >/dev/null
 grep -F '"architecture":"linux-arm64"' <<< "$self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
+observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
+observation_receipt_der=$test_root/observation-receipt-public.der
+observation_receipt_derived=$test_root/observation-receipt-derived.pub
+test "$(stat -c '%U:%G:%a:%h' "$observation_receipt_private")" \
+  = root:root:600:1
+test "$(stat -c '%U:%G:%a:%h' "$observation_receipt_public")" \
+  = root:vonk-agent:640:1
+test "$(wc -c < "$observation_receipt_public")" -eq 32
+openssl pkey -inform DER -in "$observation_receipt_private" \
+  -check -noout >/dev/null 2>&1
+openssl pkey -inform DER -in "$observation_receipt_private" \
+  -pubout -outform DER -out "$observation_receipt_der" >/dev/null 2>&1
+test "$(wc -c < "$observation_receipt_der")" -eq 44
+tail -c 32 "$observation_receipt_der" > "$observation_receipt_derived"
+cmp -s "$observation_receipt_derived" "$observation_receipt_public"
+observation_receipt_private_digest=$(sha256sum \
+  "$observation_receipt_private" | cut -d' ' -f1)
 
 # Prove that the repaired helper can carry one subsequent ordinary package
 # through the same root-custody + dpkg parent-chain mechanism.
@@ -1801,6 +1819,9 @@ grep -F '"build_digest":"'"$build_digest_next"'"' \
 grep -F '"binary_digest":"'"$ordinary_agent_sha"'"' \
   <<< "$ordinary_self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$ordinary_self_test" >/dev/null
+test "$(sha256sum "$observation_receipt_private" | cut -d' ' -f1)" \
+  = "$observation_receipt_private_digest"
+cmp -s "$observation_receipt_derived" "$observation_receipt_public"
 
 printf 'dev335 -> a122 node repair phase=%s and ordinary helper upgrade: PASS\n' \
   "$crash_phase"

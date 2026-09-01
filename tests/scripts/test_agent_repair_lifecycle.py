@@ -73,7 +73,7 @@ def _assert_frozen_runtime_and_old_runner() -> None:
             "046feb4448695d945dee13f3751674cbcf5824a4de4efadf026306a4122a9c60"
         ),
         ROOT / "packaging/debian/postinst-repair": (
-            "37cdae6cac4c447dce347b58874b7c0800346303362a86519c54bca4efdc88b1"
+            "13ab2b8f03503b826c28f34d4c6128b3da2496a4cb3dafc749bdf49d40e3ea18"
         ),
         ROOT / "scripts/build-agent-deb": (
             "17a540f1e35d43ef0a0347a5fcb46282dd38e7a89c8793e626040139f57e1b44"

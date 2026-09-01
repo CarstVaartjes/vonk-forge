@@ -11,14 +11,26 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, event, select, text, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    RecipeRunObservationReceiptClaims,
+    SignedRecipeRunObservationReceipt,
+    canonical_message,
+    recipe_run_observation_receipt_signing_bytes,
+)
+from vonk_agent_protocol.host_helper import HostHelperSignature
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.host_helper_authority import (
+    HostHelperAuthorityError,
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -45,13 +57,20 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
     RecipeRunObservation,
+    prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
 )
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+from vonk_control.recipe_routes import (
+    AtomicRecipeRoutePublisher,
+    RecipeRouteError,
+    RecipeRouteNotReady,
+    RecipeRouteService,
+)
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
@@ -134,9 +153,73 @@ class ConcurrentPublisher:
 
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
+RECEIPT_SIGNER = ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
+
+
+def signed_observation_receipt(
+    grant,
+    observation_identity_sha256: str,
+    *,
+    node_id: str,
+    observed_at: datetime,
+    outcome: str = "running",
+) -> dict[str, object]:
+    claims = RecipeRunObservationReceiptClaims(
+        schema_version=1,
+        authority="vonk.recipe-run-observation-helper",
+        node_id=node_id,
+        request_id=grant.claims.request_id,
+        request_sha256=str(grant.claims.operation.values["request_sha256"]),
+        observation_identity_sha256=observation_identity_sha256,
+        outcome=outcome,
+        observed_at=int(observed_at.timestamp()),
+    )
+    public_key = RECEIPT_SIGNER.public_key().public_bytes_raw()
+    return SignedRecipeRunObservationReceipt(
+        schema_version=1,
+        claims=claims,
+        signature=HostHelperSignature(
+            algorithm="ed25519",
+            key_id=hashlib.sha256(public_key).hexdigest(),
+            value=RECEIPT_SIGNER.sign(
+                recipe_run_observation_receipt_signing_bytes(claims)
+            ).hex(),
+        ),
+    ).to_mapping()
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
+    if payload.get("phase") == "rank-launch":
+        identity = {
+            "phase": "rank-launch",
+            "run_id": payload["run_id"],
+            "recipe_revision_id": payload["recipe_revision_id"],
+            "recipe_content_sha256": payload["recipe_content_sha256"],
+            "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
+            "artifact_set_digest": "b" * 64,
+            "model_identity": "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
+            "rank": payload["rank"],
+            "role": payload["role"],
+            "world_size": payload["world_size"],
+            "local_address": str(payload["local_address"]),
+            "master_address": str(payload["master_address"]),
+            "master_port": payload["master_port"],
+            "memory_reservation_bytes": payload["reserved_memory_bytes"],
+            "process_running": True,
+            "fabric_projection_bound": True,
+            "launched": True,
+        }
+        if "run_generation" in payload:
+            identity.update(
+                {
+                    "run_generation": payload["run_generation"],
+                    "runtime_arguments_sha256": "c" * 64,
+                }
+            )
+        return {
+            **identity,
+            "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
+        }
     identity = {
         "recipe_revision_id": payload["recipe_revision_id"],
         "recipe_content_sha256": payload["recipe_content_sha256"],
@@ -149,6 +232,24 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
         "memory_reservation_bytes": payload["reserved_memory_bytes"],
         "ready": True,
     }
+    if payload.get("phase") == "collective-readiness":
+        identity.update(
+            {
+                "phase": "collective-readiness",
+                "run_id": payload["run_id"],
+                "role": payload["role"],
+            }
+        )
+    if "run_generation" in payload:
+        identity.update(
+            {
+                "run_generation": payload["run_generation"],
+                "runtime_arguments_sha256": "c" * 64,
+                "local_address": str(payload["local_address"]),
+                "master_address": str(payload["master_address"]),
+                "master_port": payload["master_port"],
+            }
+        )
     return {
         **identity,
         "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
@@ -161,6 +262,7 @@ def setup_services(
     nodes: int = 1,
     endpoint_owner_rank_one: bool = False,
     distributed_lifecycle: bool = False,
+    start_order: tuple[str, ...] | None = None,
     engine=None,
     route_withdrawer=None,
 ):
@@ -179,8 +281,22 @@ def setup_services(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
+                    observation_receipt_public_key=(
+                        RECEIPT_SIGNER.public_key().public_bytes_raw().hex()
+                        if nodes > 1
+                        else None
+                    ),
                     capabilities=["runtime.vonk.v1", "recipe.operations.v1"]
-                    + (["fabric.connected.mbps.1000"] if nodes > 1 else []),
+                    + (
+                        [
+                            "fabric.connected.mbps.1000",
+                            "recipe.start.two-phase.v1",
+                            "recipe.run.inspect.exact.v1",
+                            "recipe.run.inspect.receipt.v1",
+                        ]
+                        if nodes > 1
+                        else []
+                    ),
                 )
             )
             session.flush()
@@ -204,7 +320,14 @@ def setup_services(
             )
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
     capabilities = ("runtime.vonk.v1", "recipe.operations.v1") + (
-        ("fabric.connected.mbps.1000",) if nodes > 1 else ()
+        (
+            "fabric.connected.mbps.1000",
+            "recipe.start.two-phase.v1",
+            "recipe.run.inspect.exact.v1",
+            "recipe.run.inspect.receipt.v1",
+        )
+        if nodes > 1
+        else ()
     )
     for index, node_id in enumerate(node_ids):
         inventory.record(
@@ -266,7 +389,7 @@ def setup_services(
             },
             "roles": roles,
             "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
-            "start_order": ["worker", "entrypoint"],
+            "start_order": list(start_order or ("worker", "entrypoint")),
             "stop_order": ["entrypoint", "worker"],
         }
         document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
@@ -353,6 +476,34 @@ def setup_services(
     return sessions, service, queue, mapping_id, build_id, node_ids
 
 
+def record_exact_empty_snapshot(
+    sessions: sessionmaker, node_id: str, observed_at: datetime
+) -> None:
+    with sessions.begin() as session:
+        prepare_exact_recipe_run_observation_nodes(session, node_id, observed_at, set())
+
+
+def mark_current_exact_observations(
+    sessions: sessionmaker, run_id: str, observed_at: datetime
+) -> None:
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        if run.plan.get("observation_schema_version") != 2:
+            return
+        for node in session.scalars(
+            select(RunNode).where(RunNode.run_id == run_id).order_by(RunNode.rank)
+        ):
+            node.observed_run_generation = run.run_generation
+            node.observation_receipt_sha256 = hashlib.sha256(
+                f"{run_id}:{run.run_generation}:{node.node_id}".encode()
+            ).hexdigest()
+            node.observation_endpoint_ready = (
+                True if node.role == "entrypoint" else None
+            )
+            node.updated_at = observed_at
+
+
 def installed_recipe(
     service: RecipeOperationService,
     mapping_id: str,
@@ -394,8 +545,8 @@ def started_recipe(
         actor="admin",
         request_id=request_id,
     )
-    completed_nodes: set[str] = set()
-    while completed_nodes != set(nodes):
+    completed_operations: set[str] = set()
+    while service.get(operation.id).state == "running":
         with sessions() as session:
             children = tuple(
                 session.scalars(
@@ -405,7 +556,7 @@ def started_recipe(
                 )
             )
         pending = tuple(
-            child for child in children if child.node_id not in completed_nodes
+            child for child in children if child.id not in completed_operations
         )
         assert pending
         for child in pending:
@@ -415,8 +566,39 @@ def started_recipe(
                 succeeded=True,
                 evidence=start_evidence(child.payload),
             )
-            completed_nodes.add(child.node_id)
+            completed_operations.add(child.id)
+    mark_current_exact_observations(sessions, operation.owner_id, NOW)
     return operation
+
+
+def complete_collective_readiness(
+    sessions,
+    service: RecipeOperationService,
+    operation_id: str,
+    endpoint_owner_node_id: str,
+) -> None:
+    with sessions() as session:
+        readiness = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == operation_id,
+                AgentOperation.node_id == endpoint_owner_node_id,
+                AgentOperation.state == "queued",
+            )
+        )
+    assert readiness is not None
+    assert readiness.payload.get("phase") == "collective-readiness"
+    service.record_node_result(
+        operation_id,
+        endpoint_owner_node_id,
+        succeeded=True,
+        evidence=start_evidence(readiness.payload),
+    )
+    assert service.get(operation_id).state == "succeeded"
+    with sessions() as session:
+        operation = session.get(Job, operation_id)
+        assert operation is not None
+        run_id = operation.payload["owner_id"]
+    mark_current_exact_observations(sessions, run_id, NOW)
 
 
 def bind_route_publications(
@@ -729,11 +911,403 @@ def test_failed_start_phase_never_enqueues_dependent_role(tmp_path: Path) -> Non
     assert service.get(start.id).state == "failed"
 
 
+@pytest.mark.parametrize(
+    "start_order",
+    (("worker", "entrypoint"), ("entrypoint", "worker")),
+)
+def test_distributed_start_launches_all_ranks_then_checks_collective(
+    tmp_path: Path, start_order: tuple[str, ...]
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        start_order=start_order,
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="p" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "two-phase")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="q" * 36,
+    )
+
+    def children() -> tuple[AgentOperation, ...]:
+        with sessions() as session:
+            return tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == start.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                )
+            )
+
+    launches = children()
+    assert len(launches) == 2
+    assert all(item.payload["phase"] == "rank-launch" for item in launches)
+    assert {item.payload["role"] for item in launches} == set(start_order)
+    deadline = launches[0].payload["start_deadline"]
+    assert all(item.payload["start_deadline"] == deadline for item in launches)
+    with sessions() as session:
+        job = session.get(Job, start.id)
+        assert job.targets == sorted(nodes)
+        phase_items = [item for phase in job.payload["phases"] for item in phase]
+        assert len(phase_items) == 3
+        assert len({item["operation_id"] for item in phase_items}) == 3
+        assert [item["payload"]["role"] for item in job.payload["phases"][0]] == list(
+            start_order
+        )
+        assert job.payload["start_deadline"] == deadline
+
+    first_by_role = {item.payload["role"]: item for item in launches}
+    for role in start_order:
+        launch = first_by_role[role]
+        service.record_node_result(
+            start.id,
+            launch.node_id,
+            succeeded=True,
+            evidence=start_evidence(launch.payload),
+        )
+
+    all_children = children()
+    readiness = next(
+        item
+        for item in all_children
+        if item.payload.get("phase") == "collective-readiness"
+    )
+    assert len(all_children) == 3
+    assert readiness.payload["role"] == "entrypoint"
+    assert readiness.payload["start_deadline"] == deadline
+    assert sum(item.node_id == readiness.node_id for item in all_children) == 2
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        run_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert run.state == "starting"
+        assert run.route_state == "withdrawn"
+        assert [node.state for node in run_nodes] == ["starting", "starting"]
+        assert all(node.endpoint is None for node in run_nodes)
+
+    service.record_node_result(
+        start.id,
+        readiness.node_id,
+        succeeded=True,
+        evidence=start_evidence(readiness.payload),
+    )
+    assert service.get(start.id).state == "succeeded"
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        run_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert run.state == "running"
+        assert run.route_state == "pending"
+        assert [node.state for node in run_nodes] == ["running", "running"]
+        assert [node.endpoint is not None for node in run_nodes] == [True, False]
+        assert all(node.observed_run_generation is None for node in run_nodes)
+
+    publisher = ConcurrentPublisher()
+    _service, routes = bind_route_publications(sessions, service, publisher)
+    with pytest.raises(RecipeRouteNotReady):
+        routes.publish_run(start.owner_id)
+    with sessions.begin() as session:
+        owner = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id, RunNode.role == "entrypoint"
+            )
+        )
+        owner.observed_run_generation = 1
+        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_endpoint_ready = True
+        owner.updated_at = NOW
+    with pytest.raises(RecipeRouteNotReady):
+        routes.publish_run(start.owner_id)
+    with sessions.begin() as session:
+        worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id, RunNode.role == "worker"
+            )
+        )
+        worker.observed_run_generation = 1
+        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_endpoint_ready = None
+        worker.updated_at = NOW
+    routes.publish_run(start.owner_id)
+    assert publisher.aliases[-1] == ("two-phase",)
+    with sessions() as session:
+        assert session.get(RecipeRun, start.owner_id).observation_deadline_at is None
+
+
+def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="s" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "bad-launch")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="t" * 36,
+    )
+    with sessions() as session:
+        launch = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
+    evidence = start_evidence(launch.payload)
+    evidence["role"] = "entrypoint"
+    identity = {
+        key: value for key, value in evidence.items() if key != "evidence_digest"
+    }
+    evidence["evidence_digest"] = hashlib.sha256(
+        canonical_message(identity)
+    ).hexdigest()
+
+    with pytest.raises(RecipeOperationConflict, match="fenced request"):
+        service.record_node_result(
+            start.id,
+            launch.node_id,
+            succeeded=True,
+            evidence=evidence,
+        )
+
+
+def test_worker_death_while_owner_is_healthy_never_publishes_route(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="d" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="e" * 36,
+        alias="owner-healthy-worker-dead",
+    )
+    record_exact_empty_snapshot(sessions, nodes[1], NOW + timedelta(seconds=1))
+
+    publisher = ConcurrentPublisher()
+    _service, routes = bind_route_publications(sessions, service, publisher)
+    with pytest.raises(RecipeRouteError, match="every .*rank"):
+        routes.publish_run(start.owner_id)
+
+    assert publisher.aliases == []
+    with sessions() as session:
+        owner = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.role == "entrypoint",
+            )
+        )
+        worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.role == "worker",
+            )
+        )
+        assert owner.state == "running"
+        assert owner.observation_endpoint_ready is True
+        assert worker.state == "failed"
+
+
+def test_collective_readiness_starts_distinct_observation_grace(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="g" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "observation-grace")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="h" * 36,
+    )
+    with sessions() as session:
+        launches = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+    assert len(launches) == 2
+    for launch in launches:
+        service.record_node_result(
+            start.id,
+            launch.node_id,
+            succeeded=True,
+            evidence=start_evidence(launch.payload),
+        )
+    with sessions() as session:
+        readiness = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == start.id,
+                AgentOperation.payload["phase"].as_string() == "collective-readiness",
+            )
+        )
+    assert readiness is not None
+
+    collective_at = NOW + timedelta(seconds=59)
+    service._clock = lambda: collective_at
+    service.record_node_result(
+        start.id,
+        readiness.node_id,
+        succeeded=True,
+        evidence=start_evidence(readiness.payload),
+    )
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        assert run.observation_deadline_at.replace(
+            tzinfo=UTC
+        ) == collective_at + timedelta(seconds=120)
+
+    _bound, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    before_expiry = RecipeOperationWorker(
+        sessions,
+        routes,
+        clock=lambda: NOW + timedelta(seconds=60),
+    )
+    assert before_expiry.tick() is False
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        assert run.route_state == "pending"
+        assert all(
+            node.state == "running"
+            for node in session.scalars(
+                select(RunNode).where(RunNode.run_id == start.owner_id)
+            )
+        )
+
+
+def test_distributed_start_deadline_is_enforced_before_phase_advance(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="v" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "expired-start")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="w" * 36,
+    )
+    with sessions() as session:
+        launches = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        assert len(launches) == 2
+        assert all(
+            launch.payload["start_deadline"]
+            == (NOW + timedelta(seconds=60)).isoformat()
+            for launch in launches
+        )
+        launch = launches[0]
+
+    service._clock = lambda: NOW + timedelta(seconds=60)
+    service.record_node_result(
+        start.id,
+        launch.node_id,
+        succeeded=True,
+        evidence=start_evidence(launch.payload),
+    )
+
+    assert service.get(start.id).state == "failed"
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        assert len(children) == 2
+        assert {child.state for child in children} == {"failed", "succeeded"}
+        run = session.get(RecipeRun, start.owner_id)
+        assert run.state == "stopping"
+        assert run.route_state == "withdrawn"
+        cleanup = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == start.owner_id,
+            )
+        )
+        assert cleanup is not None
+
+
+def test_distributed_start_capability_is_an_admission_blocker(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="u" * 36
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[1])
+        node.capabilities = [
+            capability
+            for capability in node.capabilities
+            if capability != "recipe.start.two-phase.v1"
+        ]
+
+    plan = service.preview_run(installation.owner_id, "unsupported")
+    assert plan.allowed is False
+    assert "run.distributed_start_capability_missing" in {
+        blocker.code for blocker in plan.nodes[1].blockers
+    }
+
+
+def test_distributed_start_requires_enrollment_pinned_receipt_key(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="k" * 36
+    )
+    with sessions.begin() as session:
+        session.get(AgentNode, nodes[1]).observation_receipt_public_key = None
+
+    plan = service.preview_run(installation.owner_id, "unpinned-receipt-key")
+    assert plan.allowed is False
+    assert "run.distributed_observation_receipt_capability_missing" in {
+        blocker.code for blocker in plan.nodes[1].blockers
+    }
+
+
 def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, endpoint_owner_rank_one=True
+        tmp_path,
+        nodes=2,
+        endpoint_owner_rank_one=True,
+        distributed_lifecycle=True,
     )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
@@ -748,11 +1322,13 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
         )
     run_plan = service.preview_run(install.owner_id, "nonzero")
     assert next(node for node in run_plan.nodes if node.endpoint_owner).rank == 1
-    start = service.start(
-        run_plan,
-        plan_digest=run_plan.plan_digest,
-        actor="admin",
+    start = started_recipe(
+        sessions,
+        service,
+        install.owner_id,
+        nodes,
         request_id="6" * 36,
+        alias="nonzero",
     )
     with sessions() as session:
         job = session.get(Job, start.id)
@@ -762,6 +1338,22 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
         ]
     assert {payload["master_address"] for payload in payloads} == {"192.168.100.3"}
     assert {payload["master_port"] for payload in payloads} == {29500}
+    with sessions() as session:
+        run_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert [node.role for node in run_nodes] == ["worker", "entrypoint"]
+        assert [node.endpoint is not None for node in run_nodes] == [False, True]
+        assert [node.observation_endpoint_ready for node in run_nodes] == [None, True]
+
+    publisher = ConcurrentPublisher()
+    _service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(start.owner_id)
+    assert publisher.aliases[-1] == ("nonzero",)
 
 
 def test_install_admission_and_queue_creation_roll_back_together(
@@ -1308,7 +1900,9 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
             "run_id",
             "plan_digest",
         }
-        assert {child.authority_revision for child in children} == {first_run.plan_digest}
+        assert {child.authority_revision for child in children} == {
+            first_run.plan_digest
+        }
         assert {child.payload["plan_digest"] for child in children} == {
             first_run.plan_digest
         }
@@ -1824,9 +2418,7 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
     preview = service.preview_uninstall(first.owner_id)
 
     assert preview.model_impact.effect == "recipe-only"
-    assert preview.model_impact.dependent_recipe_ids == (
-        preview.recipe_id,
-    )
+    assert preview.model_impact.dependent_recipe_ids == (preview.recipe_id,)
     assert preview.model_impact.cleanup_node_ids == ()
     assert preview.model_impact.retained_node_ids == nodes
     operation = service.uninstall(
@@ -1972,9 +2564,7 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
             "installations": [
                 {
                     "installation_id": installation_id,
-                    "recipe_content_sha256": expected_content_digests[
-                        installation_id
-                    ],
+                    "recipe_content_sha256": expected_content_digests[installation_id],
                 }
                 for installation_id in sorted(
                     [installation.owner_id, second_installation.owner_id]
@@ -2002,9 +2592,7 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
     )
     with sessions() as session:
         stored = session.get(RecipeInstallation, installation.owner_id)
-        second_stored = session.get(
-            RecipeInstallation, second_installation.owner_id
-        )
+        second_stored = session.get(RecipeInstallation, second_installation.owner_id)
         assert stored is not None and stored.state == "uninstalled"
         assert second_stored is not None and second_stored.state == "uninstalled"
         assert not list(
@@ -2370,11 +2958,11 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         )
 
 
-def test_authenticated_run_observations_project_failure_recovery_and_missing_rank(
+def test_legacy_snapshot_updates_single_run_and_ignores_exact_distributed_run(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2
+        tmp_path, nodes=2, distributed_lifecycle=True
     )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
@@ -2412,27 +3000,125 @@ def test_authenticated_run_observations_project_failure_recovery_and_missing_ran
                 evidence=start_evidence(operation.payload),
             )
 
-    record_recipe_run_observations(
-        sessions,
-        nodes[0],
-        NOW,
-        (RecipeRunObservation(start.owner_id, True),),
-    )
-    record_recipe_run_observations(sessions, nodes[1], NOW, ())
-    failed = service.run_status(start.owner_id)
-    assert [rank.state for rank in failed.ranks] == ["running", "failed"]
-    assert [rank.fresh for rank in failed.ranks] == [True, True]
-    assert failed.healthy is False
+    legacy_run_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        exact_run = session.get(RecipeRun, start.owner_id)
+        assert exact_run.plan["observation_schema_version"] == 2
+        exact_rank = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == exact_run.id,
+                RunNode.node_id == nodes[0],
+            )
+        )
+        assert exact_rank is not None
+        exact_rank.state = "failed"
+        session.add(
+            RecipeRun(
+                id=legacy_run_id,
+                installation_id=exact_run.installation_id,
+                mapping_id=exact_run.mapping_id,
+                mapping_generation=exact_run.mapping_generation,
+                run_generation=1,
+                alias="legacy-single",
+                plan_digest="d" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 1},
+                state="running",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=legacy_run_id,
+                node_id=nodes[0],
+                rank=0,
+                role="single",
+                state="running",
+                port=9000,
+                reserved_memory_bytes=1,
+                updated_at=NOW,
+            )
+        )
 
     record_recipe_run_observations(
         sessions,
-        nodes[1],
-        NOW,
-        (RecipeRunObservation(start.owner_id, True),),
+        nodes[0],
+        NOW + timedelta(seconds=1),
+        (
+            RecipeRunObservation(start.owner_id, True),
+            RecipeRunObservation(legacy_run_id, True),
+        ),
     )
-    recovered = service.run_status(start.owner_id)
-    assert [rank.state for rank in recovered.ranks] == ["running", "running"]
-    assert recovered.healthy is True
+    with sessions() as session:
+        exact_rank = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == nodes[0],
+            )
+        )
+        legacy_rank = session.scalar(
+            select(RunNode).where(RunNode.run_id == legacy_run_id)
+        )
+        assert exact_rank.state == "failed"
+        assert exact_rank.updated_at.replace(tzinfo=UTC) == NOW
+        assert legacy_rank.state == "running"
+        assert legacy_rank.updated_at.replace(tzinfo=UTC) == NOW + timedelta(seconds=1)
+
+    record_recipe_run_observations(sessions, nodes[0], NOW + timedelta(seconds=2), ())
+    with sessions() as session:
+        exact_rank = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == nodes[0],
+            )
+        )
+        legacy_rank = session.scalar(
+            select(RunNode).where(RunNode.run_id == legacy_run_id)
+        )
+        assert exact_rank.state == "failed"
+        assert legacy_rank.state == "failed"
+
+    with sessions.begin() as session:
+        assigned = prepare_exact_recipe_run_observation_nodes(
+            session, nodes[1], NOW + timedelta(seconds=3), set()
+        )
+        assert [node.run_id for node in assigned] == [start.owner_id]
+    with sessions() as session:
+        exact_worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == nodes[1],
+            )
+        )
+        assert exact_worker.state == "failed"
+
+    with sessions.begin() as session:
+        exact_run = session.get(RecipeRun, start.owner_id)
+        exact_worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == nodes[1],
+            )
+        )
+        exact_run.state = "starting"
+        exact_worker.state = "running"
+        exact_worker.updated_at = NOW + timedelta(seconds=4)
+        assert (
+            prepare_exact_recipe_run_observation_nodes(
+                session, nodes[1], NOW + timedelta(seconds=5), set()
+            )
+            == ()
+        )
+    with sessions() as session:
+        exact_worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == nodes[1],
+            )
+        )
+        assert exact_worker.state == "running"
 
 
 def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
@@ -2455,7 +3141,8 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
     publisher = ConcurrentPublisher()
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(start.owner_id)
-    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    failure_observed_at = NOW + timedelta(seconds=1)
+    record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )
@@ -2477,13 +3164,15 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
             )
         )
         assert run.route_state == "withdrawn"
+        assert run.run_generation == 2
         assert stop_job.payload["recovery"]["failed_rank"] == 1
-        assert [child.node_id for child in stop_children] == [nodes[0]]
-        assert set(stop_children[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+    assert [child.node_id for child in stop_children] == [nodes[0]]
+
+    assert set(stop_children[0].payload) == {
+        "schema_version",
+        "run_id",
+        "plan_digest",
+    }
     assert publisher.aliases[-1] == ()
 
     service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
@@ -2510,8 +3199,14 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
                 select(AgentOperation).where(AgentOperation.parent_job_id == restart.id)
             )
         )
-        assert [child.node_id for child in restart_children] == [nodes[1]]
-        worker_start = restart_children[0]
+        assert {child.node_id for child in restart_children} == set(nodes)
+        assert all(
+            child.payload["phase"] == "rank-launch" for child in restart_children
+        )
+        worker_start = next(
+            child for child in restart_children if child.node_id == nodes[1]
+        )
+        assert worker_start.payload["run_generation"] == 2
         assert session.get(RecipeRun, start.owner_id).route_state == "withdrawn"
 
     service.record_node_result(
@@ -2535,6 +3230,22 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
         succeeded=True,
         evidence=start_evidence(owner_start.payload),
     )
+    with sessions() as session:
+        readiness = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+                AgentOperation.state == "queued",
+            )
+        )
+    assert readiness is not None
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(readiness.payload),
+    )
+    mark_current_exact_observations(sessions, start.owner_id, NOW)
     routes.publish_run(start.owner_id)
 
     with sessions() as session:
@@ -2549,6 +3260,230 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
                 .order_by(RunNode.rank)
             )
         ] == ["running", "running"]
+
+
+def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="7" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="8" * 36,
+        alias="observed-exact",
+    )
+    observation_node = nodes[1]
+    certificate_serial = "serial-1"
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        installed = session.get(RecipeInstallation, run.installation_id)
+        run_node = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == run.id, RunNode.node_id == observation_node
+            )
+        )
+        start_job = session.get(Job, start.id)
+        launch = start_job.result["launch_evidence"][observation_node]
+        assert run_node.endpoint is None
+        identity = {
+            "schema_version": 1,
+            "node_id": observation_node,
+            "run_id": run.id,
+            "installation_id": run.installation_id,
+            "recipe_revision_id": installed.recipe_revision_id,
+            "recipe_content_sha256": launch["recipe_content_sha256"],
+            "mapping_id": run.mapping_id,
+            "mapping_generation": run.mapping_generation,
+            "run_generation": run.run_generation,
+            "image_digest": launch["image_digest"],
+            "artifact_set_digest": launch["artifact_set_digest"],
+            "model_identity": launch["model_identity"],
+            "rank": run_node.rank,
+            "role": run_node.role,
+            "world_size": launch["world_size"],
+            "local_address": launch["local_address"],
+            "master_address": launch["master_address"],
+            "master_port": launch["master_port"],
+            "port": run_node.port,
+            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
+        }
+    authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+    identity_sha256, grant = authority.issue_recipe_run_observation_grant(
+        node_id=observation_node,
+        certificate_serial=certificate_serial,
+        identity=identity,
+        job_id=start.owner_id,
+        operation_id=str(uuid.uuid4()),
+        attempt=1,
+        fence=str(uuid.uuid4()),
+        request_sha256="d" * 64,
+        expires_in_seconds=10,
+    )
+    assert (
+        grant.claims.operation.values["observation_identity_sha256"] == identity_sha256
+    )
+    with pytest.raises(HostHelperAuthorityError, match="pending"):
+        authority.issue_recipe_run_observation_grant(
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            job_id=start.owner_id,
+            operation_id=str(uuid.uuid4()),
+            attempt=1,
+            fence=str(uuid.uuid4()),
+            request_sha256="e" * 64,
+            expires_in_seconds=10,
+        )
+    forged_receipt = signed_observation_receipt(
+        grant,
+        identity_sha256,
+        node_id=observation_node,
+        observed_at=NOW,
+    )
+    forged_receipt["signature"]["value"] = "0" * 128
+    with (
+        sessions.begin() as session,
+        pytest.raises(HostHelperAuthorityError, match="signature"),
+    ):
+        authority.consume_recipe_run_observation_grant(
+            session,
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            observed_at=NOW,
+            received_at=NOW,
+            signed_grant=grant.to_mapping(),
+            helper_receipt=forged_receipt,
+        )
+    with sessions.begin() as session:
+        assert authority.consume_recipe_run_observation_grant(
+            session,
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            observed_at=NOW,
+            received_at=NOW,
+            signed_grant=grant.to_mapping(),
+            helper_receipt=signed_observation_receipt(
+                grant,
+                identity_sha256,
+                node_id=observation_node,
+                observed_at=NOW,
+            ),
+        ) == (
+            identity_sha256,
+            True,
+            hashlib.sha256(
+                canonical_message(
+                    signed_observation_receipt(
+                        grant,
+                        identity_sha256,
+                        node_id=observation_node,
+                        observed_at=NOW,
+                    )
+                )
+            ).hexdigest(),
+        )
+    with (
+        sessions.begin() as session,
+        pytest.raises(HostHelperAuthorityError, match="replayed"),
+    ):
+        authority.consume_recipe_run_observation_grant(
+            session,
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            observed_at=NOW + timedelta(seconds=1),
+            received_at=NOW + timedelta(seconds=1),
+            signed_grant=grant.to_mapping(),
+            helper_receipt=signed_observation_receipt(
+                grant,
+                identity_sha256,
+                node_id=observation_node,
+                observed_at=NOW + timedelta(seconds=1),
+            ),
+        )
+
+    second_identity_sha256, second_grant = authority.issue_recipe_run_observation_grant(
+        node_id=observation_node,
+        certificate_serial=certificate_serial,
+        identity=identity,
+        job_id=start.owner_id,
+        operation_id=str(uuid.uuid4()),
+        attempt=1,
+        fence=str(uuid.uuid4()),
+        request_sha256="f" * 64,
+        expires_in_seconds=10,
+    )
+    assert second_identity_sha256 == identity_sha256
+    assert second_grant.claims.request_id != grant.claims.request_id
+    with sessions.begin() as session:
+        assert authority.consume_recipe_run_observation_grant(
+            session,
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            observed_at=NOW,
+            received_at=NOW,
+            signed_grant=second_grant.to_mapping(),
+            helper_receipt=signed_observation_receipt(
+                second_grant,
+                second_identity_sha256,
+                node_id=observation_node,
+                observed_at=NOW,
+                outcome="not-running",
+            ),
+        )[:2] == (identity_sha256, False)
+
+    _, stale_grant = authority.issue_recipe_run_observation_grant(
+        node_id=observation_node,
+        certificate_serial=certificate_serial,
+        identity=identity,
+        job_id=start.owner_id,
+        operation_id=str(uuid.uuid4()),
+        attempt=1,
+        fence=str(uuid.uuid4()),
+        request_sha256="1" * 64,
+        expires_in_seconds=10,
+    )
+    with (
+        sessions.begin() as session,
+        pytest.raises(HostHelperAuthorityError, match="stale"),
+    ):
+        authority.consume_recipe_run_observation_grant(
+            session,
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            observed_at=NOW - timedelta(seconds=1),
+            received_at=NOW,
+            signed_grant=stale_grant.to_mapping(),
+            helper_receipt=signed_observation_receipt(
+                stale_grant,
+                identity_sha256,
+                node_id=observation_node,
+                observed_at=NOW - timedelta(seconds=1),
+            ),
+        )
+    with sessions() as session:
+        worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start.owner_id,
+                RunNode.node_id == observation_node,
+            )
+        )
+        assert worker.endpoint is None
 
 
 def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
@@ -2569,7 +3504,8 @@ def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
     publisher = ConcurrentPublisher()
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(started.owner_id)
-    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    failure_observed_at = NOW + timedelta(seconds=1)
+    record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )
@@ -2620,6 +3556,62 @@ def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
         worker_start,
         nodes,
     )
+
+
+def test_distributed_recovery_launches_all_ranks_before_collective_readiness(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        _routes,
+        _publisher,
+        _started,
+        restart,
+        _worker_start,
+        _nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    with sessions() as session:
+        launches = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == restart.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+    assert len(launches) == 2
+    assert {item.payload["phase"] for item in launches} == {"rank-launch"}
+
+    service.record_node_result(
+        restart.id,
+        launches[0].node_id,
+        succeeded=True,
+        evidence=start_evidence(launches[0].payload),
+    )
+    with sessions() as session:
+        assert (
+            session.query(AgentOperation).filter_by(parent_job_id=restart.id).count()
+            == 2
+        )
+
+    service.record_node_result(
+        restart.id,
+        launches[1].node_id,
+        succeeded=True,
+        evidence=start_evidence(launches[1].payload),
+    )
+    with sessions() as session:
+        operations = tuple(
+            session.query(AgentOperation).filter_by(parent_job_id=restart.id)
+        )
+        readiness = tuple(
+            item
+            for item in operations
+            if item.payload.get("phase") == "collective-readiness"
+        )
+        assert len(operations) == 3
+        assert len(readiness) == 1
+        assert readiness[0].payload["role"] == "entrypoint"
 
 
 def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
@@ -2684,7 +3676,8 @@ def test_distributed_recovery_deadline_is_enforced_before_phase_advance(
         )
         run = session.get(RecipeRun, started.owner_id)
         stored_restart = session.get(Job, restart.id)
-        assert owner_start is None
+        assert owner_start is not None
+        assert owner_start.state == "failed"
         assert stored_restart.state == "failed"
         assert run.state == "stopping"
         assert run.route_state == "withdrawn"
@@ -2722,6 +3715,22 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         succeeded=True,
         evidence=start_evidence(owner_start.payload),
     )
+    with sessions() as session:
+        readiness = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+                AgentOperation.state == "queued",
+            )
+        )
+    assert readiness is not None
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(readiness.payload),
+    )
+    mark_current_exact_observations(sessions, started.owner_id, NOW)
     routes._clock = lambda: NOW + timedelta(seconds=31)
     publications_before = list(publisher.aliases)
 
@@ -2790,15 +3799,14 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
 
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == restart.id,
-                    AgentOperation.node_id == nodes[0],
-                )
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
             )
-            is None
         )
+        assert owner_start is not None
+        assert owner_start.state == "failed"
         assert session.get(Job, restart.id).state == "failed"  # type: ignore[union-attr]
         assert session.get(RecipeRun, started.owner_id).state == "stopping"  # type: ignore[union-attr]
 
@@ -2835,6 +3843,7 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
         succeeded=True,
         evidence=start_evidence(owner_start.payload),
     )
+    complete_collective_readiness(sessions, service, restart.id, nodes[0])
     current = {"now": NOW}
 
     class DeadlineCrossingPublisher(ConcurrentPublisher):
@@ -2894,6 +3903,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
         succeeded=True,
         evidence=start_evidence(owner_start.payload),
     )
+    complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
     current = {"now": NOW}
     live_root = tmp_path / "live-routes"
@@ -2988,6 +3998,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         succeeded=True,
         evidence=start_evidence(owner_start.payload),
     )
+    complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
     current = {"now": NOW + timedelta(seconds=29)}
     live_root = tmp_path / "ack-routes"
@@ -3102,7 +4113,8 @@ def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missin
     publisher = ConcurrentPublisher()
     _service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(start.owner_id)
-    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    failure_observed_at = NOW + timedelta(seconds=1)
+    record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentPresence)):
             session.delete(presence)

@@ -89,7 +89,8 @@ dpkg_version_format="\${Version}"
 dpkg_status_format="\${db:Status-Abbrev}"
 
 for required in "$dpkg" "$dpkg_deb" "$dpkg_query" "$runuser" \
-  "$systemd_analyze" "$verify" /usr/bin/openssl /usr/bin/sha256sum; do
+  "$systemd_analyze" "$verify" /usr/bin/od /usr/bin/openssl \
+  /usr/bin/sha256sum /usr/bin/tail /usr/bin/tr; do
   if [[ ! -x "$required" ]]; then
     printf 'native lifecycle executable is unavailable: %s\n' "$required" >&2
     exit 1
@@ -116,6 +117,29 @@ test "$("$dpkg_deb" --field "$next_package" Version)" = "$next_version"
 temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
 downgrade_log=${VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG:-$temporary/downgrade.log}
+
+assert_observation_receipt_key() {
+  local private_key public_key public_der derived_public public_hex self_test_json
+  private_key=$(path /var/lib/vonk-forge/helper/observation-receipt.pk8)
+  public_key=$(path /etc/vonk-forge-agent/observation-receipt.pub)
+  public_der=$temporary/observation-receipt-public.der
+  derived_public=$temporary/observation-receipt-derived.pub
+  self_test_json=$1
+
+  test "$(stat -c '%U:%G:%a:%h' "$private_key")" = root:root:600:1
+  test "$(stat -c '%U:%G:%a:%h' "$public_key")" = root:vonk-agent:640:1
+  test "$(wc -c < "$public_key")" -eq 32
+  /usr/bin/openssl pkey -inform DER -in "$private_key" \
+    -check -noout >/dev/null 2>&1
+  /usr/bin/openssl pkey -inform DER -in "$private_key" \
+    -pubout -outform DER -out "$public_der" >/dev/null 2>&1
+  test "$(wc -c < "$public_der")" -eq 44
+  /usr/bin/tail -c 32 "$public_der" > "$derived_public"
+  cmp -s "$derived_public" "$public_key"
+  public_hex=$(/usr/bin/od -An -v -tx1 "$public_key" | /usr/bin/tr -d ' \n')
+  grep -F '"observation_receipt_public_key":"'"$public_hex"'"' \
+    <<< "$self_test_json" >/dev/null
+}
 
 env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package"
 test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$current_version"
@@ -249,6 +273,14 @@ self_test=$("$agent" --config "$config" self-test)
 grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
 grep -F '"semantic_version":"'"$next_semantic"'"' <<< "$self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
+  assert_observation_receipt_key "$self_test"
+  observation_receipt_private_digest=$(
+    /usr/bin/sha256sum \
+      "$(path /var/lib/vonk-forge/helper/observation-receipt.pk8)" \
+      | cut -d' ' -f1
+  )
+fi
 candidate_build_digest=$(sed -nE 's/.*"build_digest":"(sha256:[0-9a-f]{64})".*/\1/p' \
   <<< "$self_test")
 candidate_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
@@ -275,6 +307,12 @@ test "$("$agent" --version)" = "vonk-agent $next_semantic"
 self_test=$("$agent" --config "$config" self-test)
 grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
+  assert_observation_receipt_key "$self_test"
+  test "$(/usr/bin/sha256sum \
+    "$(path /var/lib/vonk-forge/helper/observation-receipt.pk8)" \
+    | cut -d' ' -f1)" = "$observation_receipt_private_digest"
+fi
 env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
 
 printf 'native %s package lifecycle: PASS\n' "$architecture"

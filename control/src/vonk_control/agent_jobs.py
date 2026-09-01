@@ -106,7 +106,14 @@ _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
 _NEXT_CAPABILITIES = (
     _REQUIRED_CAPABILITIES | _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 )
-_OPTIONAL_CAPABILITIES = frozenset({AgentOperation.AGENT_UPGRADE.value})
+_OPTIONAL_CAPABILITIES = frozenset(
+    {
+        AgentOperation.AGENT_UPGRADE.value,
+        "recipe.start.two-phase.v1",
+        "recipe.run.inspect.exact.v1",
+        "recipe.run.inspect.receipt.v1",
+    }
+)
 _KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
 _CONTROL_OPERATIONS = (
     _NEXT_CAPABILITIES - _RUNTIME_CAPABILITIES
@@ -1977,6 +1984,10 @@ class AgentJobService:
             or "agent.runtime.rust.v1" not in capabilities
         ):
             raise ValueError("Rust agent capability negotiation is incomplete")
+        receipt_key = runtime_identity.get("observation_receipt_public_key")
+        receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
+        if receipt_capable != (isinstance(receipt_key, str) and len(receipt_key) == 64):
+            raise ValueError("agent observation receipt identity is incomplete")
 
     @staticmethod
     def _record_contact(
@@ -2006,6 +2017,13 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
+            receipt_key = runtime_identity.get("observation_receipt_public_key")
+            if (
+                receipt_key is not None
+                and node.observation_receipt_public_key is not None
+                and node.observation_receipt_public_key != receipt_key
+            ):
+                raise ValueError("agent observation receipt key changed")
             node.architecture = str(runtime_identity["architecture"])
             node.semantic_version = str(runtime_identity["semantic_version"])
             node.build_digest = str(runtime_identity["build_digest"])
@@ -2036,13 +2054,23 @@ class AgentJobService:
         document = dict(value)
         if (
             set(document)
-            != {
-                "architecture",
-                "binary_digest",
-                "build_digest",
-                "semantic_version",
-                "self_test_passed",
-            }
+            not in (
+                {
+                    "architecture",
+                    "binary_digest",
+                    "build_digest",
+                    "semantic_version",
+                    "self_test_passed",
+                },
+                {
+                    "architecture",
+                    "binary_digest",
+                    "build_digest",
+                    "semantic_version",
+                    "self_test_passed",
+                    "observation_receipt_public_key",
+                },
+            )
             or document["architecture"] not in {"linux-amd64", "linux-arm64"}
             or not isinstance(document["architecture"], str)
             or not isinstance(document["binary_digest"], str)
@@ -2056,6 +2084,17 @@ class AgentJobService:
             )
             is None
             or document["self_test_passed"] is not True
+            or (
+                document.get("observation_receipt_public_key") is not None
+                and (
+                    not isinstance(document["observation_receipt_public_key"], str)
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}",
+                        document["observation_receipt_public_key"],
+                    )
+                    is None
+                )
+            )
         ):
             raise ValueError("agent runtime identity is invalid")
         return document

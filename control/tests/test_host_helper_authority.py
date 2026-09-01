@@ -245,6 +245,28 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     assert inspect.claims.operation.values["action"] == "run-inspect"
 
 
+def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
+    service = runtime_service(operation_payload={"phase": "collective-readiness"})
+    common = {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 2,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+    assert (
+        service.issue_grant(
+            **common, action=ContainerRuntimeAction.RUN_INSPECT
+        ).claims.operation.values["action"]
+        == "run-inspect"
+    )
+    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
+        with pytest.raises(HostHelperAuthorityError, match="stale"):
+            service.issue_grant(**common, action=action)
+
+
 @pytest.mark.parametrize(
     "action", (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP)
 )

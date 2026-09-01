@@ -345,6 +345,61 @@ def test_service_claim_requires_rust_capability_with_packaged_runtime_identity(
         )
 
 
+def test_signed_observation_receipt_key_is_capability_bound_and_immutable(
+    service,
+) -> None:
+    jobs, sessions, _clock = service
+    receipt_identity = {
+        **PACKAGED_RUNTIME_IDENTITY,
+        "observation_receipt_public_key": "1" * 64,
+    }
+
+    assert (
+        jobs.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=[
+                "agent.runtime.rust.v1",
+                "recipe.run.inspect.receipt.v1",
+            ],
+            runtime_identity=receipt_identity,
+        )
+        is None
+    )
+    with sessions() as session:
+        assert session.get(AgentNode, NODE_A).observation_receipt_public_key is None
+
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).observation_receipt_public_key = "1" * 64
+
+    with pytest.raises(ValueError, match="receipt key changed"):
+        jobs.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=[
+                "agent.runtime.rust.v1",
+                "recipe.run.inspect.receipt.v1",
+            ],
+            runtime_identity={
+                **receipt_identity,
+                "observation_receipt_public_key": "2" * 64,
+            },
+        )
+    with pytest.raises(ValueError, match="receipt identity is incomplete"):
+        jobs.claim(
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=[
+                "agent.runtime.rust.v1",
+                "recipe.run.inspect.receipt.v1",
+            ],
+            runtime_identity=PACKAGED_RUNTIME_IDENTITY,
+        )
+
+
 def test_package_operation_is_not_a_control_plane_queue_operation(service) -> None:
     jobs, sessions, clock = service
 

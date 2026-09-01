@@ -317,6 +317,36 @@ def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:
     assert result.node_id == NODE_ID
 
 
+def test_enrollment_pins_and_explicit_reenrollment_rotates_receipt_key(service) -> None:
+    enrollment, sessions, _, _ = service
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    enrollment.submit(
+        grant.token,
+        request,
+        evidence(request, observation_receipt_public_key="1" * 64),
+    )
+    with sessions() as session:
+        assert (
+            session.get(AgentNode, NODE_ID).observation_receipt_public_key == "1" * 64
+        )
+
+    replacement = csr()
+    replacement_grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+    enrollment.submit(
+        replacement_grant.token,
+        replacement,
+        evidence(replacement, observation_receipt_public_key="2" * 64),
+    )
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_ID)
+        stored = session.scalar(
+            select(AgentEnrollment).order_by(AgentEnrollment.created_at.desc())
+        )
+        assert node.observation_receipt_public_key == "2" * 64
+        assert stored.observation_receipt_public_key == "2" * 64
+
+
 def test_reenrollment_replaces_existing_active_identity_and_replay_is_idempotent(
     service,
 ) -> None:

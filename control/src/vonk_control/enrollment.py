@@ -29,8 +29,12 @@ from .models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
     AgentNodeProfile,
+    RecipeRun,
+    RoutePublication,
+    RunNode,
 )
 from .pki import CertificateAuthority, IssuedCertificate
+from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -44,6 +48,7 @@ _EVIDENCE_FIELDS = (
     "agent_digest",
     "boot_id",
 )
+_OBSERVATION_RECEIPT_PUBLIC_KEY = "observation_receipt_public_key"
 _EVIDENCE_LIMITS = {
     "node_id": 36,
     "csr_public_key_fingerprint": 64,
@@ -51,6 +56,7 @@ _EVIDENCE_LIMITS = {
     "hardware_fingerprint": 512,
     "agent_digest": 128,
     "boot_id": 128,
+    _OBSERVATION_RECEIPT_PUBLIC_KEY: 64,
 }
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
@@ -246,6 +252,9 @@ class EnrollmentService:
                         hardware_fingerprint=values["hardware_fingerprint"],
                         agent_digest=values["agent_digest"],
                         boot_id=values["boot_id"],
+                        observation_receipt_public_key=values.get(
+                            _OBSERVATION_RECEIPT_PUBLIC_KEY
+                        ),
                         created_at=now,
                     )
                     _lock_node_issuance(session, node_id)
@@ -948,6 +957,7 @@ def _persist_issued_enrollment(
             node_id=enrollment.node_id,
             state="active",
             capabilities=[],
+            observation_receipt_public_key=(enrollment.observation_receipt_public_key),
         )
         session.add(node)
         # There is no ORM relationship between these operational rows. Flush
@@ -992,6 +1002,19 @@ def _persist_issued_enrollment(
             if certificate.state in {"active", "staged"}:
                 certificate.state = "revoked"
                 certificate.revoked_at = certificate.revoked_at or now
+        if (
+            enrollment.observation_receipt_public_key is not None
+            and enrollment.observation_receipt_public_key
+            != node.observation_receipt_public_key
+        ):
+            _invalidate_rotated_observation_receipts(
+                session,
+                node_id=node.node_id,
+                now=now,
+            )
+            node.observation_receipt_public_key = (
+                enrollment.observation_receipt_public_key
+            )
     session.add(
         AgentCertificate(
             serial=issued.serial,
@@ -1014,6 +1037,47 @@ def _persist_issued_enrollment(
     enrollment.certificate_generation = generation
     enrollment.certificate_not_before = issued.not_before
     enrollment.certificate_not_after = issued.not_after
+
+
+def _invalidate_rotated_observation_receipts(
+    session: Session,
+    *,
+    node_id: str,
+    now: datetime,
+) -> None:
+    """Fail exact ranks signed by a retired per-node observation key."""
+
+    published_affected = False
+    nodes = tuple(
+        session.scalars(
+            select(RunNode)
+            .where(RunNode.node_id == node_id)
+            .order_by(RunNode.run_id, RunNode.rank)
+            .with_for_update(of=RunNode)
+        )
+    )
+    for run_node in nodes:
+        run = session.get(RecipeRun, run_node.run_id, with_for_update=True)
+        if (
+            run is None
+            or not isinstance(run.plan, Mapping)
+            or run.plan.get("observation_schema_version") != 2
+        ):
+            continue
+        run_node.state = "failed"
+        run_node.observed_run_generation = None
+        run_node.observation_receipt_sha256 = None
+        run_node.observation_endpoint_ready = None
+        run_node.updated_at = now
+        published_affected = published_affected or run.route_state == "published"
+    if published_affected:
+        publication = session.get(
+            RoutePublication,
+            RECIPE_ROUTE_AUTHORITY_ID,
+            with_for_update=True,
+        )
+        if publication is not None:
+            publication.state = "withdrawal-pending"
 
 
 def _locked_enrollment(session: Session, enrollment_id: str) -> AgentEnrollment:
@@ -1084,6 +1148,8 @@ def _replay_matches(
         and values["hardware_fingerprint"] == enrollment.hardware_fingerprint
         and values["agent_digest"] == enrollment.agent_digest
         and values["boot_id"] == enrollment.boot_id
+        and values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
+        == enrollment.observation_receipt_public_key
     )
 
 
@@ -1173,9 +1239,13 @@ def _validate_evidence(
     public_key_fingerprint: str,
 ) -> tuple[dict[str, str], str | None]:
     values: dict[str, str] = {}
-    if set(evidence) != set(_EVIDENCE_FIELDS):
+    fields = set(evidence)
+    if fields not in (
+        set(_EVIDENCE_FIELDS),
+        {*_EVIDENCE_FIELDS, _OBSERVATION_RECEIPT_PUBLIC_KEY},
+    ):
         return values, "evidence fields are invalid"
-    for name in _EVIDENCE_FIELDS:
+    for name in fields:
         value = evidence.get(name)
         if (
             not isinstance(value, str)
@@ -1194,6 +1264,9 @@ def _validate_evidence(
         return values, "evidence CSR public-key fingerprint is invalid"
     if _HEX_64.fullmatch(values["agent_digest"]) is None:
         return values, "evidence agent digest is invalid"
+    receipt_key = values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
+    if receipt_key is not None and _HEX_64.fullmatch(receipt_key) is None:
+        return values, "evidence observation receipt public key is invalid"
     return values, None
 
 

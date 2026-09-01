@@ -22,6 +22,7 @@ from .distributed_recovery import enforce_recovery_deadline
 from .interface_adapters import InterfaceAdapterError, interface_adapter
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
+    ClusterMapping,
     Job,
     LocalRecipeRevision,
     RecipeInstallation,
@@ -46,6 +47,10 @@ class RecipeRouteError(RuntimeError):
     def __init__(self, message: str, *, run_id: str | None = None) -> None:
         super().__init__(message)
         self.run_id = run_id
+
+
+class RecipeRouteNotReady(RecipeRouteError):
+    """A fail-closed route candidate is waiting for current rank evidence."""
 
 
 class RecipeRecoveryDeadlineError(RecipeRouteError):
@@ -337,6 +342,7 @@ class RecipeRouteService:
             raise KeyError(run_id)
         if run.state != "running":
             raise RecipeRouteError("recipe run is not ready for publication")
+        recovery = self._enforce_recovery_publication_deadline(session, run)
         candidate = self.candidate_in_session(
             session,
             include_run_id=run_id,
@@ -345,7 +351,6 @@ class RecipeRouteService:
         )
         if run_id not in candidate.included:
             raise RecipeRouteError("recipe run is absent from route candidate")
-        recovery = self._enforce_recovery_publication_deadline(session, run)
         if recovery is not None:
             candidate = replace(
                 candidate,
@@ -410,6 +415,7 @@ class RecipeRouteService:
             included.route_generation = generation.generation
             included.route_digest = generation.route_digest
             included.route_error = None
+            included.observation_deadline_at = None
             included.updated_at = self._clock()
         return generation
 
@@ -865,11 +871,67 @@ class RecipeRouteService:
                         "recipe rank set does not match accepted plan",
                         run_id=run.id,
                     )
+            mapping = session.get(ClusterMapping, run.mapping_id)
             entrypoints = [node for node in nodes if node.role == "entrypoint"]
-            if len(entrypoints) != 1 or entrypoints[0].rank != 0:
+            endpoint_owners = (
+                [
+                    node
+                    for node in nodes
+                    if node.node_id == mapping.endpoint_owner_node_id
+                ]
+                if mapping is not None and mapping.generation == run.mapping_generation
+                else []
+            )
+            if (
+                len(entrypoints) != 1
+                or len(endpoint_owners) != 1
+                or entrypoints[0] is not endpoint_owners[0]
+            ):
                 raise RecipeRouteError(
-                    "recipe run must have one rank-zero entrypoint", run_id=run.id
+                    "recipe run must have exactly one mapped endpoint-owner entrypoint",
+                    run_id=run.id,
                 )
+            endpoint_owner = endpoint_owners[0]
+            exact_observations = (
+                isinstance(run.plan, Mapping)
+                and run.plan.get("observation_schema_version") == 2
+            )
+            if exact_observations:
+                observation_deadline = run.observation_deadline_at
+                normalized_deadline = (
+                    _aware(observation_deadline)
+                    if observation_deadline is not None
+                    else None
+                )
+                for node in nodes:
+                    if (
+                        node.observed_run_generation != run.run_generation
+                        or not isinstance(node.observation_receipt_sha256, str)
+                        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+                    ):
+                        raise RecipeRouteNotReady(
+                            "recipe rank is awaiting current exact observation",
+                            run_id=run.id,
+                        )
+                    if (
+                        normalized_deadline is not None
+                        and _aware(node.updated_at) > normalized_deadline
+                    ):
+                        raise RecipeRouteError(
+                            "recipe rank exact observation missed its deadline",
+                            run_id=run.id,
+                        )
+                    if node is endpoint_owner:
+                        if node.observation_endpoint_ready is not True:
+                            raise RecipeRouteNotReady(
+                                "recipe endpoint owner is awaiting exact readiness",
+                                run_id=run.id,
+                            )
+                    elif node.observation_endpoint_ready is not None:
+                        raise RecipeRouteError(
+                            "headless recipe rank exposed endpoint readiness",
+                            run_id=run.id,
+                        )
             for node in nodes:
                 observed = _aware(node.updated_at)
                 if (
@@ -888,11 +950,10 @@ class RecipeRouteService:
                     )
                 evidence_times.append(observed)
                 node_ids.add(node.node_id)
-            entrypoint = entrypoints[0]
             endpoint = _endpoint(
-                entrypoint,
+                endpoint_owner,
                 self._management_policy,
-                operation_id=f"recipe:{run.id}:rank:0",
+                operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
             )
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model
@@ -1061,5 +1122,6 @@ def _endpoint(
 __all__ = [
     "AtomicRecipeRoutePublisher",
     "RecipeRouteError",
+    "RecipeRouteNotReady",
     "RecipeRouteService",
 ]

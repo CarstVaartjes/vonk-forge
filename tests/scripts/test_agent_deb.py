@@ -314,6 +314,11 @@ def _exact_repair_script_fixture(
         b"# package-repair.receipt package-repair-helper.receipt\n"
         b"package_version='@VERSION@'\n"
         b"authority_sha256='@REPAIR_AUTHORITY_SHA256@'\n"
+        b"observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8\n"
+        b"observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub\n"
+        b"# openssl genpkey -algorithm ED25519 -outform DER\n"
+        b"# openssl pkey -inform DER; tail -c 32; root:vonk-agent:640:1\n"
+        b"ensure_observation_receipt_key() { :; }\n"
     )
     control_template = (
         b"Package: vonk-forge-agent\nVersion: @VERSION@\n"

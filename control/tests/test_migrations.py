@@ -59,6 +59,7 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_imports",
     "recipe_installations",
     "recipe_library_sync_runs",
+    "recipe_run_observation_grants",
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
@@ -169,6 +170,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0009_compat_abandoned_at.py",
         "0010_managed_recipe_catalog_sync.py",
         "0011_recipe_model_identity.py",
+        "0012_recipe_run_generation.py",
     ]
 
 
@@ -184,12 +186,55 @@ def test_recipe_installation_model_identity_migration_adds_indexed_nullable_colu
 
     inspector = inspect(engine)
     columns = {
-        column["name"]: column for column in inspector.get_columns("recipe_installations")
+        column["name"]: column
+        for column in inspector.get_columns("recipe_installations")
     }
     assert columns["model_version_sha256"]["nullable"] is True
     assert "ix_recipe_installations_model_version_sha256" in {
         index["name"] for index in inspector.get_indexes("recipe_installations")
     }
+
+
+def test_recipe_run_generation_migration_adds_exact_observation_authority(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'recipe-run-generation-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0011_recipe_model_identity")
+    engine = create_engine(url)
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    run_columns = {
+        column["name"]: column for column in inspector.get_columns("recipe_runs")
+    }
+    assert run_columns["run_generation"]["nullable"] is False
+    assert run_columns["run_generation"]["default"] in {"'1'", "1"}
+    assert "ck_recipe_runs_run_generation" in {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("recipe_runs")
+    }
+    grant_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("recipe_run_observation_grants")
+    }
+    assert set(grant_columns) == {
+        "run_node_id",
+        "request_id",
+        "identity_sha256",
+        "issued_at",
+        "expires_at",
+        "consumed",
+    }
+    assert grant_columns["run_node_id"]["nullable"] is False
+    assert grant_columns["consumed"]["nullable"] is False
+    assert {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints(
+            "recipe_run_observation_grants"
+        )
+    } == {("request_id",)}
 
 
 def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraints(
@@ -394,7 +439,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0011_recipe_model_identity"
+            == "0012_recipe_run_generation"
         )
 
 
@@ -481,7 +526,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0011_recipe_model_identity"
+            == "0012_recipe_run_generation"
         )
 
 
