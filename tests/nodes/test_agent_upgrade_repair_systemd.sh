@@ -1755,10 +1755,16 @@ if [[ -n "$crash_watcher" ]]; then
       "$helper_unit" "$socket_unit" >/dev/null 2>&1 || true
     systemctl --system daemon-reload
     systemctl --system start "$socket_unit"
-    # Model the next boot transaction through the durable Wants edge. The
-    # socket deliberately wants the package-owned standard recovery unit, but
-    # schema-v2 suppresses that unit while the capsule owns the intent.
-    systemctl --system restart multi-user.target >/dev/null 2>&1 || true
+    target_wants=" $(systemctl --system show --property=Wants --value \
+      multi-user.target) "
+    case "$target_wants" in
+      *" $source_capsule_unit_name "*) ;;
+      *) printf '%s\n' 'repair capsule boot dependency is absent' >&2; exit 1 ;;
+    esac
+    # The target is already active on the CI host and restarting it does not
+    # re-enqueue dependencies. The exact Wants proof above binds the fresh-boot
+    # graph; start that dependency now to model the boot transaction's job.
+    systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
     test "$(systemctl --system show --property=ActiveState --value \
       multi-user.target)" = active
   fi

@@ -52,7 +52,14 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
         production_phases | boot_crashpoints | {"none"}
     )
     assert "systemctl --system kill --kill-whom=all --signal=SIGKILL" in harness
-    assert "systemctl --system restart multi-user.target" in harness
+    wants_proof = harness.index(
+        "systemctl --system show --property=Wants --value"
+    )
+    simulated_boot_start = harness.index(
+        'systemctl --system start "$recovery_unit"', wants_proof
+    )
+    assert wants_proof < simulated_boot_start
+    assert "systemctl --system restart multi-user.target" not in harness
     assert 'systemctl --system freeze "$helper_unit"' in harness
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
