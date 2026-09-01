@@ -1382,7 +1382,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     ):
         assert durable_proof in post_remove
     assert (
-        '"$recovery_load_state" == not-found'
+        '"$recovery_load_state" == "$expected_recovery_load_state"'
         in lifecycle[convergence:convergence_break]
     )
     assert (
@@ -1393,7 +1393,10 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         '"$package_recovery_sub_state" == dead'
         in lifecycle[convergence:convergence_break]
     )
-    assert lifecycle.index('test "$recovery_load_state" = not-found', convergence_break)
+    assert lifecycle.index(
+        'test "$recovery_load_state" = "$expected_recovery_load_state"',
+        convergence_break,
+    )
     assert lifecycle.index(
         'test "$package_recovery_active_state" = inactive', convergence_break
     )
