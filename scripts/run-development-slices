@@ -762,7 +762,20 @@ class Runner:
         )
         state = current.get("state")
         if state != "succeeded":
-            raise SliceError(f"{label} operation ended in {state}")
+            detail = ""
+            result = current.get("result")
+            if isinstance(result, dict):
+                evidence = result.get("node_evidence")
+                reasons: list[str] = []
+                if isinstance(evidence, dict):
+                    for value in evidence.values():
+                        if isinstance(value, dict) and isinstance(value.get("reason"), str):
+                            reason = value["reason"].strip()
+                            if reason:
+                                reasons.append(reason[:256])
+                if reasons:
+                    detail = f": {reasons[0]}"
+            raise SliceError(f"{label} operation ended in {state}{detail}")
         result = current.get("result")
         if expected_nodes is not None:
             successful = (

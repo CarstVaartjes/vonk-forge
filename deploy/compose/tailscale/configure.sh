@@ -3,6 +3,7 @@ set -eu
 
 socket=${TS_SOCKET_PATH:-/var/run/tailscale/tailscaled.sock}
 remaining=120
+route_wait_seconds=${TS_ROUTE_WAIT_SECONDS:-300}
 reconcile_interval=${TS_RECONCILE_INTERVAL_SECONDS:-30}
 hermes_api_host=${HERMES_API_HOST:-hermes-agent}
 hermes_api_port=${HERMES_API_PORT:-8642}
@@ -402,7 +403,7 @@ if ! wait_for_exact_services "${include_hermes}"; then
     configuration_ready=0
 fi
 
-remaining=120
+remaining=${route_wait_seconds}
 route_repair_remaining=0
 routes_ready=1
 while [ "${remaining}" -gt 0 ]; do
