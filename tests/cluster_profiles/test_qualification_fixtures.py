@@ -108,7 +108,7 @@ def test_packaged_generic_fixtures_are_digest_and_format_valid() -> None:
     )
     assert len(registry.recipes) == 44
     assert len(registry.special) == 0
-    assert len(registry.service_recipes) == 35
+    assert len(registry.service_recipes) == 36
     assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 59
     qwen_cases = registry.recipes[
         "vonk-forge/qwen-image-edit-2511-comfyui-single"
@@ -383,7 +383,7 @@ def test_packaged_recipe_bindings_match_the_campaign_matrix_exactly() -> None:
         set(registry.recipes) | set(registry.special) | set(registry.service_recipes)
     )
 
-    assert len(catalog_keys) == 83
+    assert len(catalog_keys) == 84
     assert fixture_keys == catalog_keys - unsupported_topologies
 
 
@@ -397,22 +397,22 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
         "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual"
     ]
     assert (gemma.content_sha256, gemma.alias) == (
-        "078047fc8139b5ed42da608e6d131df791b45ee74b2eedccea45c50f22d39469",
+        "ea17c8b424ffbef5ffdaaf9ae732fdbda24c4cb316fed03b60f78822cae93fc0",
         "gemma-4-26b-a4b-it-vllm028",
     )
     assert (lfm.content_sha256, lfm.alias) == (
-        "b86876422bcbc1f2adc21e3f1ea58c9e2a1849ddc15930ac8d07283c943be9b4",
+        "bd42aa982f6c27f89e52aed70f94f0413471af883a58cd5559fc81dbf2a71feb",
         "lfm2-5-vl-3b-vllm028",
     )
     assert (glm_nvfp4.content_sha256, glm_nvfp4.alias) == (
-        "db03d00e1436fcb2bc09e7189b9a9fc8f6ef8e45a90982e3f9722b5441cdc410",
+            "b9e9f3afa3148dfd5711cfdc82ec8a038181f24c54c09381b916acb6525a6019",
         "glm-5.3-flash",
     )
     assert glm_nvfp4.higher_tiers["stress"] == (
         "32K long-context repetition regression and bounded concurrency canaries",
     )
     assert (glm_exl3.content_sha256, glm_exl3.alias) == (
-        "8b26e0c70aa6f2d78a5db0c4e8050db27bba423ed629dfb6aa20b17574986b02",
+            "bb7951702200d5a95b86a5c80f6b70fc15cd63ea8b1dd3264c40d741291ac86e",
         "glm-5.3-flash-exl3",
     )
     assert glm_exl3.higher_tiers["stress"] == (
@@ -431,7 +431,7 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
         canary.alias,
         tuple(case.case_id for case in canary.cases),
     ) == (
-        "a6ec867073cea61fd2e5daff92695c2a79fbb1371f9047ad54833e1398d98dc9",
+        "84427bc35d3cc5a485ce7cc142b81b223ecd9498ff63c80752a1c774246a9b2c",
         "deepseek-v4-flash-0731-spark",
         ("M0", "A391"),
     )
@@ -443,7 +443,7 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
         "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single"
     ]
     assert (laguna.content_sha256, laguna.alias) == (
-        "51d1044c7cea46c57ba0e31ee691b8e78a3a0d30917d225fe01539031feb4c60",
+        "57670a38917d14d1877d40e9bcaa66ab98a67d02095c6f96bc4078ccfe2552a5",
         "laguna-s-2-1-low-memory-canary",
     )
 
@@ -451,13 +451,13 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
         "vonk-forge/nemotron-3-5-lightning-dspark-lowmem-canary-single"
     ]
     assert (nemotron.content_sha256, nemotron.alias) == (
-        "87c61bb4c3cc3fda60aa510370ebd44af482da235de1b741aba7a0d964cae561",
+        "dbcdfdcce6ef41d5766434f568cf1970e9a268c5a8227305f63db0ba247de9ed",
         "nemotron-3-5-lightning-dspark-low-memory-canary",
     )
 
     ltx = registry.recipes["vonk-forge/ltx-2-5-22b-distilled-fp8-cast-diffusers-single"]
     assert ltx.content_sha256 == (
-        "0b26a789538751b9c7cd899e1ef4d60dec4f1bf215b75cc83b705abf88c77c7c"
+        "dc15da0ef60bb604c322ee9692664bf7110559f07314e66c158e7cfd06ad1843"
     )
     assert tuple(fixture.fixture_id for _, fixture in ltx.inputs) == (
         "generic-prompt-text",
@@ -471,7 +471,7 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
     wan = registry.recipes["vonk-forge/wan-dancer-14b-disk-offload-pytorch-single"]
     original_wan = registry.recipes["vonk-forge/wan-dancer-14b-pytorch-single"]
     assert wan.content_sha256 == (
-        "84dc412a64fc5d9011ffde30a034077c203da273428fa9fb16ef27421b4c0c5a"
+        "37b53a96bf2c61c5994903368989d65b47d67850589cad319cfed5cd6eb291a2"
     )
     assert wan.inputs == original_wan.inputs
     assert wan.output_limits == original_wan.output_limits
@@ -482,22 +482,22 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
     )
 
     expected_artifacts = {
-        "vonk-forge/flux-2-klein-4b-comfyui-single": "2169cae98b93ef16b8ea63c508b0319a32736fb309191a0e4b0e3c73743898f6",
-        "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": "d7b92ff1327c7cd0b92970556bd17ea66ec3af95291c1a8890ccb7c200cd5d5e",
-        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "0addc2134149c337544fcc6c67d375e24b9a202f4ee88971c24826b3ae893f12",
-        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "baff135e07ea79ae4eb19729ee543edd77805a26c9b3922839ab58a63188b2e1",
-        "vonk-forge/ltx-2-19b-distilled-diffusers-single": "476a81e835313af326cc29a4f965a3c8d239a48525e1c321a22c990b464b1ae0",
-        "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "110bc132308331799923cf3f00f44e49c8cba4ce910031c4cb602b62ffa81984",
-        "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "c2279d47dec15e776ba9498d896ddb4476d39b17c681576b61c36cf69a617316",
-        "vonk-forge/minimax-h3-fl2va-diffusers-single": "3d0cc380ae32b9c19e9b0cf2da5a8dd5522dd63690d166c65f41604ca106f1e6",
-        "vonk-forge/qwen-image-2512-comfyui-single": "681b33b3c55a91597692ace91c35b099b9278d4eebef597456f5709e0e228190",
-        "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "b7ffa44be4ae99feb10716ee5b46ba68a48632c47072579311f0bcc0b7ee2eab",
-        "vonk-forge/qwen-image-edit-2511-comfyui-single": "7c8c441c009ad0d644db586098e08e1aef0da7ac98faaf83564ef30170827136",
-        "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": "8f70cbe740ca7cd2a4a40161395530fe1f9d86b5a1aeab5a57d92423a347b309",
-        "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": "61fda0a7c2ad58e699f5e1bff52dc592f53d518b2cdeea6c74be801e79b30e97",
-        "vonk-forge/wan-2-2-i2v-14b-comfyui-single": "373a948d4a6163e29e5b41d5f6971057cb1e4bbb5ed3803e0292a94320d3cbf0",
-        "vonk-forge/wan-2-2-t2v-14b-comfyui-single": "63da00c0906859479ecf251b4366219853752228fc8f7bfb12f033e2a6caa021",
-        "vonk-forge/wan-2-2-ti2v-5b-comfyui-single": "4c12f075c0afccabbc0fa6b21b0bbabc6fdb14596ec46c4c50358cab32073d5d",
+        "vonk-forge/flux-2-klein-4b-comfyui-single": "c5d344ec85816eb3699ea4e62f845d44dc283445ff66eb9fc44ca1ffccffa430",
+        "vonk-forge/flux-2-klein-4b-nvfp4-comfyui-single": "c9e09c4a06b9c5f0683b53a4c86034b9f94f8291202d8a6bcd90c5b1e8dc00c1",
+        "vonk-forge/ltx-2-19b-dev-bf16-diffusers-single": "0de7440d1bc1bfe00205cbbb1bd4cdac55fd2fd0c8785c6c63935a27ad2f8c21",
+        "vonk-forge/ltx-2-19b-dev-fp4-pytorch-single": "3c4b2151e8514c4970feb7c6fa06715e4735b2f7617af5fd400aa358284042c8",
+        "vonk-forge/ltx-2-19b-distilled-diffusers-single": "f6b5b2a4a0909e30f2cd1684d82ecc0399585cc414e5456b508518efd784186c",
+        "vonk-forge/ltx-2-19b-distilled-fp8-diffusers-single": "13254ce49e156e688a43f0fd1130414d18126cb1ce266fe13ad6ab0b8d426ba8",
+        "vonk-forge/ltx-2-3-22b-distilled-1-1-diffusers-single": "2a2844c48122ead2e0a6bcc2e8a1badd179d8aa0a2a6d83355aba7c0121abcf3",
+        "vonk-forge/minimax-h3-fl2va-diffusers-single": "6777aec751e1d43f716c30430a905afc9e46ad2bf7d11d9c4cbcc9d17d2e81a4",
+        "vonk-forge/qwen-image-2512-comfyui-single": "f67e93ad6711109df06b41b8b69ca800823436d20e14825dd4856bfefa2dcbeb",
+        "vonk-forge/qwen-image-2512-fp8-lightning-comfyui-single": "72d95fd9534b89415bab5faa7e6cb12b373669c6149599d3a3b0bce05f128a4f",
+        "vonk-forge/qwen-image-edit-2511-comfyui-single": "8209667165db6623c81376f83935cb019018438aa35623b86712d34466a12c57",
+        "vonk-forge/qwen-image-edit-2511-fp8mixed-comfyui-single": "b493c52929c1bc1d23069706ef42914125e17b1b38fc72e9a9818ab372864bd6",
+        "vonk-forge/qwen-image-edit-2511-int8-convrot-comfyui-single": "cf1c9983c9419b2b31a296ebebe013ee0eddd36c8e649d47739ba3e6f59fda62",
+        "vonk-forge/wan-2-2-i2v-14b-comfyui-single": "ce8e0f60cbb78b0603520c2a50871f0f83ff02d939f1fc1d8cde24adccdf9b21",
+        "vonk-forge/wan-2-2-t2v-14b-comfyui-single": "28cb8e8b9f0b0e4c289bfa088930f29a46c3c0db5e9c6b7f0b05d62e6884db9f",
+        "vonk-forge/wan-2-2-ti2v-5b-comfyui-single": "e424b4de358dde24bfe749d585905eba94fa5c3368bdee58f719fa56210de242",
     }
     assert {
         key: registry.recipes[key].content_sha256 for key in expected_artifacts
