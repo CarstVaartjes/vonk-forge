@@ -1127,7 +1127,7 @@ fn verified_release(
         "aarch64" => ("linux-arm64", "arm64"),
         _ => return Err(SetupError::ReleaseSignature),
     };
-    if document.schema_version != 1
+    if document.schema_version != 2
         || !matches!(document.channel.as_str(), "dev" | "stable")
         || !valid_sha256(&document.generation)
         || document.source_sha.len() != 40

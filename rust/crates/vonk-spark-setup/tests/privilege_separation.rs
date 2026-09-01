@@ -163,7 +163,7 @@ fn signed_release(
         "channel": "stable",
         "generation": "a".repeat(64),
         "images": {"api": format!("example.test/api@sha256:{}", "e".repeat(64))},
-        "schema_version": 1,
+        "schema_version": 2,
         "source_sha": "b".repeat(40),
         "version": "1.0.0",
     });

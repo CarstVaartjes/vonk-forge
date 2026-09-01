@@ -234,7 +234,7 @@ fn signed_request_with_setup(
         "channel": "stable",
         "generation": generation,
         "images": {"api": format!("example.test/api@sha256:{}", "c".repeat(64))},
-        "schema_version": 1,
+        "schema_version": 2,
         "source_sha": "d".repeat(40),
         "version": "1.0.0",
     });
