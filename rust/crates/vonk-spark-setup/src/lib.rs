@@ -2961,7 +2961,7 @@ mod tests {
                 .filter(|command| command.program == Path::new("/usr/bin/systemctl")
                     && command.args.first().map(String::as_str) == Some("is-active"))
                 .count(),
-            30
+            90
         );
         assert!(runner.commands.iter().any(|command| {
             command.program == Path::new("/usr/bin/systemctl")
