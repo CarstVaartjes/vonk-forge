@@ -1188,18 +1188,23 @@ class AgentJobService:
     def _capabilities(
         capabilities: Sequence[str] | None,
     ) -> tuple[str, ...] | None:
+        """Normalize the negotiated capability intersection.
+
+        Agents may be newer than the Controller and advertise capabilities this
+        Controller does not know yet.  Those capabilities are intentionally
+        ignored for this session; operation dispatch already checks the
+        normalized set, so the effective contract is the intersection of both
+        sides.  Required capabilities are still enforced by
+        ``_validate_agent_contract`` below.
+        """
         if capabilities is None:
             return None
         if isinstance(capabilities, (str, bytes)):
             raise TypeError("agent capabilities are invalid")
         values = tuple(capabilities)
-        if (
-            not values
-            or len(values) != len(set(values))
-            or not set(values) <= _KNOWN_CAPABILITIES
-        ):
+        if not values or any(not isinstance(value, str) or not value for value in values):
             raise ValueError("agent capabilities are invalid")
-        return tuple(sorted(values))
+        return tuple(sorted(set(values) & _KNOWN_CAPABILITIES))
 
     @staticmethod
     def _validate_agent_contract(
@@ -1216,7 +1221,9 @@ class AgentJobService:
             raise ValueError("Rust agent capability negotiation is incomplete")
         receipt_key = runtime_identity.get("observation_receipt_public_key")
         receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
-        if receipt_capable != (isinstance(receipt_key, str) and len(receipt_key) == 64):
+        if receipt_capable and not (
+            isinstance(receipt_key, str) and len(receipt_key) == 64
+        ):
             raise ValueError("agent observation receipt identity is incomplete")
 
     @staticmethod
