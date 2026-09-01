@@ -31,7 +31,7 @@ signing, and promotion. Create each environment for both `dev` and `stable`:
 | Environment | Variables | Secrets |
 | --- | --- | --- |
 | `installer-candidate-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
-| `installer-canary-<channel>` | `INSTALLER_PUBLIC_ORIGIN`, `VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX`, `VONK_ACCEPTANCE_TAILNET_KIND=isolated-disposable-test` | `VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`, `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` |
+| `installer-canary-<channel>` | `INSTALLER_PUBLIC_ORIGIN` | `VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY`, `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID`, `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET` |
 | `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
 | `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
@@ -43,16 +43,57 @@ runtime secrets into CI. Prefer workload identity if the selected object-store
 client supports it. The R2 S3 publication path requires an access key, so keep
 that exception bucket-scoped and rotate it deliberately.
 
-The canary environment must point to a dedicated disposable test tailnet, never
-an operator tailnet. `VONK_ACCEPTANCE_TAILNET_KIND` is a fail-closed attestation;
-the executable rejects full Tailscale acceptance when it is absent or has any
-other value. Use separate disposable OAuth credentials with only `auth_keys`
-write scope and only `tag:vonk-gateway`. The test tailnet separately owns its
-Service definitions, exact self-access grants, tests, and Service-host
-auto-approval. After each acceptance campaign, confirm no CI gateway remains;
-when retiring the tailnet, remove its nodes, Service definitions, grants/tests,
-auto-approvers, OAuth client, and external provider credentials. Never copy any
-of those resources into an operator tailnet.
+The canary environment must contain a dedicated OAuth factory credential with
+only the Tailscale `tailnets` write scope, no device tags, and no other scopes.
+Never store an operator tailnet's DNS suffix, machine OAuth credential, or
+policy in this environment. The workflow uses the factory solely to create one
+API-only child tailnet for the native NAS lane; the production tailnet is never
+selected or modified.
+
+The child response contains a new all-scope OAuth credential for that child
+only. The workflow masks it immediately, stores it in a mode-`0600` runner file,
+never uploads it, and never exports it to the NAS installer. It uses that
+lifecycle credential to define `svc:vonk-forge`, `svc:hermes-api`, and
+`svc:hermes-dashboard`, each on `tcp:443`, plus only the exact
+`tag:vonk-gateway` self-access grant and exact Service auto-approvals required
+by the gateway. It then creates and reads back one child-local OAuth client with
+only the `auth_keys` scope and only `tag:vonk-gateway`. That scoped client is the
+only credential exported to NAS acceptance. Isolation comes from the child
+tailnet namespace, not from an `-acceptance` suffix.
+
+Only after the child is configured and the scoped gateway client is verified
+does the workflow export its generated DNS suffix, gateway-only OAuth
+credential, and
+`VONK_ACCEPTANCE_TAILNET_KIND=isolated-disposable-test` to later steps in that
+job. The acceptance executable still fails closed when that generated boundary
+is absent. A job-level and step-level `always()` finalizer uses the protected
+runner state to delete the entire child tailnet after normal completion, step
+failure, or a standard cancellation while the runner remains available. Setup
+failures after creation also delete the child synchronously. Deletion retries
+transient network, rate-limit, conflict, and server failures and treats an exact
+child `404` as idempotent success. If retries are exhausted or authentication
+fails, the state file is retained and the lane fails rather than reporting
+acceptance. Bounded setup and acceptance steps plus explicit job-timeout
+headroom reserve time for the finalizer.
+
+The Tailnets API is currently alpha. Keep the factory credential scoped only to
+tailnet creation and rotate it if Tailscale changes that contract. Never widen
+it to `all` merely to recover an interrupted CI run. A hard force-cancel,
+runner loss, or GitHub infrastructure termination can prevent every runner-local
+finalizer from running; GitHub Actions cannot make unconditional cleanup claims
+for those events. Before creation, the workflow lists API-only tailnets and
+fails closed when a `Vonk Forge CI ...` child older than the maximum job lifetime
+exists. It reports only the exact child ID and display name, creates nothing new,
+and never attempts a production-tailnet mutation.
+
+Treat such a residual as a blocked incident. CI must not widen the factory
+scope, create credentials in the production tailnet, or mutate any production
+resource to recover it. Escalate the exact reported child ID and display name to
+Tailscale-supported recovery, or obtain separate explicit authorization for an
+administrative recovery procedure outside this CI change. Rerun publication
+only after the factory list no longer contains the residual. This is necessary
+because an API-only child does not appear in the admin console and its returned
+child secret is otherwise available only on the lost runner.
 
 Generate separate RSA-3072 release and acceptance keys on an administrative
 workstation. Record each SHA-256 fingerprint from its DER-encoded public key:

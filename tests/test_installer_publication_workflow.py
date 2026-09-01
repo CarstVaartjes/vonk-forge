@@ -81,6 +81,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "authority",
         "candidate",
     }
+    assert "always()" in jobs["nas-lane-acceptance"]["if"]
+    assert "needs.authority.result == 'success'" in jobs["nas-lane-acceptance"]["if"]
+    assert "needs.candidate.result == 'success'" in jobs["nas-lane-acceptance"]["if"]
     assert jobs["nas-lane-acceptance"]["strategy"] == {
         "fail-fast": "false",
         "max-parallel": "2",
@@ -117,9 +120,9 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert jobs["spark-acceptance"]["strategy"]["max-parallel"] == "2"
     assert "nas-lane-acceptance" not in jobs["spark-acceptance"]["if"]
     expected_services = {
-        "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
-        "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
-        "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
+        "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
+        "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
+        "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
     }
     nas_environment = _steps(jobs["nas-lane-acceptance"])[
         "Run literal clean NAS and Tailscale configuration acceptance"
@@ -134,9 +137,13 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
         "${{ matrix.gateway }}"
     )
     assert nas_environment["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "full"
-    assert nas_environment["VONK_ACCEPTANCE_TAILNET_KIND"] == (
-        "${{ vars.VONK_ACCEPTANCE_TAILNET_KIND }}"
-    )
+    assert not {
+        "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX",
+        "VONK_ACCEPTANCE_TAILNET_KIND",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
+    } & set(nas_environment)
+    assert not any("-acceptance" in value for value in expected_services.values())
     assert spark_environment["VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY"] == (
         "loopback"
     )
@@ -209,7 +216,11 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     assert lanes["permissions"] == {"contents": "read"}
     assert "services" not in lanes
     steps = _steps(lanes)
+    assert lanes["timeout-minutes"] == "60"
+    assert steps["Check out exact candidate acceptance suite"]["timeout-minutes"] == "5"
+    assert steps["Install uv and Python"]["timeout-minutes"] == "5"
     fixture_step = steps["Download verified Compose parser fixtures"]
+    assert fixture_step["timeout-minutes"] == "5"
     assert fixture_step["shell"] == "bash"
     assert fixture_step["env"] == {
         "COMPOSE_LOWER_SHA256": "eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310",
@@ -235,22 +246,67 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
     assert compatibility_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
     assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
     assert "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT" not in compatibility_step["env"]
-    assert "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME" not in compatibility_step[
-        "env"
-    ]
-    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID" not in compatibility_step[
-        "env"
-    ]
-    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET" not in compatibility_step[
-        "env"
-    ]
+    assert "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME" not in compatibility_step["env"]
+    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID" not in compatibility_step["env"]
+    assert (
+        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET" not in compatibility_step["env"]
+    )
     assert "DOCKER_HOST" not in native_step["env"]
     assert native_step["env"]["VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT"] == "false"
     assert native_step["env"]["VONK_ACCEPTANCE_COMPOSE_LOWER"] == (
         "${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6"
     )
+    create_tailnet = steps["Create isolated disposable Tailscale tailnet"]
+    assert create_tailnet["if"] == "matrix.lane == 'native'"
+    assert create_tailnet["timeout-minutes"] == "5"
+    assert create_tailnet["env"] == {
+        "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID": (
+            "${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID }}"
+        ),
+        "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET": (
+            "${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET }}"
+        ),
+    }
+    assert "scripts/tailscale-acceptance-tailnet create" in create_tailnet["run"]
+    assert '--github-env "$GITHUB_ENV"' in create_tailnet["run"]
+    assert (
+        '--state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"' in create_tailnet["run"]
+    )
+    delete_tailnet = steps["Delete isolated disposable Tailscale tailnet"]
+    assert delete_tailnet["if"] == "always() && matrix.lane == 'native'"
+    assert delete_tailnet["timeout-minutes"] == "5"
+    assert "env" not in delete_tailnet
+    assert "scripts/tailscale-acceptance-tailnet delete" in delete_tailnet["run"]
+    assert (
+        '--state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"' in delete_tailnet["run"]
+    )
+    ordered_steps = list(steps)
+    assert (
+        ordered_steps.index("Create isolated disposable Tailscale tailnet")
+        < ordered_steps.index(
+            "Run literal clean NAS and Tailscale configuration acceptance"
+        )
+        < ordered_steps.index("Delete isolated disposable Tailscale tailnet")
+    )
+    workflow_text = WORKFLOW.read_text()
+    assert "vars.VONK_ACCEPTANCE_TAILNET" not in workflow_text
+    assert "secrets.VONK_ACCEPTANCE_TAILSCALE_OAUTH" not in workflow_text
     assert compatibility_step["if"] == "matrix.lane == 'docker-29.4.3'"
     assert native_step["if"] == "matrix.lane == 'native'"
+    assert native_step["timeout-minutes"] == "25"
+    bounded_before_cleanup = sum(
+        int(steps[name]["timeout-minutes"])
+        for name in (
+            "Check out exact candidate acceptance suite",
+            "Install uv and Python",
+            "Download verified Compose parser fixtures",
+            "Create isolated disposable Tailscale tailnet",
+            "Run literal clean NAS and Tailscale configuration acceptance",
+        )
+    )
+    assert int(lanes["timeout-minutes"]) >= (
+        bounded_before_cleanup + int(delete_tailnet["timeout-minutes"]) + 10
+    )
     assert "nas-acceptance/report" not in compatibility_step["run"]
     assert "nas-acceptance/report" not in native_step["run"]
     assert "for attempt in 1 2; do" not in native_step["run"]
@@ -461,9 +517,7 @@ def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() ->
     ):
         assert forbidden not in docker["env"]
 
-    evidence = _steps(jobs["nas-lane-acceptance"])[
-        "Write exact NAS lane evidence"
-    ]
+    evidence = _steps(jobs["nas-lane-acceptance"])["Write exact NAS lane evidence"]
     assert evidence["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == (
         "${{ matrix.tailscale_mode }}"
     )
