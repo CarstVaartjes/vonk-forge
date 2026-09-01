@@ -906,6 +906,11 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     assert "candidate_before=" in preinst and "candidate_after=" in preinst
     assert "helper_namespace_has_package_paths" in preinst
     assert "inherited helper sandbox lacks package lifecycle paths" in preinst
+    assert "helper sandbox keyring directory is unsafe" in preinst
+    assert "helper sandbox package document directory is unsafe" in preinst
+    assert "helper sandbox keyring directory is not writable" in preinst
+    assert "helper sandbox package document directory is not writable" in preinst
+    assert "helper sandbox write probes have unsafe metadata" in preinst
     namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
     recovery_arm = preinst.index("arm_controller_recovery ||")
     assert namespace_probe < recovery_arm

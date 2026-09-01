@@ -323,18 +323,31 @@ package_directory_is_safe() {
 helper_namespace_has_package_paths() {
     keyrings=/usr/share/keyrings
     package_doc=/usr/share/doc/vonk-forge-agent
-    package_directory_is_safe "$keyrings" \
-        && package_directory_is_safe "$package_doc" || return 1
+    package_directory_is_safe "$keyrings" || {
+        echo 'vonk-forge-agent: helper sandbox keyring directory is unsafe' >&2
+        return 1
+    }
+    package_directory_is_safe "$package_doc" || {
+        echo 'vonk-forge-agent: helper sandbox package document directory is unsafe' >&2
+        return 1
+    }
     key_probe=
     doc_probe=
     trap '/usr/bin/rm -f -- "${key_probe:-}" "${doc_probe:-}"' EXIT HUP INT TERM
-    key_probe=$(/usr/bin/mktemp "$keyrings/.vonk-package-write.XXXXXX") \
-        || return 1
-    doc_probe=$(/usr/bin/mktemp "$package_doc/.vonk-package-write.XXXXXX") \
-        || return 1
+    key_probe=$(/usr/bin/mktemp "$keyrings/.vonk-package-write.XXXXXX") || {
+        echo 'vonk-forge-agent: helper sandbox keyring directory is not writable' >&2
+        return 1
+    }
+    doc_probe=$(/usr/bin/mktemp "$package_doc/.vonk-package-write.XXXXXX") || {
+        echo 'vonk-forge-agent: helper sandbox package document directory is not writable' >&2
+        return 1
+    }
     [ "$(/usr/bin/stat -c %u:%a "$key_probe")" = 0:600 ] \
         && [ "$(/usr/bin/stat -c %u:%a "$doc_probe")" = 0:600 ] \
-        || return 1
+        || {
+            echo 'vonk-forge-agent: helper sandbox write probes have unsafe metadata' >&2
+            return 1
+        }
     /usr/bin/rm -f -- "$key_probe" "$doc_probe"
     trap - EXIT HUP INT TERM
 }

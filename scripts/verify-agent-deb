@@ -611,7 +611,7 @@ def _verify_standard_preinst(preinst: str) -> None:
         "normalize_pending_gate",
         "allow_agent_start",
         "agent_blocker=$state_dir/agent-blocked",
-        "durable recovery armed outside the inherited helper sandbox",
+        "inherited helper sandbox lacks package lifecycle paths",
     ):
         if required not in preinst:
             raise VerificationError("preinst durable recovery is incomplete")
