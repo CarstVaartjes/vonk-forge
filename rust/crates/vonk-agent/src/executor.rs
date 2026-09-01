@@ -137,6 +137,7 @@ pub struct RecipeExecutor<'a, R> {
     pub client: &'a AgentHttpClient,
     pub runtime: OciRuntime<'a, R>,
     pub runtime_root: &'a Path,
+    pub observation_receipt_public_key: [u8; 32],
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -198,7 +199,16 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let plans = self.runtime.recipe_run_inspection_plans()?;
+        let plans = match self.runtime.recipe_run_inspection_plans() {
+            Ok(plans) => plans,
+            Err(error) => {
+                // A missing/corrupt canonical lifecycle must fail every exact
+                // assignment on this node. Returning before the explicit empty
+                // v2 snapshot would let an omitted rank retain stale health.
+                let _ = self.client.report_exact_recipe_run_observations(&[]).await;
+                return Err(RecipeObservationError::Runtime(error));
+            }
+        };
         if plans.is_empty() {
             self.client
                 .report_exact_recipe_run_observations(&[])
@@ -213,6 +223,7 @@ impl<R> RecipeExecutor<'_, R> {
                     client: self.client,
                     request_root: &request_root,
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+                    observation_receipt_public_key: self.observation_receipt_public_key,
                 };
                 let endpoint = plan.endpoint_address;
                 let outcome = boundary
@@ -222,7 +233,8 @@ impl<R> RecipeExecutor<'_, R> {
                 // Capture it immediately after the local privileged inspection;
                 // an owner-only HTTP probe follows and remains independently
                 // bounded to five seconds.
-                let observed_at = Utc::now();
+                let observed_at = DateTime::from_timestamp(outcome.receipt.claims.observed_at, 0)
+                    .ok_or(crate::host_runtime::HostRuntimeError::Protocol)?;
                 let endpoint_ready = endpoint.map(|address| {
                     outcome.process_running
                         && self.runtime.readiness_request(
@@ -239,7 +251,7 @@ impl<R> RecipeExecutor<'_, R> {
                     endpoint_ready,
                     grant: outcome.grant,
                     observation_identity_sha256: outcome.observation_identity_sha256,
-                    process_running: outcome.process_running,
+                    helper_receipt: outcome.receipt,
                 };
                 self.client
                     .report_exact_recipe_run_observations(std::slice::from_ref(&observation))
@@ -278,6 +290,7 @@ impl<R> RecipeExecutor<'_, R> {
             client: self.client,
             request_root: &request_root,
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            observation_receipt_public_key: self.observation_receipt_public_key,
         }
         .execute(claim, action, arguments)
         .await
@@ -1104,7 +1117,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         wait_for_launch_stability(
                             lease_deadline.clone(),
                             cancellation.clone(),
-                            request.start_deadline.clone(),
+                            request.start_deadline,
                             Duration::from_secs(2),
                         )
                         .await
@@ -1210,7 +1223,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             request.port,
                             &endpoint.health_path,
                             lease_deadline,
-                            request.start_deadline.clone(),
+                            request.start_deadline,
                         ),
                         runtime_guard,
                         cancellation.clone(),
@@ -1913,20 +1926,30 @@ async fn run_heartbeats<C: LoopClient>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RunOncePolicy,
+        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor, RunOncePolicy,
         normalize_execution_result, output_media_type, run_interruptible_job,
-        wait_for_launch_stability, wait_ready_with_runtime_guard,
-        run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
+        wait_ready_with_runtime_guard,
     };
-    use crate::{client::ClientError, runtime_identity::AgentRuntimeIdentity, state::StateStore};
+    use crate::{
+        client::{AgentHttpClient, ClientError},
+        oci::OciRuntime,
+        process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+        runtime_identity::AgentRuntimeIdentity,
+        state::StateStore,
+    };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
     use serde_json::json;
     use std::{
+        fs,
+        io::{Read, Write},
+        net::TcpListener,
         sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
         },
+        thread,
         time::Duration,
     };
     use tempfile::tempdir;
@@ -1937,6 +1960,99 @@ mod tests {
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    struct NoProcess;
+
+    impl ProcessRunner for NoProcess {
+        fn run(
+            &self,
+            _program: Program,
+            _arguments: &[String],
+            _timeout: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            panic!("corrupt lifecycle enumeration must not execute a process")
+        }
+    }
+
+    #[tokio::test]
+    async fn corrupt_exact_lifecycle_emits_an_explicit_empty_v2_report() {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
+        let metadata = data.path().join("run-metadata").join(run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+                if let Some(index) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            request
+        });
+        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
+        let runner = NoProcess;
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+
+        assert!(
+            executor
+                .report_exact_recipe_run_observations()
+                .await
+                .is_err()
+        );
+        let request = server.join().unwrap();
+        let (headers, body) = request
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .map(|index| (&request[..index], &request[index + 4..]))
+            .unwrap();
+        assert!(
+            std::str::from_utf8(headers)
+                .unwrap()
+                .starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+        );
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(body["schema_version"], 2);
+        assert_eq!(body["runs"], serde_json::json!([]));
+    }
 
     #[test]
     fn failed_recipe_build_preserves_only_safe_classified_evidence() {

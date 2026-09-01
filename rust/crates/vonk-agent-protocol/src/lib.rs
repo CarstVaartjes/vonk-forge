@@ -10,6 +10,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
+const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -122,6 +124,83 @@ impl RecipeRunInspectionBinding {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecipeRunObservationOutcome {
+    Running,
+    NotRunning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationReceiptClaims {
+    pub schema_version: u8,
+    pub authority: String,
+    pub node_id: String,
+    pub request_id: Uuid,
+    pub request_sha256: String,
+    pub observation_identity_sha256: String,
+    pub outcome: RecipeRunObservationOutcome,
+    pub observed_at: i64,
+}
+
+impl RecipeRunObservationReceiptClaims {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.authority != RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY
+            || !valid_node_id(&self.node_id)
+            || self.request_id.get_version() != Some(uuid::Version::Random)
+            || !lower_hex(&self.request_sha256, 64)
+            || !lower_hex(&self.observation_identity_sha256, 64)
+            || self.observed_at <= 0
+        {
+            return Err(ProtocolError::Identity(
+                "recipe run observation receipt claims",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationReceiptSignature {
+    pub algorithm: String,
+    pub key_id: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationReceipt {
+    pub schema_version: u8,
+    pub claims: RecipeRunObservationReceiptClaims,
+    pub signature: RecipeRunObservationReceiptSignature,
+}
+
+impl RecipeRunObservationReceipt {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.claims.validate()?;
+        if self.schema_version != 1
+            || self.signature.algorithm != "ed25519"
+            || !lower_hex(&self.signature.key_id, 64)
+            || !lower_hex(&self.signature.value, 128)
+        {
+            return Err(ProtocolError::Identity("recipe run observation receipt"));
+        }
+        Ok(())
+    }
+}
+
+pub fn recipe_run_observation_receipt_signing_bytes(
+    claims: &RecipeRunObservationReceiptClaims,
+) -> Result<Vec<u8>, ProtocolError> {
+    claims.validate()?;
+    let mut value = RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN.to_vec();
+    value.extend(canonical_json(claims)?);
+    Ok(value)
 }
 
 #[derive(Debug, Error)]
@@ -1686,5 +1765,41 @@ mod recipe_run_inspection_tests {
         request.action = HostRuntimeAction::RunInspect;
         request.observation.as_mut().unwrap().run_generation = 0;
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn observation_receipt_has_strict_domain_separated_claims() {
+        let claims = RecipeRunObservationReceiptClaims {
+            schema_version: 1,
+            authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
+            request_id: Uuid::new_v4(),
+            request_sha256: "a".repeat(64),
+            observation_identity_sha256: "b".repeat(64),
+            outcome: RecipeRunObservationOutcome::NotRunning,
+            observed_at: 1_788_000_000,
+        };
+        let signing = recipe_run_observation_receipt_signing_bytes(&claims).unwrap();
+        assert!(signing.starts_with(b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0"));
+        assert!(signing.ends_with(&canonical_json(&claims).unwrap()));
+
+        let receipt = RecipeRunObservationReceipt {
+            schema_version: 1,
+            claims: claims.clone(),
+            signature: RecipeRunObservationReceiptSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "c".repeat(64),
+                value: "d".repeat(128),
+            },
+        };
+        receipt.validate().unwrap();
+        let mut replay_shaped = receipt;
+        replay_shaped.claims.request_sha256 = "e".repeat(64);
+        assert_ne!(
+            recipe_run_observation_receipt_signing_bytes(&claims).unwrap(),
+            recipe_run_observation_receipt_signing_bytes(&replay_shaped.claims).unwrap()
+        );
+        replay_shaped.claims.node_id = "wrong".to_owned();
+        assert!(replay_shaped.validate().is_err());
     }
 }

@@ -1,10 +1,15 @@
 use std::io::{Read, Write};
 
-use ring::signature;
+use ring::signature::{self, Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::{Uuid, Version};
-use vonk_agent_protocol::{canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
+    RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
+    RecipeRunObservationReceiptSignature, canonical_json, hex_sha256,
+    recipe_run_observation_receipt_signing_bytes,
+};
 
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_GRANT_LIFETIME_SECONDS: i64 = 300;
@@ -243,6 +248,40 @@ pub fn canonical_signing_bytes(claims: &GrantClaims) -> Result<Vec<u8>, HelperEr
     Ok(value)
 }
 
+pub fn sign_observation_receipt(
+    signer: &Ed25519KeyPair,
+    node_id: &str,
+    request_id: Uuid,
+    request_sha256: &str,
+    observation_identity_sha256: &str,
+    outcome: RecipeRunObservationOutcome,
+    observed_at: i64,
+) -> Result<RecipeRunObservationReceipt, HelperError> {
+    let claims = RecipeRunObservationReceiptClaims {
+        schema_version: 1,
+        authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+        node_id: node_id.to_owned(),
+        request_id,
+        request_sha256: request_sha256.to_owned(),
+        observation_identity_sha256: observation_identity_sha256.to_owned(),
+        outcome,
+        observed_at,
+    };
+    let signature = signer.sign(
+        &recipe_run_observation_receipt_signing_bytes(&claims)
+            .map_err(|_| HelperError::InvalidOperation)?,
+    );
+    Ok(RecipeRunObservationReceipt {
+        schema_version: 1,
+        claims,
+        signature: RecipeRunObservationReceiptSignature {
+            algorithm: "ed25519".to_owned(),
+            key_id: hex_sha256(signer.public_key().as_ref()),
+            value: hex::encode(signature.as_ref()),
+        },
+    })
+}
+
 pub fn artifact_signing_bytes(kind: &str, digest: &str) -> Result<Vec<u8>, HelperError> {
     if !matches!(kind, "agent" | "deb") || !valid_digest(digest) {
         return Err(HelperError::InvalidOperation);
@@ -310,4 +349,49 @@ fn valid_relative_path(value: &str) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
         })
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::sign_observation_receipt;
+    use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+    use uuid::Uuid;
+    use vonk_agent_protocol::{
+        RecipeRunObservationOutcome, recipe_run_observation_receipt_signing_bytes,
+    };
+
+    #[test]
+    fn signed_receipt_fixture_verifies_and_every_claim_is_covered() {
+        let signer = Ed25519KeyPair::from_seed_unchecked(&[19; 32]).unwrap();
+        let request_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+        let receipt = sign_observation_receipt(
+            &signer,
+            "spk_0123456789abcdef0123456789abcdef",
+            request_id,
+            &"a".repeat(64),
+            &"b".repeat(64),
+            RecipeRunObservationOutcome::NotRunning,
+            1_788_000_000,
+        )
+        .unwrap();
+        receipt.validate().unwrap();
+        let signature = hex::decode(&receipt.signature.value).unwrap();
+        UnparsedPublicKey::new(&ring::signature::ED25519, signer.public_key().as_ref())
+            .verify(
+                &recipe_run_observation_receipt_signing_bytes(&receipt.claims).unwrap(),
+                &signature,
+            )
+            .unwrap();
+
+        let mut changed = receipt;
+        changed.claims.request_id = Uuid::new_v4();
+        assert!(
+            UnparsedPublicKey::new(&ring::signature::ED25519, signer.public_key().as_ref())
+                .verify(
+                    &recipe_run_observation_receipt_signing_bytes(&changed.claims).unwrap(),
+                    &signature,
+                )
+                .is_err()
+        );
+    }
 }

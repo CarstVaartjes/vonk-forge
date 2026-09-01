@@ -78,6 +78,13 @@ pub struct RecipeRunInspectionPlan {
     pub health_path: String,
 }
 
+type LoadedRunLifecycle = (
+    WorkloadSpec,
+    String,
+    Placement,
+    Option<RecipeRunInspectionBinding>,
+);
+
 #[derive(Debug, Clone)]
 pub struct RecipeRunStartIdentity {
     pub mapping_generation: u64,
@@ -913,12 +920,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
         let mut plans = Vec::new();
         for run_id in run_ids {
-            let lifecycle = match self.load_run_lifecycle(&run_id) {
-                Ok(lifecycle) => lifecycle,
-                Err(OciError::Artifact | OciError::Json(_) | OciError::Workload(_)) => continue,
-                Err(error) => return Err(error),
-            };
-            let Some((spec, installation_id, placement, Some(binding))) = lifecycle else {
+            // A canonical managed run directory is itself durable evidence that
+            // a lifecycle exists. Exact enumeration must fail closed if that
+            // evidence is missing or corrupt; otherwise an omitted distributed
+            // rank would never reach the explicit empty-v2 failure report.
+            let (spec, installation_id, placement, observation) = self
+                .load_run_lifecycle(&run_id)?
+                .ok_or(OciError::Artifact)?;
+            let Some(binding) = observation else {
                 continue;
             };
             binding.validate().map_err(|_| OciError::Artifact)?;
@@ -1048,12 +1057,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             probes.push(RecipeRunProbe {
                 run_id,
-                // A distributed run is admitted as one collective service and
-                // exposes readiness only on the retained endpoint owner. This
-                // avoids deterministically failing a healthy headless worker.
-                // Rank-loss detection here depends on that collective endpoint
-                // becoming unhealthy; exact per-rank liveness requires a future
-                // separately authorized host-runtime observation protocol.
+                // Legacy distributed runs expose readiness only on the
+                // retained endpoint owner, avoiding a false failure for a
+                // healthy headless worker. New exact-observation lifecycles
+                // are filtered above and inspect every local rank separately.
                 address: if placement.world_size > 1 {
                     placement.master_address.ok_or(OciError::Artifact)?
                 } else {
@@ -1103,18 +1110,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .is_some_and(|status| (200..300).contains(&status))
     }
 
-    fn load_run_lifecycle(
-        &self,
-        run_id: &str,
-    ) -> Result<
-        Option<(
-            WorkloadSpec,
-            String,
-            Placement,
-            Option<RecipeRunInspectionBinding>,
-        )>,
-        OciError,
-    > {
+    fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let path = metadata.join("lifecycle.json");
         let Some(record) = self.read_run_lifecycle(&path)? else {

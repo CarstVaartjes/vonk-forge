@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -12,15 +12,20 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustix::net::sockopt::socket_peercred;
 use serde::Serialize;
 use vonk_agent_helper::operations::{ManagedRoots, OperationExecutor, ProcessCommandRunner};
 use vonk_agent_helper::protocol::{
-    GrantVerifier, HelperError, PeerIdentity, parse_request, read_frame, write_frame,
+    GrantVerifier, HelperError, PeerIdentity, parse_request, read_frame, sign_observation_receipt,
+    write_frame,
 };
+use vonk_agent_protocol::RecipeRunObservationReceipt;
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
+const OBSERVATION_RECEIPT_PRIVATE_KEY: &str = "/var/lib/vonk-forge/helper/observation-receipt.pk8";
+const OBSERVATION_RECEIPT_PUBLIC_KEY: &str = "/etc/vonk-forge-agent/observation-receipt.pub";
 const AGENT_CONFIG: &str = "/etc/vonk-forge-agent/agent.toml";
 const REQUEST_LEDGER: &str = "/var/lib/vonk-forge/helper/requests";
 const DATA_ROOT: &str = "/var/lib/vonk-forge";
@@ -58,6 +63,8 @@ struct HelperResponse<'a> {
     exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation_receipt: Option<RecipeRunObservationReceipt>,
 }
 
 struct HelperRejection {
@@ -99,6 +106,13 @@ fn run() -> Result<(), String> {
     let grant_key = load_root_public_key(Path::new(GRANT_KEY))?;
     let release_key = load_root_public_key(Path::new(RELEASE_KEY))?;
     let group_gid = group_gid(Path::new("/etc/group"), AGENT_GROUP)?;
+    let observation_receipt_public_key =
+        load_root_binary_public_key(Path::new(OBSERVATION_RECEIPT_PUBLIC_KEY), group_gid)?;
+    let observation_receipt_signer =
+        load_root_private_key(Path::new(OBSERVATION_RECEIPT_PRIVATE_KEY))?;
+    if observation_receipt_signer.public_key().as_ref() != observation_receipt_public_key {
+        return Err("observation receipt key pair does not match".to_owned());
+    }
     let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
     let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
     let verifier = Arc::new(GrantVerifier::new(&grant_key, group_gid).map_err(display)?);
@@ -116,6 +130,7 @@ fn run() -> Result<(), String> {
     .with_runtime_request_owner(agent_uid);
     executor.prepare_package_custody().map_err(display)?;
     let executor = Arc::new(executor);
+    let observation_receipt_signer = Arc::new(observation_receipt_signer);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {
@@ -144,11 +159,18 @@ fn run() -> Result<(), String> {
                 let verifier = Arc::clone(&verifier);
                 let executor = Arc::clone(&executor);
                 let node_id = Arc::clone(&node_id);
+                let observation_receipt_signer = Arc::clone(&observation_receipt_signer);
                 if let Err(error) = thread::Builder::new()
                     .name("vonk-helper-request".to_owned())
                     .spawn(move || {
                         let _permit = permit;
-                        if let Err(error) = handle(&mut stream, &verifier, &executor, &node_id) {
+                        if let Err(error) = handle(
+                            &mut stream,
+                            &verifier,
+                            &executor,
+                            &node_id,
+                            &observation_receipt_signer,
+                        ) {
                             reject(&mut stream, &error);
                         }
                     })
@@ -170,6 +192,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         evidence_sha256: None,
         exit_code: None,
         error_code: Some(error.error_code),
+        observation_receipt: None,
     };
     if let Ok(body) = vonk_agent_protocol::canonical_json(&response) {
         let _ = write_frame(stream, &body);
@@ -182,6 +205,7 @@ fn handle(
     verifier: &GrantVerifier,
     executor: &OperationExecutor<ProcessCommandRunner>,
     node_id: &str,
+    observation_receipt_signer: &Ed25519KeyPair,
 ) -> Result<(), HelperRejection> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -218,10 +242,51 @@ fn handle(
         HelperRejection::for_request(&request_id, error_code, error)
     })?;
     let outcome = executor
-        .execute(&request.claims.operation)
+        .execute_for_node(&request.claims.operation, Some(node_id))
         .map_err(|error| {
             HelperRejection::for_request(&request_id, "operation_failed", display(error))
         })?;
+    let observation_receipt = match (&request.claims.operation, outcome.recipe_run_observation) {
+        (
+            vonk_agent_helper::protocol::HostOperation::ExecuteContainerRuntimeRequest {
+                action: vonk_agent_helper::protocol::ContainerRuntimeAction::RunInspect,
+                request_sha256,
+                observation_identity_sha256: Some(observation_identity_sha256),
+                ..
+            },
+            Some(observation_outcome),
+        ) => Some(
+            sign_observation_receipt(
+                observation_receipt_signer,
+                node_id,
+                request.claims.request_id,
+                request_sha256,
+                observation_identity_sha256,
+                observation_outcome,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|error| {
+                        HelperRejection::for_request(
+                            &request_id,
+                            "operation_failed",
+                            display(error),
+                        )
+                    })?
+                    .as_secs() as i64,
+            )
+            .map_err(|error| {
+                HelperRejection::for_request(&request_id, "operation_failed", display(error))
+            })?,
+        ),
+        (_, None) => None,
+        _ => {
+            return Err(HelperRejection::for_request(
+                &request_id,
+                "operation_failed",
+                "runtime inspection outcome did not match its grant",
+            ));
+        }
+    };
     let response = HelperResponse {
         schema_version: 1,
         request_id: Some(request.claims.request_id.to_string()),
@@ -229,6 +294,7 @@ fn handle(
         evidence_sha256: Some(outcome.evidence_sha256),
         exit_code: outcome.exit_code,
         error_code: None,
+        observation_receipt,
     };
     let body = vonk_agent_protocol::canonical_json(&response).map_err(|error| {
         HelperRejection::for_request(&request_id, "operation_failed", display(error))
@@ -301,6 +367,53 @@ fn load_root_public_key(path: &Path) -> Result<[u8; 32], String> {
     value
         .try_into()
         .map_err(|_| "public key must contain 32 bytes".to_owned())
+}
+
+fn load_root_binary_public_key(path: &Path, group_gid: u32) -> Result<[u8; 32], String> {
+    let raw = read_root_bytes(path, 32, 32, 0, group_gid, 0o640)?;
+    raw.try_into()
+        .map_err(|_| "public key must contain 32 bytes".to_owned())
+}
+
+fn load_root_private_key(path: &Path) -> Result<Ed25519KeyPair, String> {
+    let raw = read_root_bytes(path, 1, 128, 0, 0, 0o600)?;
+    Ed25519KeyPair::from_pkcs8(&raw)
+        .map_err(|_| "observation receipt private key is invalid".to_owned())
+}
+
+fn read_root_bytes(
+    path: &Path,
+    minimum_bytes: u64,
+    maximum_bytes: u64,
+    expected_uid: u32,
+    expected_gid: u32,
+    required_mode: u32,
+) -> Result<Vec<u8>, String> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .map_err(display)?;
+    let metadata = file.metadata().map_err(display)?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != expected_uid
+        || metadata.gid() != expected_gid
+        || metadata.permissions().mode() & 0o777 != required_mode
+        || metadata.len() < minimum_bytes
+        || metadata.len() > maximum_bytes
+    {
+        return Err(format!("{} is unsafe", path.display()));
+    }
+    let mut raw = Vec::with_capacity(metadata.len() as usize);
+    Read::by_ref(&mut file)
+        .take(maximum_bytes + 1)
+        .read_to_end(&mut raw)
+        .map_err(display)?;
+    if raw.len() as u64 != metadata.len() {
+        return Err(format!("{} changed while being read", path.display()));
+    }
+    Ok(raw)
 }
 
 fn read_root_text(path: &Path, maximum_bytes: u64) -> Result<String, String> {
@@ -411,6 +524,7 @@ mod tests {
             evidence_sha256: None,
             exit_code: None,
             error_code: Some("operation_failed"),
+            observation_receipt: None,
         };
         let body = vonk_agent_protocol::canonical_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -429,6 +543,7 @@ mod tests {
             evidence_sha256: Some("a".repeat(64)),
             exit_code: None,
             error_code: None,
+            observation_receipt: None,
         };
         let body = vonk_agent_protocol::canonical_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();

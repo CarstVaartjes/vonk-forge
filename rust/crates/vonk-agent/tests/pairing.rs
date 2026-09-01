@@ -257,6 +257,7 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
         hardware_fingerprint: "hardware".to_owned(),
         host_key_fingerprint: "host".to_owned(),
         node_id: String::new(),
+        observation_receipt_public_key: "9".repeat(64),
     };
 
     let result = pair(

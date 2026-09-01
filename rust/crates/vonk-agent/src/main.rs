@@ -194,6 +194,7 @@ async fn run_control_lane(
         "recipe.start",
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
+        "recipe.run.inspect.receipt.v1",
         "recipe.stop",
         "recipe.uninstall",
         "recipe.model-uninstall.v1",
@@ -243,6 +244,8 @@ async fn run_control_lane(
             recipes: RecipeExecutor {
                 client: &client,
                 runtime_root: Path::new("/run/vonk-forge-agent"),
+                observation_receipt_public_key: runtime_identity
+                    .observation_receipt_public_key()?,
                 runtime: OciRuntime {
                     runner: &runner,
                     data_root: &config.data_dir,

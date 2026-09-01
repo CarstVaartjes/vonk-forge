@@ -9,7 +9,8 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, HostRuntimeRequest,
-    RecipeRunInspectionBinding, canonical_json, hex_sha256, parse_strict,
+    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
+    parse_strict,
 };
 
 use crate::{
@@ -102,7 +103,7 @@ pub struct ExactRecipeRunObservation {
     pub endpoint_ready: Option<bool>,
     pub grant: serde_json::Value,
     pub observation_identity_sha256: String,
-    pub process_running: bool,
+    pub helper_receipt: RecipeRunObservationReceipt,
 }
 
 #[derive(Serialize)]
@@ -195,6 +196,15 @@ pub struct AgentHttpClient {
 }
 
 impl AgentHttpClient {
+    #[cfg(test)]
+    pub(crate) fn for_http_test(controller: &str, node_id: &str) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            controller: Url::parse(controller).expect("test controller URL must be valid"),
+            node_id: node_id.to_owned(),
+        }
+    }
+
     pub(crate) fn node_id(&self) -> &str {
         &self.node_id
     }
@@ -743,11 +753,34 @@ impl AgentHttpClient {
                 .binding
                 .validate()
                 .map_err(|_| ClientError::Protocol)?;
+            let grant_claims = observation
+                .grant
+                .get("claims")
+                .and_then(serde_json::Value::as_object)
+                .ok_or(ClientError::Protocol)?;
+            let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
             if !run_ids.insert(observation.binding.run_id)
                 || observation.schema_version != 1
                 || observation.node_id != self.node_id
                 || !valid_sha256(&observation.observation_identity_sha256)
                 || !observation.grant.is_object()
+                || observation.helper_receipt.validate().is_err()
+                || observation.helper_receipt.claims.node_id != self.node_id
+                || observation
+                    .helper_receipt
+                    .claims
+                    .observation_identity_sha256
+                    != observation.observation_identity_sha256
+                || grant_claims
+                    .get("request_id")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(receipt_request_id.as_str())
+                || grant_claims
+                    .get("request_sha256")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(observation.helper_receipt.claims.request_sha256.as_str())
+                || observation.observed_at.timestamp()
+                    != observation.helper_receipt.claims.observed_at
                 || (observation.binding.local_address == observation.binding.master_address)
                     != observation.endpoint_ready.is_some()
             {
@@ -946,7 +979,10 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
-        RecipeRunInspectionBinding, canonical_json, hex_sha256,
+        RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
+        RecipeRunObservationOutcome, RecipeRunObservationReceipt,
+        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature, canonical_json,
+        hex_sha256,
     };
 
     fn inspection_binding() -> RecipeRunInspectionBinding {
@@ -975,6 +1011,30 @@ mod tests {
                 .unwrap(),
             ),
             world_size: 2,
+        }
+    }
+
+    fn observation_receipt(
+        node_id: &str,
+        observation_identity_sha256: &str,
+    ) -> RecipeRunObservationReceipt {
+        RecipeRunObservationReceipt {
+            schema_version: 1,
+            claims: RecipeRunObservationReceiptClaims {
+                schema_version: 1,
+                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+                node_id: node_id.to_owned(),
+                request_id: Uuid::new_v4(),
+                request_sha256: "f".repeat(64),
+                observation_identity_sha256: observation_identity_sha256.to_owned(),
+                outcome: RecipeRunObservationOutcome::NotRunning,
+                observed_at: Utc::now().timestamp(),
+            },
+            signature: RecipeRunObservationReceiptSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "a".repeat(64),
+                value: "b".repeat(128),
+            },
         }
     }
 
@@ -1314,15 +1374,21 @@ mod tests {
     #[tokio::test]
     async fn exact_worker_observation_reports_process_without_endpoint_result() {
         let binding = inspection_binding();
+        let helper_receipt =
+            observation_receipt("spk_0123456789abcdef0123456789abcdef", &"e".repeat(64));
         let observations = vec![ExactRecipeRunObservation {
             schema_version: 1,
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            observed_at: Utc::now(),
+            observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
+                .unwrap(),
             binding: binding.clone(),
             endpoint_ready: None,
-            grant: serde_json::json!({"claims": {"request_id": Uuid::new_v4()}}),
+            grant: serde_json::json!({"claims": {
+                "request_id": helper_receipt.claims.request_id,
+                "request_sha256": helper_receipt.claims.request_sha256.clone(),
+            }}),
             observation_identity_sha256: "e".repeat(64),
-            process_running: false,
+            helper_receipt,
         }];
         let (client, server) = observation_client(204);
         client
@@ -1337,7 +1403,11 @@ mod tests {
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
         assert_eq!(body["schema_version"], 2);
-        assert_eq!(body["runs"][0]["process_running"], false);
+        assert!(body["runs"][0].get("process_running").is_none());
+        assert_eq!(
+            body["runs"][0]["helper_receipt"]["claims"]["outcome"],
+            "not-running"
+        );
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
         assert_eq!(body["runs"][0]["run_generation"], 3);
         assert!(body["runs"][0]["observed_at"].is_string());

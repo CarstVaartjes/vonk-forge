@@ -13,6 +13,7 @@ fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
         binary_digest: binary.to_string().repeat(64),
         architecture: "linux-amd64".to_owned(),
         self_test_passed: true,
+        observation_receipt_public_key: Some("d".repeat(64)),
     }
 }
 

@@ -13,6 +13,7 @@ clap.workspace = true
 hex.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
+ring.workspace = true
 rusqlite.workspace = true
 rustls-pemfile.workspace = true
 rustix.workspace = true

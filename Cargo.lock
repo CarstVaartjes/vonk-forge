@@ -2257,6 +2257,7 @@ dependencies = [
  "hex",
  "rcgen",
  "reqwest",
+ "ring",
  "rusqlite",
  "rustix",
  "rustls-pemfile",

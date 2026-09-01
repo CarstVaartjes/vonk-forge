@@ -2847,7 +2847,7 @@ fn exact_distributed_worker_inspection_reconstructs_local_process_without_http()
                 local_address: Some("192.168.100.11".parse().unwrap()),
                 master_address: Some("192.168.100.10".parse().unwrap()),
                 master_port: Some(29500),
-                port: 8101,
+                port: 8000,
                 reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
             },
             &RecipeRunStartIdentity {
@@ -2865,8 +2865,39 @@ fn exact_distributed_worker_inspection_reconstructs_local_process_without_http()
     assert_eq!(plans[0].binding.run_generation, 2);
     assert_eq!(plans[0].binding.rank, 1);
     assert!(plans[0].endpoint_address.is_none());
-    assert!(plans[0].arguments.iter().any(|value| value == run_id));
+    assert!(
+        plans[0]
+            .arguments
+            .iter()
+            .any(|value| value == &format!("vonk-{run_id}"))
+    );
     assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn exact_inspection_fails_closed_for_missing_or_corrupt_lifecycle_evidence() {
+    for marker in [None, Some(b"not-json".as_slice())] {
+        let directory = tempdir().unwrap();
+        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+        fs::create_dir_all(directory.path().join("runs").join(run_id)).unwrap();
+        if let Some(marker) = marker {
+            let metadata = directory.path().join("run-metadata").join(run_id);
+            fs::create_dir_all(&metadata).unwrap();
+            fs::write(metadata.join("lifecycle.json"), marker).unwrap();
+        }
+        let runner = ObservationRunner {
+            calls: RefCell::new(vec![]),
+            podman_outputs: RefCell::new(VecDeque::new()),
+        };
+        let runtime = OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(runtime.recipe_run_inspection_plans().is_err());
+        assert!(runner.calls.borrow().is_empty());
+    }
 }
 
 #[test]
