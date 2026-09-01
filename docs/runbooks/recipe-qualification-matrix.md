@@ -1,7 +1,7 @@
 # Recipe qualification decision matrix
 
 This matrix is the operational decision record for the recipe-library checkout
-used by the 2026-08-31 two-Spark qualification campaign. It covers every exact
+used by the 2026-09-01 two-Spark qualification campaign. It covers every exact
 recipe slug present in `recipes/` at the snapshot recorded below, including
 recipes whose declared topology cannot run on the present fleet.
 
@@ -24,25 +24,25 @@ relay. SSH is not part of qualification or recovery.
 
 ## Inventory snapshot
 
-The settled recipe-library checkout contains **82** `recipes/*.json` documents
-and **243** resolved catalog entities. This matrix is bound to recipe-library commit
-`f8d43aacbaa16c016697be684bf688ef3b81932a` and the generated
+The settled recipe-library checkout contains **83** `recipes/*.json` documents
+and **250** resolved catalog entities. This matrix is bound to recipe-library commit
+`decd8f8da4c871dfd34c90618d4849ed7447d3b3` and the generated
 `catalog-index.json` SHA-256
-`88386d53d22bbd2ce5cac7676f8dcf8aeabb565c1b8e6d17afab796311ec71ca`.
+`068921e7e7a104bff144a2c6e99ea042a3ce4f0fcb4b356ae5802d04dcb850f1`.
 
 The repository gates are green for this snapshot:
 
 - `tools/build-catalog-index` and `tools/build-catalog-index --check` passed;
-- the cross-repository validator passed all 82 recipes, all 243 entities, and
+- the cross-repository validator passed all 83 recipes, all 250 entities, and
   the secret scan;
 - the focused fleet, fixture, and campaign suite passed 75 tests; and
 - the portable cluster/control suite passed 201 tests and 45 subtests, while
   Linux-only package and lifecycle gates remain delegated to Linux CI.
 
 The checked-in runner registry contains 19 provenance-bound fixture records,
-44 exact artifact contracts with 59 explicit smoke cases, 34 digest-bound
+44 exact artifact contracts with 59 explicit smoke cases, 35 digest-bound
 service contracts, and zero special/unresolved fixture dispositions. Together
-those are all **78** exact
+those are all **79** exact
 one- or two-Spark recipe contracts. Exactly four catalog recipes are omitted
 from execution because their declared topologies require three, four, four,
 and eight Sparks. Repository green means installable and directly qualifiable;
@@ -111,6 +111,7 @@ explicit and are never bypassed to reach that state.
 | `glm-5-2-aqlm-vllm-triple` | 3 Sparks | Historical GLM 5.2 TP3/AQLM reference | EC, topology-inadmissible | No three-node placement exists on the present fleet | Yes on 3 Sparks, not now | unsupported topology |
 | `glm-5-2-quanttrio-vllm-four` | 4 Sparks | Explicitly historical and superseded | EC, topology-inadmissible | Four-node topology; GLM 5.3 two-Spark profiles are newer | No; qualify GLM 5.3 TP2 | superseded |
 | `glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual` | 2 Sparks | Current gated 1M-context abliterated specialist | EC, repository-green, gated | Gated weights; prove native MP startup, 1M profile, MTP4, and 120 GB/node safety | Yes, exactly 2 Sparks | qualify |
+| `glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual` | 2 Sparks | Current gated compressed-tensors L15-43/MTP-L45 DFlash2 specialist | EC, repository-green, gated, new candidate | Accept the target gate and separate drafter license; prove the vendored SM121 long-context fix, worker-first native MP startup, DFlash2 K7, thinking-off behavior, 256K profile, multimodal input, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `glm-5-3-flash-nvfp4-vllm-dual` | 2 Sparks | Current standard GLM 5.3 Ray TP2 profile | EC, focused static audit | Prove Ray formation, sparse MLA build, MTP4, multimodal input, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `glm-5-3-flash-exl3-dflash2-vllm-dual` | 2 Sparks | Current Mia EXL3/DFlash2 TP2 profile | EC, repository-green, new candidate | Prove native-MP two-rank formation, EXL3 target, DFlash2 K7 decoding, 1M context, multimodal requests, and rank recovery | Yes, exactly 2 Sparks | qualify |
 | `glm-5-3-flash-nvfp4-vllm-four` | 4 Sparks | Future-only TP4 counterpart; redundant on this fleet | EC, topology-inadmissible | Four-node topology offers no present-fleet qualification path | No on present fleet | unsupported topology |

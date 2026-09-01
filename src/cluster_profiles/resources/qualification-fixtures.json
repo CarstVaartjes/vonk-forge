@@ -3834,6 +3834,24 @@
         ]
       }
     },
+    "vonk-forge/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual": {
+      "content_sha256": "ec9a7aa89e24d1500ed2060cfd8699aea94b501cebbb6370c31b10ab2d1c340e",
+      "alias": "glm-5.3-flash-drowzeys-dflash2",
+      "smoke_cases": [
+        "M0",
+        "A391",
+        "T_REPORT",
+        "V_RED"
+      ],
+      "higher_tiers": {
+        "stress": [
+          "8K, 32K, 128K, and 256K cold-prefill ladder plus bounded concurrency canaries"
+        ],
+        "recovery": [
+          "Controller-only rank-loss, gated warm-cache restart, and exact thinking-off template revalidation"
+        ]
+      }
+    },
     "vonk-forge/qwen3-5-9b-vllm-single": {
       "content_sha256": "5db19392ad2dd5e4931f1c19e8bbbcc4c37e0ca9b22d00ca5f2ea6d028a51955",
       "alias": "qwen3.5-9b",
