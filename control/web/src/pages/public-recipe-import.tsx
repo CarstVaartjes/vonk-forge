@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import type {CatalogApi, PublicRecipe, PublicRecipeCapability, PublicRecipeExecutionReadiness, PublicRecipePreview} from "../api/types";
+import type {CatalogApi, PublicRecipe, PublicRecipeAlignment, PublicRecipeCapability, PublicRecipeExecutionReadiness, PublicRecipePreview} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import "./public-recipe-import.css";
 
@@ -21,6 +21,14 @@ const PUBLIC_RECIPE_READINESS: Array<{value: PublicRecipeExecutionReadiness; lab
   {value: "not-declared", label: "Readiness not declared"},
 ];
 
+const PUBLIC_RECIPE_ALIGNMENTS: Array<{value: PublicRecipeAlignment; label: string}> = [
+  {value: "standard", label: "Standard"},
+  {value: "abliterated", label: "Abliterated"},
+  {value: "derisked", label: "Derisked"},
+  {value: "other-modified", label: "Other modified"},
+  {value: "unspecified", label: "Unspecified"},
+];
+
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type RecipeSort = "catalog" | "model" | "sparks" | "download";
 type LocalFilter = "" | "not-imported" | "update-available" | "current" | "needs-review";
@@ -28,7 +36,7 @@ type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d"
 type UpdatedFilter = "" | "7" | "30" | "90" | "365";
 type ImportStep = "catalog" | "review" | "confirm";
 type CatalogView = "cards" | "compact";
-type Facet = "modelType" | "model" | "modelVersion" | "sourceOwner" | "repository" | "sparks" | "runtime" | "quantization" | "updated" | "topology" | "qualification" | "readiness" | "local" | "capability";
+type Facet = "modelType" | "model" | "modelVersion" | "alignment" | "sourceOwner" | "repository" | "sparks" | "runtime" | "quantization" | "updated" | "topology" | "qualification" | "readiness" | "local" | "capability";
 type ImportCompletion = {recipeId: string; title: string};
 
 const MODEL_TYPE_OPTIONS: Array<{value: Exclude<ModelType, "">; label: string}> = [
@@ -77,6 +85,7 @@ export type PublicRecipeFilters = {
   modelType: ModelType;
   model: string;
   modelVersion: string;
+  alignment: "" | PublicRecipeAlignment;
   sourceOwner: string;
   repository: string;
   sparks: SparkFilter;
@@ -92,7 +101,7 @@ export type PublicRecipeFilters = {
 };
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", modelType: "", model: "", modelVersion: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
+  query: "", modelType: "", model: "", modelVersion: "", alignment: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
@@ -102,6 +111,7 @@ const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
 const VALID_UPDATED = new Set<UpdatedFilter>(["", "7", "30", "90", "365"]);
 const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", ...PUBLIC_RECIPE_READINESS.map(option => option.value)]);
+const VALID_ALIGNMENTS = new Set<PublicRecipeFilters["alignment"]>(["", ...PUBLIC_RECIPE_ALIGNMENTS.map(option => option.value)]);
 const VALID_CAPABILITIES = new Set(PUBLIC_RECIPE_CAPABILITIES.map(option => option.value));
 
 function storedCatalogView(): CatalogView {
@@ -129,6 +139,7 @@ export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeF
   const updated = search.get("updated") as UpdatedFilter | null;
   const qualification = search.get("qualification");
   const readiness = search.get("readiness") as PublicRecipeFilters["readiness"] | null;
+  const alignment = search.get("alignment") as PublicRecipeFilters["alignment"] | null;
   const requestedStep = search.get("step");
   const recipe = search.get("recipe") ?? "";
   const step: ImportStep = recipe && requestedStep === "confirm" ? "confirm" : recipe ? "review" : "catalog";
@@ -138,6 +149,7 @@ export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeF
       modelType: modelType && VALID_MODEL_TYPES.has(modelType) ? modelType : "",
       model: search.get("model") ?? "",
       modelVersion: search.get("model_version") ?? "",
+      alignment: alignment && VALID_ALIGNMENTS.has(alignment) ? alignment : "",
       sourceOwner: search.get("creator") ?? "",
       repository: search.get("repository") ?? "",
       sparks: sparks && VALID_SPARKS.has(sparks) ? sparks : "",
@@ -163,6 +175,7 @@ export function publicRecipeImportUrl(filters: PublicRecipeFilters, options: {mo
   if (filters.modelType) search.set("model_type", filters.modelType);
   if (filters.model) search.set("model", filters.model);
   if (filters.modelVersion) search.set("model_version", filters.modelVersion);
+  if (filters.alignment) search.set("alignment", filters.alignment);
   if (filters.sourceOwner) search.set("creator", filters.sourceOwner);
   if (filters.repository) search.set("repository", filters.repository);
   if (filters.sparks) search.set("sparks", filters.sparks);
@@ -206,6 +219,10 @@ function modelTypeLabel(modelType: Exclude<ModelType, "">): string {
   return MODEL_TYPE_OPTIONS.find(option => option.value === modelType)?.label ?? modelType;
 }
 
+function alignmentLabel(alignment: PublicRecipeAlignment): string {
+  return PUBLIC_RECIPE_ALIGNMENTS.find(option => option.value === alignment)?.label ?? alignment;
+}
+
 function modelVersionKey(recipe: PublicRecipe): string {
   return `${recipe.model_version_publisher}/${recipe.model_version_slug}`;
 }
@@ -228,11 +245,12 @@ function updatedMatches(recipe: PublicRecipe, updated: UpdatedFilter, now = new 
 
 export function publicRecipeMatches(recipe: PublicRecipe, filters: PublicRecipeFilters, omitted?: Facet): boolean {
   const normalized = filters.query.trim().toLowerCase();
-  const queryMatches = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, modelVersionTitle(recipe), recipe.model_version_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, ...recipeQuantizations(recipe), ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
+  const queryMatches = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, modelVersionTitle(recipe), recipe.model_version_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, alignmentLabel(recipe.alignment), ...recipeQuantizations(recipe), ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
   return queryMatches
     && (omitted === "modelType" || modelTypeMatches(recipe, filters.modelType))
     && (omitted === "model" || !filters.model || `${recipe.model_publisher}/${recipe.model_slug}` === filters.model)
     && (omitted === "modelVersion" || !filters.modelVersion || modelVersionKey(recipe) === filters.modelVersion)
+    && (omitted === "alignment" || !filters.alignment || recipe.alignment === filters.alignment)
     && (omitted === "sourceOwner" || !filters.sourceOwner || recipe.source_owner === filters.sourceOwner)
     && (omitted === "repository" || !filters.repository || recipe.source_repository === filters.repository)
     && (omitted === "sparks" || sparkMatches(recipe, filters.sparks))
@@ -392,7 +410,7 @@ function RecipeComparisonTray({recipes, onRemove, onClear}: {recipes: PublicReci
           <tr><th scope="row">Topology</th>{recipes.map(recipe => <td key={recipe.uri}>{topologyModeLabel(recipe.topology_mode)}</td>)}</tr>
           <tr><th scope="row">Memory / Spark</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</td>)}</tr>
           <tr><th scope="row">Download</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.expected_download_bytes)}</td>)}</tr>
-          <tr><th scope="row">Quantization / format</th>{recipes.map(recipe => <td key={recipe.uri}>{recipeQuantizations(recipe).join(" · ") || "Not specified"}</td>)}</tr>
+      <tr><th scope="row">Quantization / format</th>{recipes.map(recipe => <td key={recipe.uri}>{recipeQuantizations(recipe).join(" · ") || "Not specified"}</td>)}</tr><tr><th scope="row">Alignment</th>{recipes.map(recipe => <td key={recipe.uri}>{alignmentLabel(recipe.alignment)}</td>)}</tr>
           <tr><th scope="row">Recipe creator</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.source_owner ?? "Not specified"}</td>)}</tr>
         </tbody>
       </table>
@@ -418,6 +436,7 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   if (filters.modelType) add("modelType", `Model type: ${modelTypeLabel(filters.modelType)}`, {modelType: ""});
   if (filters.model) add("model", `Model: ${filters.model.split("/").at(-1)}`, {model: ""});
   if (filters.modelVersion) add("modelVersion", `Model version: ${filters.modelVersion.split("/").at(-1)}`, {modelVersion: ""});
+  if (filters.alignment) add("alignment", `Alignment: ${PUBLIC_RECIPE_ALIGNMENTS.find(option => option.value === filters.alignment)?.label ?? filters.alignment}`, {alignment: ""});
   if (filters.sourceOwner) add("sourceOwner", `Creator: ${filters.sourceOwner}`, {sourceOwner: ""});
   if (filters.repository) add("repository", `Repository: ${repositoryLabel(filters.repository)}`, {repository: ""});
   if (filters.sparks) add("sparks", `Sparks: ${filters.sparks}`, {sparks: ""});
@@ -634,6 +653,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
   const repositories = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_repository ? [recipe.source_repository] : []))).sort(), [recipes]);
   const runtimes = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.runtime_distribution))).sort(), [recipes]);
   const quantizations = useMemo(() => Array.from(new Set(recipes.flatMap(recipeQuantizations))).sort(), [recipes]);
+  const alignments = useMemo(() => PUBLIC_RECIPE_ALIGNMENTS.filter(option => recipes.some(recipe => recipe.alignment === option.value)), [recipes]);
   const topologies = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.topology_mode))).sort(), [recipes]);
   const filtered = useMemo(() => sortRecipes(recipes.filter(recipe => publicRecipeMatches(recipe, filters)), filters.sort), [filters, recipes]);
   const count = (facet: Facet, predicate: (recipe: PublicRecipe) => boolean) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, facet) && predicate(recipe)).length;
@@ -784,6 +804,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
         <label><span>Model version</span><select aria-label="Filter by model version" value={filters.modelVersion} onChange={event => updateFilter("modelVersion", event.target.value)}><option value="">All versions ({count("modelVersion", () => true)})</option>{modelVersions.map(([value, label]) => { const available = count("modelVersion", recipe => modelVersionKey(recipe) === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
         <label><span>Quantization / format</span><select aria-label="Filter by quantization" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">Any format</option>{quantizations.map(value => <option key={value} value={value} disabled={count("quantization", recipe => recipeQuantizations(recipe).includes(value)) === 0}>{value} ({count("quantization", recipe => recipeQuantizations(recipe).includes(value))})</option>)}</select></label>
+        <label><span>Alignment</span><select aria-label="Filter by alignment" value={filters.alignment} onChange={event => updateFilter("alignment", event.target.value as PublicRecipeFilters["alignment"])}><option value="">Any alignment ({count("alignment", () => true)})</option>{alignments.map(option => <option key={option.value} value={option.value} disabled={count("alignment", recipe => recipe.alignment === option.value) === 0}>{option.label} ({count("alignment", recipe => recipe.alignment === option.value)})</option>)}</select></label>
         <label><span>Required Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
         <label><span>Recipe creator</span><select aria-label="Filter by recipe creator" value={filters.sourceOwner} onChange={event => updateFilter("sourceOwner", event.target.value)}><option value="">All creators</option>{sourceOwners.map(value => <option key={value} value={value} disabled={count("sourceOwner", recipe => recipe.source_owner === value) === 0}>{value} ({count("sourceOwner", recipe => recipe.source_owner === value)})</option>)}</select></label>
         <label><span>Updated</span><select aria-label="Filter by updated date" value={filters.updated} onChange={event => updateFilter("updated", event.target.value as UpdatedFilter)}><option value="">Any time ({count("updated", () => true)})</option>{(["7", "30", "90", "365"] as UpdatedFilter[]).map(value => <option key={value} value={value} disabled={count("updated", recipe => updatedMatches(recipe, value)) === 0}>Last {value} days ({count("updated", recipe => updatedMatches(recipe, value))})</option>)}</select></label>
@@ -819,7 +840,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         {applied.length > 0 && <div className="public-import-applied" aria-label="Applied filters">{applied.map(item => <button type="button" key={item.key} onClick={() => navigateFilters(item.remove(filters))}>{item.label}<span aria-hidden="true">×</span><span className="sr-only"> Remove filter</span></button>)}</div>}
         {!loading && recipes.length > 0 && filtered.length === 0 && <div className="public-import-state"><div><strong>No matching recipes</strong><p>Remove one or more filters to broaden the catalog.</p></div><button type="button" className="button secondary" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear filters</button></div>}
         <div className={`public-import-recipe-list is-${catalogView}`} role="list" aria-label="Public recipes">{filtered.map(recipe => { const compared = compareUris.includes(recipe.uri); return <article role="listitem" className={selectedUri === recipe.uri ? "is-selected" : ""} key={recipe.uri}>
-          <header><div><span className={`public-import-readiness readiness-${recipe.execution_readiness}`}>{readinessLabel(recipe.execution_readiness)}</span><span className={`public-import-qualification qualification-${recipe.qualification}`}>{qualificationLabel(recipe)}{recipe.release_version ? ` · v${recipe.release_version}` : ""}</span><span className={`public-import-local status-${recipe.local.status}`}>{localStatusLabel(recipe)}</span></div><h3>{recipe.model_title}</h3><p>{recipe.title}{recipeQuantizations(recipe).length ? ` · ${recipeQuantizations(recipe).join(" · ")}` : ""}</p></header>
+          <header><div><span className={`public-import-readiness readiness-${recipe.execution_readiness}`}>{readinessLabel(recipe.execution_readiness)}</span><span className={`public-import-qualification qualification-${recipe.qualification}`}>{qualificationLabel(recipe)}{recipe.release_version ? ` · v${recipe.release_version}` : ""}</span><span className={`public-import-local status-${recipe.local.status}`}>{localStatusLabel(recipe)}</span></div><h3>{recipe.model_title}</h3><p>{recipe.title}{recipeQuantizations(recipe).length ? ` · ${recipeQuantizations(recipe).join(" · ")}` : ""} · {alignmentLabel(recipe.alignment)}</p></header>
           <dl><div><dt>Sparks</dt><dd>{sparkLabel(recipe.node_count)}</dd></div><div><dt>Download</dt><dd>{formatBytes(recipe.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</dd></div></dl>
           <div className="public-import-tags" aria-label={`${recipe.title} capabilities`}>{recipe.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
           <footer><label className="public-import-compare-toggle"><input type="checkbox" checked={compared} disabled={!compared && compareUris.length >= 3} onChange={() => toggleComparison(recipe.uri)}/><span>Compare<span className="sr-only"> {recipe.title}</span></span></label>{recipe.source_owner && <span>Source: {recipe.source_owner}</span>}<button type="button" className="button secondary" data-recipe-uri={recipe.uri} aria-current={selectedUri === recipe.uri ? "true" : undefined} onClick={() => selectRecipe(recipe.uri)}>{catalogView === "compact" ? <>Review<span className="sr-only">{recipe.local.status === "update-available" ? ` update for ${recipe.title}` : ` ${recipe.title}`}</span></> : recipe.local.status === "update-available" ? `Review update for ${recipe.title}` : `Review ${recipe.title}`}</button></footer>

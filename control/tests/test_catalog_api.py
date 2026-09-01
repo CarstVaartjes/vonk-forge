@@ -1054,6 +1054,7 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
         "tree/0123456789abcdef0123456789abcdef01234567"
     )
     document["metadata"]["tags"].extend(("executable", "nvfp4", "exl3"))
+    document["metadata"]["alignment"] = "abliterated"
     dependencies = tuple(
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted((fixture / "entities").glob("*.json"))
@@ -1131,6 +1132,7 @@ def test_public_recipe_import_materializes_fresh_dependencies_and_source_bundle(
     assert listed_recipe["model_version_slug"] == "dev-http-smoke-version"
     assert listed_recipe["model_version_title"] == "Development HTTP smoke payload"
     assert listed_recipe["quantizations"] == ["NVFP4", "EXL3"]
+    assert listed_recipe["alignment"] == "abliterated"
     assert listed_recipe["source_owner"] == "MiaAI-Lab"
     assert listed_recipe["source_repository"] == (
         "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks"

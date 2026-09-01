@@ -3375,6 +3375,8 @@ export interface components {
         };
         /** PublicRecipeListItem */
         PublicRecipeListItem: {
+            /** Alignment */
+            alignment: "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
             /** Artifact Count */
             artifact_count: number;
             /** Artifact Identities */
