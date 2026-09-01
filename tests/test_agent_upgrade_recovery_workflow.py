@@ -51,7 +51,14 @@ def test_upgrade_recovery_harness_keeps_only_current_schema2_capsule_lane() -> N
     assert 'candidate_custody=${CANDIDATE_CUSTODY:-root}' in harness
     assert "recovery_unit=vonk-forge-package-upgrade-recover-capsule.service" in harness
     assert "test-post-remove-preinst-entered" in harness
-    assert 'systemctl --system restart multi-user.target' in harness
+    wants_proof = harness.index(
+        "systemctl --system show --property=Wants --value"
+    )
+    simulated_boot_start = harness.index(
+        'systemctl --system start "$recovery_unit"', wants_proof
+    )
+    assert wants_proof < simulated_boot_start
+    assert "systemctl --system restart multi-user.target" not in harness
     assert 'expected_recovery_load_state=not-found' in harness
     assert "grep -Fxq 'schema_version=2'" in harness
     assert "reason=exact_identity_proven" in harness
