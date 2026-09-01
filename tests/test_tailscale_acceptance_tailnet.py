@@ -60,8 +60,14 @@ class _Headers:
 
 
 class _Response:
-    def __init__(self, document: object, *, etag: str | None = None) -> None:
-        self.payload = json.dumps(document).encode()
+    def __init__(
+        self,
+        document: object,
+        *,
+        etag: str | None = None,
+        raw: bytes | None = None,
+    ) -> None:
+        self.payload = json.dumps(document).encode() if raw is None else raw
         self.headers = _Headers(etag)
 
     def __enter__(self) -> Self:
@@ -290,6 +296,40 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
     assert "::add-mask::child-secret-value" in output
     assert "::add-mask::gateway-secret-value" in output
     assert "::add-mask::child-delete-token" in output
+
+
+@pytest.mark.parametrize("document", [None, "tailnet deleted"])
+@pytest.mark.parametrize("raw", [None, b""])
+def test_successful_delete_accepts_empty_null_or_scalar_response(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    document: object,
+    raw: bytes | None,
+) -> None:
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response(document, raw=raw)],
+    )
+
+    response = lifecycle._request("DELETE", "/tailnet/tailnet_ci_123")
+
+    assert response.document == {}
+    assert len(urlopen.requests) == 1
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH"])
+@pytest.mark.parametrize("document", [None, "request completed"])
+def test_non_delete_scalar_response_remains_invalid(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    document: object,
+) -> None:
+    _install_urlopen(lifecycle, monkeypatch, [_Response(document)])
+
+    with pytest.raises(lifecycle.LifecycleError, match="invalid document"):
+        lifecycle._request(method, "/tailnet/tailnet_ci_123")
 
 
 def test_malformed_post_create_identity_deletes_exact_child_before_failing(
