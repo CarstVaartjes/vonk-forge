@@ -611,10 +611,17 @@ def _verify_standard_preinst(preinst: str) -> None:
         "normalize_pending_gate",
         "allow_agent_start",
         "agent_blocker=$state_dir/agent-blocked",
-        "inherited helper sandbox lacks package lifecycle paths",
     ):
         if required not in preinst:
             raise VerificationError("preinst durable recovery is incomplete")
+    if not any(
+        marker in preinst
+        for marker in (
+            "inherited helper sandbox lacks package lifecycle paths",
+            "durable recovery armed outside the inherited helper sandbox",
+        )
+    ):
+        raise VerificationError("preinst helper sandbox handoff is incomplete")
     if "dpkg --configure -a" in preinst or "apt-get" in preinst:
         raise VerificationError("preinst recovery is not package-scoped and offline")
     if "helper_unit_has_package_paths" in preinst or "helper_unit_path=" in preinst:
