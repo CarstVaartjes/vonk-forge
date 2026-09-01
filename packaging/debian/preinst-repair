@@ -39,7 +39,7 @@ source_capsule_manifest=$source_capsule_dir/manifest
 source_capsule_runner=$source_capsule_dir/runner
 source_capsule_unit_name=vonk-forge-package-upgrade-recover-capsule.service
 source_capsule_unit=/lib/systemd/system/$source_capsule_unit_name
-source_capsule_wants_dir=/lib/systemd/system/multi-user.target.wants
+source_capsule_wants_dir=/etc/systemd/system/multi-user.target.wants
 source_capsule_enablement=$source_capsule_wants_dir/$source_capsule_unit_name
 source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 source_capsule_suppression=/lib/systemd/system/$source_unit_name.d/10-capsule-owner.conf
@@ -974,7 +974,7 @@ read_source_intent() {
 source_capsule_enablement_safe() {
     [ -L "$source_capsule_enablement" ] \
         && [ "$(/usr/bin/readlink "$source_capsule_enablement")" \
-            = "../$source_capsule_unit_name" ]
+            = "$source_capsule_unit" ]
 }
 
 source_capsule_shadows_absent() {
@@ -983,12 +983,13 @@ source_capsule_shadows_absent() {
         for shadow_path in \
             "$systemd_root/$source_capsule_unit_name" \
             "$systemd_root/$source_capsule_unit_name.d" \
-            "$systemd_root/multi-user.target.wants/$source_capsule_unit_name" \
             "$systemd_root/vonk-forge-agent.service.d" \
             "$systemd_root/$source_unit_name.d"; do
             [ ! -e "$shadow_path" ] && [ ! -L "$shadow_path" ] || return 1
         done
     done
+    runtime_enablement=$source_capsule_runtime_root/multi-user.target.wants/$source_capsule_unit_name
+    [ ! -e "$runtime_enablement" ] && [ ! -L "$runtime_enablement" ]
 }
 
 source_capsule_exact() {

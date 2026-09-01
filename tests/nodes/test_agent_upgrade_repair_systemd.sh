@@ -29,7 +29,8 @@ source_version=0.1.0~dev.381+ga122909feaa3
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.382+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
-binary_revision=$packaging_revision
+binary_revision=$(git -c safe.directory="$repo_root" --no-replace-objects \
+  -C "$repo_root" rev-parse a122909f)
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -92,7 +93,7 @@ source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_capsule_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service
 source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 source_capsule_suppression=/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
-source_capsule_enablement=/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_enablement=/etc/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
 repair_state=$source_state/repair
@@ -102,6 +103,7 @@ helper_receipt=/var/lib/vonk-forge/package-repair-helper.receipt
 agent_unit=vonk-forge-agent.service
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
+agent_enablement=/lib/systemd/system/multi-user.target.wants/$agent_unit
 recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 firewall_name=vonk-forge-docker-firewall.service
 lock_holder=
@@ -325,6 +327,18 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /lib/systemd/system/vonk-forge-package-helper.service.d \
     || -e "$source_gate" \
     || -L "$source_gate" \
+    || -e "$source_capsule_unit" \
+    || -L "$source_capsule_unit" \
+    || -e "$source_capsule_gate" \
+    || -L "$source_capsule_gate" \
+    || -e "$source_capsule_suppression" \
+    || -L "$source_capsule_suppression" \
+    || -e "$source_capsule_enablement" \
+    || -L "$source_capsule_enablement" \
+    || -e "$agent_enablement" \
+    || -L "$agent_enablement" \
+    || -e "$standard_runner" \
+    || -L "$standard_runner" \
     || -e /lib/systemd/system/vonk-forge-package-helper.socket.d \
     || -L /lib/systemd/system/vonk-forge-package-helper.socket.d \
     || -e /run/vonk-forge-package-candidates \
@@ -484,14 +498,16 @@ done
 
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
 chmod 0600 "$test_root/release.pem"
+repair_probe_target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+expected_repair_probe_binary=$repair_probe_target_dir/release/vonk-repair-helper-probe
 if [[ -n "${REPAIR_PROBE_BINARY:-}" ]]; then
   repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")
   test "$repair_probe_binary" = \
-    "$repo_root/target/release/vonk-repair-helper-probe"
+    "$(realpath -e -- "$expected_repair_probe_binary")"
 else
   cargo build --locked --release --manifest-path "$repo_root/Cargo.toml" \
     --package vonk-repair-helper-probe
-  repair_probe_binary=$repo_root/target/release/vonk-repair-helper-probe
+  repair_probe_binary=$expected_repair_probe_binary
 fi
 test ! -L "$repair_probe_binary"
 test -f "$repair_probe_binary"
@@ -752,7 +768,7 @@ install -d -o root -g root -m 0755 "${source_capsule_suppression%/*}" \
   "${source_capsule_enablement%/*}"
 install -o root -g root -m 0644 "$source_capsule_suppression_file" \
   "$source_capsule_suppression"
-ln -s ../vonk-forge-package-upgrade-recover-capsule.service \
+ln -s "$source_capsule_unit" \
   "$source_capsule_enablement"
 printf '%s\n' '[Unit]' 'Wants=vonk-forge-package-upgrade-recover.service' \
   > "$source_dropin"

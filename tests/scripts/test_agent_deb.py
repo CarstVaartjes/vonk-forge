@@ -879,7 +879,9 @@ def test_controller_upgrade_commits_recovery_before_pending_gate() -> None:
     )
     pending_commit = preinst.index('atomic_text "$pending" 600', service_start)
 
-    assert cache_commit < runner_commit < unit_commit < capsule_commit < agent_gate_commit
+    assert (
+        cache_commit < runner_commit < unit_commit < capsule_commit < agent_gate_commit
+    )
     assert agent_gate_commit < intent_commit < blocker_commit
     assert intent_commit < service_start < pending_commit
     assert "package_sha256=$package_digest" in preinst
@@ -981,19 +983,15 @@ def test_durable_recovery_capsule_is_single_owner_boot_gated_and_intent_retired_
         "ConditionPathExists=!/var/lib/vonk-forge/package-upgrade/intent" in suppression
     )
     assert "capsule_admin_root=/etc/systemd/system" in preinst
+    assert "capsule_wants_dir=/etc/systemd/system/multi-user.target.wants" in preinst
+    assert '/usr/bin/ln -s "$capsule_unit" "$capsule_enablement"' in preinst
     assert "capsule_runtime_root=/run/systemd/system" in preinst
     assert "capsule_shadow_paths_absent || return 1" in preinst
 
 
 @pytest.mark.parametrize(
     ("relative", "kind"),
-    (
-        ("vonk-forge-package-upgrade-recover-capsule.service", "file"),
-        (
-            "multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
-            "symlink",
-        ),
-    ),
+    (("vonk-forge-package-upgrade-recover-capsule.service", "file"),),
 )
 def test_durable_recovery_capsule_rejects_admin_unit_and_enablement_collisions(
     tmp_path: Path, relative: str, kind: str
@@ -1027,6 +1025,49 @@ def test_durable_recovery_capsule_rejects_admin_unit_and_enablement_collisions(
         ["/bin/sh"], input=script, text=True, capture_output=True, check=False
     )
 
+    assert result.returncode != 0
+
+
+def test_durable_recovery_capsule_enablement_is_exact_and_admin_owned(
+    tmp_path: Path,
+) -> None:
+    preinst = PREINST.read_text()
+    start = preinst.index("safe_capsule_enablement() {")
+    end = preinst.index("\n}\n", start) + 3
+    function = preinst[start:end]
+    unit = tmp_path / "lib/systemd/system/recovery.service"
+    enablement = (
+        tmp_path / "etc/systemd/system/multi-user.target.wants/recovery.service"
+    )
+    unit.parent.mkdir(parents=True)
+    enablement.parent.mkdir(parents=True)
+    unit.write_text("unit\n", encoding="utf-8")
+    enablement.symlink_to(unit)
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            f"{function}\nsafe_capsule_enablement",
+        ],
+        check=False,
+        env={
+            **os.environ,
+            "capsule_enablement": str(enablement),
+            "capsule_unit": str(unit),
+        },
+    )
+    assert result.returncode == 0
+    enablement.unlink()
+    enablement.symlink_to("/tmp/foreign-recovery.service")
+    result = subprocess.run(
+        ["/bin/sh", "-c", f"{function}\nsafe_capsule_enablement"],
+        check=False,
+        env={
+            **os.environ,
+            "capsule_enablement": str(enablement),
+            "capsule_unit": str(unit),
+        },
+    )
     assert result.returncode != 0
 
 
@@ -3365,8 +3406,7 @@ def test_repair_builder_and_verifier_reconstruct_capsule_bound_runner(
             "20-package-upgrade-recovery.conf"
         ): source_gate,
         (
-            "packaging/systemd/"
-            "vonk-forge-package-upgrade-recover-capsule.service"
+            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service"
         ): capsule_unit,
         (
             "packaging/systemd/vonk-forge-agent.service.d/"
@@ -3397,7 +3437,9 @@ def test_repair_builder_and_verifier_reconstruct_capsule_bound_runner(
     authority["source_runner_sha256"] = hashlib.sha256(rendered).hexdigest()
 
     assert BUILD_MODULE.repair_standard_runner(revision, authority) == rendered
-    assert VERIFY_MODULE._render_standard_recovery_runner(revision, authority) == rendered
+    assert (
+        VERIFY_MODULE._render_standard_recovery_runner(revision, authority) == rendered
+    )
     assert re.search(rb"@[A-Z0-9_]+@", rendered) is None
 
 

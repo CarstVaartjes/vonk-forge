@@ -79,7 +79,7 @@ agent_unit=vonk-forge-agent.service
 recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 package_recovery_unit=vonk-forge-package-upgrade-recover.service
 recovery_unit_path=/lib/systemd/system/$recovery_unit
-recovery_enablement=/lib/systemd/system/multi-user.target.wants/$recovery_unit
+recovery_enablement=/etc/systemd/system/multi-user.target.wants/$recovery_unit
 recovery_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 recovery_suppression=/lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf
 agent_unit_path=/lib/systemd/system/$agent_unit
@@ -1155,7 +1155,7 @@ if [[ "$crash_mode" == post-remove ]]; then
   test -f /var/lib/vonk-forge/package-upgrade/recovery-capsule/runner
   test -f "$recovery_unit_path"
   test -L "$recovery_enablement"
-  test "$(readlink "$recovery_enablement")" = "../$recovery_unit"
+  test "$(readlink "$recovery_enablement")" = "$recovery_unit_path"
   test -f "$recovery_gate"
   test -f "$recovery_suppression"
 

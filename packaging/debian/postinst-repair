@@ -18,6 +18,8 @@ repair_phase=$repair_state/phase
 repair_candidate=$repair_state/candidate.deb
 repair_authority=/usr/share/doc/vonk-forge-agent/repair-authority
 recovery_unit=vonk-forge-package-upgrade-recover.service
+source_capsule_runner=$state/recovery-capsule/runner
+source_capsule_unit=vonk-forge-package-upgrade-recover-capsule.service
 observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
 observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 
@@ -132,6 +134,7 @@ recursive_binding() {
     case "$source_schema" in
         1) canonical_line_file "$source_intent" 14 || return 1 ;;
         2)
+            recovery_unit=$source_capsule_unit
             canonical_line_file "$source_intent" 17 \
                 && /usr/bin/sed -n '15p' "$source_intent" \
                     | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
@@ -156,7 +159,15 @@ recursive_binding() {
     intent_arch=$(/usr/bin/sed -n '9s/^architecture=//p' "$repair_intent")
     intent_agent=$(/usr/bin/sed -n '10s/^agent_sha256=//p' "$repair_intent")
     intent_helper=$(/usr/bin/sed -n '11s/^helper_sha256=//p' "$repair_intent")
-    intent_runner=$(/usr/bin/sed -n '13s/^repair_runner_sha256=//p' "$repair_intent")
+    intent_repair_runner=$(/usr/bin/sed -n \
+        '13s/^repair_runner_sha256=//p' "$repair_intent")
+    if [ "$source_schema" = 2 ]; then
+        intent_runner=$(/usr/bin/sed -n \
+            '12s/^standard_runner_sha256=//p' "$repair_intent")
+    else
+        intent_runner=$(/usr/bin/sed -n \
+            '13s/^repair_runner_sha256=//p' "$repair_intent")
+    fi
     intent_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
     phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
     valid_digest "$source_snapshot" \
@@ -166,6 +177,7 @@ recursive_binding() {
         && valid_digest "$intent_agent" \
         && valid_digest "$intent_helper" \
         && valid_digest "$intent_runner" \
+        && valid_digest "$intent_repair_runner" \
         && valid_digest "$intent_nonce" \
         && [ "$intent_authority" = "$authority_sha256" ] \
         && [ "$intent_source" = "$source_snapshot" ] \
@@ -193,6 +205,12 @@ recursive_binding() {
             /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
             | /usr/bin/cut -d' ' -f1)" = "$intent_runner" ] \
         || return 1
+    if [ "$source_schema" = 2 ]; then
+        safe_root_file "$source_capsule_runner" 555 \
+            && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
+                | /usr/bin/cut -d' ' -f1)" = "$intent_repair_runner" ] \
+            || return 1
+    fi
     grep -Fxq "0::/system.slice/$recovery_unit" /proc/self/cgroup \
         || return 1
     case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
