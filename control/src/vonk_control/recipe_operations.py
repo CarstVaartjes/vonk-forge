@@ -128,6 +128,7 @@ class RecipeRunObservation:
 
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
+_DISTRIBUTED_OBSERVATION_GRACE_SECONDS = 120
 _RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
 _RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
     {"waiting-for-operator"}
@@ -724,7 +725,8 @@ class RecipeOperationService:
                 )
                 for node in plan.nodes
             )
-            phases = _role_phases(start_order, start_payloads)
+            role_phases = _role_phases(start_order, start_payloads)
+            phases = role_phases
             if start_deadline is not None:
                 owner_payload = next(
                     payload
@@ -732,7 +734,7 @@ class RecipeOperationService:
                     if node_id == master.node_id
                 )
                 phases = (
-                    *phases,
+                    tuple(item for phase in role_phases for item in phase),
                     (
                         (
                             master.node_id,
@@ -1646,7 +1648,15 @@ class RecipeOperationService:
                                 "collective readiness preceded rank launch"
                             )
                         started_node.state = "running"
+                        started_node.observed_run_generation = None
+                        started_node.observation_receipt_sha256 = None
+                        started_node.observation_endpoint_ready = None
                         started_node.updated_at = now
+                    run = session.get(RecipeRun, owner_id)
+                    assert run is not None
+                    run.observation_deadline_at = now + timedelta(
+                        seconds=_DISTRIBUTED_OBSERVATION_GRACE_SECONDS
+                    )
                     node.endpoint = {"url": endpoint}
                     node.evidence_digest = digest
                 node.updated_at = now
@@ -1690,9 +1700,7 @@ class RecipeOperationService:
                     or isinstance(removed_model_bytes, bool)
                     or removed_model_bytes < 0
                 ):
-                    raise RecipeOperationConflict(
-                        "model deletion evidence is invalid"
-                    )
+                    raise RecipeOperationConflict("model deletion evidence is invalid")
             for raw_installation in raw_installations:
                 installation_id = (
                     raw_installation.get("installation_id")
@@ -1745,6 +1753,15 @@ class RecipeOperationService:
         phases = _stored_phases(job.payload)
         recovery_error: DistributedLifecycleError | None = None
         if phases:
+            try:
+                _enforce_start_deadline(job.payload, now=now)
+                enforce_recovery_deadline(job.payload, now=now)
+            except DistributedLifecycleError as error:
+                recovery_error = error
+                for child in children:
+                    if child.state not in _TERMINAL_JOB_STATES:
+                        child.state = "failed"
+                        child.updated_at = now
             phase_index = _current_phase_index(children, phases)
             if phase_index is not None:
                 phase_operations = {
@@ -1770,32 +1787,28 @@ class RecipeOperationService:
                     job.state = "running"
                     job.updated_at = now
                     return cleanup_queued
-                if all(child.state == "succeeded" for child in phase_children) and (
-                    phase_index + 1 < len(phases)
+                if (
+                    all(child.state == "succeeded" for child in phase_children)
+                    and phase_index + 1 < len(phases)
+                    and recovery_error is None
                 ):
-                    try:
-                        _enforce_start_deadline(job.payload, now=now)
-                        enforce_recovery_deadline(job.payload, now=now)
-                    except DistributedLifecycleError as error:
-                        recovery_error = error
-                    if recovery_error is None:
-                        for (
-                            next_operation_id,
+                    for (
+                        next_operation_id,
+                        next_node_id,
+                        next_payload,
+                    ) in phases[phase_index + 1]:
+                        self._agent_jobs.enqueue_in_session(
+                            session,
+                            job.id,
                             next_node_id,
+                            job.kind,
+                            job.authority_revision,
                             next_payload,
-                        ) in phases[phase_index + 1]:
-                            self._agent_jobs.enqueue_in_session(
-                                session,
-                                job.id,
-                                next_node_id,
-                                job.kind,
-                                job.authority_revision,
-                                next_payload,
-                                operation_id=next_operation_id or str(uuid.uuid4()),
-                            )
-                        job.state = "running"
-                        job.updated_at = now
-                        return True
+                            operation_id=next_operation_id or str(uuid.uuid4()),
+                        )
+                    job.state = "running"
+                    job.updated_at = now
+                    return True
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
         if terminal:
             successful = sorted(
@@ -2541,7 +2554,9 @@ class RecipeOperationService:
                 continue
             revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
             if revision is None:
-                raise RecipeOperationConflict("dependent recipe authority is unavailable")
+                raise RecipeOperationConflict(
+                    "dependent recipe authority is unavailable"
+                )
             primary_digest, _title = _primary_model_identity(revision.document)
             if installation.model_version_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("dependent model authority is invalid")
@@ -2572,7 +2587,9 @@ class RecipeOperationService:
         for installation in candidates:
             revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
             if revision is None or revision.content_sha256 is None:
-                raise RecipeOperationConflict("recipe revision authority is unavailable")
+                raise RecipeOperationConflict(
+                    "recipe revision authority is unavailable"
+                )
             primary_digest, _primary_title = _primary_model_identity(revision.document)
             if installation.model_version_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("installation model authority is invalid")
@@ -2599,20 +2616,30 @@ class RecipeOperationService:
         for node in node_rows:
             nodes_by_installation.setdefault(node.installation_id, []).append(node)
 
-        active_statement = select(RecipeRun).where(
-            RecipeRun.installation_id.in_(selected_ids),
-            RecipeRun.state != "stopped",
-        ).order_by(RecipeRun.id)
+        active_statement = (
+            select(RecipeRun)
+            .where(
+                RecipeRun.installation_id.in_(selected_ids),
+                RecipeRun.state != "stopped",
+            )
+            .order_by(RecipeRun.id)
+        )
         if lock:
             active_statement = active_statement.with_for_update(of=RecipeRun)
-        all_active_runs = tuple(session.scalars(active_statement)) if selected_ids else ()
+        all_active_runs = (
+            tuple(session.scalars(active_statement)) if selected_ids else ()
+        )
         active_runs = all_active_runs[:_MAX_ACTIVE_RUNS]
 
-        operation_statement = select(Job.id).where(
-            Job.kind == "recipe.model-uninstall.v1",
-            Job.state.in_({"queued", "running"}),
-            Job.payload["owner_id"].as_string() == model_version_sha256,
-        ).limit(1)
+        operation_statement = (
+            select(Job.id)
+            .where(
+                Job.kind == "recipe.model-uninstall.v1",
+                Job.state.in_({"queued", "running"}),
+                Job.payload["owner_id"].as_string() == model_version_sha256,
+            )
+            .limit(1)
+        )
         if lock:
             operation_statement = operation_statement.with_for_update(of=Job)
         active_operation = session.scalar(operation_statement) is not None
@@ -2625,7 +2652,11 @@ class RecipeOperationService:
                 nodes_by_installation.get(installation.id, []),
                 key=lambda item: (item.rank, item.node_id),
             )
-            expected = installation.plan.get("nodes") if isinstance(installation.plan, Mapping) else None
+            expected = (
+                installation.plan.get("nodes")
+                if isinstance(installation.plan, Mapping)
+                else None
+            )
             exact = (
                 installation.state == "installed"
                 and isinstance(expected, list)

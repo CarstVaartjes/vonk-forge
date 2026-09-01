@@ -299,6 +299,9 @@ class AgentRuntimeIdentityRequest(BaseModel):
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     self_test_passed: Literal[True]
+    observation_receipt_public_key: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
 
 
 class ClaimRequest(BaseModel):
@@ -584,9 +587,9 @@ class RecipeRunObservationGrantRequest(RecipeRunObservationIdentityRequest):
 class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
     observed_at: datetime
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    process_running: bool = Field(strict=True)
     endpoint_ready: bool | None = Field(default=None, strict=True)
     grant: dict[str, object]
+    helper_receipt: dict[str, object]
 
     @field_validator("observed_at")
     @classmethod
@@ -603,6 +606,7 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
                 "process_running",
                 "endpoint_ready",
                 "grant",
+                "helper_receipt",
             }
         )
 
@@ -2080,21 +2084,27 @@ def install_agent_routes(
                         ):
                             raise ValueError("recipe run observation was replayed")
                         try:
-                            observed_identity = (
-                                authority.consume_recipe_run_observation_grant(
-                                    session,
-                                    node_id=identity.node_id,
-                                    certificate_serial=identity.certificate_serial,
-                                    identity=evidence.observation_identity(),
-                                    observed_at=evidence_observed_at,
-                                    received_at=now,
-                                    signed_grant=evidence.grant,
-                                )
+                            (
+                                observed_identity,
+                                process_running,
+                                receipt_sha256,
+                            ) = authority.consume_recipe_run_observation_grant(
+                                session,
+                                node_id=identity.node_id,
+                                certificate_serial=identity.certificate_serial,
+                                identity=evidence.observation_identity(),
+                                observed_at=evidence_observed_at,
+                                received_at=now,
+                                signed_grant=evidence.grant,
+                                helper_receipt=evidence.helper_receipt,
                             )
                         except HostHelperAuthorityError:
                             # An authenticated same-generation identity mismatch is
                             # rank failure, not permission to keep serving.
                             node.state = "failed"
+                            node.observed_run_generation = None
+                            node.observation_receipt_sha256 = None
+                            node.observation_endpoint_ready = None
                             node.updated_at = evidence_observed_at
                             continue
                         mapping = session.get(ClusterMapping, run.mapping_id)
@@ -2111,10 +2121,15 @@ def install_agent_routes(
                         elif node.state != "failed":
                             node.state = (
                                 "running"
-                                if evidence.process_running
+                                if process_running
                                 and (not owner or evidence.endpoint_ready is True)
                                 else "failed"
                             )
+                        node.observed_run_generation = run.run_generation
+                        node.observation_receipt_sha256 = receipt_sha256
+                        node.observation_endpoint_ready = (
+                            evidence.endpoint_ready if owner else None
+                        )
                         node.updated_at = evidence_observed_at
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

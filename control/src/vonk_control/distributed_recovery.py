@@ -378,7 +378,7 @@ def _recovery_authority(
         "failed_rank": failed_rank,
         "recipe_content_sha256": revision.content_sha256,
         "start_phases": [
-            *[[start_payloads[str(role)]] for role in start_order],
+            [start_payloads[str(role)] for role in start_order],
             [
                 (
                     owner_node_id,

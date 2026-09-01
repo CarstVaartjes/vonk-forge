@@ -23,7 +23,9 @@ from vonk_agent_protocol.host_helper import (
     HostHelperSignature,
     HostOperationKind,
     SignedHostHelperGrant,
+    SignedRecipeRunObservationReceipt,
     host_helper_grant_signing_bytes,
+    recipe_run_observation_receipt_signing_bytes,
 )
 
 from .compat_recovery import (
@@ -378,7 +380,8 @@ class HostRuntimeAuthorityService:
         observed_at: datetime,
         received_at: datetime,
         signed_grant: Mapping[str, object],
-    ) -> str:
+        helper_receipt: Mapping[str, object],
+    ) -> tuple[str, bool, str]:
         """Verify and consume the exact grant echoed by an observation result."""
 
         now = _aware(received_at)
@@ -399,6 +402,29 @@ class HostRuntimeAuthorityService:
             raise HostHelperAuthorityError(
                 "recipe run observation grant signature is invalid"
             ) from error
+        try:
+            receipt = SignedRecipeRunObservationReceipt.parse(helper_receipt)
+            node = session.get(AgentNode, node_id)
+            if node is None or node.observation_receipt_public_key is None:
+                raise HostHelperAuthorityError(
+                    "recipe run observation receipt key is unavailable"
+                )
+            receipt_public_key = bytes.fromhex(node.observation_receipt_public_key)
+            receipt_key_id = hashlib.sha256(receipt_public_key).hexdigest()
+            if receipt.signature.key_id != receipt_key_id:
+                raise HostHelperAuthorityError(
+                    "recipe run observation receipt key is stale"
+                )
+            ed25519.Ed25519PublicKey.from_public_bytes(receipt_public_key).verify(
+                bytes.fromhex(receipt.signature.value),
+                recipe_run_observation_receipt_signing_bytes(receipt.claims),
+            )
+        except HostHelperAuthorityError:
+            raise
+        except Exception as error:
+            raise HostHelperAuthorityError(
+                "recipe run observation receipt signature is invalid"
+            ) from error
         expected_operation = {
             "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
             "action": ContainerRuntimeAction.RUN_INSPECT.value,
@@ -416,6 +442,15 @@ class HostRuntimeAuthorityService:
             or not grant.signature.key_id == self._issuer.key_id
             or not grant.claims.issued_at <= observed_epoch <= grant.claims.expires_at
             or int(now.timestamp()) > grant.claims.expires_at + 5
+            or receipt.claims.node_id != node_id
+            or receipt.claims.request_id != grant.claims.request_id
+            or receipt.claims.request_sha256
+            != grant.claims.operation.values.get("request_sha256")
+            or receipt.claims.observation_identity_sha256 != observation_identity
+            or receipt.claims.observed_at != observed_epoch
+            or not grant.claims.issued_at
+            <= receipt.claims.observed_at
+            <= grant.claims.expires_at
         ):
             raise HostHelperAuthorityError("recipe run observation grant is stale")
         run_node = session.scalar(
@@ -437,7 +472,10 @@ class HostRuntimeAuthorityService:
         ):
             raise HostHelperAuthorityError("recipe run observation grant was replayed")
         pending.consumed = True
-        return observation_identity
+        receipt_digest = hashlib.sha256(
+            canonical_message(receipt.to_mapping())
+        ).hexdigest()
+        return observation_identity, receipt.claims.outcome == "running", receipt_digest
 
     @staticmethod
     def _validate_observation_identity(

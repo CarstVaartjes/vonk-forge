@@ -19,6 +19,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
+    Job,
     LocalRecipe,
     LocalRecipeRevision,
     RecipeBuild,
@@ -35,6 +36,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteError,
+    RecipeRouteNotReady,
     RecipeRouteService,
 )
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
@@ -370,9 +372,7 @@ def test_hermes_alias_comes_only_from_published_v1_recipe_run(
     service.publish_run(run_id)
 
     document = json.loads(applied[-1])
-    assert [row["model_name"] for row in document["model_list"]] == [
-        "hermes-agent"
-    ]
+    assert [row["model_name"] for row in document["model_list"]] == ["hermes-agent"]
     assert (
         document["model_list"][0]["litellm_params"]["model"]
         == "openai/deepseek-v4-flash-dspark"
@@ -580,6 +580,152 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         failed = session.get(RecipeRun, failed_run)
         assert failed.route_state == "failed"
         assert "LiteLlmPolicyError" in failed.route_error
+
+
+def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, first_run = setup(tmp_path)
+    second_run = add_running_run(
+        service,
+        first_run,
+        alias="second",
+        route_state="pending",
+        identity=3,
+    )
+    with service.sessions.begin() as session:
+        session.get(RecipeRun, first_run).route_state = "pending"
+
+    class Routes:
+        def __init__(self) -> None:
+            self.ready = {second_run}
+            self.published: list[str] = []
+            self.maintained = 0
+
+        def publish_run(self, run_id: str) -> None:
+            if run_id not in self.ready:
+                raise RecipeRouteNotReady("awaiting exact observation")
+            self.published.append(run_id)
+
+        def maintain(self, *, renew_before_seconds: int) -> bool:
+            assert renew_before_seconds == 10
+            self.maintained += 1
+            return True
+
+    routes = Routes()
+    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: NOW)
+    assert worker.tick() is True
+    assert routes.published == [second_run]
+
+    routes.ready.clear()
+    assert worker.tick() is True
+    assert routes.maintained == 1
+
+
+def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        run.plan = {"observation_schema_version": 2}
+        run.route_state = "pending"
+        run.observation_deadline_at = NOW + timedelta(seconds=60)
+        session.add(
+            Job(
+                request_id="10000000-0000-4000-8000-000000000001",
+                kind="recipe.start",
+                state="succeeded",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[],
+                payload_digest="b" * 64,
+                payload={
+                    "owner_id": run_id,
+                    "start_deadline": (NOW + timedelta(seconds=60)).isoformat(),
+                },
+                result={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    class Recoveries:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def tick(self) -> bool:
+            self.calls += 1
+            return False
+
+    recoveries = Recoveries()
+    worker = RecipeOperationWorker(
+        service.sessions,
+        service,
+        clock=lambda: NOW + timedelta(seconds=60),
+        recoveries=recoveries,
+    )
+    assert worker.tick() is True
+    assert recoveries.calls == 2
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
+        assert run.route_state == "withdrawn"
+        assert run.route_error == "distributed start observation deadline elapsed"
+        assert all(node.state == "failed" for node in nodes)
+
+
+def test_initial_exact_observation_deadline_fails_late_signed_ranks(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    deadline = NOW + timedelta(seconds=60)
+    with service.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        run.plan = {"observation_schema_version": 2}
+        run.route_state = "pending"
+        run.observation_deadline_at = deadline
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = run.run_generation
+            node.observation_receipt_sha256 = "a" * 64
+            node.observation_endpoint_ready = node.role == "entrypoint" or None
+            node.updated_at = deadline + timedelta(microseconds=1)
+
+    worker = RecipeOperationWorker(
+        service.sessions,
+        service,
+        clock=lambda: deadline + timedelta(seconds=1),
+    )
+    assert worker.tick() is True
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
+        assert run.route_state == "withdrawn"
+        assert run.route_error == "distributed start observation deadline elapsed"
+        assert all(node.state == "failed" for node in nodes)
+
+
+def test_direct_publication_rejects_exact_observation_after_deadline(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    deadline = NOW - timedelta(seconds=1)
+    with service.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        run.plan = {"observation_schema_version": 2}
+        run.route_state = "pending"
+        run.observation_deadline_at = deadline
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = run.run_generation
+            node.observation_receipt_sha256 = "a" * 64
+            node.observation_endpoint_ready = node.role == "entrypoint" or None
+            node.updated_at = deadline + timedelta(microseconds=1)
+
+    with pytest.raises(
+        RecipeRouteError,
+        match="recipe rank exact observation missed its deadline",
+    ):
+        service.publish_run(run_id)
 
 
 def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(

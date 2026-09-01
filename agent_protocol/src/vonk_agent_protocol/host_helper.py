@@ -15,6 +15,8 @@ from .contracts import AgentProtocolError, canonical_message
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
 HOST_ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00"
+RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY = "vonk.recipe-run-observation-helper"
+RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -312,10 +314,120 @@ class SignedHostHelperGrant:
         }
 
 
+@dataclass(frozen=True)
+class RecipeRunObservationReceiptClaims:
+    schema_version: int
+    authority: str
+    node_id: str
+    request_id: str
+    request_sha256: str
+    observation_identity_sha256: str
+    outcome: str
+    observed_at: int
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version != 1
+            or isinstance(self.schema_version, bool)
+            or self.authority != RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY
+            or not isinstance(self.node_id, str)
+            or _NODE_ID.fullmatch(self.node_id) is None
+            or self.outcome not in {"running", "not-running"}
+            or not isinstance(self.observed_at, int)
+            or isinstance(self.observed_at, bool)
+            or self.observed_at <= 0
+        ):
+            raise AgentProtocolError("recipe run observation receipt is invalid")
+        _random_uuid(self.request_id, "recipe run observation receipt request")
+        _digest(self.request_sha256, "recipe run observation receipt request")
+        _digest(
+            self.observation_identity_sha256,
+            "recipe run observation receipt identity",
+        )
+
+    @classmethod
+    def parse(cls, value: Any) -> RecipeRunObservationReceiptClaims:
+        document = _mapping(value, "recipe run observation receipt claims")
+        _exact(
+            document,
+            {
+                "schema_version",
+                "authority",
+                "node_id",
+                "request_id",
+                "request_sha256",
+                "observation_identity_sha256",
+                "outcome",
+                "observed_at",
+            },
+            "recipe run observation receipt claims",
+        )
+        return cls(**document)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "authority": self.authority,
+            "node_id": self.node_id,
+            "request_id": self.request_id,
+            "request_sha256": self.request_sha256,
+            "observation_identity_sha256": self.observation_identity_sha256,
+            "outcome": self.outcome,
+            "observed_at": self.observed_at,
+        }
+
+
+@dataclass(frozen=True)
+class SignedRecipeRunObservationReceipt:
+    schema_version: int
+    claims: RecipeRunObservationReceiptClaims
+    signature: HostHelperSignature
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version != 1
+            or isinstance(self.schema_version, bool)
+            or type(self.claims) is not RecipeRunObservationReceiptClaims
+            or type(self.signature) is not HostHelperSignature
+        ):
+            raise AgentProtocolError("signed recipe run observation receipt is invalid")
+
+    @classmethod
+    def parse(cls, value: Any) -> SignedRecipeRunObservationReceipt:
+        document = _mapping(value, "signed recipe run observation receipt")
+        _exact(
+            document,
+            {"schema_version", "claims", "signature"},
+            "signed recipe run observation receipt",
+        )
+        return cls(
+            document["schema_version"],
+            RecipeRunObservationReceiptClaims.parse(document["claims"]),
+            HostHelperSignature.parse(document["signature"]),
+        )
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "claims": self.claims.to_mapping(),
+            "signature": self.signature.to_mapping(),
+        }
+
+
 def host_helper_grant_signing_bytes(claims: HostHelperGrantClaims) -> bytes:
     if type(claims) is not HostHelperGrantClaims:
         raise AgentProtocolError("host helper grant claims are invalid")
     return HOST_HELPER_GRANT_DOMAIN + canonical_message(claims.to_mapping())
+
+
+def recipe_run_observation_receipt_signing_bytes(
+    claims: RecipeRunObservationReceiptClaims,
+) -> bytes:
+    if type(claims) is not RecipeRunObservationReceiptClaims:
+        raise AgentProtocolError("recipe run observation receipt claims are invalid")
+    return RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN + canonical_message(
+        claims.to_mapping()
+    )
 
 
 def host_artifact_signing_bytes(kind: str, digest: str) -> bytes:

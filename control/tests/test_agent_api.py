@@ -2140,9 +2140,9 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
                     **identity_fields,
                     "observed_at": clock.now.replace(tzinfo=None).isoformat(),
                     "observation_identity_sha256": "f" * 64,
-                    "process_running": True,
                     "endpoint_ready": None,
                     "grant": {"schema_version": 1},
+                    "helper_receipt": {"schema_version": 1},
                 }
             ],
         },

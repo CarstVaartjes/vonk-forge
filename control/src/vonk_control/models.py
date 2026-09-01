@@ -539,6 +539,10 @@ class AgentNode(Base):
             "architecture IS NULL OR architecture IN ('linux-amd64', 'linux-arm64')",
             name="ck_agent_nodes_architecture",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("observation_receipt_public_key", 64),
+            name="ck_agent_nodes_observation_receipt_public_key",
+        ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -550,6 +554,7 @@ class AgentNode(Base):
     self_test_passed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -852,6 +857,10 @@ class AgentEnrollment(Base):
             "state IN ('issuing', 'certificate_issued')",
             name="ck_agent_enrollments_state",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("observation_receipt_public_key", 64),
+            name="ck_agent_enrollments_observation_receipt_public_key",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -870,6 +879,7 @@ class AgentEnrollment(Base):
     hardware_fingerprint: Mapped[str] = mapped_column(String(512), nullable=False)
     agent_digest: Mapped[str] = mapped_column(String(128), nullable=False)
     boot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -1373,7 +1383,9 @@ class RecipeLibrarySyncRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -2220,6 +2232,9 @@ class RecipeRun(Base):
     run_generation: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=1, server_default="1"
     )
+    observation_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     alias: Mapped[str] = mapped_column(String(128), nullable=False)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -2250,6 +2265,14 @@ class RunNode(Base):
             name="ck_run_nodes_resources",
         ),
         CheckConstraint("length(role) BETWEEN 1 AND 64", name="ck_run_nodes_role"),
+        CheckConstraint(
+            "observed_run_generation IS NULL OR observed_run_generation>=1",
+            name="ck_run_nodes_observed_run_generation",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("observation_receipt_sha256", 64),
+            name="ck_run_nodes_observation_receipt",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2270,6 +2293,9 @@ class RunNode(Base):
     observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     endpoint: Mapped[dict[str, object] | None] = mapped_column(JSON)
     evidence_digest: Mapped[str | None] = mapped_column(String(64))
+    observed_run_generation: Mapped[int | None] = mapped_column(BigInteger)
+    observation_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
+    observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

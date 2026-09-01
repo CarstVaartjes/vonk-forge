@@ -48,6 +48,10 @@ class RecipeRouteError(RuntimeError):
         self.run_id = run_id
 
 
+class RecipeRouteNotReady(RecipeRouteError):
+    """A fail-closed route candidate is waiting for current rank evidence."""
+
+
 class RecipeRecoveryDeadlineError(RecipeRouteError):
     pass
 
@@ -337,6 +341,7 @@ class RecipeRouteService:
             raise KeyError(run_id)
         if run.state != "running":
             raise RecipeRouteError("recipe run is not ready for publication")
+        recovery = self._enforce_recovery_publication_deadline(session, run)
         candidate = self.candidate_in_session(
             session,
             include_run_id=run_id,
@@ -345,7 +350,6 @@ class RecipeRouteService:
         )
         if run_id not in candidate.included:
             raise RecipeRouteError("recipe run is absent from route candidate")
-        recovery = self._enforce_recovery_publication_deadline(session, run)
         if recovery is not None:
             candidate = replace(
                 candidate,
@@ -410,6 +414,7 @@ class RecipeRouteService:
             included.route_generation = generation.generation
             included.route_digest = generation.route_digest
             included.route_error = None
+            included.observation_deadline_at = None
             included.updated_at = self._clock()
         return generation
 
@@ -870,6 +875,46 @@ class RecipeRouteService:
                 raise RecipeRouteError(
                     "recipe run must have one rank-zero entrypoint", run_id=run.id
                 )
+            exact_observations = (
+                isinstance(run.plan, Mapping)
+                and run.plan.get("observation_schema_version") == 2
+            )
+            if exact_observations:
+                observation_deadline = run.observation_deadline_at
+                normalized_deadline = (
+                    _aware(observation_deadline)
+                    if observation_deadline is not None
+                    else None
+                )
+                for node in nodes:
+                    if (
+                        node.observed_run_generation != run.run_generation
+                        or not isinstance(node.observation_receipt_sha256, str)
+                        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+                    ):
+                        raise RecipeRouteNotReady(
+                            "recipe rank is awaiting current exact observation",
+                            run_id=run.id,
+                        )
+                    if (
+                        normalized_deadline is not None
+                        and _aware(node.updated_at) > normalized_deadline
+                    ):
+                        raise RecipeRouteError(
+                            "recipe rank exact observation missed its deadline",
+                            run_id=run.id,
+                        )
+                    if node is entrypoints[0]:
+                        if node.observation_endpoint_ready is not True:
+                            raise RecipeRouteNotReady(
+                                "recipe endpoint owner is awaiting exact readiness",
+                                run_id=run.id,
+                            )
+                    elif node.observation_endpoint_ready is not None:
+                        raise RecipeRouteError(
+                            "headless recipe rank exposed endpoint readiness",
+                            run_id=run.id,
+                        )
             for node in nodes:
                 observed = _aware(node.updated_at)
                 if (
@@ -1061,5 +1106,6 @@ def _endpoint(
 __all__ = [
     "AtomicRecipeRoutePublisher",
     "RecipeRouteError",
+    "RecipeRouteNotReady",
     "RecipeRouteService",
 ]

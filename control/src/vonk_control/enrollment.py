@@ -44,6 +44,7 @@ _EVIDENCE_FIELDS = (
     "agent_digest",
     "boot_id",
 )
+_OBSERVATION_RECEIPT_PUBLIC_KEY = "observation_receipt_public_key"
 _EVIDENCE_LIMITS = {
     "node_id": 36,
     "csr_public_key_fingerprint": 64,
@@ -51,6 +52,7 @@ _EVIDENCE_LIMITS = {
     "hardware_fingerprint": 512,
     "agent_digest": 128,
     "boot_id": 128,
+    _OBSERVATION_RECEIPT_PUBLIC_KEY: 64,
 }
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
@@ -246,6 +248,9 @@ class EnrollmentService:
                         hardware_fingerprint=values["hardware_fingerprint"],
                         agent_digest=values["agent_digest"],
                         boot_id=values["boot_id"],
+                        observation_receipt_public_key=values.get(
+                            _OBSERVATION_RECEIPT_PUBLIC_KEY
+                        ),
                         created_at=now,
                     )
                     _lock_node_issuance(session, node_id)
@@ -948,6 +953,7 @@ def _persist_issued_enrollment(
             node_id=enrollment.node_id,
             state="active",
             capabilities=[],
+            observation_receipt_public_key=(enrollment.observation_receipt_public_key),
         )
         session.add(node)
         # There is no ORM relationship between these operational rows. Flush
@@ -992,6 +998,10 @@ def _persist_issued_enrollment(
             if certificate.state in {"active", "staged"}:
                 certificate.state = "revoked"
                 certificate.revoked_at = certificate.revoked_at or now
+        if enrollment.observation_receipt_public_key is not None:
+            node.observation_receipt_public_key = (
+                enrollment.observation_receipt_public_key
+            )
     session.add(
         AgentCertificate(
             serial=issued.serial,
@@ -1084,6 +1094,8 @@ def _replay_matches(
         and values["hardware_fingerprint"] == enrollment.hardware_fingerprint
         and values["agent_digest"] == enrollment.agent_digest
         and values["boot_id"] == enrollment.boot_id
+        and values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
+        == enrollment.observation_receipt_public_key
     )
 
 
@@ -1173,9 +1185,13 @@ def _validate_evidence(
     public_key_fingerprint: str,
 ) -> tuple[dict[str, str], str | None]:
     values: dict[str, str] = {}
-    if set(evidence) != set(_EVIDENCE_FIELDS):
+    fields = set(evidence)
+    if fields not in (
+        set(_EVIDENCE_FIELDS),
+        {*_EVIDENCE_FIELDS, _OBSERVATION_RECEIPT_PUBLIC_KEY},
+    ):
         return values, "evidence fields are invalid"
-    for name in _EVIDENCE_FIELDS:
+    for name in fields:
         value = evidence.get(name)
         if (
             not isinstance(value, str)
@@ -1194,6 +1210,9 @@ def _validate_evidence(
         return values, "evidence CSR public-key fingerprint is invalid"
     if _HEX_64.fullmatch(values["agent_digest"]) is None:
         return values, "evidence agent digest is invalid"
+    receipt_key = values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
+    if receipt_key is not None and _HEX_64.fullmatch(receipt_key) is None:
+        return values, "evidence observation receipt public key is invalid"
     return values, None
 
 

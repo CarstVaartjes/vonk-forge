@@ -34,6 +34,7 @@ from .topology import Placement, TopologyError, validate_topology
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
+_SIGNED_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.receipt.v1"
 
 
 class RunPlanConflict(RuntimeError):
@@ -141,15 +142,21 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            agent_capabilities = {
-                node.node_id: tuple(node.capabilities or ())
-                for node in session.scalars(
+            agent_nodes = tuple(
+                session.scalars(
                     select(AgentNode).where(
                         AgentNode.node_id.in_(
                             [mapping_node.node_id for mapping_node in mapping_nodes]
                         )
                     )
                 )
+            )
+            agent_capabilities = {
+                node.node_id: tuple(node.capabilities or ()) for node in agent_nodes
+            }
+            receipt_keys = {
+                node.node_id: node.observation_receipt_public_key
+                for node in agent_nodes
             }
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
@@ -279,6 +286,17 @@ class RunAdmissionService:
                     AdmissionReason(
                         "run.distributed_observation_capability_missing",
                         "Spark agent does not support exact distributed rank inspection.",
+                    )
+                )
+            if two_phase_start and (
+                _SIGNED_RUN_INSPECTION_CAPABILITY
+                not in agent_capabilities.get(placement.node_id, ())
+                or not isinstance(receipt_keys.get(placement.node_id), str)
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        "run.distributed_observation_receipt_capability_missing",
+                        "Spark agent does not support signed distributed rank observations.",
                     )
                 )
             role = role_by_name.get(placement.role)
