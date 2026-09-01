@@ -16,7 +16,7 @@ repair_state=$state/repair
 repair_intent=$repair_state/intent
 repair_phase=$repair_state/phase
 repair_candidate=$repair_state/candidate.deb
-repair_authority=/usr/share/doc/vonk-forge-agent/repair-authority
+repair_authority=/usr/lib/vonk-forge/repair-authority
 recovery_unit=vonk-forge-package-upgrade-recover.service
 source_capsule_runner=$state/recovery-capsule/runner
 source_capsule_unit=vonk-forge-package-upgrade-recover-capsule.service
@@ -118,18 +118,27 @@ valid_digest() {
 }
 
 recursive_binding() {
+    binding_reason=invocation
     [ "${1:-}" = configure ] \
-        && [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] \
-        && [ -d "$state" ] && [ ! -L "$state" ] \
-        && [ "$(/usr/bin/stat -c %u:%g:%a "$state")" = 0:0:700 ] \
-        && [ -d "$repair_state" ] && [ ! -L "$repair_state" ] \
+        && [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] || return 1
+    binding_reason=source-state-directory
+    [ -d "$state" ] && [ ! -L "$state" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$state")" = 0:0:700 ] || return 1
+    binding_reason=repair-state-directory
+    [ -d "$repair_state" ] && [ ! -L "$repair_state" ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a "$repair_state")" = 0:0:700 ] \
-        && safe_root_file "$source_intent" 600 \
-        && safe_root_file "$repair_intent" 600 \
-        && safe_root_file "$repair_phase" 600 \
-        && safe_root_file "$repair_candidate" 600 \
-        && safe_root_file "$repair_authority" 644 \
         || return 1
+    binding_reason=source-intent-file
+    safe_root_file "$source_intent" 600 || return 1
+    binding_reason=repair-intent-file
+    safe_root_file "$repair_intent" 600 || return 1
+    binding_reason=repair-phase-file
+    safe_root_file "$repair_phase" 600 || return 1
+    binding_reason=repair-candidate-file
+    safe_root_file "$repair_candidate" 600 || return 1
+    binding_reason=installed-authority-file
+    safe_root_file "$repair_authority" 644 || return 1
+    binding_reason=source-intent
     source_schema=$(/usr/bin/sed -n '1s/^schema_version=//p' "$source_intent")
     case "$source_schema" in
         1) canonical_line_file "$source_intent" 14 || return 1 ;;
@@ -146,6 +155,7 @@ recursive_binding() {
             ;;
         *) return 1 ;;
     esac
+    binding_reason=repair-ledger-shape
     canonical_line_file "$repair_intent" 17 \
         && canonical_line_file "$repair_phase" 3 \
         || return 1
@@ -170,6 +180,7 @@ recursive_binding() {
     fi
     intent_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
     phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
+    binding_reason=repair-ledger-binding
     valid_digest "$source_snapshot" \
         && valid_digest "$intent_authority" \
         && valid_digest "$intent_source" \
@@ -186,6 +197,7 @@ recursive_binding() {
         && [ "$phase_nonce" = "$intent_nonce" ] \
         && /usr/bin/sed -n '3p' "$repair_phase" | grep -Fxq 'phase=installing' \
         || return 1
+    binding_reason=installed-payload
     [ "$(/usr/bin/stat -c %s "$repair_candidate")" = "$intent_bytes" ] \
         && [ "$(/usr/bin/sha256sum "$repair_candidate" \
             | /usr/bin/cut -d' ' -f1)" = "$intent_candidate" ] \
@@ -206,13 +218,16 @@ recursive_binding() {
             | /usr/bin/cut -d' ' -f1)" = "$intent_runner" ] \
         || return 1
     if [ "$source_schema" = 2 ]; then
+        binding_reason=capsule-runner
         safe_root_file "$source_capsule_runner" 555 \
             && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
                 | /usr/bin/cut -d' ' -f1)" = "$intent_repair_runner" ] \
             || return 1
     fi
+    binding_reason=recovery-cgroup
     grep -Fxq "0::/system.slice/$recovery_unit" /proc/self/cgroup \
         || return 1
+    binding_reason=dpkg-parent
     case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
     command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-postinst.XXXXXX) \
         || return 1
@@ -230,7 +245,9 @@ recursive_binding() {
     return "$result"
 }
 
-recursive_binding "${1:-}" || fail 'recursive configure binding'
+binding_reason=unknown
+recursive_binding "${1:-}" \
+    || fail "recursive configure binding ($binding_reason)"
 
 if ! getent group vonk-agent >/dev/null; then
     addgroup --system vonk-agent

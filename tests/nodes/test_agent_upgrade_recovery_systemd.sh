@@ -100,7 +100,7 @@ else
 fi
 recovery_suppression=/lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf
 agent_unit_path=/lib/systemd/system/$agent_unit
-agent_enablement=/lib/systemd/system/multi-user.target.wants/$agent_unit
+agent_enablement=/etc/systemd/system/multi-user.target.wants/$agent_unit
 firewall_unit=vonk-forge-docker-firewall.service
 firewall_fixture=/run/systemd/system/$firewall_unit
 started=$test_root/start
@@ -115,9 +115,15 @@ compat_agent_config=/etc/vonk-forge-agent/agent.toml
 compat_authority_key=/etc/vonk-forge-agent/host-helper-authority.pub
 observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
 observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
+recovery_failed_line=unavailable
+recovery_failed_status=unavailable
+
+trap 'recovery_failed_status=$?; recovery_failed_line=$LINENO' ERR
 
 dump_failure_diagnostics() {
   printf '%s\n' '--- agent upgrade recovery fixture diagnostics ---' >&2
+  printf 'failed assertion: line=%s status=%s\n' \
+    "$recovery_failed_line" "$recovery_failed_status" >&2
   systemctl --system --no-pager --full status \
     "$helper_unit" "$socket_unit" "$recovery_unit" "$package_recovery_unit" \
     "$agent_unit" \
@@ -663,7 +669,20 @@ printf '%s\n' \
 (
   for _ in {1..2400}; do
     if [[ -f /var/lib/vonk-forge/package-upgrade/intent ]]; then
-      systemctl --system freeze "$helper_unit"
+      # The helper may be executing `systemctl daemon-reload` when the intent
+      # becomes visible. Freezing that cgroup can therefore freeze the client
+      # whose D-Bus reply the synchronous `systemctl freeze` is awaiting, so
+      # the command may time out after the kernel has already frozen the unit.
+      # Treat the command status as observational and prove the actual manager
+      # freezer state before inspecting any crash-point bytes.
+      systemctl --system freeze "$helper_unit" >/dev/null 2>&1 || true
+      for _ in {1..100}; do
+        helper_freezer_state=$(systemctl --system show \
+          --property=FreezerState --value "$helper_unit")
+        [[ "$helper_freezer_state" == frozen ]] && break
+        sleep 0.05
+      done
+      test "$helper_freezer_state" = frozen
       # shellcheck disable=SC2317  # Called indirectly by the EXIT trap.
       thaw_helper() {
         systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
@@ -977,13 +996,14 @@ if [[ "$crash_mode" == full-cgroup ]]; then
       "$test_root/compat-intent" > "$test_root/compat-intent.invalid"
     install -o root -g root -m 0600 "$test_root/compat-intent.invalid" \
       /var/lib/vonk-forge/package-upgrade/intent
-    systemctl --system reset-failed "$recovery_unit" >/dev/null 2>&1 || true
-    if systemctl --system start "$recovery_unit" >/dev/null 2>&1; then
+    systemctl --system reset-failed "$package_recovery_unit" \
+      >/dev/null 2>&1 || true
+    if systemctl --system start "$package_recovery_unit" >/dev/null 2>&1; then
       printf '%s\n' 'unsafe staged recovery unexpectedly succeeded' >&2
       exit 1
     fi
     test "$(systemctl --system show --property=ExecMainStatus --value \
-      "$recovery_unit")" = 78
+      "$package_recovery_unit")" = 78
     test "$(systemctl --system show --property=MainPID --value \
       "$agent_unit")" = "$old_agent_pid"
     test "$(systemctl --system show --property=ActiveState --value \
@@ -1041,7 +1061,7 @@ if [[ "$crash_mode" == full-cgroup ]]; then
       /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
       | cut -d' ' -f1)" = "$target_recovery_runner_digest"
     systemctl --system daemon-reload
-    systemctl --system reset-failed "$helper_unit" "$recovery_unit" \
+    systemctl --system reset-failed "$helper_unit" "$package_recovery_unit" \
       >/dev/null 2>&1 || true
     systemctl --system start "$helper_unit"
     compat_helper_pid=$(systemctl --system show --property=MainPID --value \
@@ -1138,16 +1158,16 @@ PY
       "$compat_reboot_timer" "$compat_reboot_service" \
       >/dev/null 2>&1 || true
     systemctl --system stop \
-      "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
+      "$agent_unit" "$helper_unit" "$socket_unit" "$package_recovery_unit" \
       >/dev/null 2>&1 || true
     systemctl --system daemon-reload
     systemctl --system reset-failed \
-      "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
+      "$agent_unit" "$helper_unit" "$socket_unit" "$package_recovery_unit" \
       >/dev/null 2>&1 || true
     systemctl --system start "$socket_unit"
     for _ in {1..150}; do
       recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
-        "$recovery_unit")
+        "$package_recovery_unit")
       [[ "$recovery_exit" == 75 ]] && break
       sleep 0.1
     done
@@ -1186,6 +1206,10 @@ if [[ "$crash_mode" == post-remove ]]; then
   # durable state before modelling the next boot transaction.
   systemctl --system kill --kill-whom=all --signal=SIGKILL "$recovery_unit"
   systemctl --system stop "$recovery_unit" >/dev/null 2>&1 || true
+  # A killed oneshot remains failed even after its processes are gone. A boot
+  # starts from a clean unit result, so reset only systemd's volatile result;
+  # the durable intent, cached package, capsule, and boot edge remain intact.
+  systemctl --system reset-failed "$recovery_unit" >/dev/null 2>&1 || true
   for _ in {1..200}; do
     recovery_active_state=$(systemctl --system show \
       --property=ActiveState --value "$recovery_unit")
@@ -1230,17 +1254,17 @@ ExecStart=/bin/sleep 3600
 WantedBy=multi-user.target
 UNIT
 install -o root -g root -m 0644 "$agent_restaged" "$agent_unit_path"
-install -d -o root -g root -m 0755 \
-    /lib/systemd/system/multi-user.target.wants
-ln -s "../$agent_unit" "$agent_enablement"
+install -d -o root -g root -m 0755 "${agent_enablement%/*}"
+ln -s "$agent_unit_path" "$agent_enablement"
 systemctl --system daemon-reload
 test "$(realpath -e -- "$(systemctl --system show \
   --property=FragmentPath --value "$agent_unit")")" = \
   "$(realpath -e -- "$agent_unit_path")"
 agent_dropins=$(systemctl --system show --property=DropInPaths --value \
   "$agent_unit")
+recovery_gate_real=$(realpath -e -- "$recovery_gate")
 case " $agent_dropins " in
-  *" $recovery_gate "*) ;;
+  *" $recovery_gate_real "*) ;;
   *) printf '%s\n' 'agent recovery gate is not an installed drop-in' >&2; exit 1 ;;
 esac
 test "$(systemctl --system is-enabled "$agent_unit")" = enabled
@@ -1254,35 +1278,59 @@ capsule_unit_digest=$(sha256sum "$recovery_unit_path" | cut -d' ' -f1)
 capsule_gate_digest=$(sha256sum "$recovery_gate" | cut -d' ' -f1)
 capsule_suppression_digest=$(sha256sum "$recovery_suppression" \
   | cut -d' ' -f1)
-test "$capsule_unit_digest" = "$(dpkg-deb --fsys-tarfile \
+candidate_preinst=$test_root/candidate-preinst
+dpkg-deb --ctrl-tarfile \
   "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
-  | tar -xOf - ./lib/systemd/system/$recovery_unit \
-  | sha256sum | cut -d' ' -f1)"
-test "$capsule_gate_digest" = "$(dpkg-deb --fsys-tarfile \
-  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
-  | tar -xOf - ./lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf \
-  | sha256sum | cut -d' ' -f1)"
-test "$capsule_suppression_digest" = "$(dpkg-deb --fsys-tarfile \
-  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
-  | tar -xOf - ./lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf \
-  | sha256sum | cut -d' ' -f1)"
+  | tar -xOf - ./preinst > "$candidate_preinst"
+embedded_capsule_unit_digest=$(sed -n \
+  "s/^recovery_capsule_unit_sha256='\([^']*\)'$/\1/p" "$candidate_preinst")
+embedded_capsule_gate_digest=$(sed -n \
+  "s/^recovery_capsule_gate_sha256='\([^']*\)'$/\1/p" "$candidate_preinst")
+embedded_capsule_suppression_digest=$(sed -n \
+  "s/^recovery_capsule_suppression_sha256='\([^']*\)'$/\1/p" \
+  "$candidate_preinst")
+test "$capsule_unit_digest" = "$embedded_capsule_unit_digest"
+test "$capsule_gate_digest" = "$embedded_capsule_gate_digest"
+test "$capsule_suppression_digest" = "$embedded_capsule_suppression_digest"
+capsule_manifest=/var/lib/vonk-forge/package-upgrade/recovery-capsule/manifest
+test "$capsule_unit_digest" = "$(sed -n '3s/^unit_sha256=//p' \
+  "$capsule_manifest")"
+test "$capsule_gate_digest" = "$(sed -n '4s/^gate_sha256=//p' \
+  "$capsule_manifest")"
+test "$capsule_suppression_digest" = "$(sed -n \
+  '5s/^suppression_sha256=//p' "$capsule_manifest")"
 test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" \
   | cut -d' ' -f1)" = "$target_recovery_runner_digest"
 
   systemctl --system daemon-reload
   systemctl --system reset-failed "$agent_unit" "$recovery_unit" \
     >/dev/null 2>&1 || true
-  if systemctl --system start "$agent_unit" >/dev/null 2>&1; then
+  # A failed ExecCondition skips the service without failing the start job, so
+  # prove the resulting process state rather than interpreting systemctl's zero
+  # exit status as evidence that ExecStart ran.
+  systemctl --system start "$agent_unit" >/dev/null 2>&1 || true
+  agent_pre_recovery_state=$(systemctl --system show \
+    --property=ActiveState --value "$agent_unit")
+  agent_pre_recovery_pid=$(systemctl --system show \
+    --property=MainPID --value "$agent_unit")
+  if [[ "$agent_pre_recovery_state" == active \
+    || "$agent_pre_recovery_pid" != 0 ]]; then
     printf '%s\n' 'agent unexpectedly started before capsule recovery' >&2
     exit 1
   fi
-  test "$(systemctl --system show --property=ActiveState --value \
-    "$agent_unit")" != active
+  test "$agent_pre_recovery_state" != active
+  test "$agent_pre_recovery_pid" = 0
 
   # Restarting the target forces systemd to traverse the vendor Wants edge,
   # which models the next boot transaction without rebooting the CI host.
   # Do not start the capsule directly: this assertion must prove boot pickup.
-  systemctl --system restart multi-user.target
+  # A Wanted dependency may transiently fail the target restart while its
+  # Restart=on-failure policy schedules the next bounded recovery attempt.
+  # A real boot does not abort multi-user.target for an optional Wants edge,
+  # so preserve that behavior here and prove convergence below.
+  systemctl --system restart multi-user.target >/dev/null 2>&1 || true
+  test "$(systemctl --system show --property=ActiveState --value \
+    multi-user.target)" = active
 fi
 printf 'durable recovery crash-point pending gate: %s\n' \
   "$(cat "$test_root/crash-point-pending-kind")"

@@ -36,7 +36,7 @@ REQUIRED_EXECUTABLE = {
 REPAIR_STANDARD_RUNNER = (
     "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard"
 )
-REPAIR_AUTHORITY = "usr/share/doc/vonk-forge-agent/repair-authority"
+REPAIR_AUTHORITY = "usr/lib/vonk-forge/repair-authority"
 REPAIR_PAYLOAD_ADDITIONS = {REPAIR_STANDARD_RUNNER, REPAIR_AUTHORITY}
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,

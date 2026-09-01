@@ -56,7 +56,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
         production_phases | boot_crashpoints | {"none"}
     )
     assert "systemctl --system kill --kill-whom=all --signal=SIGKILL" in harness
-    assert 'systemctl --system start "$recovery_unit"' in harness
+    assert "systemctl --system restart multi-user.target" in harness
     assert 'systemctl --system freeze "$helper_unit"' in harness
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
@@ -67,6 +67,19 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert "source_capsule_unit_file=$binary_source_root/packaging/systemd/" in harness
 
 
+def test_terminal_cleanup_retires_the_only_boot_owner_last() -> None:
+    runner = RUNNER.read_text()
+    cleanup = runner[
+        runner.index("finish_terminal_cleanup() {") : runner.index(
+            "allow_agent_start() {"
+        )
+    ]
+
+    assert cleanup.index("retire_repair_gate") < cleanup.index(
+        "cleanup_retired_state"
+    ) < cleanup.index("retire_source_capsule")
+
+
 def _assert_frozen_runtime_and_old_runner() -> None:
     # The package builder is deliberately frozen with the repair lifecycle:
     # ordinary packages now bind the static build-egress binary, while repair
@@ -74,13 +87,13 @@ def _assert_frozen_runtime_and_old_runner() -> None:
     # does not authenticate it.
     expected = {
             ROOT / "packaging/debian/preinst-repair": (
-                "9c38aa4379e3b5b9d78c73510cb3917beae5dfd507967e5fd7616464e6db5b27"
+                "3db1ee0d793b8978c0bbf993a64face8ca3e7a290e6b8d834bc4175dfd8ef944"
             ),
             ROOT / "packaging/debian/postinst-repair": (
-                "89efc936dce626184d3faaa6534c98e1eaa93b99103a4e0eb3af3063b605be02"
+                "c71ffce1a4fb20d4b346f7a1cb7e10558d84ab61ab4b061bcc43505f717055ac"
             ),
             ROOT / "scripts/build-agent-deb": (
-                "41b2573022156dd8e9231b8862df19cf1d6c7408a422d4fa0fe1d9512e064f5e"
+                "25874cdcd6a231776bc110f000d2003d0b79c9a76eedab071bff1e5f7cf61f59"
             ),
     }
     for path, digest in expected.items():

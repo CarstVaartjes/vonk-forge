@@ -1382,7 +1382,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'test -f "$recovery_unit_path"',
         'test -L "$recovery_enablement"',
         "agent unexpectedly started before capsule recovery",
-        'systemctl --system start "$recovery_unit"',
+        "systemctl --system restart multi-user.target",
     ):
         assert durable_proof in post_remove
     assert (
@@ -1411,6 +1411,8 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "trap 'exit 130' INT" in lifecycle
     assert "trap 'exit 143' TERM" in lifecycle
     assert "dump_failure_diagnostics" in lifecycle
+    assert "failed assertion: line=%s status=%s" in lifecycle
+    assert "recovery_failed_line=$LINENO" in lifecycle
     assert "journalctl --system --no-pager -n 200" in lifecycle
     assert "firewall_fixture=/run/systemd/system/$firewall_unit" in lifecycle
     assert "Vonk Forge package recovery firewall fixture" in lifecycle
@@ -2874,6 +2876,15 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "20-package-upgrade-recovery.conf" in runner
     assert "vonk-forge-package-upgrade-repair.service" not in runner
     assert "30-package-upgrade-repair.conf" not in runner
+    assert "30-node-bound-repair.conf" in runner
+    assert "ExecCondition=\nExecCondition=+" in runner
+    assert "stage_repair_gate" in runner
+    assert "retire_repair_gate" in runner
+    assert 'if [ "$source_schema" = 1 ]; then' in runner
+    assert "repair_gate_loaded" in runner
+    assert "terminal_repair_contract_safe" in runner
+    assert "source_capsule_terminal_safe" in runner
+    assert "1111111|1011111|1001111|1001101|1001001|1001000|1000000|0000000" in runner
     assert "/usr/bin/systemd-run --system --wait --pipe --collect --quiet" in runner
     assert "--property=CapabilityBoundingSet=CAP_SYS_PTRACE" in runner
     assert "--property=AmbientCapabilities=" in runner
@@ -2898,6 +2909,8 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "package-repair.receipt" not in postinst
     assert "helper-upgrade.pending" not in postinst
     assert "VONK_FORGE_PACKAGE_REPAIR_NONCE" in postinst
+    assert "repair_authority=/usr/lib/vonk-forge/repair-authority" in postinst
+    assert "/usr/share/doc/vonk-forge-agent/repair-authority" not in postinst
 
 
 @pytest.mark.parametrize(
@@ -2962,7 +2975,7 @@ def test_repair_runtime_binds_every_running_unit_to_uid_and_gid() -> None:
         '"$target_agent_sha256" "$agent_uid" "$agent_gid"'
     )
     assert normalized.count(helper_proof) == 7
-    assert normalized.count(agent_proof) == 6
+    assert normalized.count(agent_proof) == 8
     assert '"$target_helper_sha256" 0)' not in runner
     assert '"$target_agent_sha256" "$agent_uid")' not in runner
 

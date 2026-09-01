@@ -1217,7 +1217,7 @@ def build(
             )
             install_file(
                 stage,
-                "usr/share/doc/vonk-forge-agent/repair-authority",
+                "usr/lib/vonk-forge/repair-authority",
                 repair_authority_raw,
                 0o644,
             )

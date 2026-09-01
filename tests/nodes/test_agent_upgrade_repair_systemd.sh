@@ -27,7 +27,7 @@ node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
 source_version=0.1.0~dev.1788260440+g4cac2044d05e
 repair_version=${source_version}+repair.spk${node_suffix}.1
-ordinary_version=0.1.0~dev.382+g0123456789ab
+ordinary_version=0.1.0~dev.1788260441+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
 binary_revision=$(git -c safe.directory="$repo_root" --no-replace-objects \
   -C "$repo_root" rev-parse 4cac2044d05e39adb2a516223d1833656f605c43)
@@ -91,10 +91,12 @@ source_runner=$source_capsule_dir/runner
 standard_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard
 source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_capsule_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_unit_name=${source_capsule_unit##*/}
 source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 source_capsule_suppression=/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
 source_capsule_enablement=/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+repair_gate=/lib/systemd/system/vonk-forge-agent.service.d/30-node-bound-repair.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
 repair_state=$source_state/repair
 repair_phase=$repair_state/phase
@@ -228,7 +230,7 @@ cleanup() {
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.service.d
   rm -f -- "$source_capsule_enablement" "$source_capsule_unit" \
-    "$source_capsule_gate" "$source_capsule_suppression"
+    "$source_capsule_gate" "$source_capsule_suppression" "$repair_gate"
   rmdir --ignore-fail-on-non-empty \
     "${source_capsule_gate%/*}" "${source_capsule_suppression%/*}" \
     >/dev/null 2>&1 || true
@@ -327,6 +329,8 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /lib/systemd/system/vonk-forge-package-helper.service.d \
     || -e "$source_gate" \
     || -L "$source_gate" \
+    || -e "$repair_gate" \
+    || -L "$repair_gate" \
     || -e "$source_capsule_unit" \
     || -L "$source_capsule_unit" \
     || -e "$source_capsule_gate" \
@@ -1676,7 +1680,29 @@ if [[ -n "$crash_watcher" ]]; then
   wait "$crash_watcher"
   test -e "$test_root/crash-observed"
   if [[ " ${repair_boot_crashpoints[*]} " = *" $crash_phase "* ]]; then
-    systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+    # The freezer is a test-only power-loss bracket. A real boot recreates the
+    # helper cgroup unfrozen, so prove that normalization before stopping the
+    # old invocation and traversing the durable boot edge.
+    boot_helper_control_group=$(systemctl --system show \
+      --property=ControlGroup --value "$helper_unit")
+    case "$boot_helper_control_group" in
+      */system.slice/"$helper_unit") ;;
+      *) printf 'unexpected frozen helper cgroup: %s\n' \
+        "$boot_helper_control_group" >&2; exit 1 ;;
+    esac
+    boot_helper_cgroup=/sys/fs/cgroup$boot_helper_control_group
+    if [[ -f "$boot_helper_cgroup/cgroup.freeze" ]]; then
+      printf '0\n' > "$boot_helper_cgroup/cgroup.freeze"
+    fi
+    for _ in {1..100}; do
+      systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+      [[ ! -e "$boot_helper_cgroup/cgroup.events" ]] && break
+      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events" && break
+      sleep 0.05
+    done
+    if [[ -e "$boot_helper_cgroup/cgroup.events" ]]; then
+      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events"
+    fi
     systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
       "$socket_unit" >/dev/null 2>&1 || true
     if [[ "$crash_phase" = helper-proven-boot \
@@ -1690,9 +1716,12 @@ if [[ -n "$crash_watcher" ]]; then
       "$helper_unit" "$socket_unit" >/dev/null 2>&1 || true
     systemctl --system daemon-reload
     systemctl --system start "$socket_unit"
-  else
-    systemctl --system reset-failed "$recovery_unit" >/dev/null 2>&1 || true
-    systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
+    # Model the next boot transaction through the durable Wants edge. The
+    # socket deliberately wants the package-owned standard recovery unit, but
+    # schema-v2 suppresses that unit while the capsule owns the intent.
+    systemctl --system restart multi-user.target >/dev/null 2>&1 || true
+    test "$(systemctl --system show --property=ActiveState --value \
+      multi-user.target)" = active
   fi
 fi
 
@@ -1790,6 +1819,7 @@ test ! -e "$source_state/$source_package_sha.deb"
 test ! -e "$source_blocker"
 test ! -e "$source_pending"
 test ! -e "$source_dropin"
+test ! -e "$repair_gate"
 test ! -e "$repair_state"
 test "$(find "$source_state" -mindepth 1 -maxdepth 1 -type d \
   -name '.repair-build.*' | wc -l)" -eq 0
@@ -1849,7 +1879,8 @@ observation_receipt_private_digest=$(sha256sum \
 
 # Prove that the repaired helper can carry one subsequent ordinary package
 # through the same root-custody + dpkg parent-chain mechanism.
-build_package "$ordinary_version" next "$build_digest_next" "$test_root/next-dist"
+build_package "$ordinary_version" next "$build_digest_next" \
+  "$test_root/next-dist" "$repo_root" "$packaging_revision"
 ordinary_package=$test_root/next-dist/vonk-forge-agent_${ordinary_version}_arm64.deb
 "$repo_root/scripts/verify-agent-deb" --json "$ordinary_package" >/dev/null
 ordinary_sha="$(sha256sum "$ordinary_package" | cut -d' ' -f1)"
@@ -1867,7 +1898,10 @@ for _ in {1..2400}; do
     && "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent 2>/dev/null)" \
       = 'ii ' && -s "$started" \
     && -f /var/lib/vonk-forge/helper-upgrade.receipt \
-    && ! -e "$source_intent" && ! -e "$source_pending" ]]; then
+    && ! -e "$source_intent" && ! -e "$source_pending" \
+    && ! -e "$source_state/$ordinary_sha.deb" \
+    && "$(systemctl --system show --property=ActiveState --value \
+      "$source_capsule_unit_name")" = inactive ]]; then
     break
   fi
   sleep 0.1
