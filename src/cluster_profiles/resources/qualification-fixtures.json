@@ -3835,7 +3835,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual": {
-      "content_sha256": "e4e66aa1066d4d56d2292c81d6e70ff93bc8f65737cdb53ebe19c49dc8a2b36f",
+      "content_sha256": "ec9a7aa89e24d1500ed2060cfd8699aea94b501cebbb6370c31b10ab2d1c340e",
       "alias": "glm-5.3-flash-drowzeys-dflash2",
       "smoke_cases": [
         "M0",

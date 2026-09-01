@@ -108,7 +108,7 @@ def test_packaged_generic_fixtures_are_digest_and_format_valid() -> None:
     )
     assert len(registry.recipes) == 44
     assert len(registry.special) == 0
-    assert len(registry.service_recipes) == 34
+    assert len(registry.service_recipes) == 35
     assert sum(len(recipe.all_cases) for recipe in registry.recipes.values()) == 59
     qwen_cases = registry.recipes[
         "vonk-forge/qwen-image-edit-2511-comfyui-single"
@@ -383,7 +383,7 @@ def test_packaged_recipe_bindings_match_the_campaign_matrix_exactly() -> None:
         set(registry.recipes) | set(registry.special) | set(registry.service_recipes)
     )
 
-    assert len(catalog_keys) == 82
+    assert len(catalog_keys) == 83
     assert fixture_keys == catalog_keys - unsupported_topologies
 
 
