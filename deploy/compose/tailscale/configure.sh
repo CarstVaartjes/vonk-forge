@@ -338,13 +338,19 @@ fi
 if ! serve_is_exact "${include_hermes}"; then
     configure_services "${include_hermes}"
 fi
+configuration_ready=1
 if ! wait_for_exact_services "${include_hermes}"; then
     echo "ERROR: Tailscale Services do not have the exact HTTPS listeners." >&2
-    exit 1
+    # A fresh child tailnet can accept the tagged host before its Serve
+    # configuration and route advertisements converge. Keep the reconciler
+    # alive in normal operation so its next pass can repair that state instead
+    # of relying on a container restart (which also resets the health window).
+    configuration_ready=0
 fi
 
 remaining=120
 route_repair_remaining=0
+routes_ready=1
 while [ "${remaining}" -gt 0 ]; do
     if service_host_is_active "${include_hermes}"; then
         break
@@ -363,10 +369,15 @@ if [ "${remaining}" -le 0 ]; then
     echo "ERROR: Tailscale has not approved and activated the selected Service hosts;" \
         "verify auto-approval and grant tag:vonk-gateway TCP 443 access" \
         "to every hosted Service." >&2
-    exit 1
+    # Do not exit the long-running reconciler here. Tailscale may publish the
+    # service-host route after the initial bounded wait; the reconciler below
+    # will re-advertise it once the child policy is visible. TS_CONFIGURE_ONCE
+    # remains fail-closed for one-shot validation and acceptance checks.
+    routes_ready=0
 fi
 
 if [ "${TS_CONFIGURE_ONCE:-0}" = "1" ]; then
+    [ "${configuration_ready}" -eq 1 ] && [ "${routes_ready}" -eq 1 ] || exit 1
     exit 0
 fi
 
