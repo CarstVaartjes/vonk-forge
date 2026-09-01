@@ -38,6 +38,14 @@ const DEFAULT_ENDPOINT_HOST_PORTS: &str = "8000,8101";
 const DEFAULT_HOST_ENDPOINT_PORTS: &str = "8888";
 const DEFAULT_RENDEZVOUS_PORT: &str = "29500";
 const DEFAULT_FABRIC_BANDWIDTH_MBPS: &str = "200000";
+// A fresh Spark may spend well over a minute bootstrapping its controller
+// connection (especially while systemd starts the helper and inventory
+// dependencies).  Keep the readiness proof strict, but give that startup
+// phase a bounded budget that still fits inside the bootstrap's 300-second
+// command timeout.
+const READINESS_MAX_WAIT: Duration = Duration::from_secs(180);
+const READINESS_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+const READINESS_REQUIRED_SAMPLES: u8 = 3;
 const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
 const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
 const INSTALLER_RELEASE_PUBLIC_KEY: &[u8] =
@@ -1755,7 +1763,10 @@ fn verify_sustained_readiness(
 ) -> Result<(), SetupError> {
     let mut healthy = 0_u8;
     let mut pid = None;
-    for attempt in 0..30 {
+    let attempts = READINESS_MAX_WAIT
+        .as_secs()
+        .div_ceil(READINESS_SAMPLE_INTERVAL.as_secs());
+    for attempt in 0..attempts {
         let active = run_checked(
             runner,
             Command::new(
@@ -1820,11 +1831,11 @@ fn verify_sustained_readiness(
                 pid = None;
             }
         }
-        if healthy >= 3 {
+        if healthy >= READINESS_REQUIRED_SAMPLES {
             return Ok(());
         }
-        if attempt < 29 {
-            runner.sleep(Duration::from_secs(2));
+        if attempt + 1 < attempts {
+            runner.sleep(READINESS_SAMPLE_INTERVAL);
         }
     }
     Err(SetupError::Command(
@@ -2798,6 +2809,57 @@ mod tests {
         fn secret(&mut self, _label: &str) -> Result<String, String> {
             Err("unexpected secret prompt".to_owned())
         }
+    }
+
+    struct DelayedReadinessRunner {
+        readiness_checks: u32,
+    }
+
+    impl CommandRunner for DelayedReadinessRunner {
+        fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+            if command
+                .args
+                .iter()
+                .any(|argument| argument == "verify-readiness")
+            {
+                self.readiness_checks += 1;
+                return Ok(CommandOutput {
+                    success: self.readiness_checks > 30,
+                    stdout: Vec::new(),
+                });
+            }
+            if command.program == Path::new("/usr/bin/systemctl")
+                && command.args.first().map(String::as_str) == Some("show")
+            {
+                return Ok(CommandOutput::success(b"4242\n".to_vec()));
+            }
+            Ok(CommandOutput::success_empty())
+        }
+
+        fn sleep(&mut self, _duration: Duration) {}
+    }
+
+    #[test]
+    fn readiness_allows_bounded_slow_start_but_still_requires_three_samples() {
+        let paths = InstallPaths {
+            config: PathBuf::from("/etc/vonk-forge-agent/agent.toml"),
+            ca: PathBuf::from("/etc/vonk-forge-agent/controller-ca.pem"),
+            firewall_config: PathBuf::from("/etc/vonk-forge-agent/docker-firewall.conf"),
+            helper_authority: PathBuf::from("/etc/vonk-forge-agent/host-helper-authority.pub"),
+            hosts: PathBuf::from("/etc/hosts"),
+            agent: PathBuf::from("/usr/lib/vonk-forge/vonk-agent"),
+            staging_root: PathBuf::from("/var/tmp/vonk-forge-agent"),
+            sudo: PathBuf::from("/usr/bin/sudo"),
+            service: SERVICE.to_owned(),
+            required_owner: None,
+        };
+        let mut runner = DelayedReadinessRunner {
+            readiness_checks: 0,
+        };
+
+        verify_sustained_readiness(&paths, &mut runner).unwrap();
+
+        assert_eq!(runner.readiness_checks, 33);
     }
 
     #[test]
