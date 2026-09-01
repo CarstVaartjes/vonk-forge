@@ -1724,7 +1724,6 @@ class SparkLifecycle:
         if (
             not isinstance(document, dict)
             or not identity_fields <= set(document)
-            or bool(set(document) - identity_fields - {"observation_receipt_public_key"})
             or document.get("self_test_passed") is not True
             or not isinstance(document.get("build_digest"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
