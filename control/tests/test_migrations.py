@@ -77,6 +77,27 @@ EXPECTED_BASELINE_TABLES = {
     "telemetry_maintenance_state",
     "users",
 }
+RETAINED_LEGACY_TABLES = {"agent_upgrade_compatibility_recoveries"}
+
+
+def _metadata_differences_without_retained_legacy(connection: object) -> list[object]:
+    from vonk_control.models import Base
+
+    differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    return [
+        difference
+        for difference in differences
+        if not (
+            (
+                difference[0] == "remove_table"
+                and difference[1].name in RETAINED_LEGACY_TABLES
+            )
+            or (
+                difference[0] == "remove_index"
+                and difference[1].table.name in RETAINED_LEGACY_TABLES
+            )
+        )
+    ]
 
 
 def _config(database_url: str) -> Config:
@@ -87,7 +108,7 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
+def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
     tmp_path: Path,
 ) -> None:
     from vonk_control.models import Base
@@ -99,15 +120,14 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     engine = create_engine(url)
     tables = set(inspect(engine).get_table_names())
 
-    assert tables - {"alembic_version"} == EXPECTED_BASELINE_TABLES
+    assert tables - {"alembic_version"} - RETAINED_LEGACY_TABLES == (
+        EXPECTED_BASELINE_TABLES
+    )
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
     with engine.connect() as connection:
-        assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
-            == []
-        )
+        assert _metadata_differences_without_retained_legacy(connection) == []
         assert connection.execute(
             text(
                 "SELECT singleton_id, next_resolution_seconds FROM telemetry_maintenance_state"
@@ -138,10 +158,36 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0003_agent_reenrollment_grants.py",
         "0004_artifact_jobs.py",
         "0005_repair_fleet_profile_tables.py",
+        "0006_spark3542_compat_recovery.py",
+        "0007_compat_recovery_rearm_certificates.py",
+        "0008_compat_recovery_abandon.py",
+        "0009_compat_abandoned_at.py",
         "0010_managed_recipe_catalog_sync.py",
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
     ]
+
+
+def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.models import Base
+
+    url = f"sqlite:///{tmp_path / 'compat-recovery-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0009_compat_abandoned_at")
+    engine = create_engine(url)
+
+    assert "agent_upgrade_compatibility_recoveries" in set(
+        inspect(engine).get_table_names()
+    )
+    assert "agent_upgrade_compatibility_recoveries" not in Base.metadata.tables
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() \
+            == "0012_recipe_run_generation"
 
 
 def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(
@@ -243,8 +289,6 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
 def test_existing_database_missing_fleet_profile_tables_is_repaired(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.models import Base
-
     url = f"sqlite:///{tmp_path / 'fleet-profile-repair.sqlite'}"
     config = _config(url)
     command.upgrade(config, "0004_artifact_jobs")
@@ -281,10 +325,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
         "ix_fleet_profile_applications_state",
     }
     with engine.connect() as connection:
-        assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
-            == []
-        )
+        assert _metadata_differences_without_retained_legacy(connection) == []
     with engine.begin() as connection:
         connection.execute(
             text(
