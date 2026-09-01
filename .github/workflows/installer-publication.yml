@@ -629,6 +629,9 @@ jobs:
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          # The disabled lane still renders deterministic Service hostnames,
+          # but it must never receive a real tailnet or client credentials.
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: acceptance.invalid
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
           VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
           VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard

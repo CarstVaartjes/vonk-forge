@@ -245,6 +245,9 @@ def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report()
         )
     assert compatibility_step["env"]["DOCKER_HOST"] == "tcp://127.0.0.1:2375"
     assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
+    assert compatibility_step["env"]["VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"] == (
+        "acceptance.invalid"
+    )
     assert "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT" not in compatibility_step["env"]
     assert "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME" not in compatibility_step["env"]
     assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID" not in compatibility_step["env"]
@@ -508,6 +511,7 @@ def test_acceptance_jobs_do_not_claim_a_same_host_external_tailnet_boundary() ->
         "Run Docker 29.4.3 NAS compatibility acceptance"
     ]
     assert docker["env"]["VONK_ACCEPTANCE_TAILSCALE_MODE"] == "disabled"
+    assert docker["env"]["VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX"] == "acceptance.invalid"
     for forbidden in (
         "VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT",
         "VONK_ACCEPTANCE_TAILNET_KIND",
