@@ -2174,7 +2174,7 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{OciError, is_public_ip, public_https_endpoint_with};
-    use std::{collections::VecDeque, net::IpAddr};
+    use std::{cell::RefCell, collections::VecDeque, net::IpAddr};
     use url::Url;
 
     #[test]
