@@ -3121,7 +3121,81 @@ def test_legacy_snapshot_updates_single_run_and_ignores_exact_distributed_run(
         assert exact_worker.state == "running"
 
 
-def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
+def test_legacy_distributed_worker_cannot_inherit_healthy_owner_endpoint(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="l" * 36
+    )
+    legacy_run_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=legacy_run_id,
+                installation_id=installation.owner_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                run_generation=1,
+                alias="legacy-owner-healthy-worker-dead",
+                plan={"schema_version": 1, "observation_schema_version": 1},
+                plan_digest="7" * 64,
+                state="running",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            (
+                RunNode(
+                    run_id=legacy_run_id,
+                    node_id=nodes[0],
+                    rank=0,
+                    role="entrypoint",
+                    state="running",
+                    port=8000,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
+                ),
+                RunNode(
+                    run_id=legacy_run_id,
+                    node_id=nodes[1],
+                    rank=1,
+                    role="worker",
+                    state="running",
+                    port=8000,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
+                ),
+            )
+        )
+
+    # This is exactly what an older agent reports when the shared owner HTTP
+    # endpoint is healthy even though its local worker container is dead.
+    record_recipe_run_observations(
+        sessions,
+        nodes[1],
+        NOW + timedelta(seconds=1),
+        (RecipeRunObservation(legacy_run_id, True),),
+    )
+
+    with sessions() as session:
+        worker = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == legacy_run_id,
+                RunNode.node_id == nodes[1],
+            )
+        )
+        assert worker is not None
+        assert worker.state == "failed"
+        assert worker.updated_at.replace(tzinfo=UTC) == NOW + timedelta(seconds=1)
+
+
+def test_legacy_distributed_rank_loss_migrates_to_exact_and_republishes(
     tmp_path: Path,
 ) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
@@ -3141,8 +3215,24 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
     publisher = ConcurrentPublisher()
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(start.owner_id)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        run.plan = {**run.plan, "observation_schema_version": 1}
+        for node in session.scalars(
+            select(RunNode).where(RunNode.run_id == start.owner_id)
+        ):
+            node.observed_run_generation = None
+            node.observation_receipt_sha256 = None
+            node.observation_endpoint_ready = None
     failure_observed_at = NOW + timedelta(seconds=1)
-    record_exact_empty_snapshot(sessions, nodes[1], failure_observed_at)
+    # A legacy worker can observe the healthy owner HTTP endpoint as true, but
+    # that signal must fail closed because it proves no local worker process.
+    record_recipe_run_observations(
+        sessions,
+        nodes[1],
+        failure_observed_at,
+        (RecipeRunObservation(start.owner_id, True),),
+    )
     recovery = DistributedRecoveryCoordinator(
         sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
     )
@@ -3165,6 +3255,7 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
         )
         assert run.route_state == "withdrawn"
         assert run.run_generation == 2
+        assert run.plan["observation_schema_version"] == 2
         assert stop_job.payload["recovery"]["failed_rank"] == 1
     assert [child.node_id for child in stop_children] == [nodes[0]]
 
@@ -4376,6 +4467,12 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         alias="first",
     )
     second_run_id = clone_running_run(sessions, first.owner_id, alias="second")
+    with sessions.begin() as session:
+        for run_id in (first.owner_id, second_run_id):
+            run = session.get(RecipeRun, run_id)
+            run.plan = {**run.plan, "observation_schema_version": 2}
+    mark_current_exact_observations(sessions, first.owner_id, NOW)
+    mark_current_exact_observations(sessions, second_run_id, NOW)
     publisher = ConcurrentPublisher()
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(first.owner_id)

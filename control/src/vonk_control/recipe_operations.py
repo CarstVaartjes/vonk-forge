@@ -3513,8 +3513,22 @@ def record_recipe_run_observations(
                 continue
             if _aware(node.updated_at) > observed:
                 continue
+            rank_count = session.scalar(
+                select(func.count(RunNode.id)).where(RunNode.run_id == node.run_id)
+            )
+            # A v1 distributed observation is only an HTTP probe of the
+            # collective endpoint owner.  It cannot prove this authenticated
+            # node's exact local rank is alive, so accepting `ready=true`
+            # would let a dead worker inherit the owner's health.  Fail all
+            # such legacy ranks closed; recovery starts them again with the
+            # signed exact-v2 local-container protocol.
+            legacy_distributed = (rank_count or 0) > 1
             if node.state != "failed":
-                node.state = "running" if by_run.get(node.run_id, False) else "failed"
+                node.state = (
+                    "running"
+                    if by_run.get(node.run_id, False) and not legacy_distributed
+                    else "failed"
+                )
             node.updated_at = observed
 
 

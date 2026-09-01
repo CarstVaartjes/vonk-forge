@@ -2766,7 +2766,7 @@ fn managed_recipe_run_observation_reports_running_unhealthy_container() {
 }
 
 #[test]
-fn distributed_worker_observes_collective_endpoint_owner() {
+fn legacy_distributed_worker_never_substitutes_owner_http_for_local_liveness() {
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
     write_managed_distributed_worker_run(
@@ -2792,22 +2792,8 @@ fn distributed_worker_observes_collective_endpoint_owner() {
     .unwrap();
 
     assert_eq!(observations.len(), 1);
-    assert!(observations[0].ready);
-    let calls = runner.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, Program::Curl);
-    assert!(
-        calls[0]
-            .1
-            .iter()
-            .any(|value| value == "http://192.168.100.10:8101/v1/models")
-    );
-    assert!(
-        calls[0]
-            .1
-            .iter()
-            .all(|value| value != "http://192.168.100.11:8101/v1/models")
-    );
+    assert!(!observations[0].ready);
+    assert!(runner.calls.borrow().is_empty());
 }
 
 #[test]

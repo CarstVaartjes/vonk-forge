@@ -100,6 +100,7 @@ def setup(
     runtime_model_aliases=("qwen",),
     interfaces=None,
     endpoint_owner_rank=0,
+    exact_distributed=True,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -226,7 +227,11 @@ def setup(
             mapping_generation=1,
             alias=run_alias,
             plan_digest="c" * 64,
-            plan={},
+            plan={
+                "observation_schema_version": (
+                    2 if ranks > 1 and exact_distributed else 1
+                )
+            },
             state="running",
             actor="admin",
             created_at=NOW,
@@ -246,6 +251,19 @@ def setup(
                     reserved_memory_bytes=100,
                     endpoint={"url": f"http://10.0.0.{rank + 2}:8000"},
                     evidence_digest=str(rank + 1) * 64,
+                    observed_run_generation=(
+                        run.run_generation if ranks > 1 and exact_distributed else None
+                    ),
+                    observation_receipt_sha256=(
+                        str(rank + 1) * 64 if ranks > 1 and exact_distributed else None
+                    ),
+                    observation_endpoint_ready=(
+                        True
+                        if ranks > 1
+                        and exact_distributed
+                        and rank == endpoint_owner_rank
+                        else None
+                    ),
                     updated_at=NOW - (timedelta(seconds=301) if stale else timedelta()),
                 )
             )
@@ -401,6 +419,20 @@ def test_all_ranks_must_be_fresh_and_ready_but_only_entrypoint_is_routed(
         == "http://10.0.0.2:8000/v1"
     )
     assert b"10.0.0.3" not in applied[-1]
+
+
+def test_legacy_distributed_route_is_rejected_without_exact_local_rank_evidence(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(tmp_path, exact_distributed=False)
+
+    with pytest.raises(
+        RecipeRouteError,
+        match="distributed recipe route requires exact rank observations",
+    ):
+        service.publish_run(run_id)
+
+    assert applied == []
 
 
 def test_nonzero_mapping_owner_routes_with_its_accepted_rank_identity(
@@ -723,6 +755,10 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         run.plan = {"observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = NOW + timedelta(seconds=60)
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = None
+            node.observation_receipt_sha256 = None
+            node.observation_endpoint_ready = None
         session.add(
             Job(
                 request_id="10000000-0000-4000-8000-000000000001",

@@ -181,7 +181,7 @@ struct RunLifecycle {
 
 struct RecipeRunProbe {
     run_id: String,
-    address: IpAddr,
+    address: Option<IpAddr>,
     port: u16,
     health_path: String,
 }
@@ -993,7 +993,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         probes
             .into_iter()
             .map(|probe| {
-                let ready = self.readiness_request(probe.address, probe.port, &probe.health_path);
+                // Legacy distributed lifecycles have no controller-bound,
+                // helper-signed local-container identity.  In particular, a
+                // worker probing the shared endpoint owner only proves that
+                // the owner is healthy; it says nothing about the worker's
+                // local rank.  Fail those headless legacy ranks closed so the
+                // Controller can recover them onto the exact-v2 observation
+                // protocol.  Exact lifecycles are filtered above and combine
+                // helper-signed local liveness with owner-only HTTP readiness.
+                let ready = probe.address.is_some_and(|address| {
+                    self.readiness_request(address, probe.port, &probe.health_path)
+                });
                 Ok(RecipeRunObservation {
                     run_id: probe.run_id,
                     ready,
@@ -1059,16 +1069,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             probes.push(RecipeRunProbe {
                 run_id,
-                // Legacy distributed runs expose readiness only on the
-                // retained endpoint owner, avoiding a false failure for a
-                // healthy headless worker. New exact-observation lifecycles
-                // are filtered above and inspect every local rank separately.
+                // No distributed v1 rank may project endpoint-only health as
+                // rank readiness.  Even on the endpoint owner that signal is
+                // insufficient to prove every local rank; Controller recovery
+                // will relaunch the run with exact-v2 observations.
                 address: if placement.world_size > 1 {
-                    placement.master_address.ok_or(OciError::Artifact)?
+                    None
                 } else {
-                    placement
-                        .endpoint_address
-                        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+                    Some(
+                        placement
+                            .endpoint_address
+                            .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+                    )
                 },
                 port: placement.port,
                 health_path: endpoint.health_path.clone(),
