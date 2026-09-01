@@ -405,14 +405,14 @@ def test_current_vllm028_and_variant_bindings_are_exact() -> None:
         "lfm2-5-vl-3b-vllm028",
     )
     assert (glm_nvfp4.content_sha256, glm_nvfp4.alias) == (
-        "97e28bf3ebff5e672b8c11945628a78ee891d88945f13b5343e27ff81385d1a1",
+        "db03d00e1436fcb2bc09e7189b9a9fc8f6ef8e45a90982e3f9722b5441cdc410",
         "glm-5.3-flash",
     )
     assert glm_nvfp4.higher_tiers["stress"] == (
         "32K long-context repetition regression and bounded concurrency canaries",
     )
     assert (glm_exl3.content_sha256, glm_exl3.alias) == (
-        "cff8d29ca0ec6cd3b233c424b5f7c2155d1701a7ac5e1819fb8a3538bf5496c3",
+        "8b26e0c70aa6f2d78a5db0c4e8050db27bba423ed629dfb6aa20b17574986b02",
         "glm-5.3-flash-exl3",
     )
     assert glm_exl3.higher_tiers["stress"] == (

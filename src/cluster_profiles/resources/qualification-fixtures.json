@@ -3745,7 +3745,7 @@
       }
     },
     "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual": {
-      "content_sha256": "d0121b2d092af5ffeada0555f47ce2acc6ca541c3dcc3bc0a79e818d623f6d09",
+      "content_sha256": "0e43a31fca3e33334ae3660a5a1601285177ce865660d39f6bfd50f5cc348d90",
       "alias": "deepseek-v4-flash-vision-exp",
       "smoke_cases": [
         "M0",
@@ -3763,7 +3763,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual": {
-      "content_sha256": "97e28bf3ebff5e672b8c11945628a78ee891d88945f13b5343e27ff81385d1a1",
+      "content_sha256": "db03d00e1436fcb2bc09e7189b9a9fc8f6ef8e45a90982e3f9722b5441cdc410",
       "alias": "glm-5.3-flash",
       "smoke_cases": [
         "M0",
@@ -3817,7 +3817,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual": {
-      "content_sha256": "a576566f96a875157aae37d5db76de071580e427855ab1950bb0644675e5c47b",
+      "content_sha256": "a1fb226732c5e750096ae68cc5c97e35e7c768c72f0a1bd226efc0550fee1d84",
       "alias": "glm-5.3-flash-nvfp4",
       "smoke_cases": [
         "M0",
@@ -4183,7 +4183,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual": {
-      "content_sha256": "cff8d29ca0ec6cd3b233c424b5f7c2155d1701a7ac5e1819fb8a3538bf5496c3",
+      "content_sha256": "8b26e0c70aa6f2d78a5db0c4e8050db27bba423ed629dfb6aa20b17574986b02",
       "alias": "glm-5.3-flash-exl3",
       "smoke_cases": [
         "M0",
