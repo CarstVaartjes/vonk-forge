@@ -1156,7 +1156,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Node Status View */
+        /**
+         * Read explicit node health-probe evidence
+         * @description Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.
+         */
         get: operations["getNodeStatuses"];
         put?: never;
         post?: never;
@@ -3417,7 +3420,15 @@ export interface components {
             disk_available_bytes: number;
             /** Display Name */
             display_name: string;
-            /** Healthy */
+            /**
+             * Health Probe Stale
+             * @description True when explicit node.probe evidence is missing or older than the Controller health-probe window. This is not aggregate node readiness; use Fleet connection, inventory, and telemetry fields for live readiness.
+             */
+            health_probe_stale: boolean;
+            /**
+             * Healthy
+             * @description Health state from the latest explicit node.probe compute gate; null when no completed probe is available.
+             */
             healthy: boolean | null;
             /** Hostname */
             hostname: string;
@@ -3446,11 +3457,18 @@ export interface components {
             lifecycle: string;
             /** Memory Available Bytes */
             memory_available_bytes: number;
-            /** Probe Age Seconds */
+            /**
+             * Probe Age Seconds
+             * @description Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.
+             */
             probe_age_seconds?: number | null;
             /** Profile */
             profile: string | null;
-            /** Stale */
+            /**
+             * Stale
+             * @deprecated
+             * @description Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node readiness.
+             */
             stale: boolean;
         };
         /** OperationResponse */

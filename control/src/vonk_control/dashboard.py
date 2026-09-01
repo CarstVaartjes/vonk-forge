@@ -198,6 +198,9 @@ class DashboardService:
                 if inventory_observed_at is None
                 else max(0.0, (current - inventory_observed_at).total_seconds())
             )
+            health_probe_stale = (
+                probe_age is None or probe_age > self._health_stale_after_seconds
+            )
             nodes.append({
                 "id": node_id,
                 "display_name": node_id if profile is None else profile.display_name,
@@ -208,10 +211,9 @@ class DashboardService:
                     if observed_at is not None and isinstance(health, Mapping)
                     else None
                 ),
-                "stale": (
-                    probe_age is None
-                    or probe_age > self._health_stale_after_seconds
-                ),
+                "health_probe_stale": health_probe_stale,
+                # Retain the legacy wire field as an exact compatibility alias.
+                "stale": health_probe_stale,
                 "labels": (
                     {}
                     if profile is None or not isinstance(profile.labels, Mapping)

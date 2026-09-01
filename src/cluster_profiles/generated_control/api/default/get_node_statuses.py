@@ -67,7 +67,11 @@ def sync_detailed(
     client: AuthenticatedClient,
 
 ) -> Response[Union[BoundedErrorResponse, FleetStatusResponse]]:
-    """ Node Status View
+    """ Read explicit node health-probe evidence
+
+     Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe
+    compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection,
+    inventory, and telemetry readiness.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -93,7 +97,11 @@ def sync(
     client: AuthenticatedClient,
 
 ) -> Optional[Union[BoundedErrorResponse, FleetStatusResponse]]:
-    """ Node Status View
+    """ Read explicit node health-probe evidence
+
+     Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe
+    compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection,
+    inventory, and telemetry readiness.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -114,7 +122,11 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
 
 ) -> Response[Union[BoundedErrorResponse, FleetStatusResponse]]:
-    """ Node Status View
+    """ Read explicit node health-probe evidence
+
+     Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe
+    compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection,
+    inventory, and telemetry readiness.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -140,7 +152,11 @@ async def asyncio(
     client: AuthenticatedClient,
 
 ) -> Optional[Union[BoundedErrorResponse, FleetStatusResponse]]:
-    """ Node Status View
+    """ Read explicit node health-probe evidence
+
+     Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe
+    compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection,
+    inventory, and telemetry readiness.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

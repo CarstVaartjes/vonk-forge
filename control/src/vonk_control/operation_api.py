@@ -1013,13 +1013,38 @@ class NodeStatus(StrictModel):
     display_name: str
     hostname: str
     lifecycle: str
-    healthy: bool | None
-    stale: bool
+    healthy: bool | None = Field(
+        description=(
+            "Health state from the latest explicit node.probe compute gate; null "
+            "when no completed probe is available."
+        )
+    )
+    health_probe_stale: bool = Field(
+        description=(
+            "True when explicit node.probe evidence is missing or older than the "
+            "Controller health-probe window. This is not aggregate node readiness; "
+            "use Fleet connection, inventory, and telemetry fields for live readiness."
+        )
+    )
+    stale: bool = Field(
+        deprecated=True,
+        description=(
+            "Deprecated compatibility alias for health_probe_stale; this does not "
+            "represent aggregate node readiness."
+        ),
+    )
     labels: dict[str, str]
     profile: str | None
     memory_available_bytes: int = Field(ge=0)
     disk_available_bytes: int = Field(ge=0)
-    probe_age_seconds: float | None = Field(default=None, ge=0)
+    probe_age_seconds: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Age of the latest completed explicit node.probe compute gate, or null "
+            "when no probe evidence is available."
+        ),
+    )
     inventory_observed_at: str | None = None
     inventory_age_seconds: float | None = Field(default=None, ge=0)
     inventory_stale: bool = True

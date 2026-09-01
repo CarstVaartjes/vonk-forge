@@ -28,14 +28,19 @@ class NodeStatus:
         Attributes:
             disk_available_bytes (int):
             display_name (str):
-            healthy (Union[None, bool]):
+            health_probe_stale (bool): True when explicit node.probe evidence is missing or older than the Controller
+                health-probe window. This is not aggregate node readiness; use Fleet connection, inventory, and telemetry fields
+                for live readiness.
+            healthy (Union[None, bool]): Health state from the latest explicit node.probe compute gate; null when no
+                completed probe is available.
             hostname (str):
             id (str):
             labels (NodeStatusLabels):
             lifecycle (str):
             memory_available_bytes (int):
             profile (Union[None, str]):
-            stale (bool):
+            stale (bool): Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node
+                readiness.
             agent_binary_digest (Union[None, Unset, str]):
             agent_build_digest (Union[None, Unset, str]):
             agent_last_seen_at (Union[None, Unset, str]):
@@ -51,11 +56,13 @@ class NodeStatus:
             inventory_stale (Union[Unset, bool]):  Default: True.
             last_seen_age_seconds (Union[None, Unset, float]):
             last_seen_at (Union[None, Unset, str]):
-            probe_age_seconds (Union[None, Unset, float]):
+            probe_age_seconds (Union[None, Unset, float]): Age of the latest completed explicit node.probe compute gate, or
+                null when no probe evidence is available.
      """
 
     disk_available_bytes: int
     display_name: str
+    health_probe_stale: bool
     healthy: Union[None, bool]
     hostname: str
     id: str
@@ -90,6 +97,8 @@ class NodeStatus:
         disk_available_bytes = self.disk_available_bytes
 
         display_name = self.display_name
+
+        health_probe_stale = self.health_probe_stale
 
         healthy: Union[None, bool]
         healthy = self.healthy
@@ -195,6 +204,7 @@ class NodeStatus:
         field_dict.update({
             "disk_available_bytes": disk_available_bytes,
             "display_name": display_name,
+            "health_probe_stale": health_probe_stale,
             "healthy": healthy,
             "hostname": hostname,
             "id": id,
@@ -248,6 +258,8 @@ class NodeStatus:
         disk_available_bytes = d.pop("disk_available_bytes")
 
         display_name = d.pop("display_name")
+
+        health_probe_stale = d.pop("health_probe_stale")
 
         def _parse_healthy(data: object) -> Union[None, bool]:
             if data is None:
@@ -404,6 +416,7 @@ class NodeStatus:
         node_status = cls(
             disk_available_bytes=disk_available_bytes,
             display_name=display_name,
+            health_probe_stale=health_probe_stale,
             healthy=healthy,
             hostname=hostname,
             id=id,

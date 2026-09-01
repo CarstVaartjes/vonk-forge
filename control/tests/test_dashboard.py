@@ -235,6 +235,10 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     assert nodes["Active"]["compatibility"] == "supported"
     assert nodes["Active"]["inventory_stale"] is False
     assert nodes["Active"]["inventory_age_seconds"] == 10
+    assert nodes["Active"]["healthy"] is None
+    assert nodes["Active"]["probe_age_seconds"] is None
+    assert nodes["Active"]["health_probe_stale"] is True
+    assert nodes["Active"]["stale"] is nodes["Active"]["health_probe_stale"]
     assert nodes["Active"]["inventory_capabilities"] == [
         "build.rootless-podman.v1",
         "recipe.operations.v1",
