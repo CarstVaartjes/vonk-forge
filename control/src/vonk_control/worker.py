@@ -308,20 +308,6 @@ def assemble_production_worker(
         ),
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
-    telemetry_cadence = TelemetryMaintenanceCadence(
-        telemetry_maintenance,
-        clock=clock,
-    )
-    reconcile_compatibility_recoveries = getattr(
-        agent_jobs,
-        "reconcile_compatibility_recoveries",
-        lambda: False,
-    )
-
-    def housekeeping() -> None:
-        reconcile_compatibility_recoveries()
-        telemetry_cadence()
-
     artifact_jobs = ArtifactJobService(
         sessions,
         recipe_operations=lifecycle,
@@ -336,7 +322,10 @@ def assemble_production_worker(
         jobs,
         worker_id,
         {},
-        housekeeping=housekeeping,
+        housekeeping=TelemetryMaintenanceCadence(
+            telemetry_maintenance,
+            clock=clock,
+        ),
         artifact_housekeeping=ArtifactMaintenanceCadence(
             artifact_jobs.reconcile_storage,
             state_root=artifact_job_root,

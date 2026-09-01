@@ -46,16 +46,6 @@ from .auth import (
     agent_identity_from_scope,
     agent_source_from_scope,
 )
-from .compat_recovery import (
-    ABANDON_CONFIRMATION as COMPATIBILITY_RECOVERY_ABANDON_CONFIRMATION,
-)
-from .compat_recovery import (
-    CONFIRMATION as COMPATIBILITY_RECOVERY_CONFIRMATION,
-)
-from .compat_recovery import (
-    CompatibilityRecoveryConflict,
-    Spark3542CompatibilityRecoveryService,
-)
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -358,107 +348,6 @@ class AgentUpgradePreviewRequest(BaseModel):
 
 class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class Spark3542CompatibilityRecoveryApplyRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    confirmation: Literal["reboot-spark3542-to-resume-staged-a122-recovery"]
-
-
-class Spark3542CompatibilityRecoverySourceIdentity(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    semantic_version: Literal["0.1.0"]
-    binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-
-
-class Spark3542CompatibilityRecoveryTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    package_version: Literal["0.1.0~dev.381+ga122909feaa3"]
-    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    target_binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-
-
-class Spark3542CompatibilityRecoveryResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    action: Literal["schedule-reboot"]
-    delay_seconds: Literal[60]
-    compatibility_recovery_id: Literal["spark3542-a122-scheduled-reboot-v1"]
-    node_id: Literal["spk_2818d189042b4c77aefa7796f4befd23"]
-    source_job_targets: tuple[
-        Literal["spk_2818d189042b4c77aefa7796f4befd23"],
-        Literal["spk_9a86fdbab116442ab6707bf4181a3c1c"],
-    ]
-    dispatch_job_targets: tuple[Literal["spk_2818d189042b4c77aefa7796f4befd23"]]
-    source_identity: Spark3542CompatibilityRecoverySourceIdentity
-    job_id: Literal["6b945136-1be6-47e4-8ba0-5c5f815304ad"]
-    operation_id: Literal["d54e0b56-e465-41bd-9627-c81f37352dfd"]
-    source_attempt: Literal[3]
-    source_fence: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    source_certificate_serial: str = Field(min_length=1, max_length=128)
-    dispatch_certificate_serial: str = Field(min_length=1, max_length=128)
-    expected_retry_attempt: Literal[4]
-    authority_revision: str = Field(min_length=1, max_length=128)
-    upgrade_payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    target: Spark3542CompatibilityRecoveryTarget
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    state: Literal[
-        "preview",
-        "armed",
-        "issued",
-        "awaiting-identity",
-        "completed",
-        "completed-before-dispatch",
-        "operator-blocked",
-        "abandoned",
-    ]
-
-
-class Spark3542CompatibilityRecoveryPreviewResponse(
-    Spark3542CompatibilityRecoveryResponse
-):
-    required_confirmation: Literal["reboot-spark3542-to-resume-staged-a122-recovery"]
-
-
-class Spark3542CompatibilityRecoveryAbandonApplyRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    confirmation: Literal["abandon-expired-spark3542-a122-recovery"]
-
-
-class Spark3542CompatibilityRecoveryQueuedMutation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    job_id: str = Field(min_length=1, max_length=36)
-    operation_id: str = Field(min_length=1, max_length=36)
-    kind: str = Field(min_length=1, max_length=64)
-    authority_revision: str = Field(min_length=1, max_length=128)
-    payload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class Spark3542CompatibilityRecoveryAbandonResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    action: Literal["abandon-recovery"]
-    compatibility_recovery_id: Literal["spark3542-a122-scheduled-reboot-v1"]
-    node_id: Literal["spk_2818d189042b4c77aefa7796f4befd23"]
-    job_id: Literal["6b945136-1be6-47e4-8ba0-5c5f815304ad"]
-    operation_id: Literal["d54e0b56-e465-41bd-9627-c81f37352dfd"]
-    retry_attempt: Literal[4]
-    blocked_at: datetime
-    identity_deadline: datetime | None
-    grant_disposition: Literal["never-issued", "issued-and-expired"]
-    contact_certificate_serial: str = Field(min_length=1, max_length=128)
-    source_identity: Spark3542CompatibilityRecoverySourceIdentity
-    queued_mutations: list[Spark3542CompatibilityRecoveryQueuedMutation]
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    state: Literal["preview", "abandoned"]
-
-
-class Spark3542CompatibilityRecoveryAbandonPreviewResponse(
-    Spark3542CompatibilityRecoveryAbandonResponse
-):
-    required_confirmation: Literal["abandon-expired-spark3542-a122-recovery"]
 
 
 def _agent_upgrade_request_material(
@@ -1381,7 +1270,6 @@ def install_agent_routes(
     audits: _AuditSink,
     services: AgentApiServices | None,
     upgrades: AgentUpgradeService | None = None,
-    compatibility_recovery: Spark3542CompatibilityRecoveryService | None = None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
     human = APIRouter(prefix="/api/v1/agents")
@@ -1470,142 +1358,6 @@ def install_agent_routes(
             )
         )
         return {"id": job.id, "state": job.state}
-
-    @human.get(
-        "/compatibility-recovery/spark3542-a122/preview",
-        operation_id="previewSpark3542A122CompatibilityRecovery",
-        response_model=Spark3542CompatibilityRecoveryPreviewResponse,
-    )
-    def preview_spark3542_compatibility_recovery(
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        path = "/api/v1/agents/compatibility-recovery/spark3542-a122/preview"
-        _require_administrator(authenticated, path)
-        if compatibility_recovery is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Spark3542 compatibility recovery is unavailable",
-            )
-        try:
-            plan = compatibility_recovery.preview()
-        except CompatibilityRecoveryConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        return {
-            **plan.document,
-            "plan_digest": plan.plan_digest,
-            "state": plan.state,
-            "required_confirmation": COMPATIBILITY_RECOVERY_CONFIRMATION,
-        }
-
-    @human.post(
-        "/compatibility-recovery/spark3542-a122",
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="applySpark3542A122CompatibilityRecovery",
-        response_model=Spark3542CompatibilityRecoveryResponse,
-    )
-    def apply_spark3542_compatibility_recovery(
-        body: Spark3542CompatibilityRecoveryApplyRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        path = "/api/v1/agents/compatibility-recovery/spark3542-a122"
-        _require_administrator(authenticated, path)
-        if compatibility_recovery is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Spark3542 compatibility recovery is unavailable",
-            )
-        try:
-            plan = compatibility_recovery.apply(
-                plan_digest=body.plan_digest,
-                confirmation=body.confirmation,
-                actor=authenticated.subject,
-                request_id=request.state.request_id,
-            )
-        except CompatibilityRecoveryConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.compatibility-recovery.spark3542-a122.apply",
-                str(plan.document["authority_revision"]),
-                (str(plan.document["node_id"]),),
-            )
-        )
-        return {
-            **plan.document,
-            "plan_digest": plan.plan_digest,
-            "state": plan.state,
-        }
-
-    @human.get(
-        "/compatibility-recovery/spark3542-a122/abandon/preview",
-        operation_id="previewSpark3542A122CompatibilityRecoveryAbandonment",
-        response_model=Spark3542CompatibilityRecoveryAbandonPreviewResponse,
-    )
-    def preview_spark3542_compatibility_recovery_abandonment(
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        path = "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon/preview"
-        _require_administrator(authenticated, path)
-        if compatibility_recovery is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Spark3542 compatibility recovery is unavailable",
-            )
-        try:
-            plan = compatibility_recovery.preview_abandon()
-        except CompatibilityRecoveryConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        return {
-            **plan.document,
-            "plan_digest": plan.plan_digest,
-            "state": plan.state,
-            "required_confirmation": COMPATIBILITY_RECOVERY_ABANDON_CONFIRMATION,
-        }
-
-    @human.post(
-        "/compatibility-recovery/spark3542-a122/abandon",
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="abandonSpark3542A122CompatibilityRecovery",
-        response_model=Spark3542CompatibilityRecoveryAbandonResponse,
-    )
-    def abandon_spark3542_compatibility_recovery(
-        body: Spark3542CompatibilityRecoveryAbandonApplyRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        path = "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon"
-        _require_administrator(authenticated, path)
-        if compatibility_recovery is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Spark3542 compatibility recovery is unavailable",
-            )
-        try:
-            plan = compatibility_recovery.abandon(
-                plan_digest=body.plan_digest,
-                confirmation=body.confirmation,
-                actor=authenticated.subject,
-                request_id=request.state.request_id,
-            )
-        except CompatibilityRecoveryConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.compatibility-recovery.spark3542-a122.abandon",
-                None,
-                (str(plan.document["node_id"]),),
-            )
-        )
-        return {
-            **plan.document,
-            "plan_digest": plan.plan_digest,
-            "state": plan.state,
-        }
 
     @human.post(
         "/enrollments/grants",

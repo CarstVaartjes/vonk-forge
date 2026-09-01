@@ -8,7 +8,6 @@ on:
       - Cargo.lock
       - Cargo.toml
       - control/src/vonk_control/agent_jobs.py
-      - control/src/vonk_control/compat_recovery.py
       - control/src/vonk_control/host_helper_authority.py
       - packaging/**
       - rust/crates/vonk-agent/**
@@ -25,7 +24,6 @@ on:
       - Cargo.lock
       - Cargo.toml
       - control/src/vonk_control/agent_jobs.py
-      - control/src/vonk_control/compat_recovery.py
       - control/src/vonk_control/host_helper_authority.py
       - packaging/**
       - rust/crates/vonk-agent/**

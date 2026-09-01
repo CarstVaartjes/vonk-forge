@@ -339,45 +339,6 @@ def add_controller_commands(
         "candidate", help="Show the current signed agent package"
     )
     _add_json(upgrade_candidate)
-    compatibility_recovery = upgrade_commands.add_parser(
-        "recover-spark3542",
-        help="Operate the one-shot staged a122 recovery on Spark3542",
-    )
-    compatibility_recovery_commands = _subcommands(
-        compatibility_recovery, "compatibility_recovery_command"
-    )
-    compatibility_recovery_preview = compatibility_recovery_commands.add_parser(
-        "preview", help="Verify every pinned live and stored recovery identity"
-    )
-    _add_json(compatibility_recovery_preview)
-    compatibility_recovery_apply = compatibility_recovery_commands.add_parser(
-        "apply", help="Issue only the pinned helper restart authorization"
-    )
-    compatibility_recovery_apply.add_argument("--plan-digest", required=True)
-    compatibility_recovery_apply.add_argument(
-        "--confirm",
-        required=True,
-        choices=("reboot-spark3542-to-resume-staged-a122-recovery",),
-    )
-    _apply(compatibility_recovery_apply)
-    _add_json(compatibility_recovery_apply)
-    compatibility_recovery_abandon_preview = compatibility_recovery_commands.add_parser(
-        "abandon-preview",
-        help="Verify the expired recovery can be retired without a new grant",
-    )
-    _add_json(compatibility_recovery_abandon_preview)
-    compatibility_recovery_abandon = compatibility_recovery_commands.add_parser(
-        "abandon",
-        help="Retire the expired recovery and release its mutation lane",
-    )
-    compatibility_recovery_abandon.add_argument("--plan-digest", required=True)
-    compatibility_recovery_abandon.add_argument(
-        "--confirm",
-        required=True,
-        choices=("abandon-expired-spark3542-a122-recovery",),
-    )
-    _apply(compatibility_recovery_abandon)
-    _add_json(compatibility_recovery_abandon)
     for variant in ("preview", "apply"):
         upgrade_variant = upgrade_commands.add_parser(variant)
         upgrade_variant.add_argument(
@@ -1714,24 +1675,6 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
     if command == "upgrade":
         if args.upgrade_command == "candidate":
             return client.request("GET", "/api/v1/agents/upgrades/candidate")
-        if args.upgrade_command == "recover-spark3542":
-            endpoint = "/api/v1/agents/compatibility-recovery/spark3542-a122"
-            if args.compatibility_recovery_command == "preview":
-                return client.request("GET", f"{endpoint}/preview")
-            if args.compatibility_recovery_command == "abandon-preview":
-                return client.request("GET", f"{endpoint}/abandon/preview")
-            if args.compatibility_recovery_command == "abandon":
-                endpoint = f"{endpoint}/abandon"
-            return _plan_or_request(
-                args,
-                client,
-                "POST",
-                endpoint,
-                {
-                    "plan_digest": args.plan_digest,
-                    "confirmation": args.confirm,
-                },
-            )
         for node_id in args.node_id:
             if not re.fullmatch(r"spk_[0-9a-f]{32}", node_id):
                 raise ValueError("upgrade node ID must match spk_<32 lowercase hex>")

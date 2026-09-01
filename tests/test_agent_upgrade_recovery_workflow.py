@@ -72,7 +72,6 @@ def test_upgrade_recovery_workflow_is_scoped_to_recovery_inputs() -> None:
 
     for required_path in (
         "control/src/vonk_control/agent_jobs.py",
-        "control/src/vonk_control/compat_recovery.py",
         "control/src/vonk_control/host_helper_authority.py",
         "rust/crates/vonk-agent-helper/**",
         "rust/crates/vonk-agent-protocol/**",

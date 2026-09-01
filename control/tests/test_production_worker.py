@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control import telemetry_maintenance
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
@@ -108,17 +109,11 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     )
 
     class SignerBackedAgentJobs:
-        compatibility_reconciliations = 0
-
         def enqueue_in_session(self, *_args, **_kwargs):
             raise AssertionError("validation enqueue is not exercised here")
 
         def notify_available(self):
             return None
-
-        def reconcile_compatibility_recoveries(self):
-            self.compatibility_reconciliations += 1
-            return False
 
     class Authority:
         def prefetch(self, *_args):
@@ -155,9 +150,14 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     assert not hasattr(worker, "_validation")
     assert worker._reconciliations._agent_jobs is agent_jobs
     assert worker._reconciliations._publisher is publisher
-    assert callable(worker._housekeeping)
-    worker._housekeeping()
-    assert agent_jobs.compatibility_reconciliations == 1
+    assert isinstance(
+        worker._housekeeping,
+        telemetry_maintenance.TelemetryMaintenanceCadence,
+    )
+    assert isinstance(
+        worker._housekeeping._maintenance,
+        telemetry_maintenance.TelemetryMaintenance,
+    )
     assert isinstance(worker._artifact_housekeeping, ArtifactMaintenanceCadence)
     assert worker._artifact_housekeeping._batch_limit == 1000
     worker._artifact_housekeeping()

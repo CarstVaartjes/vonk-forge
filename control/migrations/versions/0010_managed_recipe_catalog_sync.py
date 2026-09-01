@@ -6,7 +6,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0010_managed_recipe_catalog_sync"
-down_revision = "0009_compat_abandoned_at"
+down_revision = "0005_repair_fleet_profile_tables"
 branch_labels = None
 depends_on = None
 

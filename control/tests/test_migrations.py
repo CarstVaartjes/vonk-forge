@@ -25,7 +25,6 @@ EXPECTED_BASELINE_TABLES = {
     "agent_nodes",
     "agent_operation_attempts",
     "agent_operations",
-    "agent_upgrade_compatibility_recoveries",
     "agent_presence",
     "audit_events",
     "catalog_entities",
@@ -104,31 +103,6 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
-    compatibility_columns = {
-        column["name"]: column
-        for column in inspect(engine).get_columns(
-            "agent_upgrade_compatibility_recoveries"
-        )
-    }
-    assert compatibility_columns["state"]["type"].length == 32
-    assert compatibility_columns["identity_deadline"]["nullable"] is True
-    assert compatibility_columns["rearm_attempt_certificate_serial"]["nullable"] is True
-    assert (
-        compatibility_columns["rearm_dispatch_certificate_serial"]["nullable"] is True
-    )
-    assert compatibility_columns["abandoned_at"]["nullable"] is True
-    compatibility_checks = {
-        constraint["name"]
-        for constraint in inspect(engine).get_check_constraints(
-            "agent_upgrade_compatibility_recoveries"
-        )
-    }
-    assert {
-        "ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
-        "ck_agent_upgrade_compatibility_recoveries_rearm_certs_paired",
-        "ck_agent_upgrade_compatibility_recoveries_retry_matches_rearm",
-        "ck_agent_upgrade_compatibility_recoveries_state_fields",
-    } <= compatibility_checks
     with engine.connect() as connection:
         assert (
             compare_metadata(MigrationContext.configure(connection), Base.metadata)
@@ -164,10 +138,6 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0003_agent_reenrollment_grants.py",
         "0004_artifact_jobs.py",
         "0005_repair_fleet_profile_tables.py",
-        "0006_spark3542_compat_recovery.py",
-        "0007_compat_recovery_rearm_certificates.py",
-        "0008_compat_recovery_abandon.py",
-        "0009_compat_abandoned_at.py",
         "0010_managed_recipe_catalog_sync.py",
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
@@ -235,179 +205,6 @@ def test_recipe_run_generation_migration_adds_exact_observation_authority(
             "recipe_run_observation_grants"
         )
     } == {("request_id",)}
-
-
-def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraints(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'compatibility-rearm-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0006_spark3542_compat_recovery")
-    engine = create_engine(url)
-    insert_recovery = text(
-        """
-        INSERT INTO agent_upgrade_compatibility_recoveries
-          (id, node_id, job_id, operation_id, source_attempt, source_fence,
-           source_certificate_serial, expected_retry_attempt,
-           source_semantic_version, source_build_digest, source_binary_digest,
-           upgrade_payload_sha256, package_sha256, target_package_version,
-           target_build_digest, target_binary_digest, authority_revision,
-           plan_digest, state, actor, request_id, created_at)
-        VALUES
-          ('recovery', 'node', 'job', 'operation', 3, 'source-fence',
-           'source-certificate', 4, '0.1.0', :source_build_digest,
-           :source_binary_digest, :upgrade_payload_sha256, :package_sha256,
-           '0.1.0~dev.381', :target_build_digest, :target_binary_digest,
-           'authority', :plan_digest, 'armed', 'admin', 'request',
-           '2026-08-31 12:00:00')
-        """
-    )
-    digests = {
-        "source_build_digest": f"sha256:{'a' * 64}",
-        "source_binary_digest": "b" * 64,
-        "upgrade_payload_sha256": "c" * 64,
-        "package_sha256": "d" * 64,
-        "target_build_digest": f"sha256:{'e' * 64}",
-        "target_binary_digest": "f" * 64,
-        "plan_digest": "0" * 64,
-    }
-    with engine.begin() as connection:
-        connection.execute(insert_recovery, digests)
-
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        assert connection.execute(
-            text(
-                "SELECT rearm_attempt_certificate_serial, "
-                "rearm_dispatch_certificate_serial "
-                "FROM agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one() == (None, None)
-
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET rearm_attempt_certificate_serial = 'attempt-certificate' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET rearm_attempt_certificate_serial = 'attempt-certificate', "
-                "rearm_dispatch_certificate_serial = 'dispatch-certificate' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    issue_grant = text(
-        """
-        UPDATE agent_upgrade_compatibility_recoveries
-        SET state = 'issued', retry_fence = 'retry-fence',
-            retry_certificate_serial = :retry_certificate_serial,
-            signed_grant = '{}', grant_request_id = 'grant-request',
-            grant_expires_at = '2026-08-31 12:00:10',
-            identity_deadline = '2026-08-31 12:15:00',
-            issued_at = '2026-08-31 12:00:00'
-        WHERE id = 'recovery'
-        """
-    )
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(
-            issue_grant, {"retry_certificate_serial": "other-certificate"}
-        )
-
-    with engine.begin() as connection:
-        connection.execute(
-            issue_grant, {"retry_certificate_serial": "dispatch-certificate"}
-        )
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET state = 'operator-blocked', blocked_at = '2026-08-31 12:15:00' "
-                "WHERE id = 'recovery'"
-            )
-        )
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET state = 'abandoned', completed_at = '2026-08-31 12:16:00', "
-                "abandoned_at = '2026-08-31 12:16:00' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    command.downgrade(config, "0007_compat_rearm_certificates")
-    with engine.connect() as connection:
-        assert connection.execute(
-            text(
-                "SELECT state, completed_at FROM "
-                "agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one() == ("operator-blocked", None)
-
-
-def test_compatibility_abandoned_at_migration_backfills_terminal_rows(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'compatibility-abandoned-at-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0008_compat_recovery_abandon")
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                INSERT INTO agent_upgrade_compatibility_recoveries
-                  (id, node_id, job_id, operation_id, source_attempt,
-                   source_fence, source_certificate_serial,
-                   expected_retry_attempt, source_semantic_version,
-                   source_build_digest, source_binary_digest,
-                   upgrade_payload_sha256, package_sha256,
-                   target_package_version, target_build_digest,
-                   target_binary_digest, authority_revision, plan_digest,
-                   state, actor, request_id, created_at, completed_at,
-                   blocked_at)
-                VALUES
-                  ('recovery', 'node', 'job', 'operation', 3, 'source-fence',
-                   'source-certificate', 4, '0.1.0', :source_build_digest,
-                   :source_binary_digest, :upgrade_payload_sha256,
-                   :package_sha256, '0.1.0~dev.381', :target_build_digest,
-                   :target_binary_digest, 'authority', :plan_digest,
-                   'abandoned', 'admin', 'request',
-                   '2026-08-31 12:00:00', '2026-08-31 12:16:00',
-                   '2026-08-31 12:15:00')
-                """
-            ),
-            {
-                "source_build_digest": f"sha256:{'a' * 64}",
-                "source_binary_digest": "b" * 64,
-                "upgrade_payload_sha256": "c" * 64,
-                "package_sha256": "d" * 64,
-                "target_build_digest": f"sha256:{'e' * 64}",
-                "target_binary_digest": "f" * 64,
-                "plan_digest": "0" * 64,
-            },
-        )
-
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        row = connection.execute(
-            text(
-                "SELECT state, completed_at, abandoned_at FROM "
-                "agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one()
-        assert row == (
-            "abandoned",
-            "2026-08-31 12:16:00",
-            "2026-08-31 12:16:00",
-        )
 
 
 def test_existing_baseline_is_upgraded_to_accept_node_profile_events(

@@ -34,14 +34,6 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/agents/nodes/{node_id}/revoke"): frozenset({"administrator"}),
     ("POST", "/api/v1/agents/upgrades/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/agents/upgrades"): frozenset({"administrator"}),
-    (
-        "POST",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122",
-    ): frozenset({"administrator"}),
-    (
-        "POST",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon",
-    ): frozenset({"administrator"}),
     ("POST", "/api/v1/fleet-profiles"): frozenset({"administrator"}),
     ("PUT", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
     ("DELETE", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
