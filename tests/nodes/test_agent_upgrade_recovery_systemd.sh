@@ -1051,7 +1051,7 @@ grep -Fxq "package_sha256=$package_digest" \
 test "$(stat -c %U:%G:%a:%h /var/lib/vonk-forge/package-upgrade.status)" \
   = root:root:644:1
 test "$(wc -l < /var/lib/vonk-forge/package-upgrade.status)" -eq 7
-grep -Fxq 'schema_version=1' /var/lib/vonk-forge/package-upgrade.status
+grep -Fxq 'schema_version=2' /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq 'outcome=succeeded' /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq 'stage=complete' /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq 'reason=exact_identity_proven' \
@@ -1074,19 +1074,19 @@ test "$(sha256sum "/proc/$helper_pid/exe" | cut -d' ' -f1)" = "$helper_digest"
 test "$(sha256sum "/proc/$agent_pid/exe" | cut -d' ' -f1)" = "$agent_digest"
 test "$(stat -c %U "/proc/$agent_pid")" = vonk-agent
 
-# A subsequent ordinary live reinstall must accept and replace the durable v2
-# receipt. Package removal must then accept the normal v1 receipt.
+# A subsequent ordinary live reinstall and package removal must preserve and
+# accept only the durable schema2 receipt.
 stage_candidate
 dpkg --install --force-confold "$candidate"
 for _ in {1..1200}; do
-  if grep -Fxq 'schema_version=1' \
+  if grep -Fxq 'schema_version=2' \
       /var/lib/vonk-forge/helper-upgrade.receipt 2>/dev/null \
     && [[ ! -e /var/lib/vonk-forge/helper-upgrade.pending ]]; then
     break
   fi
   sleep 0.1
 done
-grep -Fxq 'schema_version=1' /var/lib/vonk-forge/helper-upgrade.receipt
+grep -Fxq 'schema_version=2' /var/lib/vonk-forge/helper-upgrade.receipt
 dpkg --remove vonk-forge-agent
 test ! -e /var/lib/vonk-forge/helper-upgrade.receipt
 
