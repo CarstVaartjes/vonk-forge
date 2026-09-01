@@ -180,7 +180,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
             "api": "ghcr.io/example/api:1.2.3@sha256:" + "c" * 64,
             "worker": "ghcr.io/example/worker:1.2.3@sha256:" + "d" * 64,
         },
-        "schema_version": 1,
+        "schema_version": 2,
         "source_sha": SOURCE_SHA,
     }
     candidate = objects / f"artifacts/dev/releases/{GENERATION}/release.json"
