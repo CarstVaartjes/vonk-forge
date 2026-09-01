@@ -1213,7 +1213,10 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
         )
 
         assert result.returncode == 2, name
-        assert "Spark gate report" in result.stderr, (name, result.stderr)
+        expected_error = (
+            "behavioral gate report" if name == "fabricated" else "Spark gate report"
+        )
+        assert expected_error in result.stderr, (name, result.stderr)
         assert not (output / "acceptance.json").exists()
 
 
