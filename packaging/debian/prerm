@@ -68,24 +68,7 @@ safe_pending() {
 safe_receipt() {
     [ -f "$receipt" ] && [ ! -L "$receipt" ] \
         && [ "$(/usr/bin/stat -c %u:%a "$receipt")" = 0:600 ] || return 1
-    receipt_lines=$(/usr/bin/wc -l < "$receipt")
-    if [ "$receipt_lines" -eq 8 ]; then
-        /usr/bin/sed -n '1p' "$receipt" | grep -Fxq 'schema_version=1' \
-        && /usr/bin/sed -n '2p' "$receipt" \
-            | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' \
-        && /usr/bin/sed -n '3p' "$receipt" \
-            | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
-        && /usr/bin/sed -n '4p' "$receipt" \
-            | grep -Eq '^agent_sha256=[0-9a-f]{64}$' \
-        && /usr/bin/sed -n '5p' "$receipt" \
-            | grep -Eq '^boot_id=[0-9a-f-]+$' \
-        && /usr/bin/sed -n '6p' "$receipt" \
-            | grep -Eq '^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
-        && /usr/bin/sed -n '7p' "$receipt" \
-            | grep -Eq '^helper_main_pid=[0-9]+$' \
-        && /usr/bin/sed -n '8p' "$receipt" \
-            | grep -Eq '^helper_start_time=[0-9]+$'
-    elif [ "$receipt_lines" -eq 10 ]; then
+    if [ "$(/usr/bin/wc -l < "$receipt")" -eq 10 ]; then
         /usr/bin/sed -n '1p' "$receipt" | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$receipt" \
             | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' \

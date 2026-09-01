@@ -1548,15 +1548,8 @@ def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None
     installed_digest = postinst.index(
         "/usr/lib/vonk-forge/vonk-agent-helper", running_digest
     )
-    receipt_write = postinst.index('"helper_main_pid=$new_helper_pid"')
-    receipt_file_sync = postinst.index('/usr/bin/sync -f "$receipt_new"', receipt_write)
-    receipt_rename = postinst.index(
-        '/usr/bin/mv -f -- "$receipt_new" "$helper_receipt"', receipt_file_sync
-    )
-    receipt_dir_sync = postinst.index(
-        "/usr/bin/sync -f /var/lib/vonk-forge", receipt_rename
-    )
-    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_dir_sync)
+    receipt_validation = postinst.index('grep -Fxq "schema_version=2"')
+    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_validation)
     pending_retire = postinst.index(
         '/usr/bin/rm -f -- "$helper_pending"', confirmed_digest
     )
@@ -1572,15 +1565,14 @@ def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None
     )
 
     assert pending_write < schedule_call
-    assert helper_restart < running_digest < installed_digest < receipt_write
-    assert receipt_write < receipt_file_sync < receipt_rename < receipt_dir_sync
-    assert receipt_dir_sync < confirmed_digest < pending_retire
+    assert helper_restart < running_digest < installed_digest < receipt_validation
+    assert receipt_validation < confirmed_digest < pending_retire
     assert pending_retire < pending_retire_sync < agent_restart < schedule_call
     assert "helper-upgrade.pending" in postinst
     assert "helper-upgrade.receipt" in postinst
-    assert '"schema_version=1"' in postinst
-    assert '"activated_at=$activated_at"' in postinst
-    assert "/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ" in postinst
+    assert '"schema_version=2"' in postinst
+    assert '"schema_version=1"' not in postinst
+    assert "receipt_new=" not in postinst
     assert "ReadWritePaths=/var/lib/vonk-forge" in postinst
     pending_file_sync = postinst.index('/usr/bin/sync -f "$pending_new"')
     pending_rename = postinst.index(

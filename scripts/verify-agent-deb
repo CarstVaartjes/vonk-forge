@@ -542,9 +542,9 @@ def _verify_control(
             "helper-upgrade.pending",
             "helper-upgrade.receipt",
             "agent_sha256=$expected_agent_digest",
-            "boot_id=$boot_id",
-            "schema_version=1",
-            "activated_at=$activated_at",
+            "schema_version=2",
+            "package_sha256=[0-9a-f]{64}",
+            "intent_sha256=[0-9a-f]{64}",
             '"/proc/$new_helper_pid/exe"',
             "helper_sha256=$expected_helper_digest",
             "installed_helper_digest",
@@ -559,6 +559,8 @@ def _verify_control(
         ):
             if required not in postinst:
                 raise VerificationError("postinst lifecycle is incomplete")
+        if "schema_version=1" in postinst:
+            raise VerificationError("postinst accepts obsolete helper evidence")
         if any(
             forbidden in postinst
             for forbidden in (

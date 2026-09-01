@@ -82,7 +82,7 @@ write_recovery_status() {
     )
     status_dpkg=$(status_token "$status_dpkg")
     [ -n "$status_dpkg" ] || status_dpkg=unavailable
-    atomic_text "$status_receipt" 644 "schema_version=1
+    atomic_text "$status_receipt" 644 "schema_version=2
 outcome=$status_outcome
 stage=$recovery_stage
 reason=$status_reason
@@ -265,7 +265,7 @@ safe_agent_blocker() {
     safe_root_file "$agent_blocker" 600 \
         && [ "$(/usr/bin/wc -l < "$agent_blocker")" -eq 4 ] \
         && /usr/bin/sed -n '1p' "$agent_blocker" \
-            | grep -Fxq 'schema_version=1' \
+            | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$agent_blocker" \
             | grep -Fxq "target_version=$intent_version" \
         && /usr/bin/sed -n '3p' "$agent_blocker" \
@@ -469,7 +469,7 @@ cleanup_unbound_recovery_capsule() {
         && safe_root_file "$capsule_manifest" 600 \
         && [ "$(/usr/bin/wc -l < "$capsule_manifest")" -eq 5 ] \
         && /usr/bin/sed -n '1p' "$capsule_manifest" \
-            | grep -Fxq 'schema_version=1' || return 1
+            | grep -Fxq 'schema_version=2' || return 1
     unbound_runner_sha=$(/usr/bin/sed -n '2s/^runner_sha256=//p' \
         "$capsule_manifest")
     unbound_unit_sha=$(/usr/bin/sed -n '3s/^unit_sha256=//p' \
@@ -507,7 +507,7 @@ stage_recovery_capsule() {
     capsule_runner_sha256=$(/usr/bin/sha256sum "$0" \
         | /usr/bin/cut -d' ' -f1) || return 1
     valid_digest "$capsule_runner_sha256" || return 1
-    capsule_manifest_text="schema_version=1
+    capsule_manifest_text="schema_version=2
 runner_sha256=$capsule_runner_sha256
 unit_sha256=$recovery_capsule_unit_sha256
 gate_sha256=$recovery_capsule_gate_sha256
@@ -542,7 +542,7 @@ safe_recovery_capsule() {
         && safe_capsule_enablement \
         && [ "$(/usr/bin/wc -l < "$capsule_manifest")" -eq 5 ] \
         && /usr/bin/sed -n '1p' "$capsule_manifest" \
-            | grep -Fxq 'schema_version=1' \
+            | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$capsule_manifest" \
             | grep -Fxq "runner_sha256=$expected_runner_sha256" \
         && /usr/bin/sed -n '3p' "$capsule_manifest" \
@@ -794,7 +794,7 @@ capsule_gate_sha256=$recovery_capsule_gate_sha256
 capsule_suppression_sha256=$recovery_capsule_suppression_sha256
 "
     atomic_text "$intent" 600 "$intent_text" || return 1
-    blocker_text="schema_version=1
+    blocker_text="schema_version=2
 target_version=$target_version
 helper_sha256=$target_helper_sha256
 agent_sha256=$target_agent_sha256
