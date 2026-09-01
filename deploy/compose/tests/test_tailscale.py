@@ -720,6 +720,52 @@ def test_configurator_re_advertises_pending_service_host(
     assert repaired.is_file()
 
 
+def test_configurator_replaces_exact_map_for_stale_primary_route(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    repaired = tmp_path / "repaired"
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys\n"
+        f"repaired = pathlib.Path({os.fspath(repaired)!r})\n"
+        "args = [value for value in sys.argv[1:] if not value.startswith('--socket=')]\n"
+        "if args == ['status', '--json']:\n"
+        "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
+        "    print(json.dumps({'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.70.230.202']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "elif args == ['serve', 'status', '--json']:\n"
+        "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
+        "elif args == ['serve', 'get-config', '--all']:\n"
+        f"    print({json.dumps(DEFAULT_MAP, separators=(',', ':'))!r})\n"
+        "elif args[:3] == ['serve', 'set-config', '--all']:\n"
+        "    repaired.touch()\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_CONFIGURE_ONCE": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+    assert repaired.is_file()
+
+
 def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> None:
     socket_path = tmp_path / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)

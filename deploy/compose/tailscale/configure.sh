@@ -385,11 +385,20 @@ while [ "${remaining}" -gt 0 ]; do
     fi
     if [ "${route_repair_remaining}" -le 0 ]; then
         # The first advertisement can race tailnet policy propagation. A
-        # pending advertisement is not represented by service-host, so waiting
-        # for that mapping before retrying would deadlock until this container
-        # is recreated. Re-advertise the exact local Serve entries periodically;
-        # control still approves them only through the tag-scoped policy.
-        advertise_services || true
+        # pending advertisement is not represented by service-host, so retry
+        # the exact local advertisement until approval appears. Once control
+        # has mapped the TailVIPs but tailscaled has not activated their
+        # PrimaryRoutes, replace the exact Serve map: an idempotent
+        # `serve advertise` is insufficient for the stale-host state where
+        # local Serve config is exact but the daemon retained an advertisement
+        # without installing its primary routes. The policy remains the only
+        # authority that approves the host.
+        if service_host_is_approved "${include_hermes}"; then
+            configure_services "${include_hermes}" || true
+            wait_for_exact_services "${include_hermes}" || true
+        else
+            advertise_services || true
+        fi
         route_repair_remaining=30
     fi
     sleep 2
@@ -423,13 +432,23 @@ while :; do
         configure_services "${desired_hermes}"
         wait_for_exact_services "${desired_hermes}" || exit 1
     fi
-    # Re-advertise when control has mapped the TailVIPs but tailscaled has not
-    # activated their PrimaryRoutes. This repairs the userspace-host race seen
-    # after a container is created or restored.
+    # Re-advertise while approval is still pending. Once control has mapped the
+    # TailVIPs but tailscaled has not activated their PrimaryRoutes, replace the
+    # exact Serve map: an idempotent `serve advertise` is insufficient for the
+    # stale-host state where local Serve config is exact but the daemon retained
+    # an advertisement without installing its primary routes. Replacing the map
+    # forces the same configuration path as a fresh gateway without Docker
+    # access or a container restart. The policy remains the only authority that
+    # approves the host.
     if ! service_host_is_active "${desired_hermes}"; then
         if service_host_is_approved "${desired_hermes}"; then
             configure_services "${desired_hermes}"
             wait_for_exact_services "${desired_hermes}" || exit 1
+        else
+            # A pending advertisement is not represented by service-host, so
+            # keep retrying the exact local advertisement until policy approval
+            # appears.
+            advertise_services || true
         fi
         continue
     fi
