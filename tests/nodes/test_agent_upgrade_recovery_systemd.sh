@@ -813,6 +813,18 @@ if [[ "$crash_mode" == full-cgroup ]]; then
     "$agent_unit")" != active
   systemctl --system stop "$socket_unit" >/dev/null
   systemctl --system start "$socket_unit" >/dev/null
+  target_wants=" $(systemctl --system show --property=Wants --value \
+    multi-user.target) "
+  case "$target_wants" in
+    *" $recovery_unit "*) ;;
+    *) printf '%s\n' 'capsule boot dependency is absent' >&2; exit 1 ;;
+  esac
+  # The static package recovery unit is deliberately suppressed while the
+  # capsule owns a durable schema2 intent. Starting the capsule explicitly
+  # models the job that the proven Wants edge enqueues during a fresh boot.
+  systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
+  test "$(systemctl --system show --property=ActiveState --value \
+    multi-user.target)" = active
 fi
 if [[ "$crash_mode" == post-remove ]]; then
   # The synthetic postinst forces recovery into its package-scoped remove and
