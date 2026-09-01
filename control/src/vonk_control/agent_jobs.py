@@ -835,9 +835,11 @@ class AgentJobService:
             or isinstance(node.protocol_version, bool)
             or not protocol[0] <= node.protocol_version <= protocol[1]
             or not isinstance(node.capabilities, list)
-            or not _REQUIRED_CAPABILITIES
-            <= set(node.capabilities)
-            <= _KNOWN_CAPABILITIES
+            # Stored capability lists can come from a newer Spark.  The
+            # operation claim below already intersects them with the
+            # Controller's known operations; only the stable required set is
+            # a reconciliation prerequisite.
+            or not _REQUIRED_CAPABILITIES <= set(node.capabilities)
             for node in nodes
         ):
             return "reconciliation target agent is incompatible"
