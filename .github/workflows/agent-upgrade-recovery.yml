@@ -78,7 +78,7 @@ jobs:
             acl adduser build-essential ca-certificates init-system-helpers \
             fuse-overlayfs iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
-      - name: Validate current schema2 capsule post-remove boot recovery
+      - name: Validate current schema2 capsule boot recovery
         shell: bash
         run: |
           set -euo pipefail
@@ -99,6 +99,14 @@ jobs:
           cargo_home=$(dirname "$cargo_dir")
           rustup_home=$(rustup show home)
           current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)+g$(git rev-parse --short=12 HEAD)"
+          sudo env \
+            PATH="$cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            CARGO_HOME="$cargo_home" \
+            RUSTUP_HOME="$rustup_home" \
+            VERSION="$current_version" \
+            CRASH_MODE=full-cgroup \
+            BUILD_EGRESS_BINARY="$build_egress" \
+            tests/nodes/test_agent_upgrade_recovery_systemd.sh
           sudo env \
             PATH="$cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             CARGO_HOME="$cargo_home" \

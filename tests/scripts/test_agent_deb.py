@@ -1278,6 +1278,18 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert lifecycle.index('"$socket_unit"', reset_failed) > reset_failed
     assert lifecycle.index("ActiveState", reset_failed) > reset_failed
     assert lifecycle.index("Result", reset_failed) > reset_failed
+    full_cgroup_end = lifecycle.index(
+        '\nif [[ "$crash_mode" == post-remove ]]; then', full_cgroup_branch
+    )
+    full_cgroup_boot = lifecycle[full_cgroup_branch:full_cgroup_end]
+    full_cgroup_wants = full_cgroup_boot.index(
+        "systemctl --system show --property=Wants --value"
+    )
+    full_cgroup_capsule_start = full_cgroup_boot.index(
+        'systemctl --system start "$recovery_unit"'
+    )
+    assert full_cgroup_wants < full_cgroup_capsule_start
+    assert "capsule owns a durable schema2 intent" in full_cgroup_boot
     convergence_marker = lifecycle.index(
         "printf 'durable recovery crash-point pending gate:", reset_failed
     )

@@ -23,8 +23,9 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert "BUILD_EGRESS_BINARY" in text
     assert 'current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)' in text
     assert 'VERSION="$current_version"' in text
-    assert text.count("\n            tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 1
-    assert "Validate current schema2 capsule post-remove boot recovery" in text
+    assert text.count("\n            tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 2
+    assert "Validate current schema2 capsule boot recovery" in text
+    assert "CRASH_MODE=full-cgroup" in text
     assert "CRASH_MODE=post-remove" in text
     assert "persist-credentials: false" in text
     assert "contents: read" in text
