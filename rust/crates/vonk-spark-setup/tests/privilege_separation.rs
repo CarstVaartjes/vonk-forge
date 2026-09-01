@@ -1074,6 +1074,23 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
     assert!(
         matches!(result, Err(SetupError::Command(message)) if message == "controller readiness was not sustained")
     );
+    let readiness_probes = failing_runner
+        .commands
+        .iter()
+        .filter(|command| {
+            command
+                .args
+                .iter()
+                .any(|argument| argument == "verify-readiness")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(readiness_probes.len(), 31);
+    assert!(
+        readiness_probes[..30]
+            .iter()
+            .all(|command| command.stderr == CommandStderr::Suppress)
+    );
+    assert_eq!(readiness_probes[30].stderr, CommandStderr::Inherit);
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "recovering-v1\n"
