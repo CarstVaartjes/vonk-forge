@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "authority_id": "nl-single-spark-989bfa00",
+  "authority_id": "nl-single-spark-e6a8e750",
   "catalog": {
     "repository": "CarstVaartjes/vonk-forge-recipes",
-    "commit": "989bfa0093ffb543ae7e1fc5ac4092752995be2a",
+    "commit": "e6a8e75029ad85216b22e2d5e41d26a5689fcf6b",
     "catalog_index_sha256": "24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352",
     "recipe_count": 84
   },
