@@ -918,6 +918,29 @@ def _render_standard_recovery_runner(
     revision: str, authority: dict[str, str]
 ) -> bytes:
     source_preinst = _git_source(revision, "packaging/debian/preinst")
+    capsule_placeholders = (
+        b"@RECOVERY_CAPSULE_UNIT_SHA256@",
+        b"@RECOVERY_CAPSULE_UNIT_BASE64@",
+        b"@RECOVERY_CAPSULE_GATE_SHA256@",
+        b"@RECOVERY_CAPSULE_GATE_BASE64@",
+        b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+        b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+    )
+    if (
+        any(
+            source_preinst.count(placeholder) != 1
+            for placeholder in capsule_placeholders
+        )
+        or source_preinst.count(b'intent_text="schema_version=2\n') != 1
+        or source_preinst.count(b'capsule_manifest_text="schema_version=2\n') != 1
+        or source_preinst.count(
+            b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]'
+        )
+        != 1
+    ):
+        raise VerificationError(
+            "repair source runner does not implement schema-2 recovery"
+        )
     source_unit = _git_source(
         revision, "packaging/systemd/vonk-forge-package-upgrade-recover.service"
     )
@@ -938,32 +961,31 @@ def _render_standard_recovery_runner(
         ),
         (b"@AGENT_GATE_BASE64@", base64.b64encode(source_agent_gate)),
     ]
-    if b"@RECOVERY_CAPSULE_UNIT_SHA256@" in source_preinst:
-        capsule_sources = (
+    capsule_sources = (
+        (
+            b"RECOVERY_CAPSULE_UNIT",
+            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
+        ),
+        (
+            b"RECOVERY_CAPSULE_GATE",
+            "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
+        ),
+        (
+            b"RECOVERY_CAPSULE_SUPPRESSION",
+            "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
+        ),
+    )
+    for placeholder, relative in capsule_sources:
+        contents = _git_source(revision, relative)
+        replacements.extend(
             (
-                b"RECOVERY_CAPSULE_UNIT",
-                "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
-            ),
-            (
-                b"RECOVERY_CAPSULE_GATE",
-                "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
-            ),
-            (
-                b"RECOVERY_CAPSULE_SUPPRESSION",
-                "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
-            ),
-        )
-        for placeholder, relative in capsule_sources:
-            contents = _git_source(revision, relative)
-            replacements.extend(
                 (
-                    (
-                        b"@" + placeholder + b"_SHA256@",
-                        hashlib.sha256(contents).hexdigest().encode("ascii"),
-                    ),
-                    (b"@" + placeholder + b"_BASE64@", base64.b64encode(contents)),
-                )
+                    b"@" + placeholder + b"_SHA256@",
+                    hashlib.sha256(contents).hexdigest().encode("ascii"),
+                ),
+                (b"@" + placeholder + b"_BASE64@", base64.b64encode(contents)),
             )
+        )
     return _render_source(
         source_preinst,
         f"{revision}:packaging/debian/preinst",
@@ -1018,29 +1040,25 @@ def _verify_exact_repair_scripts(
     standard_runner = _render_standard_recovery_runner(
         expected_binary_source_revision, authority
     )
-    repair_uses_capsule = b"recovery_capsule_unit_sha256='" in standard_runner
-    if repair_uses_capsule:
-        source_capsule_digests = {
-            name: hashlib.sha256(
-                _git_source(expected_binary_source_revision, relative)
-            ).hexdigest()
-            for name, relative in (
-                (
-                    "unit",
-                    "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
-                ),
-                (
-                    "gate",
-                    "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
-                ),
-                (
-                    "suppression",
-                    "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
-                ),
-            )
-        }
-    else:
-        source_capsule_digests = {name: "0" * 64 for name in ("unit", "gate", "suppression")}
+    source_capsule_digests = {
+        name: hashlib.sha256(
+            _git_source(expected_binary_source_revision, relative)
+        ).hexdigest()
+        for name, relative in (
+            (
+                "unit",
+                "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service",
+            ),
+            (
+                "gate",
+                "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
+            ),
+            (
+                "suppression",
+                "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
+            ),
+        )
+    }
     if hashlib.sha256(standard_runner).hexdigest() != authority["source_runner_sha256"]:
         raise VerificationError(
             "repair authority source runner does not match binary source"
@@ -1083,7 +1101,6 @@ def _verify_exact_repair_scripts(
                 b"@TARGET_HELPER_SOCKET_SHA256@",
                 hashlib.sha256(target_helper_socket).hexdigest().encode("ascii"),
             ),
-            (b"@SOURCE_CAPSULE_V2@", b"1" if repair_uses_capsule else b"0"),
             (
                 b"@SOURCE_CAPSULE_UNIT_SHA256@",
                 source_capsule_digests["unit"].encode("ascii"),
@@ -1115,7 +1132,7 @@ def _verify_exact_repair_scripts(
         or (
             payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
         ).read_bytes()
-        != (standard_runner if repair_uses_capsule else repair_preinst)
+        != standard_runner
         or (control / "postinst").read_bytes() != repair_postinst
     ):
         raise VerificationError("repair maintainer script bytes are not canonical")
@@ -1161,7 +1178,7 @@ def _read_repair_authority(
         or any(not line.endswith("\n") for line in lines)
         or names != REPAIR_AUTHORITY_FIELDS
         or len(document) != len(REPAIR_AUTHORITY_FIELDS)
-        or document.get("schema_version") != "1"
+        or document.get("schema_version") != "2"
         or document.get("node_id") != expected_node_id
         or PACKAGE_VERSION.fullmatch(document.get("installed_version", "")) is None
         or PACKAGE_VERSION.fullmatch(document.get("source_target_version", "")) is None
@@ -1245,10 +1262,8 @@ def _verify_repair_payload(
     standard_runner = (payload / REPAIR_STANDARD_RUNNER).read_bytes()
     authority_raw = (payload / REPAIR_AUTHORITY).read_bytes()
     postinst = (control / "postinst").read_bytes()
-    repair_uses_capsule = b"recovery_capsule_unit_sha256='" in standard_runner
-    expected_installed_runner = standard_runner if repair_uses_capsule else repair_runner
     if (
-        expected_installed_runner != installed_runner
+        standard_runner != installed_runner
         or repair_runner.count(REPAIR_DISPATCH_MARKER) != 1
         or postinst.count(REPAIR_POSTINST_MARKER) != 1
         or REPAIR_DISPATCH_MARKER in standard_runner
@@ -1291,10 +1306,6 @@ def _verify_repair_payload(
     if _embedded_blob(repair_runner, "standard_runner") != standard_runner:
         raise VerificationError("repair capsule embeds a different standard runner")
     _verify_digest_assignment(repair_runner, "standard_runner_sha256", standard_runner)
-    expected_capsule_flag = b"1" if repair_uses_capsule else b"0"
-    if _single_quoted_assignment(repair_runner, "source_capsule_expected") \
-        != expected_capsule_flag:
-        raise VerificationError("repair capsule source recovery mode is invalid")
     _verify_standard_preinst(standard_runner.decode("utf-8"))
     capsule_digest_sources = (
         (
@@ -1312,13 +1323,9 @@ def _verify_repair_payload(
     )
     for name, relative in capsule_digest_sources:
         observed = _single_quoted_assignment(repair_runner, name).decode("ascii")
-        expected = (
-            hashlib.sha256(
-                _git_source(expected_binary_source_revision, relative)
-            ).hexdigest()
-            if repair_uses_capsule
-            else "0" * 64
-        )
+        expected = hashlib.sha256(
+            _git_source(expected_binary_source_revision, relative)
+        ).hexdigest()
         if observed != expected:
             raise VerificationError(f"repair capsule {name} is invalid")
     for name, expected in (

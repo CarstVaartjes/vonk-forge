@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "packaging/debian/preinst-repair"
 HARNESS = ROOT / "tests/nodes/test_agent_upgrade_repair_systemd.sh"
 MATRIX = ROOT / "tests/nodes/test_agent_upgrade_repair_matrix.sh"
 PROBE_SOURCE = ROOT / "rust/crates/vonk-repair-helper-probe/src/main.rs"
-BINARY_REVISION = "a122909feaa3b64d7b15371285e727965c3d7e9a"
 
 
 def _shell_array(source: str, name: str) -> set[str]:
@@ -61,10 +57,9 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
-    assert "binary_source_root=$test_root/binary-source" in harness
-    assert 'archive "$binary_revision" | tar -x -C "$binary_source_root"' in harness
-    assert '"$test_root/target-dist" "$binary_source_root" "$binary_revision"' in harness
-    assert "source_capsule_unit_file=$binary_source_root/packaging/systemd/" in harness
+    assert "binary_revision=$packaging_revision" in harness
+    assert '"$test_root/target-dist" "$repo_root" "$binary_revision"' in harness
+    assert "source_capsule_unit_file=$repo_root/packaging/systemd/" in harness
 
 
 def test_terminal_cleanup_retires_the_only_boot_owner_last() -> None:
@@ -80,43 +75,21 @@ def test_terminal_cleanup_retires_the_only_boot_owner_last() -> None:
     ) < cleanup.index("retire_source_capsule")
 
 
-def _assert_frozen_runtime_and_old_runner() -> None:
-    # The package builder is deliberately frozen with the repair lifecycle:
-    # ordinary packages now bind the static build-egress binary, while repair
-    # capsules continue to omit that new binary because legacy repair authority
-    # does not authenticate it.
+def _assert_frozen_schema2_runtime() -> None:
+    # These digests force review of every privileged repair contract change.
     expected = {
             ROOT / "packaging/debian/preinst-repair": (
-                "004627f2f26fe3739adb13da5487d77e45af971c61c00de4a18c73f2638f9856"
+                "8418b3bc5621b76fe504e7974d26faae2f1b3ddd4f3b11078d286e52619ba8cb"
             ),
             ROOT / "packaging/debian/postinst-repair": (
-                "c71ffce1a4fb20d4b346f7a1cb7e10558d84ab61ab4b061bcc43505f717055ac"
+                "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
             ),
             ROOT / "scripts/build-agent-deb": (
-                "25874cdcd6a231776bc110f000d2003d0b79c9a76eedab071bff1e5f7cf61f59"
+                "264ec76c89e951d4e240e8f6f0452ced3388bbab1d888b4743bfcdae8fb3c9fe"
             ),
     }
     for path, digest in expected.items():
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
-
-    available = subprocess.run(
-        ["git", "cat-file", "-e", f"{BINARY_REVISION}:packaging/debian/preinst"],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-    )
-    if available.returncode != 0:
-        pytest.skip("pinned a122 repair source is absent from shallow checkout")
-    old_runner = subprocess.run(
-        ["git", "show", f"{BINARY_REVISION}:packaging/debian/preinst"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert ".repair-build." not in old_runner
-    assert "vonk-forge-package-upgrade-recover.standard" not in old_runner
-
 
 def test_repair_native_harness_has_a_byte_and_pid_no_mutation_oracle() -> None:
     harness = HARNESS.read_text()
@@ -193,11 +166,11 @@ def test_repair_native_harness_adversarial_matrix_is_complete() -> None:
 def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> None:
     harness = HARNESS.read_text()
 
-    _assert_frozen_runtime_and_old_runner()
+    _assert_frozen_schema2_runtime()
 
     assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
     assert "0.1.0~dev.1788260440+g4cac2044d05e" in harness
-    assert "rev-parse 4cac2044d05e39adb2a516223d1833656f605c43" in harness
+    assert "binary_revision=$packaging_revision" in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness
     assert harness.count('submit_helper_install "$') == 2
     submit = harness[

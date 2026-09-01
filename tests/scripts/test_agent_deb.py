@@ -117,7 +117,7 @@ def test_repair_verifier_trusts_only_the_resolved_repository(monkeypatch) -> Non
 
 def _repair_authority(**replacements: str) -> bytes:
     values = {
-        "schema_version": "1",
+        "schema_version": "2",
         "node_id": REPAIR_NODE_ID,
         "installed_version": "0.1.0~dev.335+g2eaaf4d9b2b5",
         "source_target_version": REPAIR_SOURCE_VERSION,
@@ -294,6 +294,15 @@ def _exact_repair_script_fixture(
         b"recovery_unit_base64='@RECOVERY_UNIT_BASE64@'\n"
         b"agent_gate_sha256='@AGENT_GATE_SHA256@'\n"
         b"agent_gate_base64='@AGENT_GATE_BASE64@'\n"
+        b"recovery_capsule_unit_sha256='@RECOVERY_CAPSULE_UNIT_SHA256@'\n"
+        b"recovery_capsule_unit_base64='@RECOVERY_CAPSULE_UNIT_BASE64@'\n"
+        b"recovery_capsule_gate_sha256='@RECOVERY_CAPSULE_GATE_SHA256@'\n"
+        b"recovery_capsule_gate_base64='@RECOVERY_CAPSULE_GATE_BASE64@'\n"
+        b"recovery_capsule_suppression_sha256='@RECOVERY_CAPSULE_SUPPRESSION_SHA256@'\n"
+        b"recovery_capsule_suppression_base64='@RECOVERY_CAPSULE_SUPPRESSION_BASE64@'\n"
+        b'intent_text="schema_version=2\n"\n'
+        b'capsule_manifest_text="schema_version=2\n"\n'
+        b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]\n'
     )
     repair_template = (
         b"#!/bin/sh\n# VONK_REPAIR_DISPATCH_V1\n"
@@ -309,7 +318,6 @@ def _exact_repair_script_fixture(
         b"target_helper_unit_sha256='@TARGET_HELPER_UNIT_SHA256@'\n"
         b"target_helper_socket_sha256='@TARGET_HELPER_SOCKET_SHA256@'\n"
         b"repair_probe_sha256='@REPAIR_PROBE_SHA256@'\n"
-        b"source_capsule_expected='@SOURCE_CAPSULE_V2@'\n"
         b"source_capsule_unit_sha256_expected='@SOURCE_CAPSULE_UNIT_SHA256@'\n"
         b"source_capsule_gate_sha256_expected='@SOURCE_CAPSULE_GATE_SHA256@'\n"
         b"source_capsule_suppression_sha256_expected='@SOURCE_CAPSULE_SUPPRESSION_SHA256@'\n"
@@ -364,6 +372,9 @@ def _exact_repair_script_fixture(
         "packaging/bin/vonk-forge-docker-firewall": b"firewall-helper",
         "packaging/systemd/vonk-forge-package-upgrade-recover.service": b"recover-unit",
         "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf": b"agent-gate",
+        "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service": b"capsule-unit",
+        "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf": b"capsule-gate",
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf": b"capsule-suppression",
     }
 
     def git_source(revision: str, relative: str) -> bytes:
@@ -400,6 +411,24 @@ def _exact_repair_script_fixture(
                 hashlib.sha256(b"agent-gate").hexdigest().encode(),
             ),
             (b"@AGENT_GATE_BASE64@", base64.b64encode(b"agent-gate")),
+            (
+                b"@RECOVERY_CAPSULE_UNIT_SHA256@",
+                hashlib.sha256(b"capsule-unit").hexdigest().encode(),
+            ),
+            (b"@RECOVERY_CAPSULE_UNIT_BASE64@", base64.b64encode(b"capsule-unit")),
+            (
+                b"@RECOVERY_CAPSULE_GATE_SHA256@",
+                hashlib.sha256(b"capsule-gate").hexdigest().encode(),
+            ),
+            (b"@RECOVERY_CAPSULE_GATE_BASE64@", base64.b64encode(b"capsule-gate")),
+            (
+                b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+                hashlib.sha256(b"capsule-suppression").hexdigest().encode(),
+            ),
+            (
+                b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+                base64.b64encode(b"capsule-suppression"),
+            ),
         ),
     )
     authority = _repair_authority(
@@ -441,10 +470,18 @@ def _exact_repair_script_fixture(
                 b"@TARGET_HELPER_SOCKET_SHA256@",
                 hashlib.sha256(b"helper-socket").hexdigest().encode(),
             ),
-            (b"@SOURCE_CAPSULE_V2@", b"0"),
-            (b"@SOURCE_CAPSULE_UNIT_SHA256@", b"0" * 64),
-            (b"@SOURCE_CAPSULE_GATE_SHA256@", b"0" * 64),
-            (b"@SOURCE_CAPSULE_SUPPRESSION_SHA256@", b"0" * 64),
+            (
+                b"@SOURCE_CAPSULE_UNIT_SHA256@",
+                hashlib.sha256(b"capsule-unit").hexdigest().encode(),
+            ),
+            (
+                b"@SOURCE_CAPSULE_GATE_SHA256@",
+                hashlib.sha256(b"capsule-gate").hexdigest().encode(),
+            ),
+            (
+                b"@SOURCE_CAPSULE_SUPPRESSION_SHA256@",
+                hashlib.sha256(b"capsule-suppression").hexdigest().encode(),
+            ),
         ),
     )
     postinst = VERIFY_MODULE._render_packaging_source(
@@ -456,7 +493,7 @@ def _exact_repair_script_fixture(
     )
     for relative, raw in (
         (VERIFY_MODULE.REPAIR_STANDARD_RUNNER, standard),
-        ("usr/lib/vonk-forge/vonk-forge-package-upgrade-recover", repair),
+        ("usr/lib/vonk-forge/vonk-forge-package-upgrade-recover", standard),
     ):
         path = payload / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2872,7 +2909,10 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "ExecCondition=\nExecCondition=+" in runner
     assert "stage_repair_gate" in runner
     assert "retire_repair_gate" in runner
-    assert 'if [ "$source_schema" = 1 ]; then' in runner
+    assert "source_schema" not in runner
+    assert "SOURCE_CAPSULE_V2" not in runner
+    assert "schema_version=2" in runner
+    assert "canonical_line_file \"$source_intent\" 17" in runner
     assert "repair_gate_loaded" in runner
     assert "terminal_repair_contract_safe" in runner
     assert "source_capsule_terminal_safe" in runner
@@ -3365,11 +3405,8 @@ def test_repair_phase_replay_refreshes_boot_bound_process_receipts() -> None:
     assert 'if [ "$phase_name" != agent-proven ]' not in recover
 
 
-def test_repair_builder_reconstructs_exact_a122_standard_runner() -> None:
-    _require_git_object(
-        f"{REPAIR_BINARY_REVISION}:packaging/systemd/"
-        "vonk-forge-package-upgrade-recover.service"
-    )
+def test_repair_builder_and_verifier_reject_pre_capsule_source_runner() -> None:
+    _require_git_object(f"{REPAIR_BINARY_REVISION}:packaging/debian/preinst")
     authority = {
         "source_target_version": REPAIR_SOURCE_VERSION,
         "source_architecture": "arm64",
@@ -3390,10 +3427,18 @@ def test_repair_builder_reconstructs_exact_a122_standard_runner() -> None:
         ),
     }
 
-    runner = BUILD_MODULE.repair_standard_runner(REPAIR_BINARY_REVISION, authority)
-
-    assert hashlib.sha256(runner).hexdigest() == authority["source_runner_sha256"]
-    assert re.search(rb"@[A-Z0-9_]+@", runner) is None
+    with pytest.raises(
+        BUILD_MODULE.BuildError,
+        match="repair source runner does not implement schema-2 recovery",
+    ):
+        BUILD_MODULE.repair_standard_runner(REPAIR_BINARY_REVISION, authority)
+    with pytest.raises(
+        VERIFY_MODULE.VerificationError,
+        match="repair source runner does not implement schema-2 recovery",
+    ):
+        VERIFY_MODULE._render_standard_recovery_runner(
+            REPAIR_BINARY_REVISION, authority
+        )
 
 
 def test_repair_builder_and_verifier_reconstruct_capsule_bound_runner(
@@ -3421,6 +3466,9 @@ def test_repair_builder_and_verifier_reconstruct_capsule_bound_runner(
             b"capsule_gate=@RECOVERY_CAPSULE_GATE_BASE64@",
             b"capsule_suppression_sha=@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
             b"capsule_suppression=@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+            b'intent_text="schema_version=2',
+            b'capsule_manifest_text="schema_version=2',
+            b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]',
             b"",
         )
     )

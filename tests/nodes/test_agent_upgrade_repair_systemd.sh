@@ -29,8 +29,7 @@ source_version=0.1.0~dev.1788260440+g4cac2044d05e
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.1788260441+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
-binary_revision=$(git -c safe.directory="$repo_root" --no-replace-objects \
-  -C "$repo_root" rev-parse 4cac2044d05e39adb2a516223d1833656f605c43)
+binary_revision=$packaging_revision
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -678,14 +677,10 @@ build_package() {
       --output-dir "$output" "$@" >/dev/null
 }
 
-binary_source_root=$test_root/binary-source
-mkdir -p "$binary_source_root"
-git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" \
-  archive "$binary_revision" | tar -x -C "$binary_source_root"
 build_package "$installed_version" old "$build_digest_old" \
   "$test_root/old-dist" "$repo_root" "$packaging_revision"
 build_package "$source_version" target "$build_digest_target" \
-  "$test_root/target-dist" "$binary_source_root" "$binary_revision"
+  "$test_root/target-dist" "$repo_root" "$binary_revision"
 old_package="$test_root/old-dist/vonk-forge-agent_${installed_version}_arm64.deb"
 source_package="$test_root/target-dist/vonk-forge-agent_${source_version}_arm64.deb"
 "$repo_root/scripts/verify-agent-deb" --json "$old_package" >/dev/null
@@ -749,9 +744,9 @@ source_helper_sha="$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -
 source_runner_file=$source_payload/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
 source_unit_file=$source_payload/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_gate_file=$source_payload/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
-source_capsule_unit_file=$binary_source_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
-source_capsule_gate_file=$binary_source_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
-source_capsule_suppression_file=$binary_source_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
+source_capsule_unit_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_gate_file=$repo_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
 source_runner_sha="$(sha256sum "$source_runner_file" | cut -d' ' -f1)"
 source_unit_sha="$(sha256sum "$source_unit_file" | cut -d' ' -f1)"
 source_gate_sha="$(sha256sum "$source_gate_file" | cut -d' ' -f1)"
@@ -770,7 +765,7 @@ install -o root -g root -m 0644 "$source_gate_file" "$source_gate"
 install -d -o root -g root -m 0700 "$source_capsule_dir"
 install -o root -g root -m 0555 "$source_runner_file" "$source_runner"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "runner_sha256=$source_runner_sha" \
   "unit_sha256=$source_capsule_unit_sha" \
   "gate_sha256=$source_capsule_gate_sha" \
@@ -794,7 +789,7 @@ chown root:root "$source_dropin"
 chmod 0644 "$source_dropin"
 source_dropin_sha="$(sha256sum "$source_dropin" | cut -d' ' -f1)"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "target_version=$source_version" \
   "helper_sha256=$source_helper_sha" \
   "agent_sha256=$source_agent_sha" > "$source_blocker"
@@ -856,7 +851,7 @@ util_linux_version=${util_linux_fields[3]}
 
 authority=$test_root/repair-authority
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "node_id=$node_id" \
   "installed_version=$installed_version" \
   "installed_agent_sha256=$old_agent_sha" \

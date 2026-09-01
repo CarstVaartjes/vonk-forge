@@ -17,9 +17,9 @@ repair_intent=$repair_state/intent
 repair_phase=$repair_state/phase
 repair_candidate=$repair_state/candidate.deb
 repair_authority=/usr/lib/vonk-forge/repair-authority
-recovery_unit=vonk-forge-package-upgrade-recover.service
 source_capsule_runner=$state/recovery-capsule/runner
 source_capsule_unit=vonk-forge-package-upgrade-recover-capsule.service
+recovery_unit=$source_capsule_unit
 observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
 observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 
@@ -139,25 +139,23 @@ recursive_binding() {
     binding_reason=installed-authority-file
     safe_root_file "$repair_authority" 644 || return 1
     binding_reason=source-intent
-    source_schema=$(/usr/bin/sed -n '1s/^schema_version=//p' "$source_intent")
-    case "$source_schema" in
-        1) canonical_line_file "$source_intent" 14 || return 1 ;;
-        2)
-            recovery_unit=$source_capsule_unit
-            canonical_line_file "$source_intent" 17 \
-                && /usr/bin/sed -n '15p' "$source_intent" \
-                    | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
-                && /usr/bin/sed -n '16p' "$source_intent" \
-                    | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
-                && /usr/bin/sed -n '17p' "$source_intent" \
-                    | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$' \
-                || return 1
-            ;;
-        *) return 1 ;;
-    esac
+    canonical_line_file "$source_intent" 17 \
+        && /usr/bin/sed -n '1p' "$source_intent" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '15p' "$source_intent" \
+            | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '16p' "$source_intent" \
+            | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '17p' "$source_intent" \
+            | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$' \
+        || return 1
     binding_reason=repair-ledger-shape
     canonical_line_file "$repair_intent" 17 \
         && canonical_line_file "$repair_phase" 3 \
+        && /usr/bin/sed -n '1p' "$repair_intent" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '1p' "$repair_phase" \
+            | grep -Fxq 'schema_version=2' \
         || return 1
     source_snapshot=$(/usr/bin/sha256sum "$source_intent" \
         | /usr/bin/cut -d' ' -f1) || return 1
@@ -171,13 +169,8 @@ recursive_binding() {
     intent_helper=$(/usr/bin/sed -n '11s/^helper_sha256=//p' "$repair_intent")
     intent_repair_runner=$(/usr/bin/sed -n \
         '13s/^repair_runner_sha256=//p' "$repair_intent")
-    if [ "$source_schema" = 2 ]; then
-        intent_runner=$(/usr/bin/sed -n \
-            '12s/^standard_runner_sha256=//p' "$repair_intent")
-    else
-        intent_runner=$(/usr/bin/sed -n \
-            '13s/^repair_runner_sha256=//p' "$repair_intent")
-    fi
+    intent_runner=$(/usr/bin/sed -n \
+        '12s/^standard_runner_sha256=//p' "$repair_intent")
     intent_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
     phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
     binding_reason=repair-ledger-binding
@@ -217,13 +210,11 @@ recursive_binding() {
             /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
             | /usr/bin/cut -d' ' -f1)" = "$intent_runner" ] \
         || return 1
-    if [ "$source_schema" = 2 ]; then
-        binding_reason=capsule-runner
-        safe_root_file "$source_capsule_runner" 555 \
-            && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
-                | /usr/bin/cut -d' ' -f1)" = "$intent_repair_runner" ] \
-            || return 1
-    fi
+    binding_reason=capsule-runner
+    safe_root_file "$source_capsule_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_repair_runner" ] \
+        || return 1
     binding_reason=recovery-cgroup
     grep -Fxq "0::/system.slice/$recovery_unit" /proc/self/cgroup \
         || return 1
