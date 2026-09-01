@@ -1303,6 +1303,28 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
     )
 
 
+def test_authenticated_claim_accepts_model_uninstall_capability(agent_system) -> None:
+    client, services, _, _ = agent_system
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "capabilities": [*CAPABILITIES, "recipe.model-uninstall.v1"],
+            "lease_seconds": 30,
+            "node_id": NODE_A,
+            "protocol_version": 3,
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+            "wait_seconds": 0,
+        },
+    )
+
+    assert response.status_code == 204
+    with services.sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        assert "recipe.model-uninstall.v1" in node.capabilities
+
+
 @pytest.mark.parametrize(
     "hostname",
     ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
