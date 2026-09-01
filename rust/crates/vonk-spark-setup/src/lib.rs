@@ -1813,10 +1813,26 @@ fn verify_sustained_readiness(
     // The repeated probes intentionally suppress their transient diagnostics,
     // but once the bounded readiness window is exhausted the operator needs
     // the exact fail-closed reason (missing receipt, stale process identity,
-    // or an invalid self-test) to repair the host.  This final probe does not
-    // include any credentials and inherits stderr from the setup command.
+    // or an invalid self-test) to repair the host.  These final diagnostics do
+    // not include any credentials and inherit stderr from the setup command.
     if let Some(current_pid) = pid {
         let _ = runner.run(readiness_probe(paths, &current_pid, false));
+    } else {
+        let _ = runner.run(Command::new(
+            "/usr/bin/systemctl",
+            ["status", "--no-pager", "--full", &paths.service],
+        ));
+        let _ = runner.run(Command::new(
+            "/usr/bin/journalctl",
+            [
+                "--unit",
+                &paths.service,
+                "--lines",
+                "40",
+                "--no-pager",
+                "--full",
+            ],
+        ));
     }
     Err(SetupError::Command(
         "controller readiness was not sustained".to_owned(),
@@ -2831,6 +2847,70 @@ mod tests {
             validate_host_description("ID=ubuntu\n", true, "amd64", "arm64"),
             Err(SetupError::UnsupportedHost)
         ));
+    }
+
+    #[derive(Default)]
+    struct InactiveReadinessRunner {
+        commands: Vec<Command>,
+    }
+
+    impl CommandRunner for InactiveReadinessRunner {
+        fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+            let is_active = command.program == Path::new("/usr/bin/systemctl")
+                && command.args.first().map(String::as_str) == Some("is-active");
+            self.commands.push(command);
+            if is_active {
+                Ok(CommandOutput {
+                    success: false,
+                    stdout: Vec::new(),
+                })
+            } else {
+                Ok(CommandOutput::success_empty())
+            }
+        }
+
+        fn sleep(&mut self, _duration: Duration) {}
+    }
+
+    #[test]
+    fn readiness_timeout_without_a_pid_emits_bounded_service_diagnostics() {
+        let mut runner = InactiveReadinessRunner::default();
+        let paths = InstallPaths {
+            config: PathBuf::from("/etc/vonk-forge-agent/agent.toml"),
+            ca: PathBuf::from("/etc/vonk-forge-agent/controller-ca.pem"),
+            firewall_config: PathBuf::from("/etc/vonk-forge-agent/docker-firewall.conf"),
+            helper_authority: PathBuf::from("/etc/vonk-forge-agent/host-helper-authority.pub"),
+            hosts: PathBuf::from("/etc/hosts"),
+            agent: PathBuf::from("/usr/lib/vonk-forge/vonk-agent"),
+            staging_root: PathBuf::from("/var/tmp"),
+            sudo: PathBuf::from("/usr/bin/sudo"),
+            service: SERVICE.to_owned(),
+            required_owner: Some(0),
+        };
+
+        assert!(matches!(
+            verify_sustained_readiness(&paths, &mut runner),
+            Err(SetupError::Command(message)) if message == "controller readiness was not sustained"
+        ));
+        assert_eq!(
+            runner
+                .commands
+                .iter()
+                .filter(|command| command.program == Path::new("/usr/bin/systemctl")
+                    && command.args.first().map(String::as_str) == Some("is-active"))
+                .count(),
+            30
+        );
+        assert!(runner.commands.iter().any(|command| {
+            command.program == Path::new("/usr/bin/systemctl")
+                && command.args == ["status", "--no-pager", "--full", SERVICE]
+                && command.stderr == CommandStderr::Inherit
+        }));
+        assert!(runner.commands.iter().any(|command| {
+            command.program == Path::new("/usr/bin/journalctl")
+                && command.args == ["--unit", SERVICE, "--lines", "40", "--no-pager", "--full"]
+                && command.stderr == CommandStderr::Inherit
+        }));
     }
 
     #[test]
