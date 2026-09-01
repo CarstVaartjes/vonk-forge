@@ -164,7 +164,10 @@ _ARGUMENTS = {
     ),
     "chat-template": ArgumentSpec(
         "--chat-template",
-        validate=one_of("/opt/vonk/templates/glm53-chat-template-mm.jinja"),
+        validate=one_of(
+            "/models/target/chat_template.thinking-off.jinja",
+            "/opt/vonk/templates/glm53-chat-template-mm.jinja",
+        ),
     ),
     "chat-template-content-format": ArgumentSpec(
         "--chat-template-content-format", validate=one_of("openai")

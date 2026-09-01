@@ -1142,6 +1142,22 @@ def test_vllm_accepts_glm53_dspark_runtime_contract() -> None:
     )
 
 
+def test_vllm_accepts_immutable_model_thinking_off_chat_template() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {
+            "name": "chat-template",
+            "value": "/models/target/chat_template.thinking-off.jinja",
+        }
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert projection.command[projection.command.index("--chat-template") + 1] == (
+        "/models/target/chat_template.thinking-off.jinja"
+    )
+
+
 @pytest.mark.parametrize(
     "name",
     ["hf-overrides", "compilation-config"],
