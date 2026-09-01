@@ -3927,7 +3927,7 @@
       }
     },
     "vonk-forge/qwen3-6-35b-a3b-nvfp4-vllm-single": {
-      "content_sha256": "fcec4077f3a01e6f68bb8bf55deb43d3114c7ac20b44da12674ce70c6f140c29",
+      "content_sha256": "0ed99cee02a86cfa78aef2e601fefdf52c515bcc2f0f7a2e55d946949377c56a",
       "alias": "qwen3-6-35b-a3b-nvfp4",
       "smoke_cases": [
         "M0",
