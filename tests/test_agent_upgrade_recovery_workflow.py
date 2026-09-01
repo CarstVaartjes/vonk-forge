@@ -23,6 +23,9 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert "VERSION=0.1.0~dev.381+ga122909feaa3" in text
     assert "STALE_PENDING_FORMAT=legacy2" in text
     assert "CRASH_MODE=full-cgroup" in text
+    assert "CRASH_MODE=post-remove" in text
+    assert "STALE_PENDING_FORMAT=prior3" in text
+    assert "CANDIDATE_CUSTODY=root" in text
     assert "CANDIDATE_CUSTODY=legacy" in text
     assert "persist-credentials: false" in text
     assert "contents: read" in text
