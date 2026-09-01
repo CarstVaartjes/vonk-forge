@@ -1,0 +1,35 @@
+[Unit]
+Description=Vonk Forge durable package upgrade recovery capsule
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecCondition=/bin/sh -c 'test -e /var/lib/vonk-forge/package-upgrade/intent || test -e /var/lib/vonk-forge/package-repair.receipt'
+ExecStart=/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner recover
+Restart=on-failure
+RestartSec=10s
+RestartPreventExitStatus=78
+TimeoutStartSec=600s
+UMask=0077
+User=root
+Group=root
+PrivateTmp=yes
+PrivateDevices=yes
+IPAddressDeny=any
+ProtectHome=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

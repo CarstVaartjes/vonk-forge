@@ -419,7 +419,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert materializer.count('"archive_sha256":') == 2
     assert materializer.count('"binary_sha256":') == 2
     assert "scripts/test-agent-package-native-lifecycle" in text
-    assert text.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 5
+    assert text.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 6
     assert "CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root" in text
     for architecture in ("linux-arm64", "linux-amd64"):
         assert f"build_package {architecture}" in text
@@ -1043,14 +1043,14 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
     assert "RUSTFLAGS='-C target-feature=+crt-static'" in lifecycle
     assert "cargo build --locked --release --package vonk-build-egress" in lifecycle
-    assert lifecycle.count('BUILD_EGRESS_BINARY="$build_egress"') == 4
+    assert lifecycle.count('BUILD_EGRESS_BINARY="$build_egress"') == 5
     recovery_invocations = re.findall(
         r"sudo env (?P<environment>.*?)\n\s+"
         r"tests/nodes/test_agent_upgrade_recovery_systemd\.sh",
         lifecycle,
         re.DOTALL,
     )
-    assert len(recovery_invocations) == 4
+    assert len(recovery_invocations) == 5
     assert all(
         'BUILD_EGRESS_BINARY="$build_egress"' in environment
         for environment in recovery_invocations
@@ -1062,7 +1062,7 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert "outputs.baseline_artifact_name" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
     assert "scripts/test-agent-package-native-lifecycle" in lifecycle
-    assert lifecycle.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 5
+    assert lifecycle.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 6
     for exact_gate in (
         "STALE_PENDING_FORMAT=legacy2 \\\n            CRASH_MODE=full-cgroup",
         "STALE_PENDING_FORMAT=prior3 \\\n            CRASH_MODE=full-cgroup",
@@ -1070,6 +1070,7 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
         "STALE_PENDING_FORMAT=prior3 \\\n            CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root",
     ):
         assert exact_gate in lifecycle
+    assert "CRASH_MODE=post-remove CANDIDATE_CUSTODY=root" in lifecycle
     for forbidden in (
         "environment:",
         "id-token: write",

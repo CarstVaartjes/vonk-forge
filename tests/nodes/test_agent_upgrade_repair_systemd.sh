@@ -25,11 +25,11 @@ standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
-source_version=0.1.0~dev.381+ga122909feaa3
-repair_version=${source_version}+repair.spk${node_suffix}.1
-ordinary_version=0.1.0~dev.382+g0123456789ab
-binary_revision=a122909feaa3b64d7b15371285e727965c3d7e9a
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
+binary_revision=$packaging_revision
+source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}
+repair_version=${source_version}+repair.spk${node_suffix}.1
+ordinary_version=0.1.0~dev.1788260441+g0123456789ab
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -83,10 +83,19 @@ source_intent=$source_state/intent
 source_lock=$source_state/lock
 source_blocker=$source_state/agent-blocked
 source_pending=/var/lib/vonk-forge/helper-upgrade.pending
-source_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_package_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
+source_capsule_dir=$source_state/recovery-capsule
+source_capsule_manifest=$source_capsule_dir/manifest
+source_runner=$source_capsule_dir/runner
 standard_runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard
 source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
+source_capsule_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_unit_name=${source_capsule_unit##*/}
+source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression=/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
+source_capsule_enablement=/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+repair_gate=/lib/systemd/system/vonk-forge-agent.service.d/30-node-bound-repair.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
 repair_state=$source_state/repair
 repair_phase=$repair_state/phase
@@ -95,7 +104,9 @@ helper_receipt=/var/lib/vonk-forge/package-repair-helper.receipt
 agent_unit=vonk-forge-agent.service
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
-recovery_unit=vonk-forge-package-upgrade-recover.service
+running_agent_bypass=/run/systemd/system/$agent_unit.d/99-repair-fixture-bypass.conf
+agent_enablement=/etc/systemd/system/multi-user.target.wants/$agent_unit
+recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 firewall_name=vonk-forge-docker-firewall.service
 lock_holder=
 wrong_cgroup=
@@ -218,7 +229,16 @@ cleanup() {
   rm -rf -- /run/vonk-forge-package-candidates
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.socket.d
   rm -rf -- /lib/systemd/system/vonk-forge-package-helper.service.d
+  rm -f -- "$source_capsule_enablement" "$source_capsule_unit" \
+    "$source_capsule_gate" "$source_capsule_suppression" "$repair_gate" \
+    "$agent_enablement"
+  rmdir --ignore-fail-on-non-empty \
+    "${source_capsule_gate%/*}" "${source_capsule_suppression%/*}" \
+    >/dev/null 2>&1 || true
   rm -rf -- /run/vonk-forge-package-helper
+  rm -f -- "$running_agent_bypass"
+  rmdir --ignore-fail-on-non-empty "${running_agent_bypass%/*}" \
+    >/dev/null 2>&1 || true
   rm -f -- "$standard_runner"
   case "$fault" in
     dpkg-iU) fixture_dpkg_status='iU '; fixture_dpkg_version=$installed_version ;;
@@ -313,12 +333,29 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /lib/systemd/system/vonk-forge-package-helper.service.d \
     || -e "$source_gate" \
     || -L "$source_gate" \
+    || -e "$repair_gate" \
+    || -L "$repair_gate" \
+    || -e "$source_capsule_unit" \
+    || -L "$source_capsule_unit" \
+    || -e "$source_capsule_gate" \
+    || -L "$source_capsule_gate" \
+    || -e "$source_capsule_suppression" \
+    || -L "$source_capsule_suppression" \
+    || -e "$source_capsule_enablement" \
+    || -L "$source_capsule_enablement" \
+    || -e "$agent_enablement" \
+    || -L "$agent_enablement" \
+    || -e "$standard_runner" \
+    || -L "$standard_runner" \
     || -e /lib/systemd/system/vonk-forge-package-helper.socket.d \
     || -L /lib/systemd/system/vonk-forge-package-helper.socket.d \
     || -e /run/vonk-forge-package-candidates \
     || -L /run/vonk-forge-package-candidates \
     || -e /run/vonk-forge-package-helper \
     || -L /run/vonk-forge-package-helper \
+    || -e "$running_agent_bypass" \
+    || -L "$running_agent_bypass" \
+    || -L "${running_agent_bypass%/*}" \
     || -e "/var/lib/dpkg/tmp.ci/$repair_probe_control" \
     || -L "/var/lib/dpkg/tmp.ci/$repair_probe_control" \
     || -n "$probe_info_collision" \
@@ -336,7 +373,7 @@ trap 'exit 143' TERM
 
 mkdir -p "$test_root"/{old,target,next}-{bin,dist} "$test_root/extracted"
 build_digest_old="sha256:$(printf old-dev335 | sha256sum | cut -d' ' -f1)"
-build_digest_target="sha256:$(printf exact-a122 | sha256sum | cut -d' ' -f1)"
+build_digest_target="sha256:$(printf exact-schema2 | sha256sum | cut -d' ' -f1)"
 build_digest_next="sha256:$(printf ordinary-next | sha256sum | cut -d' ' -f1)"
 
 build_agent() {
@@ -433,15 +470,17 @@ SOURCE
   gcc -O2 -o "$output" "$test_root/helper-$identity.c"
 }
 
+build_egress_target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+expected_build_egress_binary=$build_egress_target_dir/release/vonk-build-egress
 if [[ -n "${BUILD_EGRESS_BINARY:-}" ]]; then
   build_egress_fixture=$(realpath -e -- "$BUILD_EGRESS_BINARY")
   test "$build_egress_fixture" = \
-    "$repo_root/target/release/vonk-build-egress"
+    "$(realpath -e -- "$expected_build_egress_binary")"
 else
   RUSTFLAGS='-C target-feature=+crt-static' \
     cargo build --locked --release --manifest-path "$repo_root/Cargo.toml" \
       --package vonk-build-egress
-  build_egress_fixture=$repo_root/target/release/vonk-build-egress
+  build_egress_fixture=$expected_build_egress_binary
 fi
 test ! -L "$build_egress_fixture"
 test -f "$build_egress_fixture"
@@ -472,15 +511,20 @@ done
 
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
 chmod 0600 "$test_root/release.pem"
+repair_probe_target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+expected_repair_probe_binary=$repair_probe_target_dir/release/vonk-repair-helper-probe
 if [[ -n "${REPAIR_PROBE_BINARY:-}" ]]; then
   repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")
   test "$repair_probe_binary" = \
-    "$repo_root/target/release/vonk-repair-helper-probe"
+    "$(realpath -e -- "$expected_repair_probe_binary")"
 else
   cargo build --locked --release --manifest-path "$repo_root/Cargo.toml" \
     --package vonk-repair-helper-probe
-  repair_probe_binary=$repo_root/target/release/vonk-repair-helper-probe
+  repair_probe_binary=$expected_repair_probe_binary
 fi
+repair_probe_source=$repair_probe_binary
+repair_probe_binary=$test_root/vonk-repair-helper-probe
+install -o root -g root -m 0755 "$repair_probe_source" "$repair_probe_binary"
 test ! -L "$repair_probe_binary"
 test -f "$repair_probe_binary"
 test "$(stat -c %u:%g:%a:%h "$repair_probe_binary")" = '0:0:755:1'
@@ -625,10 +669,12 @@ build_package() {
   generation=$2
   digest=$3
   output=$4
-  shift 4
-  VONK_SOURCE_REVISION="$packaging_revision" \
+  package_source_root=$5
+  package_source_revision=$6
+  shift 6
+  VONK_SOURCE_REVISION="$package_source_revision" \
   VONK_SOURCE_REPOSITORY=https://github.com/CarstVaartjes/vonk-forge \
-    "$repo_root/scripts/build-agent-deb" \
+    "$package_source_root/scripts/build-agent-deb" \
       --version "$version" \
       --architecture linux-arm64 \
       --build-digest "$digest" \
@@ -638,8 +684,10 @@ build_package() {
       --output-dir "$output" "$@" >/dev/null
 }
 
-build_package "$installed_version" old "$build_digest_old" "$test_root/old-dist"
-build_package "$source_version" target "$build_digest_target" "$test_root/target-dist"
+build_package "$installed_version" old "$build_digest_old" \
+  "$test_root/old-dist" "$repo_root" "$packaging_revision"
+build_package "$source_version" target "$build_digest_target" \
+  "$test_root/target-dist" "$repo_root" "$binary_revision"
 old_package="$test_root/old-dist/vonk-forge-agent_${installed_version}_arm64.deb"
 source_package="$test_root/target-dist/vonk-forge-agent_${source_version}_arm64.deb"
 "$repo_root/scripts/verify-agent-deb" --json "$old_package" >/dev/null
@@ -681,7 +729,7 @@ install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 systemctl --system daemon-reload
 systemctl --system enable --now "$socket_unit" >/dev/null
 systemctl --system start "$helper_unit"
-systemctl --system start "$agent_unit"
+systemctl --system enable --now "$agent_unit" >/dev/null
 
 old_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
 old_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
@@ -703,25 +751,52 @@ source_helper_sha="$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -
 source_runner_file=$source_payload/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
 source_unit_file=$source_payload/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_gate_file=$source_payload/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+source_capsule_unit_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_gate_file=$repo_root/packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+source_capsule_suppression_file=$repo_root/packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
 source_runner_sha="$(sha256sum "$source_runner_file" | cut -d' ' -f1)"
 source_unit_sha="$(sha256sum "$source_unit_file" | cut -d' ' -f1)"
 source_gate_sha="$(sha256sum "$source_gate_file" | cut -d' ' -f1)"
+source_capsule_unit_sha="$(sha256sum "$source_capsule_unit_file" | cut -d' ' -f1)"
+source_capsule_gate_sha="$(sha256sum "$source_capsule_gate_file" | cut -d' ' -f1)"
+source_capsule_suppression_sha="$(sha256sum "$source_capsule_suppression_file" | cut -d' ' -f1)"
 
 install -d -o root -g root -m 0700 "$source_state"
 install -o root -g root -m 0600 /dev/null "$source_lock"
 install -o root -g root -m 0600 "$source_package" \
   "$source_state/$source_package_sha.deb"
-install -o root -g root -m 0555 "$source_runner_file" "$source_runner"
+install -o root -g root -m 0555 "$source_runner_file" "$source_package_runner"
 install -o root -g root -m 0644 "$source_unit_file" "$source_unit"
 install -d -o root -g root -m 0755 "${source_gate%/*}" "${source_dropin%/*}"
 install -o root -g root -m 0644 "$source_gate_file" "$source_gate"
+install -d -o root -g root -m 0700 "$source_capsule_dir"
+install -o root -g root -m 0555 "$source_runner_file" "$source_runner"
+printf '%s\n' \
+  'schema_version=2' \
+  "runner_sha256=$source_runner_sha" \
+  "unit_sha256=$source_capsule_unit_sha" \
+  "gate_sha256=$source_capsule_gate_sha" \
+  "suppression_sha256=$source_capsule_suppression_sha" \
+  > "$source_capsule_manifest"
+chown root:root "$source_capsule_manifest"
+chmod 0600 "$source_capsule_manifest"
+install -o root -g root -m 0644 "$source_capsule_unit_file" \
+  "$source_capsule_unit"
+install -o root -g root -m 0644 "$source_capsule_gate_file" \
+  "$source_capsule_gate"
+install -d -o root -g root -m 0755 "${source_capsule_suppression%/*}" \
+  "${source_capsule_enablement%/*}"
+install -o root -g root -m 0644 "$source_capsule_suppression_file" \
+  "$source_capsule_suppression"
+ln -s ../vonk-forge-package-upgrade-recover-capsule.service \
+  "$source_capsule_enablement"
 printf '%s\n' '[Unit]' 'Wants=vonk-forge-package-upgrade-recover.service' \
   > "$source_dropin"
 chown root:root "$source_dropin"
 chmod 0644 "$source_dropin"
 source_dropin_sha="$(sha256sum "$source_dropin" | cut -d' ' -f1)"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "target_version=$source_version" \
   "helper_sha256=$source_helper_sha" \
   "agent_sha256=$source_agent_sha" > "$source_blocker"
@@ -738,7 +813,7 @@ source_pending_sha="$(sha256sum "$source_pending" | cut -d' ' -f1)"
 boot_id="$(sed -n '1p' /proc/sys/kernel/random/boot_id)"
 source_nonce="$(openssl rand -hex 32)"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   'package=vonk-forge-agent' \
   "target_version=$source_version" \
   'architecture=arm64' \
@@ -751,10 +826,24 @@ printf '%s\n' \
   "request_boot_id=$boot_id" \
   'dpkg_pid=999999' \
   'dpkg_start_time=1' \
-  "recovery_nonce=$source_nonce" > "$source_intent"
+  "recovery_nonce=$source_nonce" \
+  "capsule_unit_sha256=$source_capsule_unit_sha" \
+  "capsule_gate_sha256=$source_capsule_gate_sha" \
+  "capsule_suppression_sha256=$source_capsule_suppression_sha" \
+  > "$source_intent"
 chown root:root "$source_intent"
 chmod 0600 "$source_intent"
 source_intent_sha="$(sha256sum "$source_intent" | cut -d' ' -f1)"
+systemctl --system daemon-reload
+test "$(realpath -e -- "$(systemctl --system show \
+  --property=FragmentPath --value "$recovery_unit")")" = \
+  "$(realpath -e -- "$source_capsule_unit")"
+multi_user_wants=$(systemctl --system show --property=Wants --value \
+  multi-user.target)
+case " $multi_user_wants " in
+  *" $recovery_unit "*) ;;
+  *) printf '%s\n' 'capsule is not a durable multi-user dependency' >&2; exit 1 ;;
+esac
 
 setpriv_sha="$(sha256sum /usr/bin/setpriv | cut -d' ' -f1)"
 repair_probe_sha="$(sha256sum "$repair_probe_binary" | cut -d' ' -f1)"
@@ -769,7 +858,7 @@ util_linux_version=${util_linux_fields[3]}
 
 authority=$test_root/repair-authority
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   "node_id=$node_id" \
   "installed_version=$installed_version" \
   "installed_agent_sha256=$old_agent_sha" \
@@ -949,11 +1038,12 @@ collision_unit="vonk-repair-agent-collision-${collision_nonce}.service"
 native_transient_unit=$collision_unit
 /usr/bin/systemd-run --system --collect --quiet --unit="$collision_unit" \
   -- /bin/sleep 1
-set +e
-/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
-  --unit="$collision_unit" -- /bin/true >/dev/null 2>&1
-collision_status=$?
-set -e
+if /usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+  --unit="$collision_unit" -- /bin/true >/dev/null 2>&1; then
+  collision_status=0
+else
+  collision_status=$?
+fi
 test "$collision_status" -ne 0
 wait_for_transient_collection "$collision_unit"
 native_transient_unit=
@@ -1252,7 +1342,7 @@ run_wrong_binary_but_restore_installed() {
   local destination=$2
   local wrong_binary=$3
   local expected_installed=$4
-  local gate_backup=
+  local bypass_manager_path=
   local wrong_sha
   local restart_status
   local wrong_pid=
@@ -1266,30 +1356,55 @@ run_wrong_binary_but_restore_installed() {
   local wrong_owner_before
   local wrong_groups_before
   local gate_condition
+  local drop_in_paths
+  local source_capsule_gate_manager_path
   local source_gate_manager_path
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   atomic_replace "$wrong_binary" "$destination" 0555
   if [[ "$unit" = "$agent_unit" ]]; then
-    gate_backup=$test_root/running-agent-source-gate
+    test -f "$source_capsule_gate"
+    test ! -L "$source_capsule_gate"
+    test "$(stat -c %u:%g:%a:%h "$source_capsule_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_capsule_gate" | cut -d' ' -f1)" \
+      = "$source_capsule_gate_sha"
     test -f "$source_gate"
     test ! -L "$source_gate"
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
     source_gate_manager_path="$(realpath -e -- "$source_gate")"
-    test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate_manager_path"
+    source_capsule_gate_manager_path="$(realpath -e -- "$source_capsule_gate")"
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
     [[ "$gate_condition" = *"allow-agent-start"* ]]
-    install -o root -g root -m 0644 "$source_gate" "$gate_backup"
-    test "$(sha256sum "$gate_backup" | cut -d' ' -f1)" = "$source_gate_sha"
-    rm -f -- "$source_gate"
+    # Reset the accumulated ExecCondition list with a runtime-only fixture
+    # override so an already-running wrong process can be constructed without
+    # mutating either production gate. The override is removed and both exact
+    # gates are re-proved before repair is invoked.
+    test ! -e "$running_agent_bypass"
+    test ! -L "$running_agent_bypass"
+    test ! -L "${running_agent_bypass%/*}"
+    install -d -o root -g root -m 0755 "${running_agent_bypass%/*}"
+    test "$(stat -c %u:%g:%a "${running_agent_bypass%/*}")" = 0:0:755
+    printf '%s\n' '[Service]' 'ExecCondition=' > "$running_agent_bypass"
+    chown root:root "$running_agent_bypass"
+    chmod 0644 "$running_agent_bypass"
+    sync -f "$running_agent_bypass"
+    sync -f "${running_agent_bypass%/*}"
     systemctl --system daemon-reload
-    test -z "$(systemctl --system show --property=DropInPaths --value \
+    bypass_manager_path="$(realpath -e -- "$running_agent_bypass")"
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
       "$agent_unit")"
-    test -z "$(systemctl --system show --property=ExecCondition --value \
-      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $bypass_manager_path "* ]]
+    gate_condition="$(systemctl --system show \
+      --property=ExecCondition --value "$agent_unit")"
+    test -z "$gate_condition"
   fi
   set +e
   systemctl --system restart "$unit"
@@ -1328,15 +1443,25 @@ run_wrong_binary_but_restore_installed() {
       $1=""; sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print
     }' "/proc/$wrong_pid_before/status" 2>/dev/null)"
   fi
-  if [[ -n "$gate_backup" ]]; then
-    atomic_replace "$gate_backup" "$source_gate" 0644
+  if [[ -n "$bypass_manager_path" ]]; then
+    rm -f -- "$running_agent_bypass"
+    sync -f "${running_agent_bypass%/*}"
     systemctl --system daemon-reload
-    cmp -s "$gate_backup" "$source_gate"
+    test ! -e "$running_agent_bypass"
+    test ! -L "$running_agent_bypass"
+    test "$(stat -c %u:%g:%a:%h "$source_capsule_gate")" = 0:0:644:1
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_capsule_gate" | cut -d' ' -f1)" \
+      = "$source_capsule_gate_sha"
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    test "$(realpath -e -- "$source_capsule_gate")" \
+      = "$source_capsule_gate_manager_path"
     test "$(realpath -e -- "$source_gate")" = "$source_gate_manager_path"
-    test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate_manager_path"
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
+    [[ " $drop_in_paths " != *" $bypass_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
@@ -1594,7 +1719,29 @@ if [[ -n "$crash_watcher" ]]; then
   wait "$crash_watcher"
   test -e "$test_root/crash-observed"
   if [[ " ${repair_boot_crashpoints[*]} " = *" $crash_phase "* ]]; then
-    systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+    # The freezer is a test-only power-loss bracket. A real boot recreates the
+    # helper cgroup unfrozen, so prove that normalization before stopping the
+    # old invocation and traversing the durable boot edge.
+    boot_helper_control_group=$(systemctl --system show \
+      --property=ControlGroup --value "$helper_unit")
+    case "$boot_helper_control_group" in
+      */system.slice/"$helper_unit") ;;
+      *) printf 'unexpected frozen helper cgroup: %s\n' \
+        "$boot_helper_control_group" >&2; exit 1 ;;
+    esac
+    boot_helper_cgroup=/sys/fs/cgroup$boot_helper_control_group
+    if [[ -f "$boot_helper_cgroup/cgroup.freeze" ]]; then
+      printf '0\n' > "$boot_helper_cgroup/cgroup.freeze"
+    fi
+    for _ in {1..100}; do
+      systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
+      [[ ! -e "$boot_helper_cgroup/cgroup.events" ]] && break
+      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events" && break
+      sleep 0.05
+    done
+    if [[ -e "$boot_helper_cgroup/cgroup.events" ]]; then
+      grep -Fxq 'frozen 0' "$boot_helper_cgroup/cgroup.events"
+    fi
     systemctl --system stop "$recovery_unit" "$agent_unit" "$helper_unit" \
       "$socket_unit" >/dev/null 2>&1 || true
     if [[ "$crash_phase" = helper-proven-boot \
@@ -1608,9 +1755,12 @@ if [[ -n "$crash_watcher" ]]; then
       "$helper_unit" "$socket_unit" >/dev/null 2>&1 || true
     systemctl --system daemon-reload
     systemctl --system start "$socket_unit"
-  else
-    systemctl --system reset-failed "$recovery_unit" >/dev/null 2>&1 || true
-    systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
+    # Model the next boot transaction through the durable Wants edge. The
+    # socket deliberately wants the package-owned standard recovery unit, but
+    # schema-v2 suppresses that unit while the capsule owns the intent.
+    systemctl --system restart multi-user.target >/dev/null 2>&1 || true
+    test "$(systemctl --system show --property=ActiveState --value \
+      multi-user.target)" = active
   fi
 fi
 
@@ -1623,15 +1773,39 @@ if [[ "$crash_phase" = pre-runner-rename ]]; then
     fi
     sleep 0.1
   done
+  test ! -e "$source_intent"
   test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = 'ii '
   test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$source_version"
   test ! -e "$repair_state"
   test ! -e "$repair_receipt"
   test ! -e "$helper_receipt"
   assert_repair_probe_not_persisted
-  test "$(sha256sum "$source_runner" | cut -d' ' -f1)" = "$source_runner_sha"
-  source_agent_pid="$(systemctl --system show --property=MainPID --value "$agent_unit")"
-  source_helper_pid="$(systemctl --system show --property=MainPID --value "$helper_unit")"
+  test ! -e "$source_capsule_dir"
+  test ! -e "$source_capsule_unit"
+  test ! -e "$source_capsule_gate"
+  test ! -e "$source_capsule_suppression"
+  test ! -e "$source_capsule_enablement"
+  test "$(sha256sum "$source_package_runner" | cut -d' ' -f1)" \
+    = "$source_runner_sha"
+  test "$(systemctl --system is-enabled "$agent_unit")" = enabled
+  systemctl --system start "$helper_unit"
+  source_agent_pid=0
+  source_helper_pid=0
+  for _ in {1..400}; do
+    source_agent_pid="$(systemctl --system show --property=MainPID \
+      --value "$agent_unit")"
+    source_helper_pid="$(systemctl --system show --property=MainPID \
+      --value "$helper_unit")"
+    if [[ "$source_agent_pid" =~ ^[1-9][0-9]*$ \
+      && "$source_helper_pid" =~ ^[1-9][0-9]*$ \
+      && -e "/proc/$source_agent_pid/exe" \
+      && -e "/proc/$source_helper_pid/exe" ]]; then
+      break
+    fi
+    sleep 0.05
+  done
+  [[ "$source_agent_pid" =~ ^[1-9][0-9]*$ ]]
+  [[ "$source_helper_pid" =~ ^[1-9][0-9]*$ ]]
   test "$(sha256sum "/proc/$source_agent_pid/exe" | cut -d' ' -f1)" \
     = "$source_agent_sha"
   test "$(sha256sum "/proc/$source_helper_pid/exe" | cut -d' ' -f1)" \
@@ -1639,7 +1813,7 @@ if [[ "$crash_phase" = pre-runner-rename ]]; then
   snapshot_prepared_objects "$test_root/prepared-after"
   cmp -s "$test_root/prepared-before" "$test_root/prepared-after"
   printf '%s\n' \
-    'pre-runner-rename boot preserves ignored prepared objects and baseline a122 recovery: PASS'
+    'pre-runner-rename boot preserves ignored prepared objects and baseline schema2 recovery: PASS'
   exit 0
 fi
 
@@ -1664,7 +1838,7 @@ test "$(stat -c %u:%g:%a:%h "$repair_receipt")" = 0:0:600:1
 test "$(stat -c %u:%g:%a:%h "$helper_receipt")" = 0:0:600:1
 test "$(wc -l < "$repair_receipt")" -eq 16
 test "$(wc -l < "$helper_receipt")" -eq 10
-sed -n '1p' "$helper_receipt" | grep -Fxq 'schema_version=1'
+sed -n '1p' "$helper_receipt" | grep -Fxq 'schema_version=2'
 sed -n '2p' "$helper_receipt" | grep -Fxq "authority_sha256=$authority_sha"
 helper_nonce="$(sed -n '3s/^repair_nonce=//p' "$helper_receipt")"
 [[ "$helper_nonce" =~ ^[0-9a-f]{64}$ ]]
@@ -1679,7 +1853,7 @@ helper_receipt_start="$(sed -n '10s/^helper_start_time=//p' "$helper_receipt")"
 [[ "$helper_receipt_pid" =~ ^[1-9][0-9]*$ ]]
 [[ "$helper_receipt_start" =~ ^[1-9][0-9]*$ ]]
 
-sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=1'
+sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=2'
 sed -n '2p' "$repair_receipt" | grep -Fxq "authority_sha256=$authority_sha"
 sed -n '3p' "$repair_receipt" | grep -Fxq "node_id=$node_id"
 sed -n '4p' "$repair_receipt" | grep -Fxq "version=$repair_version"
@@ -1708,6 +1882,7 @@ test ! -e "$source_state/$source_package_sha.deb"
 test ! -e "$source_blocker"
 test ! -e "$source_pending"
 test ! -e "$source_dropin"
+test ! -e "$repair_gate"
 test ! -e "$repair_state"
 test "$(find "$source_state" -mindepth 1 -maxdepth 1 -type d \
   -name '.repair-build.*' | wc -l)" -eq 0
@@ -1767,7 +1942,8 @@ observation_receipt_private_digest=$(sha256sum \
 
 # Prove that the repaired helper can carry one subsequent ordinary package
 # through the same root-custody + dpkg parent-chain mechanism.
-build_package "$ordinary_version" next "$build_digest_next" "$test_root/next-dist"
+build_package "$ordinary_version" next "$build_digest_next" \
+  "$test_root/next-dist" "$repo_root" "$packaging_revision"
 ordinary_package=$test_root/next-dist/vonk-forge-agent_${ordinary_version}_arm64.deb
 "$repo_root/scripts/verify-agent-deb" --json "$ordinary_package" >/dev/null
 ordinary_sha="$(sha256sum "$ordinary_package" | cut -d' ' -f1)"
@@ -1785,7 +1961,10 @@ for _ in {1..2400}; do
     && "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent 2>/dev/null)" \
       = 'ii ' && -s "$started" \
     && -f /var/lib/vonk-forge/helper-upgrade.receipt \
-    && ! -e "$source_intent" && ! -e "$source_pending" ]]; then
+    && ! -e "$source_intent" && ! -e "$source_pending" \
+    && ! -e "$source_state/$ordinary_sha.deb" \
+    && "$(systemctl --system show --property=ActiveState --value \
+      "$source_capsule_unit_name")" = inactive ]]; then
     break
   fi
   sleep 0.1
@@ -1823,5 +2002,5 @@ test "$(sha256sum "$observation_receipt_private" | cut -d' ' -f1)" \
   = "$observation_receipt_private_digest"
 cmp -s "$observation_receipt_derived" "$observation_receipt_public"
 
-printf 'dev335 -> a122 node repair phase=%s and ordinary helper upgrade: PASS\n' \
+printf 'dev335 -> schema2 node repair phase=%s and ordinary helper upgrade: PASS\n' \
   "$crash_phase"

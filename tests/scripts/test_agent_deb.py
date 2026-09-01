@@ -65,7 +65,9 @@ def _require_git_object(object_name: str) -> None:
         capture_output=True,
     )
     if available.returncode != 0:
-        pytest.skip(f"pinned repair source is absent from shallow checkout: {object_name}")
+        pytest.skip(
+            f"pinned repair source is absent from shallow checkout: {object_name}"
+        )
 
 
 def test_repair_source_lookup_trusts_only_the_resolved_repository(monkeypatch) -> None:
@@ -87,6 +89,46 @@ def test_repair_source_lookup_trusts_only_the_resolved_repository(monkeypatch) -
         "show",
         f"{'a' * 40}:packaging/debian/preinst",
     ]
+
+
+def test_greenfield_repair_allows_one_exact_binary_and_packaging_revision() -> None:
+    builder = BUILD.read_text()
+    verifier = VERIFY.read_text()
+
+    assert "packaging_source_revision == binary_source_revision" not in builder
+    assert (
+        "expected_binary_source_revision == expected_packaging_source_revision"
+        not in verifier
+    )
+    assert "binary_revision == packaging_revision" not in verifier
+    assert "not binary_source_revision.startswith(source_revision_match.group(1))" in builder
+
+
+def test_greenfield_repair_evidence_accepts_one_exact_source_revision() -> None:
+    documents, expected = _repair_evidence_documents()
+    documents = json.loads(
+        json.dumps(documents).replace(
+            REPAIR_BINARY_REVISION,
+            REPAIR_PACKAGING_REVISION,
+        )
+    )
+    version = REPAIR_VERSION.replace(
+        REPAIR_BINARY_REVISION[:12],
+        REPAIR_PACKAGING_REVISION[:12],
+    )
+
+    evidence = VERIFY_MODULE._verify_repair_evidence(
+        documents,
+        version=version,
+        expected=expected,
+        expected_node_id=REPAIR_NODE_ID,
+        expected_authority_sha256=hashlib.sha256(_repair_authority()).hexdigest(),
+    )
+
+    assert evidence == {
+        "binary_source_revision": REPAIR_PACKAGING_REVISION,
+        "packaging_source_revision": REPAIR_PACKAGING_REVISION,
+    }
 
 
 def test_repair_verifier_trusts_only_the_resolved_repository(monkeypatch) -> None:
@@ -115,7 +157,7 @@ def test_repair_verifier_trusts_only_the_resolved_repository(monkeypatch) -> Non
 
 def _repair_authority(**replacements: str) -> bytes:
     values = {
-        "schema_version": "1",
+        "schema_version": "2",
         "node_id": REPAIR_NODE_ID,
         "installed_version": "0.1.0~dev.335+g2eaaf4d9b2b5",
         "source_target_version": REPAIR_SOURCE_VERSION,
@@ -292,6 +334,15 @@ def _exact_repair_script_fixture(
         b"recovery_unit_base64='@RECOVERY_UNIT_BASE64@'\n"
         b"agent_gate_sha256='@AGENT_GATE_SHA256@'\n"
         b"agent_gate_base64='@AGENT_GATE_BASE64@'\n"
+        b"recovery_capsule_unit_sha256='@RECOVERY_CAPSULE_UNIT_SHA256@'\n"
+        b"recovery_capsule_unit_base64='@RECOVERY_CAPSULE_UNIT_BASE64@'\n"
+        b"recovery_capsule_gate_sha256='@RECOVERY_CAPSULE_GATE_SHA256@'\n"
+        b"recovery_capsule_gate_base64='@RECOVERY_CAPSULE_GATE_BASE64@'\n"
+        b"recovery_capsule_suppression_sha256='@RECOVERY_CAPSULE_SUPPRESSION_SHA256@'\n"
+        b"recovery_capsule_suppression_base64='@RECOVERY_CAPSULE_SUPPRESSION_BASE64@'\n"
+        b'intent_text="schema_version=2\n"\n'
+        b'capsule_manifest_text="schema_version=2\n"\n'
+        b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]\n'
     )
     repair_template = (
         b"#!/bin/sh\n# VONK_REPAIR_DISPATCH_V1\n"
@@ -307,6 +358,9 @@ def _exact_repair_script_fixture(
         b"target_helper_unit_sha256='@TARGET_HELPER_UNIT_SHA256@'\n"
         b"target_helper_socket_sha256='@TARGET_HELPER_SOCKET_SHA256@'\n"
         b"repair_probe_sha256='@REPAIR_PROBE_SHA256@'\n"
+        b"source_capsule_unit_sha256_expected='@SOURCE_CAPSULE_UNIT_SHA256@'\n"
+        b"source_capsule_gate_sha256_expected='@SOURCE_CAPSULE_GATE_SHA256@'\n"
+        b"source_capsule_suppression_sha256_expected='@SOURCE_CAPSULE_SUPPRESSION_SHA256@'\n"
     )
     postinst_template = (
         b"#!/bin/sh\n# VONK_REPAIR_POSTINST_V1\n"
@@ -358,6 +412,9 @@ def _exact_repair_script_fixture(
         "packaging/bin/vonk-forge-docker-firewall": b"firewall-helper",
         "packaging/systemd/vonk-forge-package-upgrade-recover.service": b"recover-unit",
         "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf": b"agent-gate",
+        "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service": b"capsule-unit",
+        "packaging/systemd/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf": b"capsule-gate",
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf": b"capsule-suppression",
     }
 
     def git_source(revision: str, relative: str) -> bytes:
@@ -394,6 +451,24 @@ def _exact_repair_script_fixture(
                 hashlib.sha256(b"agent-gate").hexdigest().encode(),
             ),
             (b"@AGENT_GATE_BASE64@", base64.b64encode(b"agent-gate")),
+            (
+                b"@RECOVERY_CAPSULE_UNIT_SHA256@",
+                hashlib.sha256(b"capsule-unit").hexdigest().encode(),
+            ),
+            (b"@RECOVERY_CAPSULE_UNIT_BASE64@", base64.b64encode(b"capsule-unit")),
+            (
+                b"@RECOVERY_CAPSULE_GATE_SHA256@",
+                hashlib.sha256(b"capsule-gate").hexdigest().encode(),
+            ),
+            (b"@RECOVERY_CAPSULE_GATE_BASE64@", base64.b64encode(b"capsule-gate")),
+            (
+                b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+                hashlib.sha256(b"capsule-suppression").hexdigest().encode(),
+            ),
+            (
+                b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+                base64.b64encode(b"capsule-suppression"),
+            ),
         ),
     )
     authority = _repair_authority(
@@ -435,6 +510,18 @@ def _exact_repair_script_fixture(
                 b"@TARGET_HELPER_SOCKET_SHA256@",
                 hashlib.sha256(b"helper-socket").hexdigest().encode(),
             ),
+            (
+                b"@SOURCE_CAPSULE_UNIT_SHA256@",
+                hashlib.sha256(b"capsule-unit").hexdigest().encode(),
+            ),
+            (
+                b"@SOURCE_CAPSULE_GATE_SHA256@",
+                hashlib.sha256(b"capsule-gate").hexdigest().encode(),
+            ),
+            (
+                b"@SOURCE_CAPSULE_SUPPRESSION_SHA256@",
+                hashlib.sha256(b"capsule-suppression").hexdigest().encode(),
+            ),
         ),
     )
     postinst = VERIFY_MODULE._render_packaging_source(
@@ -446,7 +533,7 @@ def _exact_repair_script_fixture(
     )
     for relative, raw in (
         (VERIFY_MODULE.REPAIR_STANDARD_RUNNER, standard),
-        ("usr/lib/vonk-forge/vonk-forge-package-upgrade-recover", repair),
+        ("usr/lib/vonk-forge/vonk-forge-package-upgrade-recover", standard),
     ):
         path = payload / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -860,13 +947,18 @@ def test_controller_upgrade_commits_recovery_before_pending_gate() -> None:
     cache_commit = preinst.index('/usr/bin/mv -- "$cached_new" "$cached_package"')
     runner_commit = preinst.index('atomic_install "$0" "$runner" 555')
     unit_commit = preinst.index("stage_recovery_unit ||")
+    capsule_commit = preinst.index("stage_recovery_capsule ||")
     agent_gate_commit = preinst.index("stage_agent_gate ||")
     blocker_commit = preinst.index('atomic_text "$agent_blocker" 600')
     intent_commit = preinst.index('atomic_text "$intent" 600')
-    service_start = preinst.index('--no-block start "$unit_name"', intent_commit)
+    service_start = preinst.index(
+        '--no-block start "$capsule_unit_name"', intent_commit
+    )
     pending_commit = preinst.index('atomic_text "$pending" 600', service_start)
 
-    assert cache_commit < runner_commit < unit_commit < agent_gate_commit
+    assert (
+        cache_commit < runner_commit < unit_commit < capsule_commit < agent_gate_commit
+    )
     assert agent_gate_commit < intent_commit < blocker_commit
     assert intent_commit < service_start < pending_commit
     assert "package_sha256=$package_digest" in preinst
@@ -890,15 +982,218 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     assert 'safe_root_directory "$invocation_dir" 700' in preinst
     assert "candidate_before=" in preinst and "candidate_after=" in preinst
     assert "helper_namespace_has_package_paths" in preinst
-    assert "durable recovery armed outside the inherited helper sandbox" in preinst
+    assert "inherited helper sandbox lacks package lifecycle paths" in preinst
+    assert "helper sandbox keyring directory is unsafe" in preinst
+    assert "helper sandbox package document directory is unsafe" in preinst
+    assert "helper sandbox keyring directory is not writable" in preinst
+    assert "helper sandbox package document directory is not writable" in preinst
+    assert "helper sandbox write probes have unsafe metadata" in preinst
+    verifier = VERIFY.read_text()
+    assert "inherited helper sandbox lacks package lifecycle paths" in verifier
+    assert "durable recovery armed outside the inherited helper sandbox" in verifier
+    assert "preinst helper sandbox handoff is incomplete" in verifier
+    namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
+    recovery_arm = preinst.index("arm_controller_recovery ||")
+    assert recovery_arm < namespace_probe
     assert "Bootstrap trust boundary" in preinst
     assert "old-protocol TOCTOU" in preinst
+
+
+def test_durable_recovery_fallback_is_exact_package_scoped_and_nonce_bound() -> None:
+    preinst = PREINST.read_text()
+    prerm = PRERM.read_text()
+
+    fallback = preinst[preinst.index("reinstall_exact_package()") :]
+    assert "safe_cached_package" in fallback
+    assert '[ "$intent_version" = "$target_version" ]' in fallback
+    assert '[ "$intent_architecture" = "$target_architecture" ]' in fallback
+    assert (
+        'dpkg --compare-versions "$installed_version" gt "$intent_version"' in fallback
+    )
+    assert (
+        'VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \\\n        /usr/bin/dpkg --remove --force-remove-reinstreq "$package_name"'
+        in fallback
+    )
+    assert (
+        'VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \\\n        /usr/bin/dpkg --install --force-confold "$cached_package"'
+        in fallback
+    )
+    assert "/usr/bin/apt" not in fallback
+    assert "--configure -a" not in fallback
+
+    assert "recovery_remove_binding()" in prerm
+    assert 'grep -Fxq "0::/system.slice/$recovery_capsule_unit"' in prerm
+    assert '[ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 17 ]' in prerm
+    assert "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" in prerm
+    assert "--force-remove-reinstreq" in prerm
+    assert "Preserve its gates, service enablement, node config" in prerm
+
+
+def test_durable_recovery_capsule_is_single_owner_boot_gated_and_intent_retired_first() -> (
+    None
+):
+    preinst = PREINST.read_text()
+    capsule_unit = (
+        ROOT / "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service"
+    ).read_text()
+    capsule_gate = (
+        ROOT / "packaging/systemd/vonk-forge-agent.service.d/"
+        "10-package-upgrade-capsule.conf"
+    ).read_text()
+    suppression = (
+        ROOT / "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/"
+        "10-capsule-owner.conf"
+    ).read_text()
+
+    assert "schema_version=2" in preinst
+    for binding in (
+        "capsule_unit_sha256=",
+        "capsule_gate_sha256=",
+        "capsule_suppression_sha256=",
+    ):
+        assert binding in preinst
+    assert "safe_recovery_capsule || unsafe_state 'recovery capsule'" in preinst
+    assert "safe_capsule_enablement" in preinst
+    assert (
+        'if [ -e "$embedded_destination" ] || [ -L "$embedded_destination" ]' in preinst
+    )
+    intent_retire = preinst.index('/usr/bin/rm -- "$intent"')
+    capsule_retire = preinst.index(
+        "retire_recovery_capsule || unsafe_state", intent_retire
+    )
+    assert intent_retire < capsule_retire
+    assert (
+        "ExecStart=/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner"
+        in capsule_unit
+    )
+    assert "WantedBy=multi-user.target" in capsule_unit
+    assert "ExecCondition=+/var/lib/vonk-forge/package-upgrade/" in capsule_gate
+    assert (
+        "ConditionPathExists=!/var/lib/vonk-forge/package-upgrade/intent" in suppression
+    )
+    assert "capsule_admin_root=/etc/systemd/system" in preinst
+    assert "capsule_wants_dir=/lib/systemd/system/multi-user.target.wants" in preinst
+    assert '/usr/bin/ln -s "../$capsule_unit_name" "$capsule_enablement"' in preinst
+    assert "capsule_runtime_root=/run/systemd/system" in preinst
+    assert "capsule_shadow_paths_absent || return 1" in preinst
+
+
+@pytest.mark.parametrize(
+    ("relative", "kind"),
+    (
+        ("vonk-forge-package-upgrade-recover-capsule.service", "file"),
+        (
+            "multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
+            "symlink",
+        ),
+    ),
+)
+def test_durable_recovery_capsule_rejects_admin_unit_and_enablement_collisions(
+    tmp_path: Path, relative: str, kind: str
+) -> None:
+    preinst = PREINST.read_text()
+    start = preinst.index("capsule_shadow_paths_absent() {")
+    end = preinst.index("\n}\n", start) + 3
+    function = preinst[start:end]
+    admin_root = tmp_path / "etc-systemd"
+    runtime_root = tmp_path / "run-systemd"
+    admin_root.mkdir()
+    runtime_root.mkdir()
+    collision = admin_root / relative
+    collision.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "file":
+        collision.write_text("collision\n", encoding="utf-8")
+    else:
+        collision.symlink_to("../different.service")
+    script = "\n".join(
+        (
+            f"capsule_admin_root={shlex.quote(str(admin_root))}",
+            f"capsule_runtime_root={shlex.quote(str(runtime_root))}",
+            "capsule_unit_name=vonk-forge-package-upgrade-recover-capsule.service",
+            "unit_name=vonk-forge-package-upgrade-recover.service",
+            function,
+            "capsule_shadow_paths_absent",
+        )
+    )
+
+    result = subprocess.run(
+        ["/bin/sh"], input=script, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode != 0
+
+
+def test_durable_recovery_capsule_enablement_is_exact_and_vendor_owned(
+    tmp_path: Path,
+) -> None:
+    preinst = PREINST.read_text()
+    start = preinst.index("safe_capsule_enablement() {")
+    end = preinst.index("\n}\n", start) + 3
+    function = preinst[start:end]
+    unit = tmp_path / "lib/systemd/system/recovery.service"
+    enablement = (
+        tmp_path / "lib/systemd/system/multi-user.target.wants/recovery.service"
+    )
+    unit.parent.mkdir(parents=True)
+    enablement.parent.mkdir(parents=True)
+    unit.write_text("unit\n", encoding="utf-8")
+    enablement.symlink_to("../recovery.service")
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            f"{function}\nsafe_capsule_enablement",
+        ],
+        check=False,
+        env={
+            **os.environ,
+            "capsule_enablement": str(enablement),
+            "capsule_unit_name": "recovery.service",
+        },
+    )
+    assert result.returncode == 0
+    enablement.unlink()
+    enablement.symlink_to("/tmp/foreign-recovery.service")
+    result = subprocess.run(
+        ["/bin/sh", "-c", f"{function}\nsafe_capsule_enablement"],
+        check=False,
+        env={
+            **os.environ,
+            "capsule_enablement": str(enablement),
+            "capsule_unit_name": "recovery.service",
+        },
+    )
+    assert result.returncode != 0
+
+
+def test_recovery_status_is_bounded_stage_only_and_exercised_natively() -> None:
+    preinst = PREINST.read_text()
+    lifecycle = RECOVERY_LIFECYCLE.read_text()
+
+    assert "status_receipt=$state_parent/package-upgrade.status" in preinst
+    assert "| /usr/bin/cut -c 1-64" in preinst
+    for stage in (
+        "package-state",
+        "package-configure",
+        "package-install",
+        "package-remove",
+        "package-reinstall",
+        "package-proof",
+        "helper-proof",
+        "agent-proof",
+        "complete",
+    ):
+        assert stage in preinst
+    assert "outcome=succeeded" in lifecycle
+    assert "stage=complete" in lifecycle
+    assert "reason=exact_identity_proven" in lifecycle
+    assert "package-upgrade.status" in lifecycle
 
 
 def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
     lifecycle = RECOVERY_LIFECYCLE.read_text()
 
-    assert "candidate_custody=${CANDIDATE_CUSTODY:-legacy}" in lifecycle
+    assert "candidate_custody=${CANDIDATE_CUSTODY:-root}" in lifecycle
     assert "custody_root=/run/vonk-forge-package-candidates" in lifecycle
     assert "custody_invocation=0123456789abcdef0123456789abcdef" in lifecycle
     assert (
@@ -940,7 +1235,8 @@ def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
         "/var/lib/vonk-forge/package-upgrade",
         "/var/lib/vonk-forge/helper-upgrade.pending",
         "/var/lib/vonk-forge/helper-upgrade.receipt",
-        "vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+        '"$observation_receipt_private"',
+        '"$package_recovery_gate"',
         "vonk-forge-package-helper.socket.d",
     ):
         assert protected_path in collision_check
@@ -1048,7 +1344,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert 'test "$helper_active_state" = failed' in post_kill
     assert 'test "$helper_freezer_state" = running' in post_kill
     assert "--property=Result" in post_kill
-    dpkg_only_start = lifecycle.index("        dpkg-only)", crash_snapshot)
+    dpkg_only_start = lifecycle.index("        dpkg-only|post-remove)", crash_snapshot)
     dpkg_only_end = lifecycle.index("\n          ;;", dpkg_only_start)
     dpkg_only = lifecycle[dpkg_only_start:dpkg_only_end]
     crash_pending_check = dpkg_only.index('cmp -s "$test_root/crash-point-pending"')
@@ -1121,10 +1417,79 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert lifecycle.index('"$socket_unit"', reset_failed) > reset_failed
     assert lifecycle.index("ActiveState", reset_failed) > reset_failed
     assert lifecycle.index("Result", reset_failed) > reset_failed
+    convergence_marker = lifecycle.index(
+        "printf 'durable recovery crash-point pending gate:", reset_failed
+    )
+    convergence = lifecycle.index("for _ in {1..1200}", convergence_marker)
+    receipt_check = lifecycle.index("helper-upgrade.receipt", convergence)
+    load_state_check = lifecycle.index("recovery_load_state=", convergence)
+    recovery_active_check = lifecycle.index("recovery_active_state=", convergence)
+    recovery_sub_check = lifecycle.index("recovery_sub_state=", convergence)
+    recovery_pid_check = lifecycle.index("recovery_main_pid=", convergence)
+    active_state_check = lifecycle.index("package_recovery_active_state=", convergence)
+    sub_state_check = lifecycle.index("package_recovery_sub_state=", convergence)
+    blocked_cleanup_check = lifecycle.index(
+        "package-upgrade/agent-blocked", convergence
+    )
+    cached_package_cleanup_check = lifecycle.index(
+        "package-upgrade/$package_digest.deb", convergence
+    )
+    convergence_break = lifecycle.index("break", convergence)
+    assert (
+        load_state_check
+        < recovery_active_check
+        < recovery_sub_check
+        < recovery_pid_check
+        < active_state_check
+        < sub_state_check
+        < receipt_check
+        < blocked_cleanup_check
+        < cached_package_cleanup_check
+        < convergence_break
+    )
+    post_remove = lifecycle[
+        lifecycle.index('if [[ "$crash_mode" == post-remove ]]') : convergence_marker
+    ]
+    for durable_proof in (
+        "test-post-remove-preinst-entered",
+        "stage=package-reinstall",
+        "--kill-whom=all --signal=SIGKILL",
+        "test ! -e /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
+        "test ! -e /lib/systemd/system/vonk-forge-package-upgrade-recover.service",
+        'test -f "$recovery_unit_path"',
+        'test -L "$recovery_enablement"',
+        "agent unexpectedly started before capsule recovery",
+        "systemctl --system restart multi-user.target",
+    ):
+        assert durable_proof in post_remove
+    assert (
+        '"$recovery_load_state" == "$expected_recovery_load_state"'
+        in lifecycle[convergence:convergence_break]
+    )
+    assert (
+        '"$package_recovery_active_state" == inactive'
+        in lifecycle[convergence:convergence_break]
+    )
+    assert (
+        '"$package_recovery_sub_state" == dead'
+        in lifecycle[convergence:convergence_break]
+    )
+    assert lifecycle.index(
+        'test "$recovery_load_state" = "$expected_recovery_load_state"',
+        convergence_break,
+    )
+    assert lifecycle.index(
+        'test "$package_recovery_active_state" = inactive', convergence_break
+    )
+    assert lifecycle.index(
+        'test "$package_recovery_sub_state" = dead', convergence_break
+    )
     assert "trap 'exit 129' HUP" in lifecycle
     assert "trap 'exit 130' INT" in lifecycle
     assert "trap 'exit 143' TERM" in lifecycle
     assert "dump_failure_diagnostics" in lifecycle
+    assert "failed assertion: line=%s status=%s" in lifecycle
+    assert "recovery_failed_line=$LINENO" in lifecycle
     assert "journalctl --system --no-pager -n 200" in lifecycle
     assert "firewall_fixture=/run/systemd/system/$firewall_unit" in lifecycle
     assert "Vonk Forge package recovery firewall fixture" in lifecycle
@@ -1148,6 +1513,8 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     )
     home_cleanup = cleanup.index("rm -rf -- /var/lib/vonk-forge-agent", package_purge)
     assert recovery_state_cleanup < package_purge < home_cleanup
+    assert '"$observation_receipt_private"' in cleanup
+    assert '"$observation_receipt_public"' in cleanup
     assert cleanup.count("dpkg-query --show vonk-forge-agent") == 2
     assert 'trap - EXIT\n  exit "$cleanup_status"' in cleanup
     assert 'return "$cleanup_status"' not in cleanup
@@ -1258,15 +1625,8 @@ def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None
     installed_digest = postinst.index(
         "/usr/lib/vonk-forge/vonk-agent-helper", running_digest
     )
-    receipt_write = postinst.index('"helper_main_pid=$new_helper_pid"')
-    receipt_file_sync = postinst.index('/usr/bin/sync -f "$receipt_new"', receipt_write)
-    receipt_rename = postinst.index(
-        '/usr/bin/mv -f -- "$receipt_new" "$helper_receipt"', receipt_file_sync
-    )
-    receipt_dir_sync = postinst.index(
-        "/usr/bin/sync -f /var/lib/vonk-forge", receipt_rename
-    )
-    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_dir_sync)
+    receipt_validation = postinst.index('grep -Fxq "schema_version=2"')
+    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_validation)
     pending_retire = postinst.index(
         '/usr/bin/rm -f -- "$helper_pending"', confirmed_digest
     )
@@ -1282,15 +1642,14 @@ def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None
     )
 
     assert pending_write < schedule_call
-    assert helper_restart < running_digest < installed_digest < receipt_write
-    assert receipt_write < receipt_file_sync < receipt_rename < receipt_dir_sync
-    assert receipt_dir_sync < confirmed_digest < pending_retire
+    assert helper_restart < running_digest < installed_digest < receipt_validation
+    assert receipt_validation < confirmed_digest < pending_retire
     assert pending_retire < pending_retire_sync < agent_restart < schedule_call
     assert "helper-upgrade.pending" in postinst
     assert "helper-upgrade.receipt" in postinst
-    assert '"schema_version=1"' in postinst
-    assert '"activated_at=$activated_at"' in postinst
-    assert "/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ" in postinst
+    assert '"schema_version=2"' in postinst
+    assert '"schema_version=1"' not in postinst
+    assert "receipt_new=" not in postinst
     assert "ReadWritePaths=/var/lib/vonk-forge" in postinst
     pending_file_sync = postinst.index('/usr/bin/sync -f "$pending_new"')
     pending_rename = postinst.index(
@@ -2586,6 +2945,18 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "20-package-upgrade-recovery.conf" in runner
     assert "vonk-forge-package-upgrade-repair.service" not in runner
     assert "30-package-upgrade-repair.conf" not in runner
+    assert "30-node-bound-repair.conf" in runner
+    assert "ExecCondition=\nExecCondition=+" in runner
+    assert "stage_repair_gate" in runner
+    assert "retire_repair_gate" in runner
+    assert "source_schema" not in runner
+    assert "SOURCE_CAPSULE_V2" not in runner
+    assert "schema_version=2" in runner
+    assert 'canonical_line_file "$source_intent" 17' in runner
+    assert "repair_gate_loaded" in runner
+    assert "terminal_repair_contract_safe" in runner
+    assert "source_capsule_terminal_safe" in runner
+    assert "1111111|1011111|1001111|1001101|1001001|1001000|1000000|0000000" in runner
     assert "/usr/bin/systemd-run --system --wait --pipe --collect --quiet" in runner
     assert "--property=CapabilityBoundingSet=CAP_SYS_PTRACE" in runner
     assert "--property=AmbientCapabilities=" in runner
@@ -2610,6 +2981,8 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "package-repair.receipt" not in postinst
     assert "helper-upgrade.pending" not in postinst
     assert "VONK_FORGE_PACKAGE_REPAIR_NONCE" in postinst
+    assert "repair_authority=/usr/lib/vonk-forge/repair-authority" in postinst
+    assert "/usr/share/doc/vonk-forge-agent/repair-authority" not in postinst
 
 
 @pytest.mark.parametrize(
@@ -2633,13 +3006,13 @@ def test_repair_canonical_line_files_reject_unterminated_trailing_bytes(
     document.write_text("first\nsecond\n", encoding="utf-8")
 
     exact = subprocess.run(
-        ["/bin/sh", "-c", f"{helper}\ncanonical_line_file \"$1\" 2", "sh", document],
+        ["/bin/sh", "-c", f'{helper}\ncanonical_line_file "$1" 2', "sh", document],
         check=False,
     )
     with document.open("ab") as output:
         output.write(b"x")
     trailing = subprocess.run(
-        ["/bin/sh", "-c", f"{helper}\ncanonical_line_file \"$1\" 2", "sh", document],
+        ["/bin/sh", "-c", f'{helper}\ncanonical_line_file "$1" 2', "sh", document],
         check=False,
     )
 
@@ -2667,15 +3040,14 @@ def test_repair_runtime_binds_every_running_unit_to_uid_and_gid() -> None:
     normalized = re.sub(r"\s+", " ", runner.replace("\\\n", " "))
 
     helper_proof = (
-        'prove_running_unit "$helper_unit" "$helper_binary" '
-        '"$target_helper_sha256" 0 0'
+        'prove_running_unit "$helper_unit" "$helper_binary" "$target_helper_sha256" 0 0'
     )
     agent_proof = (
         'prove_running_unit "$agent_unit" "$agent_binary" '
         '"$target_agent_sha256" "$agent_uid" "$agent_gid"'
     )
-    assert normalized.count(helper_proof) == 6
-    assert normalized.count(agent_proof) == 5
+    assert normalized.count(helper_proof) == 7
+    assert normalized.count(agent_proof) == 8
     assert '"$target_helper_sha256" 0)' not in runner
     assert '"$target_agent_sha256" "$agent_uid")' not in runner
 
@@ -2771,9 +3143,7 @@ def test_repair_manager_probe_uses_the_exact_transient_sandbox_contract() -> Non
 
     agent_start = runner.index("agent_probe_output=$(/usr/bin/systemd-run")
     agent_end = runner.index(") || return 1", agent_start)
-    agent_command = runner[
-        agent_start + len("agent_probe_output=$(") : agent_end
-    ]
+    agent_command = runner[agent_start + len("agent_probe_output=$(") : agent_end]
     agent_tokens = shlex.split(agent_command.replace("\\\n", " "))
     agent_properties = tuple(
         token for token in agent_tokens if token.startswith("--property=")
@@ -2924,18 +3294,58 @@ def test_repair_dpkg_state_parser_executes_fail_closed_with_system_awk(
         ("required", "Package: unrelated\nStatus: install ok installed\n\n", False),
         ("optional", "Package:\tvonk-forge-agent\n" + exact.split("\n", 1)[1], False),
         ("optional", exact.replace("Package:", "package:", 1), False),
-        ("required", exact.replace("install ok installed", "install ok unpacked"), False),
-        ("optional", exact.replace("install ok installed", "install ok unpacked"), False),
-        ("required", exact.replace("Architecture: arm64", "Architecture: amd64"), False),
-        ("optional", exact.replace("Architecture: arm64", "Architecture: amd64"), False),
+        (
+            "required",
+            exact.replace("install ok installed", "install ok unpacked"),
+            False,
+        ),
+        (
+            "optional",
+            exact.replace("install ok installed", "install ok unpacked"),
+            False,
+        ),
+        (
+            "required",
+            exact.replace("Architecture: arm64", "Architecture: amd64"),
+            False,
+        ),
+        (
+            "optional",
+            exact.replace("Architecture: arm64", "Architecture: amd64"),
+            False,
+        ),
         ("required", exact.replace("dev.335", "dev.334"), False),
         ("optional", exact.replace("dev.335", "dev.334"), False),
-        ("required", exact.replace("Package:", "Package: unrelated\nPackage:", 1), False),
-        ("optional", exact.replace("Package:", "Package: unrelated\nPackage:", 1), False),
-        ("required", exact.replace("Status:", "Status: install ok installed\nStatus:", 1), False),
-        ("optional", exact.replace("Status:", "Status: install ok installed\nStatus:", 1), False),
-        ("required", exact.replace("Status:", "status: install ok installed\nStatus:", 1), False),
-        ("required", exact.replace("Architecture:", "Architecture: arm64\nArchitecture:", 1), False),
+        (
+            "required",
+            exact.replace("Package:", "Package: unrelated\nPackage:", 1),
+            False,
+        ),
+        (
+            "optional",
+            exact.replace("Package:", "Package: unrelated\nPackage:", 1),
+            False,
+        ),
+        (
+            "required",
+            exact.replace("Status:", "Status: install ok installed\nStatus:", 1),
+            False,
+        ),
+        (
+            "optional",
+            exact.replace("Status:", "Status: install ok installed\nStatus:", 1),
+            False,
+        ),
+        (
+            "required",
+            exact.replace("Status:", "status: install ok installed\nStatus:", 1),
+            False,
+        ),
+        (
+            "required",
+            exact.replace("Architecture:", "Architecture: arm64\nArchitecture:", 1),
+            False,
+        ),
         ("required", exact.replace("Version:", "Version: 0\nVersion:", 1), False),
         ("required", exact + exact, False),
         ("invalid-mode", exact, False),
@@ -2958,16 +3368,14 @@ def test_repair_dpkg_state_parser_executes_fail_closed_with_system_awk(
 
 
 def test_native_repair_failure_dumps_bounded_dpkg_transition_evidence() -> None:
-    harness = (
-        ROOT / "tests/nodes/test_agent_upgrade_repair_systemd.sh"
-    ).read_text()
+    harness = (ROOT / "tests/nodes/test_agent_upgrade_repair_systemd.sh").read_text()
     diagnostics = harness[
         harness.index("dump_diagnostics() {") : harness.index("cleanup() {")
     ]
 
     assert "--- dpkg transition journal ---" in diagnostics
     assert "/var/lib/dpkg/status /var/lib/dpkg/status-old" in diagnostics
-    assert "Package: \" package" in diagnostics
+    assert 'Package: " package' in diagnostics
     assert "sed -n '1,120p'" in diagnostics
     assert "cat /var/lib/dpkg/status" not in diagnostics
 
@@ -2987,7 +3395,7 @@ def test_repair_hidden_handoff_is_complete_before_unified_runner_swap() -> None:
         < arm.index('repair_tree_exact "$repair_build"')
         < arm.index('/usr/bin/sync -f "$source_state"')
         < arm.index('repair_tree_exact_read_only "$repair_build"')
-        < arm.index('atomic_install "$0" "$source_runner"')
+        < arm.index('atomic_install "$0" "$source_active_runner"')
         < arm.rindex("promote_hidden_repair")
     )
     assert (
@@ -3037,11 +3445,8 @@ def test_repair_phase_replay_refreshes_boot_bound_process_receipts() -> None:
     assert 'if [ "$phase_name" != agent-proven ]' not in recover
 
 
-def test_repair_builder_reconstructs_exact_a122_standard_runner() -> None:
-    _require_git_object(
-        f"{REPAIR_BINARY_REVISION}:packaging/systemd/"
-        "vonk-forge-package-upgrade-recover.service"
-    )
+def test_repair_builder_and_verifier_reject_pre_capsule_source_runner() -> None:
+    _require_git_object(f"{REPAIR_BINARY_REVISION}:packaging/debian/preinst")
     authority = {
         "source_target_version": REPAIR_SOURCE_VERSION,
         "source_architecture": "arm64",
@@ -3062,10 +3467,94 @@ def test_repair_builder_reconstructs_exact_a122_standard_runner() -> None:
         ),
     }
 
-    runner = BUILD_MODULE.repair_standard_runner(REPAIR_BINARY_REVISION, authority)
+    with pytest.raises(
+        BUILD_MODULE.BuildError,
+        match="repair source runner does not implement schema-2 recovery",
+    ):
+        BUILD_MODULE.repair_standard_runner(REPAIR_BINARY_REVISION, authority)
+    with pytest.raises(
+        VERIFY_MODULE.VerificationError,
+        match="repair source runner does not implement schema-2 recovery",
+    ):
+        VERIFY_MODULE._render_standard_recovery_runner(
+            REPAIR_BINARY_REVISION, authority
+        )
 
-    assert hashlib.sha256(runner).hexdigest() == authority["source_runner_sha256"]
-    assert re.search(rb"@[A-Z0-9_]+@", runner) is None
+
+def test_repair_builder_and_verifier_reconstruct_capsule_bound_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "a" * 40
+    source_unit = b"standard recovery unit\n"
+    source_gate = b"standard agent gate\n"
+    capsule_unit = b"durable capsule unit\n"
+    capsule_gate = b"durable capsule agent gate\n"
+    capsule_suppression = b"durable single-owner suppression\n"
+    source_preinst = b"\n".join(
+        (
+            b"version=@VERSION@",
+            b"architecture=@ARCHITECTURE@",
+            b"agent=@AGENT_SHA256@",
+            b"helper=@HELPER_SHA256@",
+            b"unit_sha=@RECOVERY_UNIT_SHA256@",
+            b"unit=@RECOVERY_UNIT_BASE64@",
+            b"agent_gate_sha=@AGENT_GATE_SHA256@",
+            b"agent_gate=@AGENT_GATE_BASE64@",
+            b"capsule_unit_sha=@RECOVERY_CAPSULE_UNIT_SHA256@",
+            b"capsule_unit=@RECOVERY_CAPSULE_UNIT_BASE64@",
+            b"capsule_gate_sha=@RECOVERY_CAPSULE_GATE_SHA256@",
+            b"capsule_gate=@RECOVERY_CAPSULE_GATE_BASE64@",
+            b"capsule_suppression_sha=@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
+            b"capsule_suppression=@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
+            b'intent_text="schema_version=2',
+            b'capsule_manifest_text="schema_version=2',
+            b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]',
+            b"",
+        )
+    )
+    sources = {
+        "packaging/debian/preinst": source_preinst,
+        "packaging/systemd/vonk-forge-package-upgrade-recover.service": source_unit,
+        (
+            "packaging/systemd/vonk-forge-agent.service.d/"
+            "20-package-upgrade-recovery.conf"
+        ): source_gate,
+        (
+            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service"
+        ): capsule_unit,
+        (
+            "packaging/systemd/vonk-forge-agent.service.d/"
+            "10-package-upgrade-capsule.conf"
+        ): capsule_gate,
+        (
+            "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/"
+            "10-capsule-owner.conf"
+        ): capsule_suppression,
+    }
+
+    def source_lookup(selected_revision: str, relative: str) -> bytes:
+        assert selected_revision == revision
+        return sources[relative]
+
+    monkeypatch.setattr(BUILD_MODULE, "source_at_revision", source_lookup)
+    monkeypatch.setattr(VERIFY_MODULE, "_git_source", source_lookup)
+    authority = {
+        "source_target_version": "0.1.0~dev.500+g0123456789ab",
+        "source_architecture": "arm64",
+        "source_agent_sha256": "1" * 64,
+        "source_helper_sha256": "2" * 64,
+        "source_unit_sha256": hashlib.sha256(source_unit).hexdigest(),
+        "source_agent_gate_sha256": hashlib.sha256(source_gate).hexdigest(),
+        "source_runner_sha256": "0" * 64,
+    }
+    rendered = VERIFY_MODULE._render_standard_recovery_runner(revision, authority)
+    authority["source_runner_sha256"] = hashlib.sha256(rendered).hexdigest()
+
+    assert BUILD_MODULE.repair_standard_runner(revision, authority) == rendered
+    assert (
+        VERIFY_MODULE._render_standard_recovery_runner(revision, authority) == rendered
+    )
+    assert re.search(rb"@[A-Z0-9_]+@", rendered) is None
 
 
 def test_repair_runtime_orders_helper_proof_before_agent_release_and_cleanup() -> None:

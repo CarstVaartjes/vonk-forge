@@ -22,10 +22,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .agent_upgrade_status import (
-    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
-    operator_agent_upgrade_reason,
-)
+from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
 from .logging import redact_text
 from .models import (
@@ -33,7 +30,6 @@ from .models import (
     AgentNode,
     AgentNodeProfile,
     AgentOperationAttempt,
-    AgentUpgradeCompatibilityRecovery,
     ArtifactJob,
     Job,
     Observation,
@@ -69,7 +65,7 @@ _RECIPE_CAPABILITIES = frozenset(
         AgentOperation.RECIPE_UNINSTALL.value,
     }
 )
-MUTATING_AGENT_OPERATIONS = frozenset(
+_MUTATING_OPERATIONS = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
         AgentOperation.RELEASE_INSTALL.value,
@@ -90,7 +86,6 @@ _TERMINAL_PARENT_STATES = frozenset(
 )
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
-_COMPATIBILITY_ARM_TIMEOUT = timedelta(minutes=10)
 _REQUIRED_CAPABILITIES = frozenset(
     {
         AgentOperation.NODE_PROBE.value,
@@ -126,36 +121,6 @@ class StaleAgentAttempt(RuntimeError):
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _active_current_certificate(
-    session: Session,
-    *,
-    node_id: str,
-    certificate_serial: str,
-    now: datetime,
-) -> bool:
-    node = session.scalar(
-        select(AgentNode)
-        .where(AgentNode.node_id == node_id)
-        .with_for_update(of=AgentNode)
-    )
-    certificate = session.scalar(
-        select(AgentCertificate)
-        .where(AgentCertificate.serial == certificate_serial)
-        .with_for_update(of=AgentCertificate)
-    )
-    return bool(
-        node is not None
-        and node.contact_certificate_serial == certificate_serial
-        and certificate is not None
-        and certificate.node_id == node_id
-        and certificate.state == "active"
-        and certificate.revoked_at is None
-        and certificate.ca_revoked_at is None
-        and _aware(certificate.not_before) <= _aware(now)
-        and _aware(certificate.not_after) > _aware(now)
-    )
 
 
 def _document(value: Mapping[str, object]) -> dict[str, object]:
@@ -451,17 +416,6 @@ class AgentJobService:
                 capabilities,
                 runtime_identity,
             )
-            replay = self._replay_grantless_compatibility_claim(
-                session,
-                node_id=node_id,
-                certificate_serial=certificate.serial,
-                now=now,
-                protocol_version=protocol_version,
-                capabilities=capabilities,
-                runtime_identity=runtime_identity,
-            )
-            if replay is not None:
-                return replay
             expired_attempt = (
                 select(AgentOperationAttempt.id)
                 .where(
@@ -518,86 +472,6 @@ class AgentJobService:
                 if self._claim_has_authority(session, operation, now):
                     break
                 return None
-            active_compatibility_recovery = session.scalar(
-                select(AgentUpgradeCompatibilityRecovery.id)
-                .where(
-                    AgentUpgradeCompatibilityRecovery.node_id == node_id,
-                    AgentUpgradeCompatibilityRecovery.state.in_(
-                        {
-                            "armed",
-                            "issued",
-                            "awaiting-identity",
-                            "operator-blocked",
-                        }
-                    ),
-                    AgentUpgradeCompatibilityRecovery.operation_id != operation.id,
-                )
-                .limit(1)
-            )
-            if (
-                active_compatibility_recovery is not None
-                and operation.kind in MUTATING_AGENT_OPERATIONS
-            ):
-                # The one-shot recovery owns the node's mutation lane until
-                # exact target completion. Even an operator-blocked timeout
-                # remains quarantined; mutations may queue but cannot execute.
-                return None
-            operation_compatibility_recovery = session.scalar(
-                select(AgentUpgradeCompatibilityRecovery)
-                .where(
-                    AgentUpgradeCompatibilityRecovery.operation_id == operation.id,
-                    AgentUpgradeCompatibilityRecovery.state.in_(
-                        {"armed", "issued", "awaiting-identity", "operator-blocked"}
-                    ),
-                )
-                .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-            )
-            if operation_compatibility_recovery is not None:
-                # Identity reconciliation runs before dispatch. If it did not
-                # complete, only the exact authenticated dev335 source may
-                # claim the already armed retry. Target-like but inexact
-                # contacts cannot accidentally create attempt 4 or reach the
-                # one-shot grant issuer.
-                from .compat_recovery import (
-                    ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
-                    SOURCE_ATTEMPT,
-                    SOURCE_BINARY_DIGEST,
-                    SOURCE_BUILD_DIGEST,
-                    SOURCE_SEMANTIC_VERSION,
-                )
-
-                expected_dispatch_certificate = (
-                    operation_compatibility_recovery.rearm_dispatch_certificate_serial
-                    or ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
-                )
-
-                if not (
-                    operation_compatibility_recovery.state == "armed"
-                    and operation_compatibility_recovery.issued_at is None
-                    and operation_compatibility_recovery.signed_grant is None
-                    and operation_compatibility_recovery.grant_request_id is None
-                    and operation_compatibility_recovery.grant_expires_at is None
-                    and operation.current_attempt == SOURCE_ATTEMPT
-                    and operation.retry_disposition == _RETRY_DISPOSITION
-                    and operation.retry_disposition_attempt == SOURCE_ATTEMPT
-                    and expected_dispatch_certificate == certificate_serial
-                    and _active_current_certificate(
-                        session,
-                        node_id=node_id,
-                        certificate_serial=certificate_serial,
-                        now=now,
-                    )
-                    and runtime_identity.get("architecture") == "linux-arm64"
-                    and runtime_identity.get("semantic_version")
-                    == SOURCE_SEMANTIC_VERSION
-                    and runtime_identity.get("build_digest") == SOURCE_BUILD_DIGEST
-                    and runtime_identity.get("binary_digest") == SOURCE_BINARY_DIGEST
-                    and runtime_identity.get("self_test_passed") is True
-                    and capabilities is not None
-                    and "agent.runtime.rust.v1" in capabilities
-                    and AgentOperation.AGENT_UPGRADE.value in capabilities
-                ):
-                    return None
             if capabilities is not None and operation.kind not in capabilities:
                 return None
             if operation.kind in _RECIPE_CAPABILITIES and (
@@ -614,13 +488,13 @@ class AgentJobService:
                     session, operation, certificate_serial, now
                 )
                 return None
-            if operation.kind in MUTATING_AGENT_OPERATIONS:
+            if operation.kind in _MUTATING_OPERATIONS:
                 active_mutation = session.scalar(
                     select(StoredOperation.id)
                     .where(
                         StoredOperation.node_id == node_id,
                         StoredOperation.id != operation.id,
-                        StoredOperation.kind.in_(MUTATING_AGENT_OPERATIONS),
+                        StoredOperation.kind.in_(_MUTATING_OPERATIONS),
                         StoredOperation.state == "running",
                     )
                     .limit(1)
@@ -666,19 +540,6 @@ class AgentJobService:
                 agent_certificate_serial=certificate_serial,
                 state="running",
             )
-            if (
-                operation_compatibility_recovery is not None
-                and operation_compatibility_recovery.rearm_attempt_certificate_serial
-                is None
-                and operation_compatibility_recovery.rearm_dispatch_certificate_serial
-                is None
-            ):
-                operation_compatibility_recovery.rearm_attempt_certificate_serial = (
-                    certificate_serial
-                )
-                operation_compatibility_recovery.rearm_dispatch_certificate_serial = (
-                    certificate_serial
-                )
             session.add(attempt)
             return AgentClaim(
                 schema_version=1,
@@ -693,198 +554,6 @@ class AgentJobService:
                 payload=operation.payload,
                 deadline=deadline,
             )
-
-    @staticmethod
-    def _replay_grantless_compatibility_claim(
-        session: Session,
-        *,
-        node_id: str,
-        certificate_serial: str,
-        now: datetime,
-        protocol_version: int | None,
-        capabilities: tuple[str, ...] | None,
-        runtime_identity: Mapping[str, object],
-    ) -> AgentClaim | None:
-        """Replay only the exact grantless dev335 attempt-4 claim.
-
-        The administrator re-arm transition has already reopened this durable
-        attempt. This path creates no attempt, fence, or grant; it merely
-        returns the same claim until its first exact helper request persists
-        the one allowed signed grant.
-        """
-
-        from .compat_recovery import (
-            _GRANTLESS_RETRY_FAILURE,
-            GRANTLESS_RETRY_CERTIFICATE_SERIAL,
-            GRANTLESS_RETRY_FENCE,
-            JOB_ID,
-            NODE_ID,
-            OPERATION_ID,
-            RECOVERY_ID,
-            RETRY_ATTEMPT,
-            SOURCE_ATTEMPT,
-            SOURCE_ATTEMPT_CERTIFICATE_SERIAL,
-            SOURCE_BINARY_DIGEST,
-            SOURCE_BUILD_DIGEST,
-            SOURCE_SEMANTIC_VERSION,
-            TARGET_BINARY_DIGEST,
-            TARGET_BUILD_DIGEST,
-            TARGET_PACKAGE_SHA256,
-            TARGET_PACKAGE_VERSION,
-            Spark3542CompatibilityRecoveryService,
-        )
-
-        if node_id != NODE_ID:
-            return None
-        recovery = session.scalar(
-            select(AgentUpgradeCompatibilityRecovery)
-            .where(AgentUpgradeCompatibilityRecovery.id == RECOVERY_ID)
-            .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-        )
-        if recovery is None:
-            return None
-        operation = session.scalar(
-            select(StoredOperation)
-            .where(StoredOperation.id == OPERATION_ID)
-            .with_for_update(of=StoredOperation)
-        )
-        parent = session.scalar(
-            select(Job).where(Job.id == JOB_ID).with_for_update(of=Job)
-        )
-        source = session.scalar(
-            select(AgentOperationAttempt)
-            .where(
-                AgentOperationAttempt.operation_id == OPERATION_ID,
-                AgentOperationAttempt.attempt == SOURCE_ATTEMPT,
-            )
-            .with_for_update(of=AgentOperationAttempt)
-        )
-        retry = session.scalar(
-            select(AgentOperationAttempt)
-            .where(
-                AgentOperationAttempt.operation_id == OPERATION_ID,
-                AgentOperationAttempt.attempt == RETRY_ATTEMPT,
-            )
-            .with_for_update(of=AgentOperationAttempt)
-        )
-        if operation is None or parent is None or source is None or retry is None:
-            return None
-        package = operation.payload
-        payload_digest = hashlib.sha256(canonical_message(dict(package))).hexdigest()
-        parent_package = (
-            parent.payload.get("package") if isinstance(parent.payload, dict) else None
-        )
-        parent_digest = (
-            Spark3542CompatibilityRecoveryService._job_plan_digest(
-                authority_revision=parent.authority_revision,
-                node_ids=[NODE_ID],
-                package=parent_package,
-            )
-            if isinstance(parent_package, dict)
-            else None
-        )
-        recovery_digest = hashlib.sha256(
-            canonical_message(
-                Spark3542CompatibilityRecoveryService._stored_document(recovery)
-            )
-        ).hexdigest()
-        dispatch_certificate_is_exact = bool(
-            recovery.rearm_dispatch_certificate_serial == certificate_serial
-            and _active_current_certificate(
-                session,
-                node_id=node_id,
-                certificate_serial=certificate_serial,
-                now=now,
-            )
-        )
-        if not (
-            recovery.state == "armed"
-            and recovery.blocked_at is None
-            and recovery.completed_at is None
-            and recovery.retry_fence is None
-            and recovery.retry_certificate_serial is None
-            and recovery.signed_grant is None
-            and recovery.grant_request_id is None
-            and recovery.grant_expires_at is None
-            and recovery.identity_deadline is None
-            and recovery.issued_at is None
-            and recovery.node_id == NODE_ID
-            and recovery.job_id == JOB_ID
-            and recovery.operation_id == OPERATION_ID
-            and recovery.source_attempt == SOURCE_ATTEMPT
-            and recovery.expected_retry_attempt == RETRY_ATTEMPT
-            and recovery.source_fence == source.fence
-            and recovery.source_certificate_serial
-            == source.agent_certificate_serial
-            == SOURCE_ATTEMPT_CERTIFICATE_SERIAL
-            and recovery.source_semantic_version == SOURCE_SEMANTIC_VERSION
-            and recovery.source_binary_digest == SOURCE_BINARY_DIGEST
-            and recovery.source_build_digest == SOURCE_BUILD_DIGEST
-            and recovery.package_sha256 == TARGET_PACKAGE_SHA256
-            and recovery.target_package_version == TARGET_PACKAGE_VERSION
-            and recovery.target_binary_digest == TARGET_BINARY_DIGEST
-            and recovery.target_build_digest == TARGET_BUILD_DIGEST
-            and recovery.plan_digest == recovery_digest
-            and recovery.upgrade_payload_sha256 == payload_digest
-            and operation.id == OPERATION_ID
-            and operation.parent_job_id == JOB_ID
-            and operation.node_id == NODE_ID
-            and operation.kind == AgentOperation.AGENT_UPGRADE.value
-            and operation.state == "running"
-            and operation.current_attempt == RETRY_ATTEMPT
-            and operation.retry_disposition is None
-            and operation.retry_disposition_attempt is None
-            and operation.authority_revision == recovery.authority_revision
-            and operation.payload_digest == payload_digest
-            and Spark3542CompatibilityRecoveryService._exact_target(package)
-            and parent.id == JOB_ID
-            and parent.kind == "agent-upgrade"
-            and parent.state == "running"
-            and parent.targets == [NODE_ID]
-            and parent.authority_revision == recovery.authority_revision
-            and set(parent.payload) == {"node_order", "package", "strategy"}
-            and parent.payload.get("node_order") == [NODE_ID]
-            and parent.payload.get("strategy") == "one-at-a-time"
-            and parent_package == package
-            and parent.payload_digest == parent_digest
-            and source.attempt == SOURCE_ATTEMPT
-            and source.fence == recovery.source_fence
-            and source.agent_certificate_serial == recovery.source_certificate_serial
-            and source.state in {"expired", "failed", "waiting-for-operator"}
-            and retry.attempt == RETRY_ATTEMPT
-            and retry.fence == GRANTLESS_RETRY_FENCE
-            and retry.state == "running"
-            and retry.result == _GRANTLESS_RETRY_FAILURE
-            and retry.agent_certificate_serial == GRANTLESS_RETRY_CERTIFICATE_SERIAL
-            and recovery.rearm_attempt_certificate_serial
-            == retry.agent_certificate_serial
-            and dispatch_certificate_is_exact
-            and _aware(retry.lease_deadline) > _aware(now)
-            and protocol_version == 3
-            and capabilities is not None
-            and {"agent.runtime.rust.v1", AgentOperation.AGENT_UPGRADE.value}.issubset(
-                capabilities
-            )
-            and runtime_identity.get("architecture") == "linux-arm64"
-            and runtime_identity.get("semantic_version") == SOURCE_SEMANTIC_VERSION
-            and runtime_identity.get("build_digest") == SOURCE_BUILD_DIGEST
-            and runtime_identity.get("binary_digest") == SOURCE_BINARY_DIGEST
-            and runtime_identity.get("self_test_passed") is True
-        ):
-            return None
-        return AgentClaim(
-            schema_version=1,
-            job_id=operation.parent_job_id,
-            operation_id=operation.id,
-            attempt=retry.attempt,
-            fence=retry.fence,
-            node_id=operation.node_id,
-            operation=AgentOperation(operation.kind),
-            authority_revision=operation.authority_revision,
-            payload_digest=operation.payload_digest,
-            payload=operation.payload,
-            deadline=_aware(retry.lease_deadline),
-        )
 
     def _reconcile_agent_upgrade(
         self,
@@ -913,25 +582,7 @@ class AgentJobService:
             .with_for_update(of=StoredOperation)
             .limit(1)
         )
-        if operation is None:
-            return
-        compatibility_recovery = session.scalar(
-            select(AgentUpgradeCompatibilityRecovery)
-            .where(AgentUpgradeCompatibilityRecovery.operation_id == operation.id)
-            .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-        )
-        if compatibility_recovery is not None:
-            self._reconcile_issued_compatibility_upgrade(
-                session,
-                operation,
-                compatibility_recovery,
-                certificate_serial,
-                now,
-                capabilities,
-                runtime_identity,
-            )
-            return
-        if (
+        if operation is None or (
             runtime_identity.get("build_digest")
             != operation.payload.get("target_build_digest")
             or runtime_identity.get("binary_digest")
@@ -1000,319 +651,6 @@ class AgentJobService:
         operation.updated_at = now
         if self._result_consumer is not None:
             self._result_consumer(session, operation, attempt, message)
-        self._aggregate_parent(session, operation.parent_job_id)
-
-    def _reconcile_issued_compatibility_upgrade(
-        self,
-        session: Session,
-        operation: StoredOperation,
-        recovery: AgentUpgradeCompatibilityRecovery,
-        certificate_serial: str,
-        now: datetime,
-        capabilities: tuple[str, ...],
-        runtime_identity: Mapping[str, object],
-    ) -> None:
-        """Close the pinned one-shot recovery from exact target identity.
-
-        This path cannot issue, refresh, or re-enable a grant. It only consumes
-        authenticated target contact. Before dispatch it preserves the failed
-        source attempt as audit; after dispatch it also requires the exact
-        signed scheduled-reboot grant and retry fence already persisted.
-        """
-
-        from vonk_agent_protocol import AgentProtocolError
-        from vonk_agent_protocol.host_helper import SignedHostHelperGrant
-
-        from .compat_recovery import (
-            GRANTLESS_RETRY_CERTIFICATE_SERIAL,
-            GRANTLESS_RETRY_FENCE,
-            JOB_ID,
-            NODE_ID,
-            OPERATION_ID,
-            ORIGINAL_DISPATCH_CERTIFICATE_SERIAL,
-            RECOVERY_ID,
-            SOURCE_ATTEMPT,
-            SOURCE_BINARY_DIGEST,
-            SOURCE_BUILD_DIGEST,
-            SOURCE_SEMANTIC_VERSION,
-            TARGET_BINARY_DIGEST,
-            TARGET_BUILD_DIGEST,
-            TARGET_PACKAGE_SHA256,
-            TARGET_PACKAGE_VERSION,
-            Spark3542CompatibilityRecoveryService,
-        )
-
-        if recovery.state not in {
-            "armed",
-            "issued",
-            "awaiting-identity",
-            "operator-blocked",
-        }:
-            return
-        # An armed row may time out before the legacy agent ever claims retry
-        # 4.  Grant presence, not the terminal timeout state name, is the
-        # durable distinction between pre- and post-dispatch reconciliation.
-        before_dispatch = recovery.issued_at is None
-        rearm_is_bound = bool(
-            recovery.rearm_attempt_certificate_serial is not None
-            and recovery.rearm_dispatch_certificate_serial is not None
-        )
-        authenticated_certificate_is_bound = bool(
-            rearm_is_bound
-            and recovery.rearm_dispatch_certificate_serial == certificate_serial
-            and _active_current_certificate(
-                session,
-                node_id=recovery.node_id,
-                certificate_serial=certificate_serial,
-                now=now,
-            )
-        )
-        original_dispatch_certificate_is_exact = bool(
-            not rearm_is_bound
-            and certificate_serial == ORIGINAL_DISPATCH_CERTIFICATE_SERIAL
-            and _active_current_certificate(
-                session,
-                node_id=recovery.node_id,
-                certificate_serial=certificate_serial,
-                now=now,
-            )
-        )
-        persisted_grant_is_exact = before_dispatch
-        if not before_dispatch and recovery.signed_grant is not None:
-            try:
-                persisted_grant = SignedHostHelperGrant.parse(recovery.signed_grant)
-            except (AgentProtocolError, TypeError, ValueError):
-                persisted_grant_is_exact = False
-            else:
-                grant_expires_at = recovery.grant_expires_at
-                grant_issued_at = recovery.issued_at
-                persisted_grant_is_exact = bool(
-                    persisted_grant.claims.node_id == NODE_ID
-                    and persisted_grant.claims.request_id == recovery.grant_request_id
-                    and persisted_grant.claims.operation.to_mapping()
-                    == {"type": "schedule-reboot", "delay_seconds": 60}
-                    and grant_expires_at is not None
-                    and persisted_grant.claims.expires_at
-                    == int(_aware(grant_expires_at).timestamp())
-                    and grant_issued_at is not None
-                    and persisted_grant.claims.issued_at
-                    == int(_aware(grant_issued_at).timestamp())
-                )
-        parent = session.scalar(
-            select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
-        )
-        package = operation.payload
-        parent_package = (
-            parent.payload.get("package")
-            if parent is not None and isinstance(parent.payload, dict)
-            else None
-        )
-        canonical_payload_digest = hashlib.sha256(
-            canonical_message(dict(package))
-        ).hexdigest()
-        recovery_plan_digest = hashlib.sha256(
-            canonical_message(
-                Spark3542CompatibilityRecoveryService._stored_document(recovery)
-            )
-        ).hexdigest()
-        parent_plan_digest = (
-            hashlib.sha256(
-                canonical_message(
-                    {
-                        "authority_revision": parent.authority_revision,
-                        "node_ids": parent.payload.get("node_order"),
-                        "package": parent_package,
-                        "strategy": parent.payload.get("strategy"),
-                    }
-                )
-            ).hexdigest()
-            if parent is not None and isinstance(parent.payload, dict)
-            else None
-        )
-        if not (
-            recovery.id == RECOVERY_ID
-            and recovery.node_id == NODE_ID
-            and recovery.job_id == JOB_ID
-            and recovery.operation_id == OPERATION_ID
-            and recovery.source_attempt == SOURCE_ATTEMPT
-            and recovery.expected_retry_attempt == SOURCE_ATTEMPT + 1
-            and recovery.source_semantic_version == SOURCE_SEMANTIC_VERSION
-            and recovery.source_binary_digest == SOURCE_BINARY_DIGEST
-            and recovery.source_build_digest == SOURCE_BUILD_DIGEST
-            and recovery.package_sha256 == TARGET_PACKAGE_SHA256
-            and recovery.target_package_version == TARGET_PACKAGE_VERSION
-            and recovery.target_binary_digest == TARGET_BINARY_DIGEST
-            and recovery.target_build_digest == TARGET_BUILD_DIGEST
-            and operation.id == OPERATION_ID
-            and operation.parent_job_id == JOB_ID
-            and operation.node_id == NODE_ID
-            and operation.kind == AgentOperation.AGENT_UPGRADE.value
-            and parent is not None
-            and parent.id == JOB_ID
-            and parent.kind == "agent-upgrade"
-            and parent.targets == [NODE_ID]
-            and recovery.authority_revision == operation.authority_revision
-            and recovery.authority_revision == parent.authority_revision
-            and recovery.plan_digest == recovery_plan_digest
-            and recovery.upgrade_payload_sha256 == canonical_payload_digest
-            and operation.payload_digest == canonical_payload_digest
-            and set(parent.payload) == {"node_order", "package", "strategy"}
-            and parent.payload.get("node_order") == [NODE_ID]
-            and parent.payload.get("strategy") == "one-at-a-time"
-            and parent.payload_digest == parent_plan_digest
-            and isinstance(parent_package, dict)
-            and parent_package == package
-            and Spark3542CompatibilityRecoveryService._exact_target(package)
-            and "agent.runtime.rust.v1" in capabilities
-            and AgentOperation.AGENT_UPGRADE.value in capabilities
-            and runtime_identity.get("architecture") == "linux-arm64"
-            and runtime_identity.get("semantic_version") == "0.1.0"
-            and runtime_identity.get("build_digest") == TARGET_BUILD_DIGEST
-            and runtime_identity.get("binary_digest") == TARGET_BINARY_DIGEST
-            and runtime_identity.get("self_test_passed") is True
-            and (
-                (
-                    before_dispatch
-                    and recovery.retry_fence is None
-                    and recovery.retry_certificate_serial is None
-                    and recovery.signed_grant is None
-                    and recovery.grant_request_id is None
-                    and recovery.grant_expires_at is None
-                    and recovery.identity_deadline is None
-                    and recovery.issued_at is None
-                    and (
-                        (
-                            rearm_is_bound
-                            and authenticated_certificate_is_bound
-                            and operation.current_attempt
-                            == recovery.expected_retry_attempt
-                            and operation.retry_disposition is None
-                            and operation.retry_disposition_attempt is None
-                            and (
-                                (
-                                    recovery.state == "armed"
-                                    and recovery.blocked_at is None
-                                    and operation.state == "running"
-                                )
-                                or (
-                                    recovery.state == "operator-blocked"
-                                    and recovery.blocked_at is not None
-                                    and operation.state == "waiting-for-operator"
-                                )
-                            )
-                        )
-                        or (
-                            not rearm_is_bound
-                            and original_dispatch_certificate_is_exact
-                            and operation.current_attempt == recovery.source_attempt
-                            and (
-                                (
-                                    recovery.state == "armed"
-                                    and recovery.blocked_at is None
-                                    and operation.retry_disposition == "retry"
-                                    and operation.retry_disposition_attempt
-                                    == recovery.source_attempt
-                                )
-                                or (
-                                    recovery.state == "operator-blocked"
-                                    and recovery.blocked_at is not None
-                                    and operation.state == "waiting-for-operator"
-                                    and operation.retry_disposition is None
-                                    and operation.retry_disposition_attempt is None
-                                )
-                            )
-                        )
-                    )
-                )
-                or (
-                    not before_dispatch
-                    and persisted_grant_is_exact
-                    and recovery.retry_fence is not None
-                    and recovery.retry_certificate_serial is not None
-                    and recovery.signed_grant is not None
-                    and recovery.grant_request_id is not None
-                    and recovery.grant_expires_at is not None
-                    and recovery.identity_deadline is not None
-                    and recovery.issued_at is not None
-                    and operation.current_attempt == recovery.expected_retry_attempt
-                    and authenticated_certificate_is_bound
-                    and certificate_serial
-                    == recovery.retry_certificate_serial
-                    == recovery.rearm_dispatch_certificate_serial
-                )
-            )
-        ):
-            return
-        expected_attempt = (
-            recovery.expected_retry_attempt
-            if rearm_is_bound
-            else recovery.source_attempt
-        )
-        attempt = session.scalar(
-            select(AgentOperationAttempt)
-            .where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == expected_attempt,
-            )
-            .with_for_update(of=AgentOperationAttempt)
-        )
-        if (
-            attempt is None
-            or (
-                rearm_is_bound
-                and before_dispatch
-                and attempt.fence != GRANTLESS_RETRY_FENCE
-            )
-            or (not before_dispatch and attempt.fence != recovery.retry_fence)
-            or attempt.agent_certificate_serial
-            != (
-                recovery.rearm_attempt_certificate_serial
-                if rearm_is_bound
-                else recovery.source_certificate_serial
-            )
-            or (
-                rearm_is_bound
-                and before_dispatch
-                and attempt.agent_certificate_serial
-                != GRANTLESS_RETRY_CERTIFICATE_SERIAL
-            )
-            or attempt.state
-            not in {"running", "waiting-for-operator", "expired", "failed"}
-        ):
-            return
-        evidence = {
-            "architecture": "linux-arm64",
-            "binary_digest": TARGET_BINARY_DIGEST,
-            "build_digest": TARGET_BUILD_DIGEST,
-            "package_sha256": TARGET_PACKAGE_SHA256,
-            "package_version": TARGET_PACKAGE_VERSION,
-            "self_test_passed": True,
-            "status": "upgraded",
-        }
-        message = AgentResult(
-            schema_version=1,
-            job_id=JOB_ID,
-            operation_id=OPERATION_ID,
-            attempt=attempt.attempt,
-            fence=attempt.fence,
-            node_id=NODE_ID,
-            deadline=max(_aware(attempt.lease_deadline), _aware(now)),
-            state="succeeded",
-            result=evidence,
-        )
-        if attempt.state != "failed":
-            attempt.state = "succeeded"
-            attempt.result = _document(evidence)
-        operation.state = "succeeded"
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-        operation.updated_at = now
-        if self._result_consumer is not None:
-            self._result_consumer(session, operation, attempt, message)
-        if operation.state != "succeeded":
-            return
-        recovery.state = "completed-before-dispatch" if before_dispatch else "completed"
-        recovery.completed_at = now
         self._aggregate_parent(session, operation.parent_job_id)
 
     @staticmethod
@@ -1553,7 +891,7 @@ class AgentJobService:
                 raise ValueError("running reconciliation operation lacks its attempt")
             terminal = (
                 "waiting-for-operator"
-                if candidate.kind in MUTATING_AGENT_OPERATIONS
+                if candidate.kind in _MUTATING_OPERATIONS
                 else "failed"
             )
             candidate.state = terminal
@@ -1689,119 +1027,10 @@ class AgentJobService:
             operation.updated_at = now
             if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
-            self._project_compatibility_result(
-                session,
-                operation,
-                attempt,
-                message,
-                now,
-            )
             self._aggregate_parent(session, operation.parent_job_id)
         # A result consumer can atomically make the next durable recipe phase
         # queueable; wake long-polling agents only after that transaction commits.
         self.notify_available()
-
-    @staticmethod
-    def _project_compatibility_result(
-        session: Session,
-        operation: StoredOperation,
-        attempt: AgentOperationAttempt,
-        message: AgentResult,
-        now: datetime,
-    ) -> None:
-        recovery = session.scalar(
-            select(AgentUpgradeCompatibilityRecovery)
-            .where(AgentUpgradeCompatibilityRecovery.operation_id == operation.id)
-            .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-        )
-        if (
-            recovery is None
-            or recovery.state != "issued"
-            or recovery.expected_retry_attempt != attempt.attempt
-            or recovery.retry_fence != attempt.fence
-            or recovery.retry_certificate_serial != attempt.agent_certificate_serial
-        ):
-            return
-        reason = message.result.get("reason")
-        expected_old_agent_outcome = bool(
-            message.state == "succeeded"
-            or (
-                message.state == "failed"
-                and isinstance(reason, str)
-                and reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
-            )
-        )
-        if expected_old_agent_outcome:
-            recovery.state = "awaiting-identity"
-            return
-        recovery.state = "operator-blocked"
-        recovery.blocked_at = now
-        operation.state = "waiting-for-operator"
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
-
-    def reconcile_compatibility_recoveries(self) -> bool:
-        """Fail a stranded one-shot recovery closed after its durable deadline."""
-
-        now = self._clock()
-        with self._sessions.begin() as session:
-            recovery = session.scalar(
-                select(AgentUpgradeCompatibilityRecovery)
-                .where(
-                    AgentUpgradeCompatibilityRecovery.state.in_(
-                        {"armed", "issued", "awaiting-identity"}
-                    )
-                )
-                .order_by(AgentUpgradeCompatibilityRecovery.created_at)
-                .with_for_update(of=AgentUpgradeCompatibilityRecovery)
-                .limit(1)
-            )
-            if recovery is None:
-                return False
-            operation = session.scalar(
-                select(StoredOperation)
-                .where(StoredOperation.id == recovery.operation_id)
-                .with_for_update(of=StoredOperation)
-            )
-            job = session.scalar(
-                select(Job).where(Job.id == recovery.job_id).with_for_update(of=Job)
-            )
-            attempt = session.scalar(
-                select(AgentOperationAttempt)
-                .where(
-                    AgentOperationAttempt.operation_id == recovery.operation_id,
-                    AgentOperationAttempt.attempt == recovery.expected_retry_attempt,
-                )
-                .with_for_update(of=AgentOperationAttempt)
-            )
-            deadline = (
-                _aware(recovery.identity_deadline)
-                if recovery.identity_deadline is not None
-                else _aware(
-                    operation.updated_at
-                    if operation is not None
-                    else recovery.created_at
-                )
-                + _COMPATIBILITY_ARM_TIMEOUT
-            )
-            if _aware(now) < deadline:
-                return False
-            recovery.state = "operator-blocked"
-            recovery.blocked_at = now
-            if operation is not None and operation.state != "succeeded":
-                operation.state = "waiting-for-operator"
-                operation.retry_disposition = None
-                operation.retry_disposition_attempt = None
-                operation.updated_at = now
-            if attempt is not None and attempt.state == "running":
-                attempt.state = "waiting-for-operator"
-            if job is not None and job.state != "succeeded":
-                from .compat_recovery import COMPATIBILITY_TIMEOUT_REASON
-
-                job.state = "waiting-for-operator"
-                job.status_reason = COMPATIBILITY_TIMEOUT_REASON
-                job.updated_at = now
-            return True
 
     def _active(
         self,

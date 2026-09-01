@@ -122,6 +122,31 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
 
 
+def test_repair_manifest_is_v2_while_upgrade_package_remains_v1() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    components = schema["components"]["schemas"]
+    assert (
+        components["AgentRepairManifestRequest"]["properties"]["schema_version"][
+            "const"
+        ]
+        == 2
+    )
+    assert (
+        components["AgentUpgradePackageRequest"]["properties"]["schema_version"][
+            "const"
+        ]
+        == 1
+    )
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert "AgentRepairManifestRequest" in typescript
+    assert "schema_version: 2;" in typescript
+    python_client = (
+        PYTHON_CLIENT / "models/agent_repair_manifest_request.py"
+    ).read_text()
+    assert "schema_version: Literal[2]" in python_client
+
+
 def test_generated_library_placement_is_digest_bound_and_transport_neutral() -> None:
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
@@ -152,6 +177,7 @@ def test_generated_library_placement_is_digest_bound_and_transport_neutral() -> 
     from cluster_profiles.generated_control.models.library_placement_apply_request import (
         LibraryPlacementApplyRequest,
     )
+
     request = LibraryPlacementApplyRequest(
         recipe_id="00000000-0000-4000-8000-000000000001",
         node_ids=["spk_" + "1" * 32],

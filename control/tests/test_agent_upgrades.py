@@ -59,7 +59,7 @@ REPAIR_PACKAGE = {
     "target_build_digest": "sha256:" + "5" * 64,
 }
 REPAIR_MANIFEST = {
-    "schema_version": 1,
+    "schema_version": 2,
     "kind": "agent-upgrade-repair",
     "node_id": NODE_A,
     "authority_sha256": REPAIR_AUTHORITY_SHA256,
@@ -213,6 +213,11 @@ def test_repair_manifest_requires_canonical_immutable_url_and_stales_on_change(
     )
     with pytest.raises(AgentUpgradeConflict, match="URL is not canonical"):
         upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=mutable)
+
+    legacy = json.loads(json.dumps(REPAIR_MANIFEST))
+    legacy["schema_version"] = 1
+    with pytest.raises(AgentUpgradeConflict, match="manifest is invalid"):
+        upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=legacy)
 
     plan = upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=REPAIR_MANIFEST)
     changed = json.loads(json.dumps(REPAIR_MANIFEST))
@@ -405,6 +410,65 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
             {"reason": "agent upgrade request is invalid"},
             {"reason": "agent upgrade request is invalid"},
         ]
+    assert _operation_nodes(sessions, job.id) == [NODE_A]
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "package_verification_failed",
+        "package_metadata_failed",
+        "package_custody_failed",
+        "package_install_failed",
+    ],
+)
+def test_package_stage_helper_failures_pause_without_automatic_retry(
+    tmp_path, error_code
+) -> None:
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, f"package-stage-{error_code}", clock=clock
+    )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    reason = f"agent upgrade helper rejected the request: {error_code}"
+
+    operations.fail(first, reason)
+
+    with sessions() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        assert operation is not None
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 1,
+            )
+        )
+        parent = session.get(Job, job.id)
+        assert operation.state == "waiting-for-operator"
+        assert operation.current_attempt == 1
+        assert operation.retry_disposition is None
+        assert operation.retry_disposition_attempt is None
+        assert attempt is not None and attempt.state == "failed"
+        deadline = attempt.lease_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        assert deadline == clock() + _AGENT_UPGRADE_RECOVERY_FENCE
+        assert parent is not None and parent.state == "waiting-for-operator"
+        assert parent.status_reason == reason
+
+    clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
     assert _operation_nodes(sessions, job.id) == [NODE_A]
 
 

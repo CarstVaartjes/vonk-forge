@@ -230,7 +230,7 @@ def _manifest(verified: dict[str, Any]) -> dict[str, Any]:
             "target_binary_digest": verified["target_binary_digest"],
             "target_build_digest": verified["target_build_digest"],
         },
-        "schema_version": 1,
+        "schema_version": 2,
     }
 
 
@@ -288,7 +288,7 @@ def assemble(arguments: argparse.Namespace) -> None:
         "package_sha256": verified["sha256"],
         "packaging_source_revision": verified["packaging_source_revision"],
         "release_key_sha256": release_key,
-        "schema_version": 1,
+        "schema_version": 2,
     }
     output = arguments.output.absolute()
     if output.exists() or output.is_symlink():
@@ -355,7 +355,7 @@ def _validate_bundle(
     packaging_source = plan.get("packaging_source_revision")
     release_key = plan.get("release_key_sha256")
     if (
-        plan.get("schema_version") != 1
+        plan.get("schema_version") != 2
         or plan.get("kind") != "agent-repair-capsule-publication"
         or not isinstance(node_id, str)
         or NODE_ID.fullmatch(node_id) is None
@@ -471,7 +471,7 @@ def _manifest_from_plan_and_descriptor(
         raise PublicationError("repair package descriptor shape is invalid")
     prefix = _prefix(plan["node_id"], plan["authority_sha256"], plan["package_sha256"])
     if (
-        manifest.get("schema_version") != 1
+        manifest.get("schema_version") != 2
         or manifest.get("kind") != "agent-upgrade-repair"
         or manifest.get("node_id") != plan["node_id"]
         or manifest.get("authority_sha256") != plan["authority_sha256"]

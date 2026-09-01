@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "packaging/debian/preinst-repair"
 HARNESS = ROOT / "tests/nodes/test_agent_upgrade_repair_systemd.sh"
 MATRIX = ROOT / "tests/nodes/test_agent_upgrade_repair_matrix.sh"
 PROBE_SOURCE = ROOT / "rust/crates/vonk-repair-helper-probe/src/main.rs"
-BINARY_REVISION = "a122909feaa3b64d7b15371285e727965c3d7e9a"
 
 
 def _shell_array(source: str, name: str) -> set[str]:
@@ -56,49 +52,47 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
         production_phases | boot_crashpoints | {"none"}
     )
     assert "systemctl --system kill --kill-whom=all --signal=SIGKILL" in harness
-    assert 'systemctl --system start "$recovery_unit"' in harness
+    assert "systemctl --system restart multi-user.target" in harness
     assert 'systemctl --system freeze "$helper_unit"' in harness
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
+    assert "binary_revision=$packaging_revision" in harness
+    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert '"$test_root/target-dist" "$repo_root" "$binary_revision"' in harness
+    assert "source_capsule_unit_file=$repo_root/packaging/systemd/" in harness
 
 
-def _assert_frozen_runtime_and_old_runner() -> None:
-    # The package builder is deliberately frozen with the repair lifecycle:
-    # ordinary packages now bind the static build-egress binary, while repair
-    # capsules continue to omit that new binary because legacy repair authority
-    # does not authenticate it.
+def test_terminal_cleanup_retires_the_only_boot_owner_last() -> None:
+    runner = RUNNER.read_text()
+    cleanup = runner[
+        runner.index("finish_terminal_cleanup() {") : runner.index(
+            "allow_agent_start() {"
+        )
+    ]
+
+    assert (
+        cleanup.index("retire_repair_gate")
+        < cleanup.index("cleanup_retired_state")
+        < cleanup.index("retire_source_capsule")
+    )
+
+
+def _assert_frozen_schema2_runtime() -> None:
+    # These digests force review of every privileged repair contract change.
     expected = {
         ROOT / "packaging/debian/preinst-repair": (
-            "046feb4448695d945dee13f3751674cbcf5824a4de4efadf026306a4122a9c60"
+            "8418b3bc5621b76fe504e7974d26faae2f1b3ddd4f3b11078d286e52619ba8cb"
         ),
         ROOT / "packaging/debian/postinst-repair": (
-            "13ab2b8f03503b826c28f34d4c6128b3da2496a4cb3dafc749bdf49d40e3ea18"
+            "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
         ),
         ROOT / "scripts/build-agent-deb": (
-            "17a540f1e35d43ef0a0347a5fcb46282dd38e7a89c8793e626040139f57e1b44"
+            "fec5fba5b5c285565bc370acd3b3e07f10671c34665d5755ac85ea1bf7f0c084"
         ),
     }
     for path, digest in expected.items():
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
-
-    available = subprocess.run(
-        ["git", "cat-file", "-e", f"{BINARY_REVISION}:packaging/debian/preinst"],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-    )
-    if available.returncode != 0:
-        pytest.skip("pinned a122 repair source is absent from shallow checkout")
-    old_runner = subprocess.run(
-        ["git", "show", f"{BINARY_REVISION}:packaging/debian/preinst"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert ".repair-build." not in old_runner
-    assert "vonk-forge-package-upgrade-recover.standard" not in old_runner
 
 
 def test_repair_native_harness_has_a_byte_and_pid_no_mutation_oracle() -> None:
@@ -109,7 +103,7 @@ def test_repair_native_harness_has_a_byte_and_pid_no_mutation_oracle() -> None:
     assert 'snapshot_state "$test_root/before"' in harness
     assert 'snapshot_state "$test_root/after"' in harness
     assert 'cmp -s "$test_root/before" "$test_root/after"' in harness
-    assert 'sed \'/^dpkg=/d\' "$test_root/before"' in harness
+    assert "sed '/^dpkg=/d' \"$test_root/before\"" in harness
     assert '"iF |arm64|$installed_version" "ii |arm64|$installed_version"' in harness
     assert '"iHR|arm64|$installed_version" "iH |arm64|$installed_version"' in harness
     assert '"rc |arm64|$installed_version" "ic |arm64|$installed_version"' in harness
@@ -176,11 +170,12 @@ def test_repair_native_harness_adversarial_matrix_is_complete() -> None:
 def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> None:
     harness = HARNESS.read_text()
 
-    _assert_frozen_runtime_and_old_runner()
+    _assert_frozen_schema2_runtime()
 
     assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
-    assert "0.1.0~dev.381+ga122909feaa3" in harness
-    assert "a122909feaa3b64d7b15371285e727965c3d7e9a" in harness
+    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert "binary_revision=$packaging_revision" in harness
+    assert 'rev-parse HEAD)"' in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness
     assert harness.count('submit_helper_install "$') == 2
     submit = harness[
@@ -203,12 +198,18 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert "source_recovery_nonce)=.*/\\1=<redacted>" in harness
     assert '"/usr/bin/sha256sum /proc/%ld/exe", (long)getpid()' in harness
     assert "/usr/bin/sha256sum /proc/self/exe" not in harness
-    assert 'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
+    assert (
+        'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
+    )
     assert "failed assertion: line=%s status=%s expected-agent=%s:%s" in harness
-    assert "gate_backup=$test_root/running-agent-source-gate" in harness
-    assert 'rm -f -- "$source_gate"' in harness
+    assert (
+        "running_agent_bypass=/run/systemd/system/"
+        "$agent_unit.d/99-repair-fixture-bypass.conf" in harness
+    )
+    assert "printf '%s\\n' '[Service]' 'ExecCondition='" in harness
+    assert 'rm -f -- "$running_agent_bypass"' in harness
     assert 'source_gate_manager_path="$(realpath -e -- "$source_gate")"' in harness
-    assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
+    assert 'test ! -e "$running_agent_bypass"' in harness
     assert "local destination=$2" in harness
     assert (
         'assert_fixture_equal "wrong-process restart status" 0 "$restart_status"'
@@ -219,17 +220,13 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert '"$wrong_sha"' in harness
     assert "--property=DropInPaths" in harness
     assert "--property=ExecCondition" in harness
-    assert (
-        'assert_fixture_equal "wrong-process cgroup identity"' in harness
-    )
+    assert 'assert_fixture_equal "wrong-process cgroup identity"' in harness
     assert 'assert_fixture_equal "wrong-process uid and gid"' in harness
     assert 'assert_fixture_equal "wrong-process supplementary groups"' in harness
-    assert (
-        'assert_fixture_equal "running process deleted executable path"' in harness
-    )
+    assert 'assert_fixture_equal "running process deleted executable path"' in harness
     assert "snapshot_source_authority_state()" in harness
     assert '"dpkg=$authority_dpkg_status|arm64|$installed_version"' in harness
-    assert '"$test_root/before-source-authority" \'ii \'' in harness
+    assert "\"$test_root/before-source-authority\" 'ii '" in harness
     assert '"$test_root/pre-runner-authority" iHR' in harness
     assert 'if [[ "$crash_phase" = pre-runner-rename ]]; then' in harness
     assert "unexpected synthetic dpkg cleanup state" in harness
@@ -252,6 +249,32 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'test "$final_helper_pid" = "$helper_receipt_pid"' in harness
     assert 'test "$target_agent_pid" = "$final_agent_pid"' in harness
     assert 'test "$target_helper_pid" = "$final_helper_pid"' in harness
+
+
+def test_repair_native_harness_expects_schema2_terminal_receipts() -> None:
+    harness = HARNESS.read_text()
+    terminal_receipts = harness[
+        harness.index('test -f "$repair_receipt"') : harness.index(
+            '[[ "$final_agent_pid" =~ ^[1-9][0-9]*$ ]]'
+        )
+    ]
+
+    assert terminal_receipts.count("grep -Fxq 'schema_version=2'") == 2
+    assert "grep -Fxq 'schema_version=1'" not in terminal_receipts
+
+
+def test_expected_transient_collision_does_not_mask_err_diagnostics() -> None:
+    harness = HARNESS.read_text()
+    collision_start = harness.index("collision_nonce=$(openssl rand -hex 32)")
+    collision_end = harness.index(
+        'wait_for_transient_collection "$collision_unit"', collision_start
+    )
+    collision = harness[collision_start:collision_end]
+
+    assert "if /usr/bin/systemd-run" in collision
+    assert "collision_status=$?" in collision
+    assert "set +e" not in collision
+    assert "set -e" not in collision
 
 
 def test_repair_native_cleanup_cannot_arm_before_collision_preflight() -> None:
@@ -286,8 +309,7 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert 'const SETPRIV: &str = "/usr/bin/setpriv";' in probe
     assert 'const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";' in probe
     assert (
-        'const AGENT_CGROUP: &str = "/system.slice/vonk-forge-agent.service";'
-        in probe
+        'const AGENT_CGROUP: &str = "/system.slice/vonk-forge-agent.service";' in probe
     )
     assert 'const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";' in probe
     assert (
@@ -302,8 +324,8 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "if args.len() != 2" in probe
     assert "if args.len() != 9" in probe
     assert "if args.len() != 12" in probe
-    assert '|| !is_decimal(&args[7])' in probe
-    assert '|| !is_decimal(&args[8])' in probe
+    assert "|| !is_decimal(&args[7])" in probe
+    assert "|| !is_decimal(&args[8])" in probe
     assert '|| (args[9] != "none" && args[9] != args[8])' in probe
     assert ".filter(|number| number.to_string() == value)" in probe
     assert ".is_some_and(|number| number > 1)" in probe
@@ -321,7 +343,9 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "if hash_reader(&file)? != expected_sha" in probe
     assert "metadata_identity(&before) != metadata_identity(&after)" in probe
     assert "if values != [expected, expected, expected, expected]" in probe
-    assert 'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]' in probe
+    assert (
+        'for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]' in probe
+    )
     assert 'for field in ["CapPrm:", "CapEff:", "CapAmb:"]' in probe
     assert 'status_value(&status, "CapInh:")? != AGENT_INHERITABLE_CAPS' in probe
     assert 'status_value(&status, "CapBnd:")? != AGENT_BOUNDING_CAPS' in probe

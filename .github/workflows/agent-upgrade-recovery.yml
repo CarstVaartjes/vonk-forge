@@ -8,7 +8,6 @@ on:
       - Cargo.lock
       - Cargo.toml
       - control/src/vonk_control/agent_jobs.py
-      - control/src/vonk_control/compat_recovery.py
       - control/src/vonk_control/host_helper_authority.py
       - packaging/**
       - rust/crates/vonk-agent/**
@@ -25,7 +24,6 @@ on:
       - Cargo.lock
       - Cargo.toml
       - control/src/vonk_control/agent_jobs.py
-      - control/src/vonk_control/compat_recovery.py
       - control/src/vonk_control/host_helper_authority.py
       - packaging/**
       - rust/crates/vonk-agent/**
@@ -46,7 +44,7 @@ concurrency:
 
 jobs:
   native-arm64-recovery:
-    name: Exercise pinned recovery on disposable ARM64 systemd
+    name: Exercise current schema2 capsule recovery on ARM64 systemd
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
@@ -80,7 +78,7 @@ jobs:
             acl adduser build-essential ca-certificates init-system-helpers \
             fuse-overlayfs iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
-      - name: Validate and exercise the exact legacy recovery lifecycle
+      - name: Validate current schema2 capsule post-remove boot recovery
         shell: bash
         run: |
           set -euo pipefail
@@ -97,16 +95,17 @@ jobs:
             "$build_egress" "$build_egress_staged"
           sudo mv -f "$build_egress_staged" "$build_egress"
           test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
-          compatibility_cargo_dir=$(dirname "$(command -v cargo)")
-          compatibility_cargo_home=$(dirname "$compatibility_cargo_dir")
-          compatibility_rustup_home=$(rustup show home)
+          cargo_dir=$(dirname "$(command -v cargo)")
+          cargo_home=$(dirname "$cargo_dir")
+          rustup_home=$(rustup show home)
+          current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)+g$(git rev-parse --short=12 HEAD)"
           sudo env \
-            PATH="$compatibility_cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-            CARGO_HOME="$compatibility_cargo_home" \
-            RUSTUP_HOME="$compatibility_rustup_home" \
-            VERSION=0.1.0~dev.381+ga122909feaa3 \
-            STALE_PENDING_FORMAT=legacy2 \
-            CRASH_MODE=full-cgroup \
-            CANDIDATE_CUSTODY=legacy \
+            PATH="$cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            CARGO_HOME="$cargo_home" \
+            RUSTUP_HOME="$rustup_home" \
+            VERSION="$current_version" \
+            STALE_PENDING_FORMAT=prior3 \
+            CRASH_MODE=post-remove \
+            CANDIDATE_CUSTODY=root \
             BUILD_EGRESS_BINARY="$build_egress" \
             tests/nodes/test_agent_upgrade_recovery_systemd.sh

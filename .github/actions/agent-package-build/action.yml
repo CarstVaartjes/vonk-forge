@@ -573,6 +573,9 @@ runs:
         sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
           CRASH_MODE=full-cgroup CANDIDATE_CUSTODY=root \
           tests/nodes/test_agent_upgrade_recovery_systemd.sh
+        sudo env VERSION="$VERSION" STALE_PENDING_FORMAT=prior3 \
+          CRASH_MODE=post-remove CANDIDATE_CUSTODY=root \
+          tests/nodes/test_agent_upgrade_recovery_systemd.sh
         sudo scripts/test-agent-package-native-lifecycle \
           linux-arm64 \
           "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \

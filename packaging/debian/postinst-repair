@@ -16,8 +16,10 @@ repair_state=$state/repair
 repair_intent=$repair_state/intent
 repair_phase=$repair_state/phase
 repair_candidate=$repair_state/candidate.deb
-repair_authority=/usr/share/doc/vonk-forge-agent/repair-authority
-recovery_unit=vonk-forge-package-upgrade-recover.service
+repair_authority=/usr/lib/vonk-forge/repair-authority
+source_capsule_runner=$state/recovery-capsule/runner
+source_capsule_unit=vonk-forge-package-upgrade-recover-capsule.service
+recovery_unit=$source_capsule_unit
 observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
 observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 
@@ -116,21 +118,44 @@ valid_digest() {
 }
 
 recursive_binding() {
+    binding_reason=invocation
     [ "${1:-}" = configure ] \
-        && [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] \
-        && [ -d "$state" ] && [ ! -L "$state" ] \
-        && [ "$(/usr/bin/stat -c %u:%g:%a "$state")" = 0:0:700 ] \
-        && [ -d "$repair_state" ] && [ ! -L "$repair_state" ] \
+        && [ -n "${VONK_FORGE_PACKAGE_REPAIR_NONCE:-}" ] || return 1
+    binding_reason=source-state-directory
+    [ -d "$state" ] && [ ! -L "$state" ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a "$state")" = 0:0:700 ] || return 1
+    binding_reason=repair-state-directory
+    [ -d "$repair_state" ] && [ ! -L "$repair_state" ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a "$repair_state")" = 0:0:700 ] \
-        && safe_root_file "$source_intent" 600 \
-        && safe_root_file "$repair_intent" 600 \
-        && safe_root_file "$repair_phase" 600 \
-        && safe_root_file "$repair_candidate" 600 \
-        && safe_root_file "$repair_authority" 644 \
         || return 1
-    canonical_line_file "$source_intent" 14 \
-        && canonical_line_file "$repair_intent" 17 \
+    binding_reason=source-intent-file
+    safe_root_file "$source_intent" 600 || return 1
+    binding_reason=repair-intent-file
+    safe_root_file "$repair_intent" 600 || return 1
+    binding_reason=repair-phase-file
+    safe_root_file "$repair_phase" 600 || return 1
+    binding_reason=repair-candidate-file
+    safe_root_file "$repair_candidate" 600 || return 1
+    binding_reason=installed-authority-file
+    safe_root_file "$repair_authority" 644 || return 1
+    binding_reason=source-intent
+    canonical_line_file "$source_intent" 17 \
+        && /usr/bin/sed -n '1p' "$source_intent" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '15p' "$source_intent" \
+            | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '16p' "$source_intent" \
+            | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '17p' "$source_intent" \
+            | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$' \
+        || return 1
+    binding_reason=repair-ledger-shape
+    canonical_line_file "$repair_intent" 17 \
         && canonical_line_file "$repair_phase" 3 \
+        && /usr/bin/sed -n '1p' "$repair_intent" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '1p' "$repair_phase" \
+            | grep -Fxq 'schema_version=2' \
         || return 1
     source_snapshot=$(/usr/bin/sha256sum "$source_intent" \
         | /usr/bin/cut -d' ' -f1) || return 1
@@ -142,9 +167,13 @@ recursive_binding() {
     intent_arch=$(/usr/bin/sed -n '9s/^architecture=//p' "$repair_intent")
     intent_agent=$(/usr/bin/sed -n '10s/^agent_sha256=//p' "$repair_intent")
     intent_helper=$(/usr/bin/sed -n '11s/^helper_sha256=//p' "$repair_intent")
-    intent_runner=$(/usr/bin/sed -n '13s/^repair_runner_sha256=//p' "$repair_intent")
+    intent_repair_runner=$(/usr/bin/sed -n \
+        '13s/^repair_runner_sha256=//p' "$repair_intent")
+    intent_runner=$(/usr/bin/sed -n \
+        '12s/^standard_runner_sha256=//p' "$repair_intent")
     intent_nonce=$(/usr/bin/sed -n '17s/^repair_nonce=//p' "$repair_intent")
     phase_nonce=$(/usr/bin/sed -n '2s/^repair_nonce=//p' "$repair_phase")
+    binding_reason=repair-ledger-binding
     valid_digest "$source_snapshot" \
         && valid_digest "$intent_authority" \
         && valid_digest "$intent_source" \
@@ -152,6 +181,7 @@ recursive_binding() {
         && valid_digest "$intent_agent" \
         && valid_digest "$intent_helper" \
         && valid_digest "$intent_runner" \
+        && valid_digest "$intent_repair_runner" \
         && valid_digest "$intent_nonce" \
         && [ "$intent_authority" = "$authority_sha256" ] \
         && [ "$intent_source" = "$source_snapshot" ] \
@@ -160,6 +190,7 @@ recursive_binding() {
         && [ "$phase_nonce" = "$intent_nonce" ] \
         && /usr/bin/sed -n '3p' "$repair_phase" | grep -Fxq 'phase=installing' \
         || return 1
+    binding_reason=installed-payload
     [ "$(/usr/bin/stat -c %s "$repair_candidate")" = "$intent_bytes" ] \
         && [ "$(/usr/bin/sha256sum "$repair_candidate" \
             | /usr/bin/cut -d' ' -f1)" = "$intent_candidate" ] \
@@ -179,8 +210,15 @@ recursive_binding() {
             /usr/lib/vonk-forge/vonk-forge-package-upgrade-recover \
             | /usr/bin/cut -d' ' -f1)" = "$intent_runner" ] \
         || return 1
+    binding_reason=capsule-runner
+    safe_root_file "$source_capsule_runner" 555 \
+        && [ "$(/usr/bin/sha256sum "$source_capsule_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$intent_repair_runner" ] \
+        || return 1
+    binding_reason=recovery-cgroup
     grep -Fxq "0::/system.slice/$recovery_unit" /proc/self/cgroup \
         || return 1
+    binding_reason=dpkg-parent
     case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
     command_file=$(/usr/bin/mktemp /tmp/.vonk-repair-postinst.XXXXXX) \
         || return 1
@@ -198,7 +236,9 @@ recursive_binding() {
     return "$result"
 }
 
-recursive_binding "${1:-}" || fail 'recursive configure binding'
+binding_reason=unknown
+recursive_binding "${1:-}" \
+    || fail "recursive configure binding ($binding_reason)"
 
 if ! getent group vonk-agent >/dev/null; then
     addgroup --system vonk-agent

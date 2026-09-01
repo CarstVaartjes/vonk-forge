@@ -9,6 +9,12 @@ target_agent_sha256='@AGENT_SHA256@'
 target_helper_sha256='@HELPER_SHA256@'
 recovery_unit_sha256='@RECOVERY_UNIT_SHA256@'
 recovery_unit_base64='@RECOVERY_UNIT_BASE64@'
+recovery_capsule_unit_sha256='@RECOVERY_CAPSULE_UNIT_SHA256@'
+recovery_capsule_unit_base64='@RECOVERY_CAPSULE_UNIT_BASE64@'
+recovery_capsule_gate_sha256='@RECOVERY_CAPSULE_GATE_SHA256@'
+recovery_capsule_gate_base64='@RECOVERY_CAPSULE_GATE_BASE64@'
+recovery_capsule_suppression_sha256='@RECOVERY_CAPSULE_SUPPRESSION_SHA256@'
+recovery_capsule_suppression_base64='@RECOVERY_CAPSULE_SUPPRESSION_BASE64@'
 agent_gate_sha256='@AGENT_GATE_SHA256@'
 agent_gate_base64='@AGENT_GATE_BASE64@'
 
@@ -18,9 +24,23 @@ intent=$state_dir/intent
 lock=$state_dir/lock
 pending=$state_parent/helper-upgrade.pending
 receipt=$state_parent/helper-upgrade.receipt
+status_receipt=$state_parent/package-upgrade.status
 runner=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover
 unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 unit_name=vonk-forge-package-upgrade-recover.service
+capsule_dir=$state_dir/recovery-capsule
+capsule_manifest=$capsule_dir/manifest
+capsule_runner=$capsule_dir/runner
+capsule_unit_name=vonk-forge-package-upgrade-recover-capsule.service
+capsule_unit=/lib/systemd/system/$capsule_unit_name
+capsule_wants_dir=/lib/systemd/system/multi-user.target.wants
+capsule_enablement=$capsule_wants_dir/$capsule_unit_name
+capsule_gate_dir=/lib/systemd/system/vonk-forge-agent.service.d
+capsule_gate=$capsule_gate_dir/10-package-upgrade-capsule.conf
+capsule_suppression_dir=/lib/systemd/system/$unit_name.d
+capsule_suppression=$capsule_suppression_dir/10-capsule-owner.conf
+capsule_admin_root=/etc/systemd/system
+capsule_runtime_root=/run/systemd/system
 helper_socket=vonk-forge-package-helper.socket
 socket_dropin_dir=/lib/systemd/system/vonk-forge-package-helper.socket.d
 socket_dropin=$socket_dropin_dir/20-package-upgrade-recovery.conf
@@ -35,13 +55,51 @@ legacy_bridge=$legacy_bridge_dir/20-package-upgrade-bridge.conf
 legacy_bridge_retired=${legacy_bridge}.retired
 legacy_bridge_runtime=/run/vonk-forge-package-helper/upgrade-bridge
 legacy_bridge_marker=$legacy_bridge_runtime/previous-main-pid
+recovery_stage=dispatch
+
+status_token() {
+    printf '%s' "$1" | /usr/bin/tr -cs 'A-Za-z0-9._+-' '_' \
+        | /usr/bin/cut -c 1-64
+}
+
+write_recovery_status() {
+    status_outcome=$1
+    status_reason=$(status_token "$2")
+    case "$status_outcome" in running|failed|succeeded) ;; *) return 1 ;; esac
+    case "$recovery_stage" in
+        dispatch|preflight|serialization|package-state|package-configure|package-install|package-remove|package-reinstall|package-proof|helper-restart|helper-proof|agent-restart|agent-proof|retirement|complete) ;;
+        *) return 1 ;;
+    esac
+    ensure_root_directory "$state_parent" 755 || return 1
+    status_package_sha=${package_sha256:-${package_digest:-unavailable}}
+    case "$status_package_sha" in
+        unavailable) ;;
+        *) valid_digest "$status_package_sha" || status_package_sha=unavailable ;;
+    esac
+    status_dpkg=$(
+        LC_ALL=C /usr/bin/dpkg-query -W -f='${db:Status-Abbrev}|${Version}' \
+            "$package_name" 2>/dev/null || printf '%s' absent
+    )
+    status_dpkg=$(status_token "$status_dpkg")
+    [ -n "$status_dpkg" ] || status_dpkg=unavailable
+    atomic_text "$status_receipt" 644 "schema_version=2
+outcome=$status_outcome
+stage=$recovery_stage
+reason=$status_reason
+target_version=$target_version
+package_sha256=$status_package_sha
+dpkg=$status_dpkg
+" || return 1
+}
 
 temporary_failure() {
+    write_recovery_status failed "$1" || true
     echo "vonk-forge-agent: package recovery will retry: $1" >&2
     exit 75
 }
 
 unsafe_state() {
+    write_recovery_status failed "$1" || true
     echo "vonk-forge-agent: unsafe package recovery state: $1" >&2
     exit 78
 }
@@ -136,8 +194,8 @@ atomic_text() {
 safe_intent() {
     safe_root_directory "$state_dir" 700 \
         && safe_root_file "$intent" 600 \
-        && [ "$(/usr/bin/wc -l < "$intent")" -eq 14 ] \
-        && /usr/bin/sed -n '1p' "$intent" | grep -Fxq 'schema_version=1' \
+        && [ "$(/usr/bin/wc -l < "$intent")" -eq 17 ] \
+        && /usr/bin/sed -n '1p' "$intent" | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$intent" | grep -Fxq "package=$package_name" \
         && /usr/bin/sed -n '3p' "$intent" | grep -Eq '^target_version=[0-9A-Za-z.+~:-]+$' \
         && /usr/bin/sed -n '4p' "$intent" | grep -Eq '^architecture=(arm64|amd64)$' \
@@ -151,7 +209,10 @@ safe_intent() {
             | grep -Eq '^request_boot_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
         && /usr/bin/sed -n '12p' "$intent" | grep -Eq '^dpkg_pid=[0-9]+$' \
         && /usr/bin/sed -n '13p' "$intent" | grep -Eq '^dpkg_start_time=[0-9]+$' \
-        && /usr/bin/sed -n '14p' "$intent" | grep -Eq '^recovery_nonce=[0-9a-f]{64}$'
+        && /usr/bin/sed -n '14p' "$intent" | grep -Eq '^recovery_nonce=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '15p' "$intent" | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '16p' "$intent" | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '17p' "$intent" | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$'
 }
 
 read_intent() {
@@ -168,6 +229,12 @@ read_intent() {
     request_dpkg_pid=$(/usr/bin/sed -n '12s/^dpkg_pid=//p' "$intent")
     request_dpkg_start=$(/usr/bin/sed -n '13s/^dpkg_start_time=//p' "$intent")
     recovery_nonce=$(/usr/bin/sed -n '14s/^recovery_nonce=//p' "$intent")
+    expected_capsule_unit_sha256=$(/usr/bin/sed -n \
+        '15s/^capsule_unit_sha256=//p' "$intent")
+    expected_capsule_gate_sha256=$(/usr/bin/sed -n \
+        '16s/^capsule_gate_sha256=//p' "$intent")
+    expected_capsule_suppression_sha256=$(/usr/bin/sed -n \
+        '17s/^capsule_suppression_sha256=//p' "$intent")
     cached_package=$state_dir/$package_sha256.deb
 }
 
@@ -198,7 +265,7 @@ safe_agent_blocker() {
     safe_root_file "$agent_blocker" 600 \
         && [ "$(/usr/bin/wc -l < "$agent_blocker")" -eq 4 ] \
         && /usr/bin/sed -n '1p' "$agent_blocker" \
-            | grep -Fxq 'schema_version=1' \
+            | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$agent_blocker" \
             | grep -Fxq "target_version=$intent_version" \
         && /usr/bin/sed -n '3p' "$agent_blocker" \
@@ -256,18 +323,31 @@ package_directory_is_safe() {
 helper_namespace_has_package_paths() {
     keyrings=/usr/share/keyrings
     package_doc=/usr/share/doc/vonk-forge-agent
-    package_directory_is_safe "$keyrings" \
-        && package_directory_is_safe "$package_doc" || return 1
+    package_directory_is_safe "$keyrings" || {
+        echo 'vonk-forge-agent: helper sandbox keyring directory is unsafe' >&2
+        return 1
+    }
+    package_directory_is_safe "$package_doc" || {
+        echo 'vonk-forge-agent: helper sandbox package document directory is unsafe' >&2
+        return 1
+    }
     key_probe=
     doc_probe=
     trap '/usr/bin/rm -f -- "${key_probe:-}" "${doc_probe:-}"' EXIT HUP INT TERM
-    key_probe=$(/usr/bin/mktemp "$keyrings/.vonk-package-write.XXXXXX") \
-        || return 1
-    doc_probe=$(/usr/bin/mktemp "$package_doc/.vonk-package-write.XXXXXX") \
-        || return 1
+    key_probe=$(/usr/bin/mktemp "$keyrings/.vonk-package-write.XXXXXX") || {
+        echo 'vonk-forge-agent: helper sandbox keyring directory is not writable' >&2
+        return 1
+    }
+    doc_probe=$(/usr/bin/mktemp "$package_doc/.vonk-package-write.XXXXXX") || {
+        echo 'vonk-forge-agent: helper sandbox package document directory is not writable' >&2
+        return 1
+    }
     [ "$(/usr/bin/stat -c %u:%a "$key_probe")" = 0:600 ] \
         && [ "$(/usr/bin/stat -c %u:%a "$doc_probe")" = 0:600 ] \
-        || return 1
+        || {
+            echo 'vonk-forge-agent: helper sandbox write probes have unsafe metadata' >&2
+            return 1
+        }
     /usr/bin/rm -f -- "$key_probe" "$doc_probe"
     trap - EXIT HUP INT TERM
 }
@@ -303,6 +383,220 @@ stage_recovery_unit() {
     /usr/bin/mv -f -- "$unit_new" "$unit"
     /usr/bin/sync -f "$unit_parent"
     trap - EXIT HUP INT TERM
+}
+
+safe_capsule_enablement() {
+    [ -L "$capsule_enablement" ] \
+        && [ "$(/usr/bin/readlink "$capsule_enablement")" \
+            = "../$capsule_unit_name" ]
+}
+
+capsule_shadow_paths_absent() {
+    for systemd_root in "$capsule_admin_root" "$capsule_runtime_root"; do
+        for shadow_path in \
+            "$systemd_root/$capsule_unit_name" \
+            "$systemd_root/$capsule_unit_name.d" \
+            "$systemd_root/multi-user.target.wants/$capsule_unit_name" \
+            "$systemd_root/vonk-forge-agent.service.d" \
+            "$systemd_root/$unit_name.d"; do
+            [ ! -e "$shadow_path" ] && [ ! -L "$shadow_path" ] || return 1
+        done
+    done
+}
+
+stage_embedded_file() {
+    embedded_base64=$1
+    embedded_sha256=$2
+    embedded_destination=$3
+    embedded_mode=$4
+    embedded_parent=$(/usr/bin/dirname "$embedded_destination")
+    ensure_root_directory "$embedded_parent" 755 || return 1
+    if [ -e "$embedded_destination" ] || [ -L "$embedded_destination" ]; then
+        safe_root_file "$embedded_destination" "$embedded_mode" \
+            && [ "$(/usr/bin/sha256sum "$embedded_destination" \
+                | /usr/bin/cut -d' ' -f1)" = "$embedded_sha256" ]
+        return $?
+    fi
+    embedded_new=$(/usr/bin/mktemp \
+        "$embedded_parent/.vonk-recovery-capsule.XXXXXX") || return 1
+    trap '/usr/bin/rm -f -- "$embedded_new"' EXIT HUP INT TERM
+    printf '%s' "$embedded_base64" | /usr/bin/base64 -d > "$embedded_new"
+    [ "$(/usr/bin/sha256sum "$embedded_new" | /usr/bin/cut -d' ' -f1)" \
+        = "$embedded_sha256" ] || return 1
+    /usr/bin/chown root:root "$embedded_new"
+    /usr/bin/chmod "0$embedded_mode" "$embedded_new"
+    /usr/bin/sync -f "$embedded_new"
+    /usr/bin/mv -- "$embedded_new" "$embedded_destination"
+    /usr/bin/sync -f "$embedded_parent"
+    trap - EXIT HUP INT TERM
+}
+
+stage_recovery_capsule_unit() {
+    stage_embedded_file "$recovery_capsule_unit_base64" \
+        "$recovery_capsule_unit_sha256" "$capsule_unit" 644
+}
+
+remove_unbound_capsule_file() {
+    unbound_path=$1
+    unbound_mode=$2
+    unbound_digest=$3
+    if [ -e "$unbound_path" ] || [ -L "$unbound_path" ]; then
+        safe_root_file "$unbound_path" "$unbound_mode" \
+            && [ "$(/usr/bin/sha256sum "$unbound_path" \
+                | /usr/bin/cut -d' ' -f1)" = "$unbound_digest" ] \
+            || return 1
+        /usr/bin/rm -- "$unbound_path" || return 1
+        /usr/bin/sync -f "$(/usr/bin/dirname "$unbound_path")" || return 1
+    fi
+}
+
+cleanup_unbound_recovery_capsule() {
+    [ ! -e "$intent" ] && [ ! -L "$intent" ] || return 1
+    capsule_shadow_paths_absent || return 1
+    if [ ! -e "$capsule_manifest" ] && [ ! -L "$capsule_manifest" ]; then
+        for unbound_path in "$capsule_runner" "$capsule_unit" "$capsule_gate" \
+            "$capsule_suppression" "$capsule_enablement"; do
+            [ ! -e "$unbound_path" ] && [ ! -L "$unbound_path" ] || return 1
+        done
+        [ ! -e "$capsule_dir" ] && [ ! -L "$capsule_dir" ] \
+            || { safe_root_directory "$capsule_dir" 700 \
+                && [ -z "$(/usr/bin/find "$capsule_dir" -mindepth 1 \
+                    -maxdepth 1 -print -quit)" ] \
+                && /usr/bin/rmdir "$capsule_dir"; }
+        return $?
+    fi
+    safe_root_directory "$capsule_dir" 700 \
+        && safe_root_file "$capsule_manifest" 600 \
+        && [ "$(/usr/bin/wc -l < "$capsule_manifest")" -eq 5 ] \
+        && /usr/bin/sed -n '1p' "$capsule_manifest" \
+            | grep -Fxq 'schema_version=2' || return 1
+    unbound_runner_sha=$(/usr/bin/sed -n '2s/^runner_sha256=//p' \
+        "$capsule_manifest")
+    unbound_unit_sha=$(/usr/bin/sed -n '3s/^unit_sha256=//p' \
+        "$capsule_manifest")
+    unbound_gate_sha=$(/usr/bin/sed -n '4s/^gate_sha256=//p' \
+        "$capsule_manifest")
+    unbound_suppression_sha=$(/usr/bin/sed -n \
+        '5s/^suppression_sha256=//p' "$capsule_manifest")
+    valid_digest "$unbound_runner_sha" \
+        && valid_digest "$unbound_unit_sha" \
+        && valid_digest "$unbound_gate_sha" \
+        && valid_digest "$unbound_suppression_sha" || return 1
+    unknown=$(/usr/bin/find "$capsule_dir" -mindepth 1 -maxdepth 1 \
+        ! -name manifest ! -name runner -print -quit) || return 1
+    [ -z "$unknown" ] || return 1
+    if [ -e "$capsule_enablement" ] || [ -L "$capsule_enablement" ]; then
+        safe_capsule_enablement || return 1
+        /usr/bin/rm -- "$capsule_enablement" || return 1
+        /usr/bin/sync -f "$capsule_wants_dir" || return 1
+    fi
+    remove_unbound_capsule_file "$capsule_gate" 644 "$unbound_gate_sha" \
+        && remove_unbound_capsule_file "$capsule_suppression" 644 \
+            "$unbound_suppression_sha" \
+        && remove_unbound_capsule_file "$capsule_unit" 644 "$unbound_unit_sha" \
+        && remove_unbound_capsule_file "$capsule_runner" 555 \
+            "$unbound_runner_sha" \
+        && /usr/bin/rm -- "$capsule_manifest" \
+        && /usr/bin/sync -f "$capsule_dir" \
+        && /usr/bin/rmdir "$capsule_dir" \
+        && /usr/bin/sync -f "$state_dir"
+}
+
+stage_recovery_capsule() {
+    ensure_root_directory "$capsule_dir" 700 || return 1
+    capsule_runner_sha256=$(/usr/bin/sha256sum "$0" \
+        | /usr/bin/cut -d' ' -f1) || return 1
+    valid_digest "$capsule_runner_sha256" || return 1
+    capsule_manifest_text="schema_version=2
+runner_sha256=$capsule_runner_sha256
+unit_sha256=$recovery_capsule_unit_sha256
+gate_sha256=$recovery_capsule_gate_sha256
+suppression_sha256=$recovery_capsule_suppression_sha256
+"
+    atomic_text "$capsule_manifest" 600 "$capsule_manifest_text" || return 1
+    atomic_install "$0" "$capsule_runner" 555 || return 1
+    stage_recovery_capsule_unit || return 1
+    stage_embedded_file "$recovery_capsule_gate_base64" \
+        "$recovery_capsule_gate_sha256" "$capsule_gate" 644 || return 1
+    stage_embedded_file "$recovery_capsule_suppression_base64" \
+        "$recovery_capsule_suppression_sha256" \
+        "$capsule_suppression" 644 || return 1
+    ensure_root_directory "$capsule_wants_dir" 755 || return 1
+    if [ -e "$capsule_enablement" ] || [ -L "$capsule_enablement" ]; then
+        safe_capsule_enablement || return 1
+    else
+        /usr/bin/ln -s "../$capsule_unit_name" "$capsule_enablement"
+        /usr/bin/sync -f "$capsule_wants_dir"
+    fi
+    safe_capsule_enablement
+}
+
+safe_recovery_capsule() {
+    capsule_shadow_paths_absent \
+        && safe_root_directory "$capsule_dir" 700 \
+        && safe_root_file "$capsule_manifest" 600 \
+        && safe_root_file "$capsule_runner" 555 \
+        && safe_root_file "$capsule_unit" 644 \
+        && safe_root_file "$capsule_gate" 644 \
+        && safe_root_file "$capsule_suppression" 644 \
+        && safe_capsule_enablement \
+        && [ "$(/usr/bin/wc -l < "$capsule_manifest")" -eq 5 ] \
+        && /usr/bin/sed -n '1p' "$capsule_manifest" \
+            | grep -Fxq 'schema_version=2' \
+        && /usr/bin/sed -n '2p' "$capsule_manifest" \
+            | grep -Fxq "runner_sha256=$expected_runner_sha256" \
+        && /usr/bin/sed -n '3p' "$capsule_manifest" \
+            | grep -Fxq "unit_sha256=$expected_capsule_unit_sha256" \
+        && /usr/bin/sed -n '4p' "$capsule_manifest" \
+            | grep -Fxq "gate_sha256=$expected_capsule_gate_sha256" \
+        && /usr/bin/sed -n '5p' "$capsule_manifest" \
+            | grep -Fxq \
+                "suppression_sha256=$expected_capsule_suppression_sha256" \
+        && [ "$(/usr/bin/sha256sum "$capsule_runner" \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_runner_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$capsule_unit" \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_capsule_unit_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$capsule_gate" \
+            | /usr/bin/cut -d' ' -f1)" = "$expected_capsule_gate_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$capsule_suppression" \
+            | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_capsule_suppression_sha256" ] \
+        && [ "$expected_capsule_unit_sha256" \
+            = "$recovery_capsule_unit_sha256" ] \
+        && [ "$expected_capsule_gate_sha256" \
+            = "$recovery_capsule_gate_sha256" ] \
+        && [ "$expected_capsule_suppression_sha256" \
+            = "$recovery_capsule_suppression_sha256" ]
+}
+
+retire_recovery_capsule() {
+    [ ! -e "$intent" ] && [ ! -L "$intent" ] || return 1
+    safe_recovery_capsule || return 1
+    safe_root_file "$runner" 555 \
+        && safe_root_file "$unit" 644 \
+        && [ "$(/usr/bin/sha256sum "$runner" | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_runner_sha256" ] \
+        && [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
+            = "$expected_unit_sha256" ] || return 1
+    /usr/bin/rm -- "$capsule_enablement"
+    /usr/bin/sync -f "$capsule_wants_dir"
+    /usr/bin/rm -- "$capsule_gate"
+    /usr/bin/sync -f "$capsule_gate_dir"
+    /usr/bin/rm -- "$capsule_suppression"
+    /usr/bin/sync -f "$capsule_suppression_dir"
+    /usr/bin/rm -- "$capsule_unit"
+    /usr/bin/sync -f /lib/systemd/system
+    /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
+    package_fragment=$(/usr/bin/systemctl --system show \
+        --property=FragmentPath --value "$unit_name" 2>/dev/null || true)
+    [ "$(/usr/bin/readlink -f "$package_fragment" 2>/dev/null || true)" \
+        = "$(/usr/bin/readlink -f "$unit")" ] || return 1
+    /usr/bin/rm -- "$capsule_runner"
+    /usr/bin/sync -f "$capsule_dir"
+    /usr/bin/rm -- "$capsule_manifest"
+    /usr/bin/sync -f "$capsule_dir"
+    /usr/bin/rmdir "$capsule_dir"
+    /usr/bin/sync -f "$state_dir"
 }
 
 stage_agent_gate() {
@@ -384,6 +678,7 @@ arm_controller_recovery() {
         || return 1
     ensure_root_directory "$state_parent" 755 || return 1
     ensure_root_directory "$state_dir" 700 || return 1
+    capsule_shadow_paths_absent || return 1
     if [ -e "$intent" ] || [ -L "$intent" ]; then
         read_intent \
             && [ "$intent_version" = "$target_version" ] \
@@ -397,15 +692,17 @@ arm_controller_recovery() {
                 = "$expected_runner_sha256" ] \
             && [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
                 = "$expected_unit_sha256" ] \
+            && safe_recovery_capsule \
             || return 1
         /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
-        /usr/bin/systemctl --system reset-failed "$unit_name" \
+        /usr/bin/systemctl --system reset-failed "$capsule_unit_name" \
             >/dev/null 2>&1 || true
-        /usr/bin/systemctl --system --no-block start "$unit_name" >/dev/null \
-            || return 1
+        /usr/bin/systemctl --system --no-block start \
+            "$capsule_unit_name" >/dev/null || return 1
         # Never allow this second dpkg to race the immutable recovery owner.
         return 1
     fi
+    cleanup_unbound_recovery_capsule || return 1
     if [ -e "$lock" ] || [ -L "$lock" ]; then
         safe_root_file "$lock" 600 || return 1
     else
@@ -458,6 +755,8 @@ arm_controller_recovery() {
     stage_recovery_unit || return 1
     [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
         = "$recovery_unit_sha256" ] || return 1
+    stage_recovery_capsule || return 1
+    [ "$capsule_runner_sha256" = "$runner_sha256" ] || return 1
     stage_agent_gate || return 1
     [ "$(/usr/bin/sha256sum "$agent_gate" | /usr/bin/cut -d' ' -f1)" \
         = "$agent_gate_sha256" ] || return 1
@@ -476,7 +775,7 @@ Wants=vonk-forge-package-upgrade-recover.service
     intent_version=$target_version
     expected_helper_sha256=$target_helper_sha256
     expected_agent_sha256=$target_agent_sha256
-    intent_text="schema_version=1
+    intent_text="schema_version=2
 package=$package_name
 target_version=$target_version
 architecture=$target_architecture
@@ -490,9 +789,12 @@ request_boot_id=$boot_id
 dpkg_pid=$PPID
 dpkg_start_time=$dpkg_start
 recovery_nonce=$recovery_nonce
+capsule_unit_sha256=$recovery_capsule_unit_sha256
+capsule_gate_sha256=$recovery_capsule_gate_sha256
+capsule_suppression_sha256=$recovery_capsule_suppression_sha256
 "
     atomic_text "$intent" 600 "$intent_text" || return 1
-    blocker_text="schema_version=1
+    blocker_text="schema_version=2
 target_version=$target_version
 helper_sha256=$target_helper_sha256
 agent_sha256=$target_agent_sha256
@@ -500,12 +802,13 @@ agent_sha256=$target_agent_sha256
     atomic_text "$agent_blocker" 600 "$blocker_text" || return 1
     /usr/bin/systemctl --system daemon-reload >/dev/null || return 1
     fragment=$(/usr/bin/systemctl --system show --property=FragmentPath --value \
-        "$unit_name" 2>/dev/null || true)
+        "$capsule_unit_name" 2>/dev/null || true)
     [ "$(/usr/bin/readlink -f "$fragment" 2>/dev/null || true)" \
-        = "$(/usr/bin/readlink -f "$unit")" ] || return 1
-    /usr/bin/systemctl --system reset-failed "$unit_name" >/dev/null 2>&1 || true
-    /usr/bin/systemctl --system --no-block start "$unit_name" >/dev/null \
-        || return 1
+        = "$(/usr/bin/readlink -f "$capsule_unit")" ] || return 1
+    /usr/bin/systemctl --system reset-failed "$capsule_unit_name" \
+        >/dev/null 2>&1 || true
+    /usr/bin/systemctl --system --no-block start "$capsule_unit_name" \
+        >/dev/null || return 1
     pending_text="version=$target_version
 helper_sha256=$target_helper_sha256
 agent_sha256=$target_agent_sha256
@@ -538,6 +841,33 @@ wait_for_original_dpkg() {
     return 1
 }
 
+reinstall_exact_package() {
+    # This fallback is reachable only from the durable recovery unit after the
+    # controller-signed candidate, root-owned cache, target identity, and nonce
+    # have all been revalidated. It is deliberately package-scoped: no broad
+    # dependency repair and no unrelated dpkg configuration are allowed.
+    read_intent \
+        && [ "$intent_version" = "$target_version" ] \
+        && [ "$intent_architecture" = "$target_architecture" ] \
+        && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
+        && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
+        && safe_cached_package \
+        || return 1
+    query_package_state || return 1
+    if /usr/bin/dpkg --compare-versions "$installed_version" gt "$intent_version"; then
+        return 1
+    fi
+    recovery_stage=package-remove
+    write_recovery_status running remove || true
+    VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+        /usr/bin/dpkg --remove --force-remove-reinstreq "$package_name" \
+        || return 1
+    recovery_stage=package-reinstall
+    write_recovery_status running reinstall || true
+    VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+        /usr/bin/dpkg --install --force-confold "$cached_package"
+}
+
 prove_installed_payload() {
     safe_root_file /usr/lib/vonk-forge/vonk-agent-helper 555 \
         && safe_root_file /usr/lib/vonk-forge/vonk-agent 555 \
@@ -553,7 +883,8 @@ prove_installed_payload() {
         && [ "$(/usr/bin/sha256sum "$unit" | /usr/bin/cut -d' ' -f1)" \
             = "$expected_unit_sha256" ] \
         && [ "$(/usr/bin/sha256sum "$agent_gate" | /usr/bin/cut -d' ' -f1)" \
-            = "$agent_gate_sha256" ]
+            = "$agent_gate_sha256" ] \
+        && safe_recovery_capsule
 }
 
 safe_legacy_bridge_file() {
@@ -674,18 +1005,32 @@ allow_agent_start() {
 }
 
 recover_upgrade() {
+    recovery_stage=preflight
+    write_recovery_status running start || true
     safe_root_directory "$state_dir" 700 || unsafe_state 'state directory'
     safe_root_file "$lock" 600 || unsafe_state 'serialization lock'
+    recovery_stage=serialization
+    write_recovery_status running lock || true
     exec 9>> "$lock"
     /usr/bin/flock -x 9 || temporary_failure 'cannot acquire serialization lock'
     read_intent || unsafe_state 'intent'
-    [ "$intent_version" = "$target_version" ] \
+    if { [ "$intent_version" = "$target_version" ] \
         && [ "$intent_architecture" = "$target_architecture" ] \
         && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
         && [ "$expected_helper_sha256" = "$target_helper_sha256" ] \
         && [ "$expected_unit_sha256" = "$recovery_unit_sha256" ] \
-        || unsafe_state 'intent does not belong to installed recovery runner'
+        && [ "$expected_capsule_unit_sha256" \
+            = "$recovery_capsule_unit_sha256" ] \
+        && [ "$expected_capsule_gate_sha256" \
+            = "$recovery_capsule_gate_sha256" ] \
+        && [ "$expected_capsule_suppression_sha256" \
+            = "$recovery_capsule_suppression_sha256" ]; }; then
+        :
+    else
+        unsafe_state 'intent does not belong to installed recovery runner'
+    fi
     safe_cached_package || unsafe_state 'cached package'
+    safe_recovery_capsule || unsafe_state 'recovery capsule'
     intent_snapshot=$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)
     valid_digest "$intent_snapshot" || unsafe_state 'intent digest'
     normalize_pending_gate || unsafe_state 'pending gate normalization'
@@ -693,6 +1038,8 @@ recover_upgrade() {
     /usr/bin/systemctl --system stop "$agent_unit" >/dev/null 2>&1 || true
     /usr/bin/systemctl --system stop "$helper_unit" >/dev/null 2>&1 || true
 
+    recovery_stage=package-state
+    write_recovery_status running inspect || true
     if query_package_state; then
         if /usr/bin/dpkg --compare-versions "$installed_version" gt "$intent_version"; then
             unsafe_state 'newer installed package would be downgraded'
@@ -712,25 +1059,43 @@ recover_upgrade() {
     case "$repair" in
         none) ;;
         configure)
-            VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
-                /usr/bin/dpkg --force-confold --configure "$package_name" \
-                || temporary_failure 'named package configure failed'
+            recovery_stage=package-configure
+            write_recovery_status running configure || true
+            if ! VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+                /usr/bin/dpkg --force-confold --configure "$package_name"; then
+                reinstall_exact_package \
+                    || temporary_failure 'named package configure and reinstall failed'
+            fi
             ;;
         install)
-            VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
-                /usr/bin/dpkg --install --force-confold "$cached_package" \
-                || temporary_failure 'exact cached package install failed'
+            recovery_stage=package-install
+            write_recovery_status running install || true
+            if ! VONK_FORGE_UPGRADE_RECOVERY_NONCE=$recovery_nonce \
+                /usr/bin/dpkg --install --force-confold "$cached_package"; then
+                reinstall_exact_package \
+                    || temporary_failure 'exact cached package install and reinstall failed'
+            fi
             ;;
     esac
+    recovery_stage=package-proof
+    write_recovery_status running prove || true
     query_package_state || temporary_failure 'package database is unavailable'
-    [ "$package_status" = ii ] && [ "$installed_version" = "$intent_version" ] \
-        || temporary_failure 'named package is not fully installed'
+    if { [ "$package_status" = ii ] \
+        && [ "$installed_version" = "$intent_version" ]; }; then
+        :
+    else
+        temporary_failure 'named package is not fully installed'
+    fi
     prove_installed_payload || unsafe_state 'installed package identity'
     retire_legacy_bridge || unsafe_state 'legacy bridge evidence'
     /usr/bin/systemctl --system daemon-reload >/dev/null \
         || temporary_failure 'systemd reload failed'
+    recovery_stage=helper-restart
+    write_recovery_status running restart || true
     /usr/bin/systemctl --system restart "$helper_unit" >/dev/null \
         || temporary_failure 'helper restart failed'
+    recovery_stage=helper-proof
+    write_recovery_status running prove || true
     prove_running_unit "$helper_unit" "$expected_helper_sha256" \
         || temporary_failure 'running helper identity proof failed'
     write_receipt || temporary_failure 'receipt commit failed'
@@ -748,17 +1113,25 @@ recover_upgrade() {
     else
         safe_durable_receipt || unsafe_state 'agent start release evidence'
     fi
+    recovery_stage=agent-restart
+    write_recovery_status running restart || true
     /usr/bin/systemctl --system restart "$agent_unit" >/dev/null \
         || temporary_failure 'agent restart failed'
     /bin/sleep 1
+    recovery_stage=agent-proof
+    write_recovery_status running prove || true
     prove_running_unit "$agent_unit" "$expected_agent_sha256" \
         || temporary_failure 'running agent identity proof failed'
     prove_running_unit "$helper_unit" "$expected_helper_sha256" \
         || temporary_failure 'helper identity changed during activation'
     [ "$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)" \
         = "$intent_snapshot" ] || unsafe_state 'intent changed before retirement'
+    recovery_stage=retirement
+    write_recovery_status running retire || true
+    safe_recovery_capsule || unsafe_state 'recovery capsule before retirement'
     /usr/bin/rm -- "$intent"
     /usr/bin/sync -f "$state_dir"
+    retire_recovery_capsule || unsafe_state 'recovery capsule retirement'
     /usr/bin/rm -f -- "$cached_package"
     /usr/bin/sync -f "$state_dir"
     if [ -e "$socket_dropin" ] || [ -L "$socket_dropin" ]; then
@@ -773,6 +1146,8 @@ recover_upgrade() {
         /usr/bin/sync -f "$socket_dropin_dir"
         /usr/bin/systemctl --system daemon-reload >/dev/null || true
     fi
+    recovery_stage=complete
+    write_recovery_status succeeded exact_identity_proven || true
 }
 
 if [ "${1:-}" = recover ]; then
@@ -819,7 +1194,7 @@ if [ "$package_action" -eq 1 ] \
         exit 1
     }
     if ! helper_namespace_has_package_paths; then
-        echo 'vonk-forge-agent: durable recovery armed outside the inherited helper sandbox' >&2
+        echo 'vonk-forge-agent: inherited helper sandbox lacks package lifecycle paths' >&2
         exit 1
     fi
 fi

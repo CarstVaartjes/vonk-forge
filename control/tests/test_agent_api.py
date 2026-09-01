@@ -38,7 +38,6 @@ from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.host_helper_authority import HostHelperAuthorityError
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -1990,58 +1989,6 @@ def test_setup_schema_two_fails_closed_without_a_host_helper_authority(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "host runtime authority is unavailable"}
-
-
-def test_dev335_agent_upgrade_grant_api_forwards_exact_ten_second_ttl(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-
-    class Grant:
-        @staticmethod
-        def to_mapping() -> dict[str, object]:
-            return {"schema_version": 1, "test": "exact-dev335-ttl"}
-
-    class ExactDev335Authority:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def issue_agent_upgrade_grant(self, **values):
-            self.calls.append(values)
-            if values["expires_in_seconds"] != 10:
-                raise HostHelperAuthorityError("compatibility TTL mismatch")
-            assert values["certificate_serial"] == "serial-a"
-            return Grant()
-
-    authority = ExactDev335Authority()
-    object.__setattr__(services, "host_runtime_authority", authority)
-    request = {
-        "node_id": NODE_A,
-        "job_id": "10000000-0000-4000-8000-000000000001",
-        "operation_id": "20000000-0000-4000-8000-000000000002",
-        "attempt": 4,
-        "fence": "30000000-0000-4000-8000-000000000003",
-        "package_sha256": "a" * 64,
-        "package_signature": "b" * 128,
-        "expires_in_seconds": 10,
-    }
-
-    accepted = client.post(
-        "/agent/v1/agent-upgrade/grant",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    rejected = client.post(
-        "/agent/v1/agent-upgrade/grant",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "expires_in_seconds": 30},
-    )
-
-    assert accepted.status_code == 200
-    assert accepted.json()["grant"]["test"] == "exact-dev335-ttl"
-    assert rejected.status_code == 409
-    assert rejected.json() == {"detail": "agent upgrade authority rejected request"}
-    assert [call["expires_in_seconds"] for call in authority.calls] == [10, 30]
 
 
 def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(

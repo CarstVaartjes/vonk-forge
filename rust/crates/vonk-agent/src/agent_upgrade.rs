@@ -28,8 +28,11 @@ pub enum AgentUpgradeError {
     GrantInvalid,
     #[error("agent upgrade helper rejected the request")]
     HelperRejected,
-    #[error("agent upgrade helper rejected the request: {0}")]
-    HelperRejectedWithCode(String),
+    #[error("agent upgrade helper rejected the request: {code}")]
+    HelperRejectedWithCode {
+        code: String,
+        exit_code: Option<i32>,
+    },
     #[error("agent upgrade helper response is invalid")]
     HelperResponseInvalid,
     #[error("agent upgrade helper is unavailable")]
@@ -53,6 +56,17 @@ struct HelperResponse {
     evidence_sha256: Option<String>,
     #[serde(default)]
     error_code: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+}
+
+impl AgentUpgradeError {
+    pub fn helper_diagnostics(&self) -> Option<(&str, Option<i32>)> {
+        match self {
+            Self::HelperRejectedWithCode { code, exit_code } => Some((code.as_str(), *exit_code)),
+            _ => None,
+        }
+    }
 }
 
 pub struct AgentUpgradeExecutor<'a> {
@@ -256,6 +270,11 @@ fn validate_helper_response(
             .is_some_and(|value| value != expected_request_id)
             || response.evidence_sha256.is_some()
             || response
+                .exit_code
+                .is_some_and(|value| !(0..=255).contains(&value))
+            || (response.exit_code.is_some()
+                && response.error_code.as_deref() != Some("package_install_failed"))
+            || response
                 .error_code
                 .as_deref()
                 .is_some_and(|value| !stable_helper_error_code(value))
@@ -263,7 +282,10 @@ fn validate_helper_response(
             return Err(AgentUpgradeError::HelperResponseInvalid);
         }
         return Err(match response.error_code.as_deref() {
-            Some(error_code) => AgentUpgradeError::HelperRejectedWithCode(error_code.to_owned()),
+            Some(error_code) => AgentUpgradeError::HelperRejectedWithCode {
+                code: error_code.to_owned(),
+                exit_code: response.exit_code,
+            },
             None => AgentUpgradeError::HelperRejected,
         });
     }
@@ -271,6 +293,7 @@ fn validate_helper_response(
     if response.request_id.as_deref() != Some(expected_request_id)
         || response.status != "package-installed"
         || response.evidence_sha256.as_deref() != Some(expected_evidence_sha256.as_str())
+        || response.exit_code.is_some()
         || response.error_code.is_some()
     {
         return Err(AgentUpgradeError::HelperResponseInvalid);
@@ -288,6 +311,10 @@ fn stable_helper_error_code(value: &str) -> bool {
             | "grant_unauthorized"
             | "request_replayed"
             | "request_ledger_failed"
+            | "package_verification_failed"
+            | "package_metadata_failed"
+            | "package_custody_failed"
+            | "package_install_failed"
             | "operation_failed"
             | "concurrency_limit"
     )
@@ -312,6 +339,7 @@ mod tests {
             status: status.to_owned(),
             evidence_sha256: None,
             error_code: None,
+            exit_code: None,
         }
     }
 
@@ -335,12 +363,46 @@ mod tests {
         let error = validate_helper_response(&response, "request-1", PACKAGE_SHA256).unwrap_err();
         assert!(matches!(
             &error,
-            AgentUpgradeError::HelperRejectedWithCode(_)
+            AgentUpgradeError::HelperRejectedWithCode { .. }
         ));
         assert_eq!(
             error.to_string(),
             "agent upgrade helper rejected the request: operation_failed"
         );
+    }
+
+    #[test]
+    fn accepts_bounded_package_install_diagnostics() {
+        let mut response = response("rejected");
+        response.error_code = Some("package_install_failed".to_owned());
+        response.exit_code = Some(75);
+        let error = validate_helper_response(&response, "request-1", PACKAGE_SHA256).unwrap_err();
+        assert_eq!(
+            error.helper_diagnostics(),
+            Some(("package_install_failed", Some(75)))
+        );
+        assert_eq!(
+            error.to_string(),
+            "agent upgrade helper rejected the request: package_install_failed"
+        );
+    }
+
+    #[test]
+    fn rejects_unbounded_or_misbound_package_exit_diagnostics() {
+        let mut response = response("rejected");
+        response.error_code = Some("package_install_failed".to_owned());
+        response.exit_code = Some(256);
+        assert!(matches!(
+            validate_helper_response(&response, "request-1", PACKAGE_SHA256),
+            Err(AgentUpgradeError::HelperResponseInvalid)
+        ));
+
+        response.error_code = Some("operation_failed".to_owned());
+        response.exit_code = Some(1);
+        assert!(matches!(
+            validate_helper_response(&response, "request-1", PACKAGE_SHA256),
+            Err(AgentUpgradeError::HelperResponseInvalid)
+        ));
     }
 
     #[test]

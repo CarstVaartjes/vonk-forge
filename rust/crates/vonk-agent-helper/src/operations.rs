@@ -37,6 +37,10 @@ pub enum OperationError {
     UnsafePath,
     #[error("artifact verification failed")]
     InvalidArtifact,
+    #[error("package metadata verification failed")]
+    PackageMetadataInvalid,
+    #[error("package installation failed")]
+    PackageInstallFailed { exit_code: Option<i32> },
     #[error("compiled command failed")]
     CommandFailed,
     #[error("one-shot runtime could not be stopped safely")]
@@ -609,8 +613,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
         let package = self.take_package_custody(&incoming, digest, detached_signature)?;
         let package_name = package.path().to_string_lossy().into_owned();
-        self.require_field(&package_name, "Package", "vonk-forge-agent")?;
-        self.require_field(&package_name, "Architecture", "arm64")?;
+        self.require_package_field(&package_name, "Package", "vonk-forge-agent")?;
+        self.require_package_field(&package_name, "Architecture", "arm64")?;
         let result = self
             .runner
             .run(
@@ -621,9 +625,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     package_name,
                 ],
             )
-            .map_err(|_| OperationError::CommandFailed)?;
+            .map_err(|_| OperationError::PackageInstallFailed { exit_code: None })?;
         if !result.success {
-            return Err(OperationError::CommandFailed);
+            return Err(OperationError::PackageInstallFailed {
+                exit_code: result.exit_code,
+            });
         }
         package.cleanup()?;
         Ok(())
@@ -721,7 +727,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(custody)
     }
 
-    fn require_field(
+    fn require_package_field(
         &self,
         package: &str,
         field: &str,
@@ -733,9 +739,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 Path::new("/usr/bin/dpkg-deb"),
                 &["--field".to_owned(), package.to_owned(), field.to_owned()],
             )
-            .map_err(|_| OperationError::CommandFailed)?;
+            .map_err(|_| OperationError::PackageMetadataInvalid)?;
         if !result.success || result.stdout != format!("{expected}\n").as_bytes() {
-            return Err(OperationError::InvalidArtifact);
+            return Err(OperationError::PackageMetadataInvalid);
         }
         Ok(())
     }

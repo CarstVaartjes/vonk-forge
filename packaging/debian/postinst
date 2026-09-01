@@ -98,15 +98,21 @@ durable_intent_is_safe() {
         && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
             = 0:0:600:1 ] \
-        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 14 ] \
+        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 17 ] \
         && /usr/bin/sed -n '1p' "$upgrade_intent" \
-            | grep -Fxq 'schema_version=1' \
+            | grep -Fxq 'schema_version=2' \
         && /usr/bin/sed -n '2p' "$upgrade_intent" \
             | grep -Fxq 'package=vonk-forge-agent' \
         && /usr/bin/sed -n '3p' "$upgrade_intent" \
             | grep -Fxq "target_version=$package_version" \
         && /usr/bin/sed -n '14p' "$upgrade_intent" \
-            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$'
+            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '15p' "$upgrade_intent" \
+            | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '16p' "$upgrade_intent" \
+            | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
+        && /usr/bin/sed -n '17p' "$upgrade_intent" \
+            | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$'
 }
 
 write_helper_pending() {
@@ -339,14 +345,6 @@ schedule_permanent_helper_restart() {
             installed_agent_digest=$(/usr/bin/sha256sum \
                 /usr/lib/vonk-forge/vonk-agent | /usr/bin/cut -d" " -f1)
             [ "$installed_agent_digest" = "$expected_agent_digest" ] || exit 1
-            boot_id=$(/usr/bin/sed -n "1p" /proc/sys/kernel/random/boot_id)
-            printf "%s\n" "$boot_id" \
-                | grep -Eq "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" \
-                || exit 1
-            activated_at=$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
-            printf "%s\n" "$activated_at" \
-                | grep -Eq "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
-                || exit 1
             [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
                 && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
                 || exit 1
@@ -361,27 +359,8 @@ schedule_permanent_helper_restart() {
             if [ -e "$helper_receipt" ] || [ -L "$helper_receipt" ]; then
                 [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
                     && [ "$(/usr/bin/stat -c %u:%a "$helper_receipt")" = 0:600 ] \
+                    && [ "$(/usr/bin/wc -l < "$helper_receipt")" -eq 10 ] \
                     || exit 1
-                receipt_lines=$(/usr/bin/wc -l < "$helper_receipt")
-                if [ "$receipt_lines" -eq 8 ]; then
-                    /usr/bin/sed -n "1p" "$helper_receipt" \
-                        | grep -Fxq "schema_version=1" \
-                    && /usr/bin/sed -n "2p" "$helper_receipt" \
-                        | grep -Eq "^version=[0-9A-Za-z.+~:-]+$" \
-                    && /usr/bin/sed -n "3p" "$helper_receipt" \
-                        | grep -Eq "^helper_sha256=[0-9a-f]{64}$" \
-                    && /usr/bin/sed -n "4p" "$helper_receipt" \
-                        | grep -Eq "^agent_sha256=[0-9a-f]{64}$" \
-                    && /usr/bin/sed -n "5p" "$helper_receipt" \
-                        | grep -Eq "^boot_id=[0-9a-f-]+$" \
-                    && /usr/bin/sed -n "6p" "$helper_receipt" \
-                        | grep -Eq "^activated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
-                    && /usr/bin/sed -n "7p" "$helper_receipt" \
-                        | grep -Eq "^helper_main_pid=[0-9]+$" \
-                    && /usr/bin/sed -n "8p" "$helper_receipt" \
-                        | grep -Eq "^helper_start_time=[0-9]+$" \
-                    || exit 1
-                elif [ "$receipt_lines" -eq 10 ]; then
                     /usr/bin/sed -n "1p" "$helper_receipt" \
                         | grep -Fxq "schema_version=2" \
                     && /usr/bin/sed -n "2p" "$helper_receipt" \
@@ -403,29 +382,7 @@ schedule_permanent_helper_restart() {
                     && /usr/bin/sed -n "10p" "$helper_receipt" \
                         | grep -Eq "^intent_sha256=[0-9a-f]{64}$" \
                     || exit 1
-                else
-                    exit 1
-                fi
             fi
-            receipt_new=$(/usr/bin/mktemp \
-                /var/lib/vonk-forge/.helper-upgrade-receipt.XXXXXX)
-            trap '\''/usr/bin/rm -f -- "$receipt_new"'\'' EXIT HUP INT TERM
-            printf "%s\n" \
-                "schema_version=1" \
-                "version=$package_version" \
-                "helper_sha256=$expected_helper_digest" \
-                "agent_sha256=$expected_agent_digest" \
-                "boot_id=$boot_id" \
-                "activated_at=$activated_at" \
-                "helper_main_pid=$new_helper_pid" \
-                "helper_start_time=$new_helper_start" \
-                > "$receipt_new"
-            /usr/bin/chown root:root "$receipt_new"
-            /usr/bin/chmod 0600 "$receipt_new"
-            /usr/bin/sync -f "$receipt_new"
-            /usr/bin/mv -f -- "$receipt_new" "$helper_receipt"
-            /usr/bin/sync -f /var/lib/vonk-forge
-            trap - EXIT HUP INT TERM
             [ "$(/usr/bin/systemctl --system show --property=ActiveState \
                 --value vonk-forge-package-helper.service)" = active ]
             confirmed_helper_pid=$(/usr/bin/systemctl --system show \

@@ -50,22 +50,6 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/v1/agents/upgrades/candidate"): "getAgentUpgradeCandidate",
     ("post", "/api/v1/agents/upgrades/preview"): "previewAgentUpgrade",
     ("post", "/api/v1/agents/upgrades"): "applyAgentUpgrade",
-    (
-        "get",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122/preview",
-    ): "previewSpark3542A122CompatibilityRecovery",
-    (
-        "post",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122",
-    ): "applySpark3542A122CompatibilityRecovery",
-    (
-        "get",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon/preview",
-    ): "previewSpark3542A122CompatibilityRecoveryAbandonment",
-    (
-        "post",
-        "/api/v1/agents/compatibility-recovery/spark3542-a122/abandon",
-    ): "abandonSpark3542A122CompatibilityRecovery",
     ("get", "/api/v1/fleet"): "getFleetStatus",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
     ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",

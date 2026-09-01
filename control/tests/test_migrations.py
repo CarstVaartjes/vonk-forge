@@ -25,7 +25,6 @@ EXPECTED_BASELINE_TABLES = {
     "agent_nodes",
     "agent_operation_attempts",
     "agent_operations",
-    "agent_upgrade_compatibility_recoveries",
     "agent_presence",
     "audit_events",
     "catalog_entities",
@@ -78,6 +77,27 @@ EXPECTED_BASELINE_TABLES = {
     "telemetry_maintenance_state",
     "users",
 }
+RETAINED_LEGACY_TABLES = {"agent_upgrade_compatibility_recoveries"}
+
+
+def _metadata_differences_without_retained_legacy(connection: object) -> list[object]:
+    from vonk_control.models import Base
+
+    differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    return [
+        difference
+        for difference in differences
+        if not (
+            (
+                difference[0] == "remove_table"
+                and difference[1].name in RETAINED_LEGACY_TABLES
+            )
+            or (
+                difference[0] == "remove_index"
+                and difference[1].table.name in RETAINED_LEGACY_TABLES
+            )
+        )
+    ]
 
 
 def _config(database_url: str) -> Config:
@@ -88,7 +108,7 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
+def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
     tmp_path: Path,
 ) -> None:
     from vonk_control.models import Base
@@ -100,40 +120,14 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     engine = create_engine(url)
     tables = set(inspect(engine).get_table_names())
 
-    assert tables - {"alembic_version"} == EXPECTED_BASELINE_TABLES
+    assert tables - {"alembic_version"} - RETAINED_LEGACY_TABLES == (
+        EXPECTED_BASELINE_TABLES
+    )
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
-    compatibility_columns = {
-        column["name"]: column
-        for column in inspect(engine).get_columns(
-            "agent_upgrade_compatibility_recoveries"
-        )
-    }
-    assert compatibility_columns["state"]["type"].length == 32
-    assert compatibility_columns["identity_deadline"]["nullable"] is True
-    assert compatibility_columns["rearm_attempt_certificate_serial"]["nullable"] is True
-    assert (
-        compatibility_columns["rearm_dispatch_certificate_serial"]["nullable"] is True
-    )
-    assert compatibility_columns["abandoned_at"]["nullable"] is True
-    compatibility_checks = {
-        constraint["name"]
-        for constraint in inspect(engine).get_check_constraints(
-            "agent_upgrade_compatibility_recoveries"
-        )
-    }
-    assert {
-        "ck_agent_upgrade_compatibility_recoveries_grant_all_or_none",
-        "ck_agent_upgrade_compatibility_recoveries_rearm_certs_paired",
-        "ck_agent_upgrade_compatibility_recoveries_retry_matches_rearm",
-        "ck_agent_upgrade_compatibility_recoveries_state_fields",
-    } <= compatibility_checks
     with engine.connect() as connection:
-        assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
-            == []
-        )
+        assert _metadata_differences_without_retained_legacy(connection) == []
         assert connection.execute(
             text(
                 "SELECT singleton_id, next_resolution_seconds FROM telemetry_maintenance_state"
@@ -172,6 +166,28 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
     ]
+
+
+def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.models import Base
+
+    url = f"sqlite:///{tmp_path / 'compat-recovery-upgrade.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "0009_compat_abandoned_at")
+    engine = create_engine(url)
+
+    assert "agent_upgrade_compatibility_recoveries" in set(
+        inspect(engine).get_table_names()
+    )
+    assert "agent_upgrade_compatibility_recoveries" not in Base.metadata.tables
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() \
+            == "0012_recipe_run_generation"
 
 
 def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(
@@ -237,179 +253,6 @@ def test_recipe_run_generation_migration_adds_exact_observation_authority(
     } == {("request_id",)}
 
 
-def test_compatibility_rearm_certificate_migration_preserves_rows_and_constraints(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'compatibility-rearm-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0006_spark3542_compat_recovery")
-    engine = create_engine(url)
-    insert_recovery = text(
-        """
-        INSERT INTO agent_upgrade_compatibility_recoveries
-          (id, node_id, job_id, operation_id, source_attempt, source_fence,
-           source_certificate_serial, expected_retry_attempt,
-           source_semantic_version, source_build_digest, source_binary_digest,
-           upgrade_payload_sha256, package_sha256, target_package_version,
-           target_build_digest, target_binary_digest, authority_revision,
-           plan_digest, state, actor, request_id, created_at)
-        VALUES
-          ('recovery', 'node', 'job', 'operation', 3, 'source-fence',
-           'source-certificate', 4, '0.1.0', :source_build_digest,
-           :source_binary_digest, :upgrade_payload_sha256, :package_sha256,
-           '0.1.0~dev.381', :target_build_digest, :target_binary_digest,
-           'authority', :plan_digest, 'armed', 'admin', 'request',
-           '2026-08-31 12:00:00')
-        """
-    )
-    digests = {
-        "source_build_digest": f"sha256:{'a' * 64}",
-        "source_binary_digest": "b" * 64,
-        "upgrade_payload_sha256": "c" * 64,
-        "package_sha256": "d" * 64,
-        "target_build_digest": f"sha256:{'e' * 64}",
-        "target_binary_digest": "f" * 64,
-        "plan_digest": "0" * 64,
-    }
-    with engine.begin() as connection:
-        connection.execute(insert_recovery, digests)
-
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        assert connection.execute(
-            text(
-                "SELECT rearm_attempt_certificate_serial, "
-                "rearm_dispatch_certificate_serial "
-                "FROM agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one() == (None, None)
-
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET rearm_attempt_certificate_serial = 'attempt-certificate' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET rearm_attempt_certificate_serial = 'attempt-certificate', "
-                "rearm_dispatch_certificate_serial = 'dispatch-certificate' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    issue_grant = text(
-        """
-        UPDATE agent_upgrade_compatibility_recoveries
-        SET state = 'issued', retry_fence = 'retry-fence',
-            retry_certificate_serial = :retry_certificate_serial,
-            signed_grant = '{}', grant_request_id = 'grant-request',
-            grant_expires_at = '2026-08-31 12:00:10',
-            identity_deadline = '2026-08-31 12:15:00',
-            issued_at = '2026-08-31 12:00:00'
-        WHERE id = 'recovery'
-        """
-    )
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(
-            issue_grant, {"retry_certificate_serial": "other-certificate"}
-        )
-
-    with engine.begin() as connection:
-        connection.execute(
-            issue_grant, {"retry_certificate_serial": "dispatch-certificate"}
-        )
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET state = 'operator-blocked', blocked_at = '2026-08-31 12:15:00' "
-                "WHERE id = 'recovery'"
-            )
-        )
-        connection.execute(
-            text(
-                "UPDATE agent_upgrade_compatibility_recoveries "
-                "SET state = 'abandoned', completed_at = '2026-08-31 12:16:00', "
-                "abandoned_at = '2026-08-31 12:16:00' "
-                "WHERE id = 'recovery'"
-            )
-        )
-
-    command.downgrade(config, "0007_compat_rearm_certificates")
-    with engine.connect() as connection:
-        assert connection.execute(
-            text(
-                "SELECT state, completed_at FROM "
-                "agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one() == ("operator-blocked", None)
-
-
-def test_compatibility_abandoned_at_migration_backfills_terminal_rows(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'compatibility-abandoned-at-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0008_compat_recovery_abandon")
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                INSERT INTO agent_upgrade_compatibility_recoveries
-                  (id, node_id, job_id, operation_id, source_attempt,
-                   source_fence, source_certificate_serial,
-                   expected_retry_attempt, source_semantic_version,
-                   source_build_digest, source_binary_digest,
-                   upgrade_payload_sha256, package_sha256,
-                   target_package_version, target_build_digest,
-                   target_binary_digest, authority_revision, plan_digest,
-                   state, actor, request_id, created_at, completed_at,
-                   blocked_at)
-                VALUES
-                  ('recovery', 'node', 'job', 'operation', 3, 'source-fence',
-                   'source-certificate', 4, '0.1.0', :source_build_digest,
-                   :source_binary_digest, :upgrade_payload_sha256,
-                   :package_sha256, '0.1.0~dev.381', :target_build_digest,
-                   :target_binary_digest, 'authority', :plan_digest,
-                   'abandoned', 'admin', 'request',
-                   '2026-08-31 12:00:00', '2026-08-31 12:16:00',
-                   '2026-08-31 12:15:00')
-                """
-            ),
-            {
-                "source_build_digest": f"sha256:{'a' * 64}",
-                "source_binary_digest": "b" * 64,
-                "upgrade_payload_sha256": "c" * 64,
-                "package_sha256": "d" * 64,
-                "target_build_digest": f"sha256:{'e' * 64}",
-                "target_binary_digest": "f" * 64,
-                "plan_digest": "0" * 64,
-            },
-        )
-
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        row = connection.execute(
-            text(
-                "SELECT state, completed_at, abandoned_at FROM "
-                "agent_upgrade_compatibility_recoveries WHERE id = 'recovery'"
-            )
-        ).one()
-        assert row == (
-            "abandoned",
-            "2026-08-31 12:16:00",
-            "2026-08-31 12:16:00",
-        )
-
-
 def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
     tmp_path: Path,
 ) -> None:
@@ -446,8 +289,6 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
 def test_existing_database_missing_fleet_profile_tables_is_repaired(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.models import Base
-
     url = f"sqlite:///{tmp_path / 'fleet-profile-repair.sqlite'}"
     config = _config(url)
     command.upgrade(config, "0004_artifact_jobs")
@@ -484,10 +325,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
         "ix_fleet_profile_applications_state",
     }
     with engine.connect() as connection:
-        assert (
-            compare_metadata(MigrationContext.configure(connection), Base.metadata)
-            == []
-        )
+        assert _metadata_differences_without_retained_legacy(connection) == []
     with engine.begin() as connection:
         connection.execute(
             text(
