@@ -22,6 +22,7 @@ from .distributed_recovery import enforce_recovery_deadline
 from .interface_adapters import InterfaceAdapterError, interface_adapter
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
+    ClusterMapping,
     Job,
     LocalRecipeRevision,
     RecipeInstallation,
@@ -870,11 +871,27 @@ class RecipeRouteService:
                         "recipe rank set does not match accepted plan",
                         run_id=run.id,
                     )
+            mapping = session.get(ClusterMapping, run.mapping_id)
             entrypoints = [node for node in nodes if node.role == "entrypoint"]
-            if len(entrypoints) != 1 or entrypoints[0].rank != 0:
+            endpoint_owners = (
+                [
+                    node
+                    for node in nodes
+                    if node.node_id == mapping.endpoint_owner_node_id
+                ]
+                if mapping is not None and mapping.generation == run.mapping_generation
+                else []
+            )
+            if (
+                len(entrypoints) != 1
+                or len(endpoint_owners) != 1
+                or entrypoints[0] is not endpoint_owners[0]
+            ):
                 raise RecipeRouteError(
-                    "recipe run must have one rank-zero entrypoint", run_id=run.id
+                    "recipe run must have exactly one mapped endpoint-owner entrypoint",
+                    run_id=run.id,
                 )
+            endpoint_owner = endpoint_owners[0]
             exact_observations = (
                 isinstance(run.plan, Mapping)
                 and run.plan.get("observation_schema_version") == 2
@@ -904,7 +921,7 @@ class RecipeRouteService:
                             "recipe rank exact observation missed its deadline",
                             run_id=run.id,
                         )
-                    if node is entrypoints[0]:
+                    if node is endpoint_owner:
                         if node.observation_endpoint_ready is not True:
                             raise RecipeRouteNotReady(
                                 "recipe endpoint owner is awaiting exact readiness",
@@ -933,11 +950,10 @@ class RecipeRouteService:
                     )
                 evidence_times.append(observed)
                 node_ids.add(node.node_id)
-            entrypoint = entrypoints[0]
             endpoint = _endpoint(
-                entrypoint,
+                endpoint_owner,
                 self._management_policy,
-                operation_id=f"recipe:{run.id}:rank:0",
+                operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
             )
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model

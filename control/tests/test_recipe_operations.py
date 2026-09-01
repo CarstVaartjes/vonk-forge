@@ -1304,7 +1304,10 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, endpoint_owner_rank_one=True
+        tmp_path,
+        nodes=2,
+        endpoint_owner_rank_one=True,
+        distributed_lifecycle=True,
     )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
@@ -1319,11 +1322,13 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
         )
     run_plan = service.preview_run(install.owner_id, "nonzero")
     assert next(node for node in run_plan.nodes if node.endpoint_owner).rank == 1
-    start = service.start(
-        run_plan,
-        plan_digest=run_plan.plan_digest,
-        actor="admin",
+    start = started_recipe(
+        sessions,
+        service,
+        install.owner_id,
+        nodes,
         request_id="6" * 36,
+        alias="nonzero",
     )
     with sessions() as session:
         job = session.get(Job, start.id)
@@ -1333,6 +1338,22 @@ def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
         ]
     assert {payload["master_address"] for payload in payloads} == {"192.168.100.3"}
     assert {payload["master_port"] for payload in payloads} == {29500}
+    with sessions() as session:
+        run_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert [node.role for node in run_nodes] == ["worker", "entrypoint"]
+        assert [node.endpoint is not None for node in run_nodes] == [False, True]
+        assert [node.observation_endpoint_ready for node in run_nodes] == [None, True]
+
+    publisher = ConcurrentPublisher()
+    _service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(start.owner_id)
+    assert publisher.aliases[-1] == ("nonzero",)
 
 
 def test_install_admission_and_queue_creation_roll_back_together(

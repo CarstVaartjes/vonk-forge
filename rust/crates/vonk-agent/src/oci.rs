@@ -920,13 +920,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
         let mut plans = Vec::new();
         for run_id in run_ids {
-            // A canonical managed run directory is itself durable evidence that
-            // a lifecycle exists. Exact enumeration must fail closed if that
-            // evidence is missing or corrupt; otherwise an omitted distributed
-            // rank would never reach the explicit empty-v2 failure report.
-            let (spec, installation_id, placement, observation) = self
-                .load_run_lifecycle(&run_id)?
-                .ok_or(OciError::Artifact)?;
+            // Run directories intentionally outlive their lifecycle after a
+            // successful stop and older agents retained the same residue. A
+            // missing lifecycle is therefore historical, while a present but
+            // malformed lifecycle remains an active-assignment integrity error.
+            let Some((spec, installation_id, placement, observation)) =
+                self.load_run_lifecycle(&run_id)?
+            else {
+                continue;
+            };
             let Some(binding) = observation else {
                 continue;
             };

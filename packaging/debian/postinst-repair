@@ -18,10 +18,84 @@ repair_phase=$repair_state/phase
 repair_candidate=$repair_state/candidate.deb
 repair_authority=/usr/share/doc/vonk-forge-agent/repair-authority
 recovery_unit=vonk-forge-package-upgrade-recover.service
+observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
+observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 
 fail() {
     echo "vonk-forge-agent: repair postinst rejected: $1" >&2
     exit 1
+}
+
+ensure_observation_receipt_key() {
+    [ -d /var/lib/vonk-forge/helper ] \
+        && [ ! -L /var/lib/vonk-forge/helper ] \
+        && [ "$(/usr/bin/stat -c %u:%g:%a /var/lib/vonk-forge/helper)" = 0:0:700 ] \
+        && [ -d /etc/vonk-forge-agent ] \
+        && [ ! -L /etc/vonk-forge-agent ] \
+        && [ "$(/usr/bin/stat -c %u:%a /etc/vonk-forge-agent)" = 0:755 ] \
+        || return 1
+    if [ -e "$observation_receipt_private" ] \
+        || [ -L "$observation_receipt_private" ]; then
+        [ -f "$observation_receipt_private" ] \
+            && [ ! -L "$observation_receipt_private" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%a:%h \
+                "$observation_receipt_private")" = 0:0:600:1 ] \
+            && [ "$(/usr/bin/wc -c < "$observation_receipt_private")" -le 128 ] \
+            && /usr/bin/openssl pkey -inform DER \
+                -in "$observation_receipt_private" -check -noout >/dev/null 2>&1 \
+            || return 1
+    else
+        [ ! -e "$observation_receipt_public" ] \
+            && [ ! -L "$observation_receipt_public" ] || return 1
+        private_new=$(/usr/bin/mktemp \
+            /var/lib/vonk-forge/helper/.observation-receipt.XXXXXX)
+        /usr/bin/openssl genpkey -algorithm ED25519 -outform DER \
+            -out "$private_new" >/dev/null 2>&1 || {
+            /usr/bin/rm -f -- "$private_new"
+            return 1
+        }
+        /usr/bin/chown root:root "$private_new"
+        /usr/bin/chmod 0600 "$private_new"
+        /usr/bin/sync -f "$private_new"
+        /usr/bin/mv -- "$private_new" "$observation_receipt_private"
+        /usr/bin/sync -f /var/lib/vonk-forge/helper
+    fi
+    public_der=$(/usr/bin/mktemp \
+        /var/lib/vonk-forge/helper/.observation-public-der.XXXXXX)
+    public_new=$(/usr/bin/mktemp \
+        /etc/vonk-forge-agent/.observation-receipt.XXXXXX)
+    if ! /usr/bin/openssl pkey -inform DER \
+        -in "$observation_receipt_private" -pubout -outform DER \
+        -out "$public_der" >/dev/null 2>&1 \
+        || [ "$(/usr/bin/wc -c < "$public_der")" -ne 44 ]; then
+        /usr/bin/rm -f -- "$public_der" "$public_new"
+        return 1
+    fi
+    /usr/bin/tail -c 32 "$public_der" > "$public_new"
+    /usr/bin/rm -f -- "$public_der"
+    /usr/bin/chown root:vonk-agent "$public_new"
+    /usr/bin/chmod 0640 "$public_new"
+    if [ -e "$observation_receipt_public" ] \
+        || [ -L "$observation_receipt_public" ]; then
+        if ! {
+            [ -f "$observation_receipt_public" ] \
+                && [ ! -L "$observation_receipt_public" ] \
+                && [ "$(/usr/bin/stat -c %U:%G:%a:%h \
+                    "$observation_receipt_public")" = root:vonk-agent:640:1 ] \
+                && [ "$(/usr/bin/wc -c \
+                    < "$observation_receipt_public")" -eq 32 ] \
+                && /usr/bin/cmp -s \
+                    "$public_new" "$observation_receipt_public"
+        }; then
+            /usr/bin/rm -f -- "$public_new"
+            return 1
+        fi
+        /usr/bin/rm -f -- "$public_new"
+    else
+        /usr/bin/sync -f "$public_new"
+        /usr/bin/mv -- "$public_new" "$observation_receipt_public"
+        /usr/bin/sync -f /etc/vonk-forge-agent
+    fi
 }
 
 safe_root_file() {
@@ -214,6 +288,8 @@ else
 fi
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests /var/lib/vonk-forge/runtime-images
+ensure_observation_receipt_key \
+    || fail 'observation receipt key custody is unsafe'
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true

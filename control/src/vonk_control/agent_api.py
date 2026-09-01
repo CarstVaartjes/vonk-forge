@@ -215,7 +215,7 @@ class EnrollmentSubmitRequest(BaseModel):
     @field_validator("evidence")
     @classmethod
     def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        expected = {
+        legacy = {
             "node_id",
             "csr_public_key_fingerprint",
             "host_key_fingerprint",
@@ -223,10 +223,13 @@ class EnrollmentSubmitRequest(BaseModel):
             "agent_digest",
             "boot_id",
         }
-        if set(evidence) != expected or any(
+        receipt_key = "observation_receipt_public_key"
+        if set(evidence) not in (legacy, legacy | {receipt_key}) or any(
             not value.strip() for value in evidence.values()
         ):
             raise ValueError("evidence fields are invalid")
+        if receipt_key in evidence and _DIGEST.fullmatch(evidence[receipt_key]) is None:
+            raise ValueError("observation receipt public key is invalid")
         if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
             raise ValueError("evidence is too large")
         return evidence
@@ -552,7 +555,7 @@ class RecipeRunObservationIdentityRequest(BaseModel):
     run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
     image_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     artifact_set_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_identity: str = Field(min_length=3, max_length=512)
+    model_identity: str = Field(min_length=3, max_length=1024)
     rank: int = Field(ge=0, le=1023, strict=True)
     role: str = Field(min_length=1, max_length=64)
     world_size: int = Field(ge=2, le=1024, strict=True)

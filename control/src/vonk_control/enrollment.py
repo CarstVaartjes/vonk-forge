@@ -29,8 +29,12 @@ from .models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
     AgentNodeProfile,
+    RecipeRun,
+    RoutePublication,
+    RunNode,
 )
 from .pki import CertificateAuthority, IssuedCertificate
+from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -998,7 +1002,16 @@ def _persist_issued_enrollment(
             if certificate.state in {"active", "staged"}:
                 certificate.state = "revoked"
                 certificate.revoked_at = certificate.revoked_at or now
-        if enrollment.observation_receipt_public_key is not None:
+        if (
+            enrollment.observation_receipt_public_key is not None
+            and enrollment.observation_receipt_public_key
+            != node.observation_receipt_public_key
+        ):
+            _invalidate_rotated_observation_receipts(
+                session,
+                node_id=node.node_id,
+                now=now,
+            )
             node.observation_receipt_public_key = (
                 enrollment.observation_receipt_public_key
             )
@@ -1024,6 +1037,47 @@ def _persist_issued_enrollment(
     enrollment.certificate_generation = generation
     enrollment.certificate_not_before = issued.not_before
     enrollment.certificate_not_after = issued.not_after
+
+
+def _invalidate_rotated_observation_receipts(
+    session: Session,
+    *,
+    node_id: str,
+    now: datetime,
+) -> None:
+    """Fail exact ranks signed by a retired per-node observation key."""
+
+    published_affected = False
+    nodes = tuple(
+        session.scalars(
+            select(RunNode)
+            .where(RunNode.node_id == node_id)
+            .order_by(RunNode.run_id, RunNode.rank)
+            .with_for_update(of=RunNode)
+        )
+    )
+    for run_node in nodes:
+        run = session.get(RecipeRun, run_node.run_id, with_for_update=True)
+        if (
+            run is None
+            or not isinstance(run.plan, Mapping)
+            or run.plan.get("observation_schema_version") != 2
+        ):
+            continue
+        run_node.state = "failed"
+        run_node.observed_run_generation = None
+        run_node.observation_receipt_sha256 = None
+        run_node.observation_endpoint_ready = None
+        run_node.updated_at = now
+        published_affected = published_affected or run.route_state == "published"
+    if published_affected:
+        publication = session.get(
+            RoutePublication,
+            RECIPE_ROUTE_AUTHORITY_ID,
+            with_for_update=True,
+        )
+        if publication is not None:
+            publication.state = "withdrawal-pending"
 
 
 def _locked_enrollment(session: Session, enrollment_id: str) -> AgentEnrollment:
