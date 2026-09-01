@@ -1349,6 +1349,8 @@ run_wrong_binary_but_restore_installed() {
   local wrong_owner_before
   local wrong_groups_before
   local gate_condition
+  local drop_in_paths
+  local source_capsule_gate_manager_path
   local source_gate_manager_path
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   atomic_replace "$wrong_binary" "$destination" 0555
@@ -1359,8 +1361,11 @@ run_wrong_binary_but_restore_installed() {
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
     source_gate_manager_path="$(realpath -e -- "$source_gate")"
-    test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate_manager_path"
+    source_capsule_gate_manager_path="$(realpath -e -- "$source_capsule_gate")"
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
@@ -1369,10 +1374,14 @@ run_wrong_binary_but_restore_installed() {
     test "$(sha256sum "$gate_backup" | cut -d' ' -f1)" = "$source_gate_sha"
     rm -f -- "$source_gate"
     systemctl --system daemon-reload
-    test -z "$(systemctl --system show --property=DropInPaths --value \
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
       "$agent_unit")"
-    test -z "$(systemctl --system show --property=ExecCondition --value \
-      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " != *" $source_gate_manager_path "* ]]
+    gate_condition="$(systemctl --system show \
+      --property=ExecCondition --value "$agent_unit")"
+    [[ "$gate_condition" = *"$source_runner"* ]]
+    [[ "$gate_condition" = *"allow-agent-start"* ]]
   fi
   set +e
   systemctl --system restart "$unit"
@@ -1418,8 +1427,10 @@ run_wrong_binary_but_restore_installed() {
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
     test "$(realpath -e -- "$source_gate")" = "$source_gate_manager_path"
-    test "$(systemctl --system show --property=DropInPaths --value \
-      "$agent_unit")" = "$source_gate_manager_path"
+    drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
+      "$agent_unit")"
+    [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
