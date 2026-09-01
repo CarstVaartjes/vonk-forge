@@ -4467,6 +4467,12 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         alias="first",
     )
     second_run_id = clone_running_run(sessions, first.owner_id, alias="second")
+    with sessions.begin() as session:
+        for run_id in (first.owner_id, second_run_id):
+            run = session.get(RecipeRun, run_id)
+            run.plan = {**run.plan, "observation_schema_version": 2}
+    mark_current_exact_observations(sessions, first.owner_id, NOW)
+    mark_current_exact_observations(sessions, second_run_id, NOW)
     publisher = ConcurrentPublisher()
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(first.owner_id)
