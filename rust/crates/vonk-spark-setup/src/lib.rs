@@ -1802,24 +1802,7 @@ fn verify_sustained_readiness(
                     healthy = 0;
                 }
                 pid = Some(current_pid.clone());
-                let ready = run_checked(
-                    runner,
-                    Command::new(
-                        &paths.agent,
-                        [
-                            "--config",
-                            paths.config.to_string_lossy().as_ref(),
-                            "verify-readiness",
-                            "--receipt",
-                            "/run/vonk-forge-agent/readiness.json",
-                            "--pid",
-                            &current_pid,
-                            "--max-age-seconds",
-                            "90",
-                        ],
-                    )
-                    .suppress_stderr(),
-                );
+                let ready = run_checked(runner, readiness_probe(paths, &current_pid, true));
                 if ready.is_ok() {
                     healthy += 1;
                 } else {
@@ -1838,9 +1821,39 @@ fn verify_sustained_readiness(
             runner.sleep(READINESS_SAMPLE_INTERVAL);
         }
     }
+    // The repeated probes intentionally suppress their transient diagnostics,
+    // but once the bounded readiness window is exhausted the operator needs
+    // the exact fail-closed reason (missing receipt, stale process identity,
+    // or an invalid self-test) to repair the host.  This final probe does not
+    // include any credentials and inherits stderr from the setup command.
+    if let Some(current_pid) = pid {
+        let _ = runner.run(readiness_probe(paths, &current_pid, false));
+    }
     Err(SetupError::Command(
         "controller readiness was not sustained".to_owned(),
     ))
+}
+
+fn readiness_probe(paths: &InstallPaths, pid: &str, suppress_stderr: bool) -> Command {
+    let command = Command::new(
+        &paths.agent,
+        [
+            "--config",
+            paths.config.to_string_lossy().as_ref(),
+            "verify-readiness",
+            "--receipt",
+            "/run/vonk-forge-agent/readiness.json",
+            "--pid",
+            pid,
+            "--max-age-seconds",
+            "90",
+        ],
+    );
+    if suppress_stderr {
+        command.suppress_stderr()
+    } else {
+        command
+    }
 }
 
 enum InstallState {
