@@ -1829,11 +1829,11 @@ fn verify_sustained_readiness(
     if let Some(current_pid) = pid {
         let _ = runner.run(readiness_probe(paths, &current_pid, false));
     } else {
-        let _ = runner.run(Command::new(
+        emit_diagnostic_stdout(runner.run(Command::new(
             "/usr/bin/systemctl",
             ["status", "--no-pager", "--full", &paths.service],
-        ));
-        let _ = runner.run(Command::new(
+        )));
+        emit_diagnostic_stdout(runner.run(Command::new(
             "/usr/bin/journalctl",
             [
                 "--unit",
@@ -1843,11 +1843,33 @@ fn verify_sustained_readiness(
                 "--no-pager",
                 "--full",
             ],
-        ));
+        )));
     }
     Err(SetupError::Command(
         "controller readiness was not sustained".to_owned(),
     ))
+}
+
+/// The command runner captures stdout so setup can inspect machine-readable
+/// values (for example, systemd's MainPID).  Final failure diagnostics are
+/// human-facing, though, and systemctl/journalctl write their useful detail to
+/// stdout.  Forward only this bounded, non-secret diagnostic output; transient
+/// readiness probes and command failures remain fail-closed and quiet.
+fn emit_diagnostic_stdout(result: Result<CommandOutput, String>) {
+    let Ok(output) = result else {
+        return;
+    };
+    let Some(text) = diagnostic_stdout(&output) else {
+        return;
+    };
+    eprint!("{text}");
+    if !text.ends_with('\n') {
+        eprintln!();
+    }
+}
+
+fn diagnostic_stdout(output: &CommandOutput) -> Option<String> {
+    (!output.stdout.is_empty()).then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn readiness_probe(paths: &InstallPaths, pid: &str, suppress_stderr: bool) -> Command {
@@ -2829,6 +2851,19 @@ mod tests {
     use tempfile::tempdir;
 
     struct Values(VecDeque<String>);
+
+    #[test]
+    fn final_diagnostic_stdout_is_rendered_even_when_not_utf8() {
+        let output = CommandOutput {
+            success: false,
+            stdout: b"ActiveState=failed\nreason=agent\xff\n".to_vec(),
+        };
+        assert_eq!(
+            diagnostic_stdout(&output).as_deref(),
+            Some("ActiveState=failed\nreason=agent�\n")
+        );
+        assert!(diagnostic_stdout(&CommandOutput::success_empty()).is_none());
+    }
 
     impl Prompt for Values {
         fn value(&mut self, _label: &str) -> Result<String, String> {
