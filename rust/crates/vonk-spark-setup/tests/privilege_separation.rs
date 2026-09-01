@@ -1084,13 +1084,15 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
                 .any(|argument| argument == "verify-readiness")
         })
         .collect::<Vec<_>>();
-    assert_eq!(readiness_probes.len(), 31);
+    // The bounded readiness window is 180 seconds with a two-second sample
+    // interval, followed by one inherited-stderr diagnostic probe.
+    assert_eq!(readiness_probes.len(), 91);
     assert!(
-        readiness_probes[..30]
+        readiness_probes[..90]
             .iter()
             .all(|command| command.stderr == CommandStderr::Suppress)
     );
-    assert_eq!(readiness_probes[30].stderr, CommandStderr::Inherit);
+    assert_eq!(readiness_probes[90].stderr, CommandStderr::Inherit);
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "recovering-v1\n"
