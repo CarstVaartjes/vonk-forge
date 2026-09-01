@@ -3745,7 +3745,7 @@
       }
     },
     "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual": {
-      "content_sha256": "44efc986cd6740f9da8fb57d3471c60966adeedac9094afddda7efa029ffcd51",
+      "content_sha256": "0e43a31fca3e33334ae3660a5a1601285177ce865660d39f6bfd50f5cc348d90",
       "alias": "deepseek-v4-flash-vision-exp",
       "smoke_cases": [
         "M0",
@@ -3763,7 +3763,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-nvfp4-vllm-dual": {
-      "content_sha256": "713ef2a7f87998e2a99447e6dabc3838114c41c2ee2977dc47c79d5bd298b059",
+      "content_sha256": "db03d00e1436fcb2bc09e7189b9a9fc8f6ef8e45a90982e3f9722b5441cdc410",
       "alias": "glm-5.3-flash",
       "smoke_cases": [
         "M0",
@@ -4201,7 +4201,7 @@
       }
     },
     "vonk-forge/glm-5-3-flash-exl3-dflash2-vllm-dual": {
-      "content_sha256": "a068d343ca6c2962f1df66146280a245dd136c6c6cd28556e7b5f0da08853a04",
+      "content_sha256": "8b26e0c70aa6f2d78a5db0c4e8050db27bba423ed629dfb6aa20b17574986b02",
       "alias": "glm-5.3-flash-exl3",
       "smoke_cases": [
         "M0",
