@@ -80,7 +80,7 @@ jobs:
             acl adduser build-essential ca-certificates init-system-helpers \
             fuse-overlayfs iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
-      - name: Validate and exercise the exact legacy recovery lifecycle
+      - name: Validate historical compatibility and current capsule recovery
         shell: bash
         run: |
           set -euo pipefail
@@ -100,11 +100,13 @@ jobs:
           compatibility_cargo_dir=$(dirname "$(command -v cargo)")
           compatibility_cargo_home=$(dirname "$compatibility_cargo_dir")
           compatibility_rustup_home=$(rustup show home)
+          current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)+g$(git rev-parse --short=12 HEAD)"
           sudo env \
             PATH="$compatibility_cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             CARGO_HOME="$compatibility_cargo_home" \
             RUSTUP_HOME="$compatibility_rustup_home" \
             VERSION=0.1.0~dev.381+ga122909feaa3 \
+            HISTORICAL_A122=1 \
             STALE_PENDING_FORMAT=legacy2 \
             CRASH_MODE=full-cgroup \
             CANDIDATE_CUSTODY=legacy \
@@ -114,7 +116,7 @@ jobs:
             PATH="$compatibility_cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             CARGO_HOME="$compatibility_cargo_home" \
             RUSTUP_HOME="$compatibility_rustup_home" \
-            VERSION=0.1.0~dev.381+ga122909feaa3 \
+            VERSION="$current_version" \
             STALE_PENDING_FORMAT=prior3 \
             CRASH_MODE=post-remove \
             CANDIDATE_CUSTODY=root \

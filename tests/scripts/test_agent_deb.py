@@ -905,7 +905,10 @@ def test_recovery_binds_exact_dev335_dpkg_invocation_and_candidate() -> None:
     assert 'safe_root_directory "$invocation_dir" 700' in preinst
     assert "candidate_before=" in preinst and "candidate_after=" in preinst
     assert "helper_namespace_has_package_paths" in preinst
-    assert "durable recovery armed outside the inherited helper sandbox" in preinst
+    assert "inherited helper sandbox lacks package lifecycle paths" in preinst
+    namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
+    recovery_arm = preinst.index("arm_controller_recovery ||")
+    assert namespace_probe < recovery_arm
     assert "Bootstrap trust boundary" in preinst
     assert "old-protocol TOCTOU" in preinst
 

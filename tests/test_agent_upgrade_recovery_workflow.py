@@ -2,6 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-upgrade-recovery.yml"
+HARNESS = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 
 
 def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
@@ -20,7 +21,10 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert "shellcheck tests/nodes/test_agent_upgrade_recovery_systemd.sh" in text
     assert "cargo build --locked --release --package vonk-build-egress" in text
     assert "BUILD_EGRESS_BINARY" in text
-    assert "VERSION=0.1.0~dev.381+ga122909feaa3" in text
+    assert text.count("VERSION=0.1.0~dev.381+ga122909feaa3") == 1
+    assert "HISTORICAL_A122=1" in text
+    assert 'current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)' in text
+    assert 'VERSION="$current_version"' in text
     assert "STALE_PENDING_FORMAT=legacy2" in text
     assert "CRASH_MODE=full-cgroup" in text
     assert "CRASH_MODE=post-remove" in text
@@ -37,6 +41,20 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
         "APT_REPOSITORY_GPG_PRIVATE_KEY",
     ):
         assert forbidden not in text
+
+
+def test_upgrade_recovery_harness_separates_historical_and_capsule_sources() -> None:
+    harness = HARNESS.read_text()
+
+    assert "a122909feaa3b64d7b15371285e727965c3d7e9a" in harness
+    assert "HISTORICAL_A122" in harness
+    assert "target_source_root=$test_root/a122-source" in harness
+    assert "recovery_unit=$package_recovery_unit" in harness
+    assert "vonk-forge-package-upgrade-recover-capsule.service" in harness
+    assert 'test "$(wc -l < "$test_root/compat-intent")" -eq 14' in harness
+    assert "grep -Fxq 'schema_version=1'" in harness
+    assert "expected_recovery_load_state=loaded" in harness
+    assert "expected_recovery_load_state=not-found" in harness
 
 
 def test_upgrade_recovery_workflow_is_scoped_to_recovery_inputs() -> None:

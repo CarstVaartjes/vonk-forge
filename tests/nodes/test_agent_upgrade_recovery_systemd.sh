@@ -19,10 +19,19 @@ baseline_semantic=0.0.0
 stale_pending_format=${STALE_PENDING_FORMAT:-prior3}
 crash_mode=${CRASH_MODE:-full-cgroup}
 candidate_custody=${CANDIDATE_CUSTODY:-legacy}
+historical_a122=${HISTORICAL_A122:-0}
 compatibility_trigger=0
-if [[ "$stale_pending_format" == legacy2 \
-  && "$crash_mode" == full-cgroup \
-  && "$candidate_custody" == legacy ]]; then
+case "$historical_a122" in 0|1) ;; *)
+  printf 'unknown historical a122 fixture mode: %s\n' "$historical_a122" >&2
+  exit 64
+esac
+if [[ "$historical_a122" == 1 ]]; then
+  [[ "$stale_pending_format" == legacy2 \
+    && "$crash_mode" == full-cgroup \
+    && "$candidate_custody" == legacy ]] || {
+    printf '%s\n' 'historical a122 mode requires its exact compatibility shape' >&2
+    exit 64
+  }
   compatibility_trigger=1
 fi
 case "$crash_mode" in
@@ -75,12 +84,20 @@ old_helper_unit=/lib/systemd/system/vonk-forge-package-helper.service
 old_socket_unit=/lib/systemd/system/vonk-forge-package-helper.socket
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
-agent_unit=vonk-forge-agent.service
-recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 package_recovery_unit=vonk-forge-package-upgrade-recover.service
+agent_unit=vonk-forge-agent.service
+if (( compatibility_trigger == 1 )); then
+  recovery_unit=$package_recovery_unit
+else
+  recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
+fi
 recovery_unit_path=/lib/systemd/system/$recovery_unit
 recovery_enablement=/lib/systemd/system/multi-user.target.wants/$recovery_unit
-recovery_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+if (( compatibility_trigger == 1 )); then
+  recovery_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
+else
+  recovery_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
+fi
 recovery_suppression=/lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf
 agent_unit_path=/lib/systemd/system/$agent_unit
 agent_enablement=/lib/systemd/system/multi-user.target.wants/$agent_unit
@@ -335,26 +352,40 @@ done
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
 chmod 0600 "$test_root/release.pem"
 epoch=$(git -C "$repo_root" show -s --format=%ct HEAD)
-VONK_SOURCE_REVISION=$(git -C "$repo_root" rev-parse HEAD) \
+target_source_root=$repo_root
+target_source_revision=$(git -C "$repo_root" rev-parse HEAD)
+target_epoch=$epoch
+if (( compatibility_trigger == 1 )); then
+  target_source_revision=a122909feaa3b64d7b15371285e727965c3d7e9a
+  git -C "$repo_root" cat-file -e "$target_source_revision^{commit}"
+  target_source_root=$test_root/a122-source
+  mkdir -p "$target_source_root"
+  git -C "$repo_root" archive "$target_source_revision" \
+    | tar -x -C "$target_source_root"
+  target_epoch=$(git -C "$repo_root" show -s --format=%ct \
+    "$target_source_revision")
+  test "$version" = 0.1.0~dev.381+ga122909feaa3
+fi
+VONK_SOURCE_REVISION=$target_source_revision \
 VONK_SOURCE_REPOSITORY=https://github.com/CarstVaartjes/vonk-forge \
-  "$repo_root/scripts/build-agent-deb" \
+  "$target_source_root/scripts/build-agent-deb" \
     --version "$version" \
     --architecture "$build_arch" \
     --build-digest "$build_digest" \
     --release-private-key "$test_root/release.pem" \
     --binaries-dir "$test_root/target-bin" \
-    --source-date-epoch "$epoch" \
+    --source-date-epoch "$target_epoch" \
     --output-dir "$test_root/target-dist"
 
-VONK_SOURCE_REVISION=$(git -C "$repo_root" rev-parse HEAD) \
+VONK_SOURCE_REVISION=$target_source_revision \
 VONK_SOURCE_REPOSITORY=https://github.com/CarstVaartjes/vonk-forge \
-  "$repo_root/scripts/build-agent-deb" \
+  "$target_source_root/scripts/build-agent-deb" \
     --version "$baseline_version" \
     --architecture "$build_arch" \
     --build-digest "$build_digest" \
     --release-private-key "$test_root/release.pem" \
     --binaries-dir "$test_root/baseline-bin" \
-    --source-date-epoch "$epoch" \
+    --source-date-epoch "$target_epoch" \
     --output-dir "$test_root/baseline-dist" \
     --acceptance-baseline
 
@@ -418,6 +449,12 @@ dpkg-deb --fsys-tarfile "$package" \
   > "$target_recovery_runner"
 chmod 0555 "$target_recovery_runner"
 target_recovery_runner_digest=$(sha256sum "$target_recovery_runner" \
+  | cut -d' ' -f1)
+target_recovery_unit=$test_root/target-package-upgrade-recover.service
+dpkg-deb --fsys-tarfile "$package" \
+  | tar -xOf - ./lib/systemd/system/vonk-forge-package-upgrade-recover.service \
+  > "$target_recovery_unit"
+target_recovery_unit_digest=$(sha256sum "$target_recovery_unit" \
   | cut -d' ' -f1)
 agent_digest=$(sha256sum "$test_root/target-bin/vonk-agent" | cut -d' ' -f1)
 helper_digest=$(sha256sum "$test_root/target-bin/vonk-agent-helper" | cut -d' ' -f1)
@@ -922,8 +959,13 @@ if [[ "$crash_mode" == full-cgroup ]]; then
       "$agent_unit")
     cp -- /var/lib/vonk-forge/package-upgrade/intent \
       "$test_root/compat-intent"
+    test "$(wc -l < "$test_root/compat-intent")" -eq 14
+    sed -n '1p' "$test_root/compat-intent" | grep -Fxq 'schema_version=1'
     grep -Fxq "runner_sha256=$target_recovery_runner_digest" \
       "$test_root/compat-intent"
+    grep -Fxq "unit_sha256=$target_recovery_unit_digest" \
+      "$test_root/compat-intent"
+    test -z "$(grep '^capsule_' "$test_root/compat-intent" || true)"
     sed 's/^unit_sha256=.*/unit_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/' \
       "$test_root/compat-intent" > "$test_root/compat-intent.invalid"
     install -o root -g root -m 0600 "$test_root/compat-intent.invalid" \
@@ -1096,10 +1138,6 @@ PY
       "$agent_unit" "$helper_unit" "$socket_unit" "$recovery_unit" \
       >/dev/null 2>&1 || true
     systemctl --system start "$socket_unit"
-    # Schema-v2 capsule ownership suppresses the package-owned recovery unit
-    # while intent exists. Start the capsule explicitly to exercise its
-    # bounded retry against the held dpkg lock.
-    systemctl --system start "$recovery_unit" >/dev/null 2>&1 || true
     for _ in {1..150}; do
       recovery_exit=$(systemctl --system show --property=ExecMainStatus --value \
         "$recovery_unit")
@@ -1242,6 +1280,11 @@ fi
 printf 'durable recovery crash-point pending gate: %s\n' \
   "$(cat "$test_root/crash-point-pending-kind")"
 
+if (( compatibility_trigger == 1 )); then
+  expected_recovery_load_state=loaded
+else
+  expected_recovery_load_state=not-found
+fi
 for _ in {1..1200}; do
   recovery_load_state=$(systemctl --system show --property=LoadState --value \
     "$recovery_unit" 2>/dev/null || true)
@@ -1260,7 +1303,7 @@ for _ in {1..1200}; do
     && ! -e /var/lib/vonk-forge/package-upgrade/intent \
     && ! -e /var/lib/vonk-forge/package-upgrade/agent-blocked \
     && ! -e "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
-    && "$recovery_load_state" == not-found \
+    && "$recovery_load_state" == "$expected_recovery_load_state" \
     && "$recovery_active_state" == inactive \
     && "$recovery_sub_state" == dead \
     && "$recovery_main_pid" == 0 \
@@ -1271,7 +1314,7 @@ for _ in {1..1200}; do
   sleep 0.1
 done
 
-test "$recovery_load_state" = not-found
+test "$recovery_load_state" = "$expected_recovery_load_state"
 test "$recovery_active_state" = inactive
 test "$recovery_sub_state" = dead
 test "$recovery_main_pid" = 0
@@ -1281,17 +1324,21 @@ grep -Fxq 'schema_version=2' /var/lib/vonk-forge/helper-upgrade.receipt
 grep -Fxq "version=$version" /var/lib/vonk-forge/helper-upgrade.receipt
 grep -Fxq "package_sha256=$package_digest" \
   /var/lib/vonk-forge/helper-upgrade.receipt
-test "$(stat -c %U:%G:%a:%h /var/lib/vonk-forge/package-upgrade.status)" \
-  = root:root:644:1
-test "$(wc -l < /var/lib/vonk-forge/package-upgrade.status)" -eq 7
-grep -Fxq 'schema_version=1' /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq 'outcome=succeeded' /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq 'stage=complete' /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq 'reason=exact_identity_proven' \
-  /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq "target_version=$version" /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq "package_sha256=$package_digest" \
-  /var/lib/vonk-forge/package-upgrade.status
+if (( compatibility_trigger == 1 )); then
+  test ! -e /var/lib/vonk-forge/package-upgrade.status
+else
+  test "$(stat -c %U:%G:%a:%h /var/lib/vonk-forge/package-upgrade.status)" \
+    = root:root:644:1
+  test "$(wc -l < /var/lib/vonk-forge/package-upgrade.status)" -eq 7
+  grep -Fxq 'schema_version=1' /var/lib/vonk-forge/package-upgrade.status
+  grep -Fxq 'outcome=succeeded' /var/lib/vonk-forge/package-upgrade.status
+  grep -Fxq 'stage=complete' /var/lib/vonk-forge/package-upgrade.status
+  grep -Fxq 'reason=exact_identity_proven' \
+    /var/lib/vonk-forge/package-upgrade.status
+  grep -Fxq "target_version=$version" /var/lib/vonk-forge/package-upgrade.status
+  grep -Fxq "package_sha256=$package_digest" \
+    /var/lib/vonk-forge/package-upgrade.status
+fi
 test "$(wc -l < "$upgrade_invocations")" -eq 1
 test ! -e /var/lib/vonk-forge/helper-upgrade.pending
 test ! -e /var/lib/vonk-forge/package-upgrade/intent

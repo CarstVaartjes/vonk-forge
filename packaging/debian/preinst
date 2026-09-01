@@ -1176,14 +1176,14 @@ if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
     && [ -d /run/systemd/system ] \
     && inside_package_helper; then
+    if ! helper_namespace_has_package_paths; then
+        echo 'vonk-forge-agent: inherited helper sandbox lacks package lifecycle paths' >&2
+        exit 1
+    fi
     arm_controller_recovery || {
         echo 'vonk-forge-agent: cannot durably arm the signed controller upgrade' >&2
         exit 1
     }
-    if ! helper_namespace_has_package_paths; then
-        echo 'vonk-forge-agent: durable recovery armed outside the inherited helper sandbox' >&2
-        exit 1
-    fi
 fi
 
 exit 0
