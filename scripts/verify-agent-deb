@@ -1666,7 +1666,6 @@ def _verify_repair_evidence(
         or re.fullmatch(r"[0-9a-f]{40}", binary_revision) is None
         or not isinstance(packaging_revision, str)
         or re.fullmatch(r"[0-9a-f]{40}", packaging_revision) is None
-        or binary_revision == packaging_revision
         or repair_version is None
         or not binary_revision.startswith(
             repair_version.group("source").rsplit("+g", 1)[1]

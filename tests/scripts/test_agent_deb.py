@@ -100,7 +100,35 @@ def test_greenfield_repair_allows_one_exact_binary_and_packaging_revision() -> N
         "expected_binary_source_revision == expected_packaging_source_revision"
         not in verifier
     )
+    assert "binary_revision == packaging_revision" not in verifier
     assert "not binary_source_revision.startswith(source_revision_match.group(1))" in builder
+
+
+def test_greenfield_repair_evidence_accepts_one_exact_source_revision() -> None:
+    documents, expected = _repair_evidence_documents()
+    documents = json.loads(
+        json.dumps(documents).replace(
+            REPAIR_BINARY_REVISION,
+            REPAIR_PACKAGING_REVISION,
+        )
+    )
+    version = REPAIR_VERSION.replace(
+        REPAIR_BINARY_REVISION[:12],
+        REPAIR_PACKAGING_REVISION[:12],
+    )
+
+    evidence = VERIFY_MODULE._verify_repair_evidence(
+        documents,
+        version=version,
+        expected=expected,
+        expected_node_id=REPAIR_NODE_ID,
+        expected_authority_sha256=hashlib.sha256(_repair_authority()).hexdigest(),
+    )
+
+    assert evidence == {
+        "binary_source_revision": REPAIR_PACKAGING_REVISION,
+        "packaging_source_revision": REPAIR_PACKAGING_REVISION,
+    }
 
 
 def test_repair_verifier_trusts_only_the_resolved_repository(monkeypatch) -> None:
