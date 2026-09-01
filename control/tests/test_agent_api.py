@@ -1513,6 +1513,34 @@ def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
         assert node is not None
         assert node.capabilities == CAPABILITIES
         assert node.protocol_version == 3
+
+
+def test_newer_claim_fields_and_runtime_attestations_are_forward_compatible(
+    agent_system,
+) -> None:
+    client, services, _, _clock = agent_system
+
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "capabilities": CAPABILITIES,
+            "lease_seconds": 30,
+            "node_id": NODE_A,
+            "protocol_version": 3,
+            "future_claim_field": {"version": 4},
+            "runtime_identity": {
+                **PACKAGED_RUNTIME_IDENTITY,
+                "future_attestation": {"format": "v2"},
+            },
+        },
+    )
+
+    assert response.status_code == 204
+    with services.sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        assert node.semantic_version == PACKAGED_RUNTIME_IDENTITY["semantic_version"]
         assert node.last_seen_at is not None
         assert session.get(AgentPresence, NODE_A) is not None
 

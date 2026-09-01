@@ -284,7 +284,10 @@ class EnrollmentListResponse(BaseModel):
 
 
 class AgentRuntimeIdentityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Runtime identity is an extensible envelope.  Newer agents may add
+    # attestations or diagnostics; the Controller only consumes the stable
+    # identity fields below and must not reject an otherwise compatible agent.
+    model_config = ConfigDict(extra="ignore")
     architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -296,9 +299,27 @@ class AgentRuntimeIdentityRequest(BaseModel):
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_retired_identity_fields(cls, value: object) -> object:
+        if isinstance(value, Mapping) and {
+            "active_slot",
+            "agent_sha256",
+            "platform_version",
+            "supervisor_generation",
+            "supervisor_ready_generation",
+            "activation_deadline",
+        } & value.keys():
+            raise ValueError("retired runtime identity fields are not supported")
+        return value
+
 
 class ClaimRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Claims are a version-skew boundary.  Unknown top-level fields are
+    # intentionally ignored so a newer Spark can still claim work from this
+    # Controller; operation safety comes from the negotiated capability
+    # intersection below.
+    model_config = ConfigDict(extra="ignore")
     lease_seconds: int = Field(default=30, ge=1, le=300)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     hostname: str | None = Field(
@@ -311,7 +332,7 @@ class ClaimRequest(BaseModel):
         ),
     )
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
-    capabilities: list[str] | None = Field(default=None, max_length=32)
+    capabilities: list[str] | None = Field(default=None, max_length=128)
     runtime_identity: AgentRuntimeIdentityRequest
     wait_seconds: int = Field(default=0, ge=0, le=60)
 

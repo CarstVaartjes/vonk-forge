@@ -1671,9 +1671,10 @@ class AgentReconciliationService:
             or isinstance(node.protocol_version, bool)
             or not protocol[0] <= node.protocol_version <= protocol[1]
             or not isinstance(node.capabilities, list)
-            or not _REQUIRED_AGENT_CAPABILITIES
-            <= set(node.capabilities)
-            <= _NEXT_AGENT_CAPABILITIES
+            # Capabilities are an open, monotonic namespace.  Require the
+            # operations this reconciliation needs, but ignore capabilities
+            # introduced by a newer agent instead of blocking the rollout.
+            or not _REQUIRED_AGENT_CAPABILITIES <= set(node.capabilities)
             for node in nodes
         ):
             return "reconciliation target agent is incompatible"

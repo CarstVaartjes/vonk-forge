@@ -1289,25 +1289,27 @@ class AgentJobService:
         if not isinstance(value, Mapping):
             raise TypeError("agent runtime identity is invalid")
         document = dict(value)
+        if {
+            "active_slot",
+            "agent_sha256",
+            "platform_version",
+            "supervisor_generation",
+            "supervisor_ready_generation",
+            "activation_deadline",
+        } & document.keys():
+            raise ValueError("retired runtime identity fields are not supported")
+        required = {
+            "architecture",
+            "binary_digest",
+            "build_digest",
+            "semantic_version",
+            "self_test_passed",
+        }
+        # Keep the identity envelope forward-compatible.  Only the stable
+        # fields are persisted/validated; newer agents may attach additional
+        # evidence without making an otherwise compatible claim unusable.
         if (
-            set(document)
-            not in (
-                {
-                    "architecture",
-                    "binary_digest",
-                    "build_digest",
-                    "semantic_version",
-                    "self_test_passed",
-                },
-                {
-                    "architecture",
-                    "binary_digest",
-                    "build_digest",
-                    "semantic_version",
-                    "self_test_passed",
-                    "observation_receipt_public_key",
-                },
-            )
+            not required <= document.keys()
             or document["architecture"] not in {"linux-amd64", "linux-arm64"}
             or not isinstance(document["architecture"], str)
             or not isinstance(document["binary_digest"], str)
@@ -1334,7 +1336,14 @@ class AgentJobService:
             )
         ):
             raise ValueError("agent runtime identity is invalid")
-        return document
+        return {
+            key: document[key]
+            for key in (
+                *sorted(required),
+                "observation_receipt_public_key",
+            )
+            if key in document
+        }
 
     def _consume_contact(
         self,
