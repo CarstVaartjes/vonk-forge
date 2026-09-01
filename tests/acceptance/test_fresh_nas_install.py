@@ -440,7 +440,48 @@ def compose_startup_diagnostics(bundle: Path) -> str:
     if logs is None:
         return f"{details}; logs unavailable"
     output = _redact_diagnostics(logs.stdout or logs.stderr)
-    return f"{details}; failing service logs:\n{output or 'no output'}"
+    if output:
+        return f"{details}; failing service logs:\n{output}"
+
+    # Docker does not include healthcheck stderr in `compose logs`. Read the
+    # retained health records when a long-running service is merely unhealthy;
+    # this is especially important for the Tailscale configurator, whose
+    # healthcheck deliberately performs strict route and Serve validation.
+    docker = shutil.which("docker")
+    if docker is not None:
+        ids = _diagnostic_command(
+            bundle, [*reference_compose(), "ps", "-q", *broken]
+        )
+        container_ids = (
+            [line.strip() for line in ids.stdout.splitlines()]
+            if ids is not None and ids.returncode == 0
+            else []
+        )
+        container_ids = [
+            identifier
+            for identifier in container_ids
+            if re.fullmatch(r"[0-9a-fA-F]{12,64}", identifier)
+        ]
+        if container_ids:
+            health = _diagnostic_command(
+                bundle,
+                [
+                    docker,
+                    "inspect",
+                    "--format",
+                    "{{json .State.Health.Log}}",
+                    *container_ids,
+                ],
+            )
+            if health is not None:
+                health_output = _redact_diagnostics(
+                    health.stdout or health.stderr
+                )
+                return (
+                    f"{details}; failing service healthchecks:\n"
+                    f"{health_output or 'no output'}"
+                )
+    return f"{details}; failing service logs:\nno output"
 
 
 def compose_compatibility_fixtures() -> list[tuple[str, Path]]:
