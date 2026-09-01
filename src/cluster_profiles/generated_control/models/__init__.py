@@ -221,6 +221,7 @@ from .public_recipe_disk_requirements import PublicRecipeDiskRequirements
 from .public_recipe_fabric import PublicRecipeFabric
 from .public_recipe_fabric_connectivity import PublicRecipeFabricConnectivity
 from .public_recipe_list_item import PublicRecipeListItem
+from .public_recipe_list_item_alignment import PublicRecipeListItemAlignment
 from .public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
 from .public_recipe_list_item_execution_readiness import PublicRecipeListItemExecutionReadiness
 from .public_recipe_list_item_execution_readiness_basis import PublicRecipeListItemExecutionReadinessBasis
@@ -230,6 +231,7 @@ from .public_recipe_list_response import PublicRecipeListResponse
 from .public_recipe_local_state import PublicRecipeLocalState
 from .public_recipe_local_state_status import PublicRecipeLocalStateStatus
 from .public_recipe_preview_response import PublicRecipePreviewResponse
+from .public_recipe_preview_response_alignment import PublicRecipePreviewResponseAlignment
 from .public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
 from .public_recipe_preview_response_execution_readiness import PublicRecipePreviewResponseExecutionReadiness
 from .public_recipe_preview_response_execution_readiness_basis import PublicRecipePreviewResponseExecutionReadinessBasis
@@ -582,6 +584,7 @@ __all__ = (
     "PublicRecipeFabric",
     "PublicRecipeFabricConnectivity",
     "PublicRecipeListItem",
+    "PublicRecipeListItemAlignment",
     "PublicRecipeListItemCapabilitiesItem",
     "PublicRecipeListItemExecutionReadiness",
     "PublicRecipeListItemExecutionReadinessBasis",
@@ -591,6 +594,7 @@ __all__ = (
     "PublicRecipeLocalState",
     "PublicRecipeLocalStateStatus",
     "PublicRecipePreviewResponse",
+    "PublicRecipePreviewResponseAlignment",
     "PublicRecipePreviewResponseCapabilitiesItem",
     "PublicRecipePreviewResponseExecutionReadiness",
     "PublicRecipePreviewResponseExecutionReadinessBasis",

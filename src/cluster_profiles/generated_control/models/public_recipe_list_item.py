@@ -6,6 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.public_recipe_list_item_alignment import check_public_recipe_list_item_alignment
+from ..models.public_recipe_list_item_alignment import PublicRecipeListItemAlignment
 from ..models.public_recipe_list_item_capabilities_item import check_public_recipe_list_item_capabilities_item
 from ..models.public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
 from ..models.public_recipe_list_item_execution_readiness import check_public_recipe_list_item_execution_readiness
@@ -39,6 +41,7 @@ T = TypeVar("T", bound="PublicRecipeListItem")
 class PublicRecipeListItem:
     """
         Attributes:
+            alignment (PublicRecipeListItemAlignment):
             artifact_count (int):
             artifact_identities (list['PublicRecipeArtifactIdentity']):
             capabilities (list[PublicRecipeListItemCapabilitiesItem]):
@@ -82,6 +85,7 @@ class PublicRecipeListItem:
             source_repository (Union[None, Unset, str]):
      """
 
+    alignment: PublicRecipeListItemAlignment
     artifact_count: int
     artifact_identities: list['PublicRecipeArtifactIdentity']
     capabilities: list[PublicRecipeListItemCapabilitiesItem]
@@ -133,6 +137,8 @@ class PublicRecipeListItem:
         from ..models.public_recipe_topology_role import PublicRecipeTopologyRole
         from ..models.public_recipe_fabric import PublicRecipeFabric
         from ..models.public_recipe_local_state import PublicRecipeLocalState
+        alignment: str = self.alignment
+
         artifact_count = self.artifact_count
 
         artifact_identities = []
@@ -258,6 +264,7 @@ class PublicRecipeListItem:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "alignment": alignment,
             "artifact_count": artifact_count,
             "artifact_identities": artifact_identities,
             "capabilities": capabilities,
@@ -317,6 +324,11 @@ class PublicRecipeListItem:
         from ..models.public_recipe_fabric import PublicRecipeFabric
         from ..models.public_recipe_local_state import PublicRecipeLocalState
         d = dict(src_dict)
+        alignment = check_public_recipe_list_item_alignment(d.pop("alignment"))
+
+
+
+
         artifact_count = d.pop("artifact_count")
 
         artifact_identities = []
@@ -484,6 +496,7 @@ class PublicRecipeListItem:
 
 
         public_recipe_list_item = cls(
+            alignment=alignment,
             artifact_count=artifact_count,
             artifact_identities=artifact_identities,
             capabilities=capabilities,

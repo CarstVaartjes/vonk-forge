@@ -7085,6 +7085,17 @@
       "PublicRecipeListItem": {
         "additionalProperties": false,
         "properties": {
+          "alignment": {
+            "enum": [
+              "standard",
+              "abliterated",
+              "derisked",
+              "other-modified",
+              "unspecified"
+            ],
+            "title": "Alignment",
+            "type": "string"
+          },
           "artifact_count": {
             "maximum": 32.0,
             "minimum": 0.0,
@@ -7396,6 +7407,7 @@
           "model_version_publisher",
           "model_version_slug",
           "model_version_title",
+          "alignment",
           "capabilities",
           "qualification",
           "qualification_basis",
@@ -7528,6 +7540,17 @@
       "PublicRecipePreviewResponse": {
         "additionalProperties": false,
         "properties": {
+          "alignment": {
+            "enum": [
+              "standard",
+              "abliterated",
+              "derisked",
+              "other-modified",
+              "unspecified"
+            ],
+            "title": "Alignment",
+            "type": "string"
+          },
           "artifact_count": {
             "maximum": 32.0,
             "minimum": 0.0,
@@ -7855,6 +7878,7 @@
           "model_version_publisher",
           "model_version_slug",
           "model_version_title",
+          "alignment",
           "capabilities",
           "qualification",
           "qualification_basis",

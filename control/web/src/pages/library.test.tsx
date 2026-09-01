@@ -24,6 +24,7 @@ const publicRecipe = (overrides: Partial<PublicRecipe> = {}): PublicRecipe => ({
   model_version_title: "Qwen 3.5 BF16",
   source_owner: "QwenLM",
   source_repository: "https://github.com/QwenLM/Qwen3",
+  alignment: "standard",
   capabilities: ["chat"],
   qualification: "candidate",
   qualification_basis: "explicit-candidate-metadata",

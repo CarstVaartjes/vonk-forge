@@ -70,6 +70,9 @@ PublicRecipeCapability = Literal[
     "3d",
 ]
 PublicRecipeQualification = Literal["candidate", "cataloged"]
+PublicRecipeAlignment = Literal[
+    "standard", "abliterated", "derisked", "other-modified", "unspecified"
+]
 PublicRecipeExecutionReadiness = Literal[
     "executable", "not-executable", "integration-required", "not-declared"
 ]
@@ -380,6 +383,7 @@ class PublicRecipeListItem(StrictModel):
     model_version_title: str = Field(min_length=1, max_length=120)
     source_owner: str | None = Field(default=None, min_length=1, max_length=120)
     source_repository: str | None = Field(default=None, min_length=1, max_length=512)
+    alignment: PublicRecipeAlignment
     capabilities: list[PublicRecipeCapability] = Field(max_length=8)
     qualification: PublicRecipeQualification
     qualification_basis: PublicRecipeQualificationBasis
@@ -614,6 +618,7 @@ def _public_recipe_metadata(
     model_slug = model_version_slug
     model_title = model_slug
     model_reference: Mapping[str, object] | None = None
+    model_version_document: Mapping[str, object] | None = None
     for dependency in dependencies:
         identity = dependency.get("identity")
         if (
@@ -622,6 +627,7 @@ def _public_recipe_metadata(
             and identity.get("publisher") == model_version_publisher
             and identity.get("slug") == model_version_slug
         ):
+            model_version_document = dependency
             value = dependency.get("model")
             model_reference = value if isinstance(value, Mapping) else None
             metadata = dependency.get("metadata")
@@ -703,6 +709,7 @@ def _public_recipe_metadata(
     ]
     precision = quantizations[0] if quantizations else None
     source_owner, source_repository = _public_recipe_source(document)
+    alignment = _public_recipe_alignment(document, model_version_document)
     qualification, qualification_basis, qualification_detail = (
         _public_recipe_qualification(tags)
     )
@@ -780,6 +787,7 @@ def _public_recipe_metadata(
         "model_version_title": model_version_title,
         "source_owner": source_owner,
         "source_repository": source_repository,
+        "alignment": alignment,
         "capabilities": [
             capability
             for capability in _PUBLIC_CAPABILITIES
@@ -901,6 +909,26 @@ def _public_recipe_tags(document: Mapping[str, object]) -> set[str]:
     raw_tags = metadata.get("tags", [])
     raw_tags = raw_tags if isinstance(raw_tags, list) else []
     return {value.lower() for value in raw_tags if isinstance(value, str)}
+
+
+_PUBLIC_RECIPE_ALIGNMENTS = frozenset(
+    {"standard", "abliterated", "derisked", "other-modified", "unspecified"}
+)
+
+
+def _public_recipe_alignment(
+    document: Mapping[str, object], model_version: Mapping[str, object] | None = None
+) -> str:
+    """Return only an explicit alignment declaration; never infer it from names or tags."""
+
+    metadata = document.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    raw = metadata.get("alignment")
+    if raw is None and isinstance(model_version, Mapping):
+        model_metadata = model_version.get("metadata")
+        if isinstance(model_metadata, Mapping):
+            raw = model_metadata.get("alignment")
+    return raw if isinstance(raw, str) and raw in _PUBLIC_RECIPE_ALIGNMENTS else "unspecified"
 
 
 def _public_recipe_source(
