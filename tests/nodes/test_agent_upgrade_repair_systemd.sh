@@ -93,7 +93,7 @@ source_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover.service
 source_capsule_unit=/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service
 source_capsule_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 source_capsule_suppression=/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf
-source_capsule_enablement=/etc/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
+source_capsule_enablement=/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service
 source_gate=/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf
 source_dropin=/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
 repair_state=$source_state/repair
@@ -459,15 +459,17 @@ SOURCE
   gcc -O2 -o "$output" "$test_root/helper-$identity.c"
 }
 
+build_egress_target_dir=${CARGO_TARGET_DIR:-$repo_root/target}
+expected_build_egress_binary=$build_egress_target_dir/release/vonk-build-egress
 if [[ -n "${BUILD_EGRESS_BINARY:-}" ]]; then
   build_egress_fixture=$(realpath -e -- "$BUILD_EGRESS_BINARY")
   test "$build_egress_fixture" = \
-    "$repo_root/target/release/vonk-build-egress"
+    "$(realpath -e -- "$expected_build_egress_binary")"
 else
   RUSTFLAGS='-C target-feature=+crt-static' \
     cargo build --locked --release --manifest-path "$repo_root/Cargo.toml" \
       --package vonk-build-egress
-  build_egress_fixture=$repo_root/target/release/vonk-build-egress
+  build_egress_fixture=$expected_build_egress_binary
 fi
 test ! -L "$build_egress_fixture"
 test -f "$build_egress_fixture"
@@ -768,7 +770,7 @@ install -d -o root -g root -m 0755 "${source_capsule_suppression%/*}" \
   "${source_capsule_enablement%/*}"
 install -o root -g root -m 0644 "$source_capsule_suppression_file" \
   "$source_capsule_suppression"
-ln -s "$source_capsule_unit" \
+ln -s ../vonk-forge-package-upgrade-recover-capsule.service \
   "$source_capsule_enablement"
 printf '%s\n' '[Unit]' 'Wants=vonk-forge-package-upgrade-recover.service' \
   > "$source_dropin"
@@ -815,9 +817,15 @@ chown root:root "$source_intent"
 chmod 0600 "$source_intent"
 source_intent_sha="$(sha256sum "$source_intent" | cut -d' ' -f1)"
 systemctl --system daemon-reload
-test "$(systemctl --system show --property=FragmentPath --value \
-  "$recovery_unit")" = "$source_capsule_unit"
-systemctl --system is-enabled --quiet "$recovery_unit"
+test "$(realpath -e -- "$(systemctl --system show \
+  --property=FragmentPath --value "$recovery_unit")")" = \
+  "$(realpath -e -- "$source_capsule_unit")"
+multi_user_wants=$(systemctl --system show --property=Wants --value \
+  multi-user.target)
+case " $multi_user_wants " in
+  *" $recovery_unit "*) ;;
+  *) printf '%s\n' 'capsule is not a durable multi-user dependency' >&2; exit 1 ;;
+esac
 
 setpriv_sha="$(sha256sum /usr/bin/setpriv | cut -d' ' -f1)"
 repair_probe_sha="$(sha256sum "$repair_probe_binary" | cut -d' ' -f1)"

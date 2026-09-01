@@ -79,7 +79,7 @@ agent_unit=vonk-forge-agent.service
 recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 package_recovery_unit=vonk-forge-package-upgrade-recover.service
 recovery_unit_path=/lib/systemd/system/$recovery_unit
-recovery_enablement=/etc/systemd/system/multi-user.target.wants/$recovery_unit
+recovery_enablement=/lib/systemd/system/multi-user.target.wants/$recovery_unit
 recovery_gate=/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf
 recovery_suppression=/lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf
 agent_unit_path=/lib/systemd/system/$agent_unit
@@ -1155,7 +1155,7 @@ if [[ "$crash_mode" == post-remove ]]; then
   test -f /var/lib/vonk-forge/package-upgrade/recovery-capsule/runner
   test -f "$recovery_unit_path"
   test -L "$recovery_enablement"
-  test "$(readlink "$recovery_enablement")" = "$recovery_unit_path"
+  test "$(readlink "$recovery_enablement")" = "../$recovery_unit"
   test -f "$recovery_gate"
   test -f "$recovery_suppression"
 
@@ -1185,8 +1185,9 @@ install -d -o root -g root -m 0755 \
     /lib/systemd/system/multi-user.target.wants
 ln -s "../$agent_unit" "$agent_enablement"
 systemctl --system daemon-reload
-test "$(systemctl --system show --property=FragmentPath --value \
-  "$agent_unit")" = "$agent_unit_path"
+test "$(realpath -e -- "$(systemctl --system show \
+  --property=FragmentPath --value "$agent_unit")")" = \
+  "$(realpath -e -- "$agent_unit_path")"
 agent_dropins=$(systemctl --system show --property=DropInPaths --value \
   "$agent_unit")
 case " $agent_dropins " in
@@ -1229,14 +1230,10 @@ test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" 
   test "$(systemctl --system show --property=ActiveState --value \
     "$agent_unit")" != active
 
-  # multi-user.target owns the exact durable wants symlink. Starting the
-  # enabled capsule directly is the systemd boot transaction without rebooting
-  # the disposable CI host itself.
-  # Starting the target is the boot-equivalent transaction. The explicit
-  # capsule start is retained as a deterministic fallback for hosts whose
-  # multi-user target was already active when the fixture entered this gate.
-  systemctl --system start multi-user.target
-  systemctl --system start "$recovery_unit"
+  # Restarting the target forces systemd to traverse the vendor Wants edge,
+  # which models the next boot transaction without rebooting the CI host.
+  # Do not start the capsule directly: this assertion must prove boot pickup.
+  systemctl --system restart multi-user.target
 fi
 printf 'durable recovery crash-point pending gate: %s\n' \
   "$(cat "$test_root/crash-point-pending-kind")"

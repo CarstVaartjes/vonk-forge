@@ -33,7 +33,7 @@ capsule_manifest=$capsule_dir/manifest
 capsule_runner=$capsule_dir/runner
 capsule_unit_name=vonk-forge-package-upgrade-recover-capsule.service
 capsule_unit=/lib/systemd/system/$capsule_unit_name
-capsule_wants_dir=/etc/systemd/system/multi-user.target.wants
+capsule_wants_dir=/lib/systemd/system/multi-user.target.wants
 capsule_enablement=$capsule_wants_dir/$capsule_unit_name
 capsule_gate_dir=/lib/systemd/system/vonk-forge-agent.service.d
 capsule_gate=$capsule_gate_dir/10-package-upgrade-capsule.conf
@@ -375,7 +375,7 @@ stage_recovery_unit() {
 safe_capsule_enablement() {
     [ -L "$capsule_enablement" ] \
         && [ "$(/usr/bin/readlink "$capsule_enablement")" \
-            = "$capsule_unit" ]
+            = "../$capsule_unit_name" ]
 }
 
 capsule_shadow_paths_absent() {
@@ -383,13 +383,12 @@ capsule_shadow_paths_absent() {
         for shadow_path in \
             "$systemd_root/$capsule_unit_name" \
             "$systemd_root/$capsule_unit_name.d" \
+            "$systemd_root/multi-user.target.wants/$capsule_unit_name" \
             "$systemd_root/vonk-forge-agent.service.d" \
             "$systemd_root/$unit_name.d"; do
             [ ! -e "$shadow_path" ] && [ ! -L "$shadow_path" ] || return 1
         done
     done
-    runtime_enablement=$capsule_runtime_root/multi-user.target.wants/$capsule_unit_name
-    [ ! -e "$runtime_enablement" ] && [ ! -L "$runtime_enablement" ]
 }
 
 stage_embedded_file() {
@@ -513,7 +512,7 @@ suppression_sha256=$recovery_capsule_suppression_sha256
     if [ -e "$capsule_enablement" ] || [ -L "$capsule_enablement" ]; then
         safe_capsule_enablement || return 1
     else
-        /usr/bin/ln -s "$capsule_unit" "$capsule_enablement"
+        /usr/bin/ln -s "../$capsule_unit_name" "$capsule_enablement"
         /usr/bin/sync -f "$capsule_wants_dir"
     fi
     safe_capsule_enablement

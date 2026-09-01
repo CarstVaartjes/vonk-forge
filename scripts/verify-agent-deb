@@ -639,7 +639,7 @@ def _verify_payload(
         raise VerificationError("preinst and durable recovery runner differ")
     for forbidden in (
         "lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service",
-        "etc/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
+        "lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
         "lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
         "lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
     ):

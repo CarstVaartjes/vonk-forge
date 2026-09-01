@@ -983,15 +983,21 @@ def test_durable_recovery_capsule_is_single_owner_boot_gated_and_intent_retired_
         "ConditionPathExists=!/var/lib/vonk-forge/package-upgrade/intent" in suppression
     )
     assert "capsule_admin_root=/etc/systemd/system" in preinst
-    assert "capsule_wants_dir=/etc/systemd/system/multi-user.target.wants" in preinst
-    assert '/usr/bin/ln -s "$capsule_unit" "$capsule_enablement"' in preinst
+    assert "capsule_wants_dir=/lib/systemd/system/multi-user.target.wants" in preinst
+    assert '/usr/bin/ln -s "../$capsule_unit_name" "$capsule_enablement"' in preinst
     assert "capsule_runtime_root=/run/systemd/system" in preinst
     assert "capsule_shadow_paths_absent || return 1" in preinst
 
 
 @pytest.mark.parametrize(
     ("relative", "kind"),
-    (("vonk-forge-package-upgrade-recover-capsule.service", "file"),),
+    (
+        ("vonk-forge-package-upgrade-recover-capsule.service", "file"),
+        (
+            "multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
+            "symlink",
+        ),
+    ),
 )
 def test_durable_recovery_capsule_rejects_admin_unit_and_enablement_collisions(
     tmp_path: Path, relative: str, kind: str
@@ -1028,7 +1034,7 @@ def test_durable_recovery_capsule_rejects_admin_unit_and_enablement_collisions(
     assert result.returncode != 0
 
 
-def test_durable_recovery_capsule_enablement_is_exact_and_admin_owned(
+def test_durable_recovery_capsule_enablement_is_exact_and_vendor_owned(
     tmp_path: Path,
 ) -> None:
     preinst = PREINST.read_text()
@@ -1037,12 +1043,12 @@ def test_durable_recovery_capsule_enablement_is_exact_and_admin_owned(
     function = preinst[start:end]
     unit = tmp_path / "lib/systemd/system/recovery.service"
     enablement = (
-        tmp_path / "etc/systemd/system/multi-user.target.wants/recovery.service"
+        tmp_path / "lib/systemd/system/multi-user.target.wants/recovery.service"
     )
     unit.parent.mkdir(parents=True)
     enablement.parent.mkdir(parents=True)
     unit.write_text("unit\n", encoding="utf-8")
-    enablement.symlink_to(unit)
+    enablement.symlink_to("../recovery.service")
     result = subprocess.run(
         [
             "/bin/sh",
@@ -1053,7 +1059,7 @@ def test_durable_recovery_capsule_enablement_is_exact_and_admin_owned(
         env={
             **os.environ,
             "capsule_enablement": str(enablement),
-            "capsule_unit": str(unit),
+            "capsule_unit_name": "recovery.service",
         },
     )
     assert result.returncode == 0
@@ -1065,7 +1071,7 @@ def test_durable_recovery_capsule_enablement_is_exact_and_admin_owned(
         env={
             **os.environ,
             "capsule_enablement": str(enablement),
-            "capsule_unit": str(unit),
+            "capsule_unit_name": "recovery.service",
         },
     )
     assert result.returncode != 0
