@@ -963,6 +963,9 @@ test "$capsule_unit_digest" = "$embedded_capsule_unit_digest"
 test "$capsule_gate_digest" = "$embedded_capsule_gate_digest"
 test "$capsule_suppression_digest" = "$embedded_capsule_suppression_digest"
 capsule_manifest=/var/lib/vonk-forge/package-upgrade/recovery-capsule/manifest
+grep -Fxq 'schema_version=2' "$capsule_manifest"
+capsule_runner_digest=$(sed -n '2s/^runner_sha256=//p' "$capsule_manifest")
+[[ "$capsule_runner_digest" =~ ^[0-9a-f]{64}$ ]]
 test "$capsule_unit_digest" = "$(sed -n '3s/^unit_sha256=//p' \
   "$capsule_manifest")"
 test "$capsule_gate_digest" = "$(sed -n '4s/^gate_sha256=//p' \
@@ -970,7 +973,7 @@ test "$capsule_gate_digest" = "$(sed -n '4s/^gate_sha256=//p' \
 test "$capsule_suppression_digest" = "$(sed -n \
   '5s/^suppression_sha256=//p' "$capsule_manifest")"
 test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" \
-  | cut -d' ' -f1)" = "$target_recovery_runner_digest"
+  | cut -d' ' -f1)" = "$capsule_runner_digest"
 
   systemctl --system daemon-reload
   systemctl --system reset-failed "$agent_unit" "$recovery_unit" \

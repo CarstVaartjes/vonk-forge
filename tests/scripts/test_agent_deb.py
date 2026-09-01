@@ -1153,7 +1153,7 @@ def test_recovery_status_is_bounded_stage_only_and_exercised_natively() -> None:
 def test_root_custody_lifecycle_executes_the_exact_real_dpkg_contract() -> None:
     lifecycle = RECOVERY_LIFECYCLE.read_text()
 
-    assert "candidate_custody=${CANDIDATE_CUSTODY:-legacy}" in lifecycle
+    assert "candidate_custody=${CANDIDATE_CUSTODY:-root}" in lifecycle
     assert "custody_root=/run/vonk-forge-package-candidates" in lifecycle
     assert "custody_invocation=0123456789abcdef0123456789abcdef" in lifecycle
     assert (
@@ -2912,7 +2912,7 @@ def test_repair_runtime_bounds_the_transient_manager_probe() -> None:
     assert "source_schema" not in runner
     assert "SOURCE_CAPSULE_V2" not in runner
     assert "schema_version=2" in runner
-    assert "canonical_line_file \"$source_intent\" 17" in runner
+    assert 'canonical_line_file "$source_intent" 17' in runner
     assert "repair_gate_loaded" in runner
     assert "terminal_repair_contract_safe" in runner
     assert "source_capsule_terminal_safe" in runner
