@@ -1759,12 +1759,19 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             try:
                 self_test = self._self_test()
-                if (
-                    self._installed_package_version() != package_version
-                    or self_test.get("semantic_version") != expected_semantic
-                    or self_test.get("architecture") != expected_architecture
-                ):
-                    raise LifecycleError("installed package identity is unexpected")
+                installed_package_version = self._installed_package_version()
+                package_mismatches = []
+                if installed_package_version != package_version:
+                    package_mismatches.append("package_version")
+                if self_test.get("semantic_version") != expected_semantic:
+                    package_mismatches.append("semantic_version")
+                if self_test.get("architecture") != expected_architecture:
+                    package_mismatches.append("architecture")
+                if package_mismatches:
+                    raise LifecycleError(
+                        "installed package identity is unexpected: "
+                        + ",".join(package_mismatches)
+                    )
                 _, response = self.control.request("GET", "/api/v1/agents")
                 agents = require_object(response, "agents").get("agents")
                 matching = [
@@ -1774,19 +1781,33 @@ class SparkLifecycle:
                     and agent.get("semantic_version") == expected_semantic
                 ]
                 if len(matching) != 1:
-                    raise LifecycleError("controller has not observed the direct agent")
+                    raise LifecycleError(
+                        "controller has not observed the direct agent: "
+                        f"semantic_version_matches={len(matching)}"
+                    )
                 agent = matching[0]
                 node_id = agent.get("node_id")
+                agent_mismatches = []
                 if (
                     not isinstance(node_id, str)
                     or NODE_ID.fullmatch(node_id) is None
-                    or agent.get("state") != "active"
-                    or agent.get("stale") is not False
-                    or agent.get("build_digest") != self_test["build_digest"]
-                    or agent.get("binary_digest") != self_test["binary_digest"]
-                    or "agent.runtime.rust.v1" not in agent.get("capabilities", [])
                 ):
-                    raise LifecycleError("controller direct-agent identity is invalid")
+                    agent_mismatches.append("node_id")
+                if agent.get("state") != "active":
+                    agent_mismatches.append("state")
+                if agent.get("stale") is not False:
+                    agent_mismatches.append("stale")
+                if agent.get("build_digest") != self_test["build_digest"]:
+                    agent_mismatches.append("build_digest")
+                if agent.get("binary_digest") != self_test["binary_digest"]:
+                    agent_mismatches.append("binary_digest")
+                if "agent.runtime.rust.v1" not in agent.get("capabilities", []):
+                    agent_mismatches.append("capabilities")
+                if agent_mismatches:
+                    raise LifecycleError(
+                        "controller direct-agent identity is invalid: "
+                        + ",".join(agent_mismatches)
+                    )
                 rows = self._psql(
                     "SELECT architecture,semantic_version,build_digest,binary_digest,"
                     "self_test_passed::int,contact_certificate_serial "
@@ -1799,13 +1820,32 @@ class SparkLifecycle:
                     str(self_test["binary_digest"]),
                     "1",
                 ]
-                if (
-                    len(rows) != 1
-                    or rows[0][:5] != expected_row
-                    or len(rows[0]) != 6
-                    or SERIAL.fullmatch(rows[0][5]) is None
-                ):
-                    raise LifecycleError("controller runtime identity is incomplete")
+                row_mismatches = []
+                if len(rows) != 1:
+                    row_mismatches.append("row_count")
+                elif rows[0][:5] != expected_row:
+                    row_mismatches.extend(
+                        field
+                        for index, field in enumerate(
+                            (
+                                "architecture",
+                                "semantic_version",
+                                "build_digest",
+                                "binary_digest",
+                                "self_test_passed",
+                            )
+                        )
+                        if len(rows[0]) <= index or rows[0][index] != expected_row[index]
+                    )
+                if len(rows) == 1 and len(rows[0]) != 6:
+                    row_mismatches.append("column_count")
+                elif len(rows) == 1 and SERIAL.fullmatch(rows[0][5]) is None:
+                    row_mismatches.append("contact_certificate_serial")
+                if row_mismatches:
+                    raise LifecycleError(
+                        "controller runtime identity is incomplete: "
+                        + ",".join(dict.fromkeys(row_mismatches))
+                    )
                 return {
                     "binary_sha256": self_test["binary_digest"],
                     "build_sha256": str(self_test["build_digest"]).removeprefix(
