@@ -1823,8 +1823,9 @@ class SparkLifecycle:
             except (LifecycleError, SliceError, TypeError) as error:
                 last_error = error
                 time.sleep(2)
+        reason = str(last_error) if last_error is not None else "no observation"
         raise LifecycleError(
-            "direct Rust agent identity did not converge"
+            f"direct Rust agent identity did not converge: {reason}"
         ) from last_error
 
     @staticmethod
