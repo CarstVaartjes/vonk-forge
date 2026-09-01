@@ -1197,26 +1197,26 @@ test "$(systemctl --system is-enabled "$agent_unit")" = enabled
 test "$(systemctl --system show --property=ActiveState --value \
   multi-user.target)" = active
 test "$(stat -c %u:%g:%a:%h \
-  /var/lib/vonk-forge/package-upgrade/$package_digest.deb)" = 0:0:600:1
-test "$(sha256sum /var/lib/vonk-forge/package-upgrade/$package_digest.deb \
+  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb")" = 0:0:600:1
+test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
   | cut -d' ' -f1)" = "$package_digest"
 capsule_unit_digest=$(sha256sum "$recovery_unit_path" | cut -d' ' -f1)
 capsule_gate_digest=$(sha256sum "$recovery_gate" | cut -d' ' -f1)
 capsule_suppression_digest=$(sha256sum "$recovery_suppression" \
   | cut -d' ' -f1)
 test "$capsule_unit_digest" = "$(dpkg-deb --fsys-tarfile \
-  /var/lib/vonk-forge/package-upgrade/$package_digest.deb \
+  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
   | tar -xOf - ./lib/systemd/system/$recovery_unit \
   | sha256sum | cut -d' ' -f1)"
 test "$capsule_gate_digest" = "$(dpkg-deb --fsys-tarfile \
-  /var/lib/vonk-forge/package-upgrade/$package_digest.deb \
+  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
   | tar -xOf - ./lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf \
   | sha256sum | cut -d' ' -f1)"
 test "$capsule_suppression_digest" = "$(dpkg-deb --fsys-tarfile \
-  /var/lib/vonk-forge/package-upgrade/$package_digest.deb \
+  "/var/lib/vonk-forge/package-upgrade/$package_digest.deb" \
   | tar -xOf - ./lib/systemd/system/$package_recovery_unit.d/10-capsule-owner.conf \
   | sha256sum | cut -d' ' -f1)"
-test "$(sha256sum /var/lib/vonk-forge/package-upgrade/recovery-capsule/runner \
+test "$(sha256sum "/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner" \
   | cut -d' ' -f1)" = "$target_recovery_runner_digest"
 
   systemctl --system daemon-reload
