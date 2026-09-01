@@ -1036,11 +1036,12 @@ collision_unit="vonk-repair-agent-collision-${collision_nonce}.service"
 native_transient_unit=$collision_unit
 /usr/bin/systemd-run --system --collect --quiet --unit="$collision_unit" \
   -- /bin/sleep 1
-set +e
-/usr/bin/systemd-run --system --wait --pipe --collect --quiet \
-  --unit="$collision_unit" -- /bin/true >/dev/null 2>&1
-collision_status=$?
-set -e
+if /usr/bin/systemd-run --system --wait --pipe --collect --quiet \
+  --unit="$collision_unit" -- /bin/true >/dev/null 2>&1; then
+  collision_status=0
+else
+  collision_status=$?
+fi
 test "$collision_status" -ne 0
 wait_for_transient_collection "$collision_unit"
 native_transient_unit=
@@ -1800,7 +1801,7 @@ test "$(stat -c %u:%g:%a:%h "$repair_receipt")" = 0:0:600:1
 test "$(stat -c %u:%g:%a:%h "$helper_receipt")" = 0:0:600:1
 test "$(wc -l < "$repair_receipt")" -eq 16
 test "$(wc -l < "$helper_receipt")" -eq 10
-sed -n '1p' "$helper_receipt" | grep -Fxq 'schema_version=1'
+sed -n '1p' "$helper_receipt" | grep -Fxq 'schema_version=2'
 sed -n '2p' "$helper_receipt" | grep -Fxq "authority_sha256=$authority_sha"
 helper_nonce="$(sed -n '3s/^repair_nonce=//p' "$helper_receipt")"
 [[ "$helper_nonce" =~ ^[0-9a-f]{64}$ ]]
@@ -1815,7 +1816,7 @@ helper_receipt_start="$(sed -n '10s/^helper_start_time=//p' "$helper_receipt")"
 [[ "$helper_receipt_pid" =~ ^[1-9][0-9]*$ ]]
 [[ "$helper_receipt_start" =~ ^[1-9][0-9]*$ ]]
 
-sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=1'
+sed -n '1p' "$repair_receipt" | grep -Fxq 'schema_version=2'
 sed -n '2p' "$repair_receipt" | grep -Fxq "authority_sha256=$authority_sha"
 sed -n '3p' "$repair_receipt" | grep -Fxq "node_id=$node_id"
 sed -n '4p' "$repair_receipt" | grep -Fxq "version=$repair_version"

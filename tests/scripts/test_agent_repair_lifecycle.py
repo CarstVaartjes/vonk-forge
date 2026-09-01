@@ -271,6 +271,32 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     assert 'test "$target_helper_pid" = "$final_helper_pid"' in harness
 
 
+def test_repair_native_harness_expects_schema2_terminal_receipts() -> None:
+    harness = HARNESS.read_text()
+    terminal_receipts = harness[
+        harness.index('test -f "$repair_receipt"') : harness.index(
+            '[[ "$final_agent_pid" =~ ^[1-9][0-9]*$ ]]'
+        )
+    ]
+
+    assert terminal_receipts.count("grep -Fxq 'schema_version=2'") == 2
+    assert "grep -Fxq 'schema_version=1'" not in terminal_receipts
+
+
+def test_expected_transient_collision_does_not_mask_err_diagnostics() -> None:
+    harness = HARNESS.read_text()
+    collision_start = harness.index("collision_nonce=$(openssl rand -hex 32)")
+    collision_end = harness.index(
+        'wait_for_transient_collection "$collision_unit"', collision_start
+    )
+    collision = harness[collision_start:collision_end]
+
+    assert "if /usr/bin/systemd-run" in collision
+    assert "collision_status=$?" in collision
+    assert "set +e" not in collision
+    assert "set -e" not in collision
+
+
 def test_repair_native_cleanup_cannot_arm_before_collision_preflight() -> None:
     harness = HARNESS.read_text()
     preflight = harness.index("if dpkg-query -W vonk-forge-agent")
