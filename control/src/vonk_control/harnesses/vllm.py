@@ -23,6 +23,11 @@ from .common import (
 )
 from .contracts import HarnessProjection
 
+_DISTRIBUTED_BACKENDS = {
+    "vllm-mp": "mp",
+    "vllm-ray": "ray",
+}
+
 _ARGUMENTS = {
     "max-model-len": ArgumentSpec("--max-model-len", validate=integer(1, 10_000_000)),
     "gpu-memory-utilization": ArgumentSpec(
@@ -239,13 +244,14 @@ class VllmHarnessCompiler:
                 if isinstance(implementation, Mapping)
                 else None
             )
+            distributed_backend = _DISTRIBUTED_BACKENDS.get(mechanism)
             parallelism = topology.get("parallelism")
             node_count = topology.get("node_count")
             if (
                 patch is None
                 or not isinstance(implementation, Mapping)
                 or implementation.get("verified") is not True
-                or mechanism not in {"vllm-mp", "vllm-ray"}
+                or distributed_backend is None
                 or implementation.get("topology_mode") != "distributed"
                 or implementation.get("node_count") != node_count
                 or implementation.get("world_size") != node_count
@@ -259,8 +265,7 @@ class VllmHarnessCompiler:
                 or implementation.get("worker_role") != "worker"
                 or implementation.get("rank_loss_withdraws_endpoint") is not True
                 or implementation.get("fabric") != "nccl-roce"
-                or parallelism.get("backend")
-                != ("ray" if mechanism == "vllm-ray" else "mp")
+                or parallelism.get("backend") != distributed_backend
             ):
                 raise HarnessCompileError(
                     "vLLM distributed topology requires a verified distributed vLLM distribution"
@@ -328,7 +333,7 @@ class VllmHarnessCompiler:
                 "--pipeline-parallel-size",
                 str(parallelism["pipeline"]),
                 "--distributed-executor-backend",
-                "mp" if mechanism == "vllm-mp" else "ray",
+                distributed_backend,
                 "--nnodes",
                 str(node_count),
                 "--node-rank",

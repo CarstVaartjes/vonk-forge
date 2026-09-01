@@ -1261,6 +1261,23 @@ def test_vllm_projects_a_verified_ray_adapter_contract() -> None:
     assert projection.command[backend + 1] == "ray"
     assert "--headless" in projection.command
 
+    # The runtime distribution mechanism and recipe topology backend form a
+    # pair.  Both supported vLLM distributed mechanisms must compile.
+    recipe["topology"]["parallelism"]["backend"] = "mp"
+    distribution["capabilities"]["distributed_vllm"]["mechanism"] = "vllm-mp"
+    projection = VllmHarnessCompiler().compile(
+        recipe,
+        distribution,
+        {},
+        {},
+        recipe["topology"],
+        "worker",
+        1,
+    )
+    backend = projection.command.index("--distributed-executor-backend")
+    assert projection.command[backend + 1] == "mp"
+
+    distribution["capabilities"]["distributed_vllm"]["mechanism"] = "vllm-ray"
     recipe["topology"]["parallelism"]["backend"] = "mp"
     with pytest.raises(
         HarnessCompileError,
