@@ -123,6 +123,13 @@ def _request(
         raise LifecycleError(
             f"Tailscale API {method} {path} returned invalid JSON"
         ) from error
+    # The Tailscale delete endpoint may acknowledge a successful deletion with
+    # JSON `null` or a scalar message instead of an object.  DELETE callers do
+    # not consume a response document, so normalize those acknowledgements to
+    # the same empty response used for a 204.  Keep object validation strict
+    # for every other method (and for unexpected DELETE arrays/numbers/bools).
+    if method == "DELETE" and (document is None or isinstance(document, str)):
+        return ApiResponse(document={}, etag=etag)
     if not isinstance(document, dict):
         raise LifecycleError(
             f"Tailscale API {method} {path} returned an invalid document"
