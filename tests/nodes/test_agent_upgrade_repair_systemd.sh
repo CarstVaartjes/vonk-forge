@@ -25,12 +25,12 @@ standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
-source_version=0.1.0~dev.381+ga122909feaa3
+source_version=0.1.0~dev.381+g9162cae2c853
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.382+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
 binary_revision=$(git -c safe.directory="$repo_root" --no-replace-objects \
-  -C "$repo_root" rev-parse a122909f)
+  -C "$repo_root" rev-parse 9162cae2)
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -511,6 +511,9 @@ else
     --package vonk-repair-helper-probe
   repair_probe_binary=$expected_repair_probe_binary
 fi
+repair_probe_source=$repair_probe_binary
+repair_probe_binary=$test_root/vonk-repair-helper-probe
+install -o root -g root -m 0755 "$repair_probe_source" "$repair_probe_binary"
 test ! -L "$repair_probe_binary"
 test -f "$repair_probe_binary"
 test "$(stat -c %u:%g:%a:%h "$repair_probe_binary")" = '0:0:755:1'
