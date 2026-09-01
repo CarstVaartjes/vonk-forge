@@ -4064,7 +4064,7 @@
       }
     },
     "vonk-forge/laguna-s-2-1-nvfp4-vllm-single": {
-      "content_sha256": "6411a685d6f2b1aa518ffb1fc2fabd8b27a612751a0082b175188a98ed4cbf3a",
+      "content_sha256": "5d002b31ce3cb85dc2ff6f4acf798ec3386ce6ac0372061cc7c9a5b8dfa3a335",
       "alias": "laguna-s-2-1",
       "smoke_cases": [
         "M0",
