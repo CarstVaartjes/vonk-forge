@@ -250,6 +250,32 @@ service_host_is_approved() {
         && service_has_mapped_addresses "${hermes_dashboard_service}"
 }
 
+reconfigure_approved_services() {
+    include_hermes=$1
+    repaired=1
+    if service_has_mapped_addresses "${control_service}"; then
+        ts serve drain "${control_service}" >/dev/null 2>&1 || true
+        ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
+        ts serve advertise "${control_service}" >/dev/null
+        repaired=0
+    fi
+    if [ "${include_hermes}" = "1" ] \
+        && service_has_mapped_addresses "${hermes_api_service}"; then
+        ts serve drain "${hermes_api_service}" >/dev/null 2>&1 || true
+        ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
+        ts serve advertise "${hermes_api_service}" >/dev/null
+        repaired=0
+    fi
+    if [ "${include_hermes}" = "1" ] \
+        && service_has_mapped_addresses "${hermes_dashboard_service}"; then
+        ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1 || true
+        ts serve --service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119 >/dev/null
+        ts serve advertise "${hermes_dashboard_service}" >/dev/null
+        repaired=0
+    fi
+    return "${repaired}"
+}
+
 service_has_primary_routes() {
     service_name=$1
     service_has_mapped_addresses "${service_name}" || return 1
@@ -393,8 +419,7 @@ while [ "${remaining}" -gt 0 ]; do
         # local Serve config is exact but the daemon retained an advertisement
         # without installing its primary routes. The policy remains the only
         # authority that approves the host.
-        if service_host_is_approved "${include_hermes}"; then
-            configure_services "${include_hermes}" || true
+        if reconfigure_approved_services "${include_hermes}"; then
             wait_for_exact_services "${include_hermes}" || true
         else
             advertise_services || true
@@ -441,9 +466,8 @@ while :; do
     # access or a container restart. The policy remains the only authority that
     # approves the host.
     if ! service_host_is_active "${desired_hermes}"; then
-        if service_host_is_approved "${desired_hermes}"; then
-            configure_services "${desired_hermes}"
-            wait_for_exact_services "${desired_hermes}" || exit 1
+        if reconfigure_approved_services "${desired_hermes}"; then
+            wait_for_exact_services "${desired_hermes}" || true
         else
             # A pending advertisement is not represented by service-host, so
             # keep retrying the exact local advertisement until policy approval
