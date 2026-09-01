@@ -183,8 +183,8 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
     _assert_frozen_runtime_and_old_runner()
 
     assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
-    assert "0.1.0~dev.381+g9162cae286d1" in harness
-    assert "rev-parse 9162cae2" in harness
+    assert "0.1.0~dev.1788260440+g4cac2044d05e" in harness
+    assert "rev-parse 4cac2044d05e39adb2a516223d1833656f605c43" in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness
     assert harness.count('submit_helper_install "$') == 2
     submit = harness[

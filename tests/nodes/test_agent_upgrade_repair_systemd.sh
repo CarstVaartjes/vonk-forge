@@ -25,12 +25,12 @@ standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
-source_version=0.1.0~dev.381+g9162cae286d1
+source_version=0.1.0~dev.1788260440+g4cac2044d05e
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.382+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
 binary_revision=$(git -c safe.directory="$repo_root" --no-replace-objects \
-  -C "$repo_root" rev-parse 9162cae2)
+  -C "$repo_root" rev-parse 4cac2044d05e39adb2a516223d1833656f605c43)
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
