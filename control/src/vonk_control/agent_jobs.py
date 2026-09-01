@@ -104,6 +104,7 @@ _NEXT_CAPABILITIES = (
 _OPTIONAL_CAPABILITIES = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
+        "recipe.model-uninstall.v1",
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
         "recipe.run.inspect.receipt.v1",
