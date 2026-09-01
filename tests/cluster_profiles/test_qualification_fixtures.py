@@ -443,7 +443,7 @@ def test_below_envelope_canary_bindings_are_exact() -> None:
         "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single"
     ]
     assert (laguna.content_sha256, laguna.alias) == (
-        "c384397f261aba1328f6e167041f04975cca67f111bcf89afaae41c1a0ffecf0",
+        "51d1044c7cea46c57ba0e31ee691b8e78a3a0d30917d225fe01539031feb4c60",
         "laguna-s-2-1-low-memory-canary",
     )
 
