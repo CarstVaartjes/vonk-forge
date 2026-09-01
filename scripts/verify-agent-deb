@@ -171,7 +171,6 @@ def verify(
             or re.fullmatch(r"[0-9a-f]{40}", expected_binary_source_revision) is None
             or expected_packaging_source_revision is None
             or re.fullmatch(r"[0-9a-f]{40}", expected_packaging_source_revision) is None
-            or expected_binary_source_revision == expected_packaging_source_revision
         ):
             raise VerificationError(
                 "repair verification requires exact node, authority, release-key, "

@@ -969,9 +969,8 @@ def build(
             or re.fullmatch(r"[0-9a-f]{40}", packaging_source_revision) is None
             or source_revision_match is None
             or not binary_source_revision.startswith(source_revision_match.group(1))
-            or packaging_source_revision == binary_source_revision
         ):
-            raise BuildError("repair source revisions are invalid or ambiguous")
+            raise BuildError("repair source revisions are invalid or version-mismatched")
         repair_evidence = {
             "authority_sha256": hashlib.sha256(repair_authority_raw).hexdigest(),
             "binary_source_revision": binary_source_revision,

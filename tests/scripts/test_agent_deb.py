@@ -91,6 +91,18 @@ def test_repair_source_lookup_trusts_only_the_resolved_repository(monkeypatch) -
     ]
 
 
+def test_greenfield_repair_allows_one_exact_binary_and_packaging_revision() -> None:
+    builder = BUILD.read_text()
+    verifier = VERIFY.read_text()
+
+    assert "packaging_source_revision == binary_source_revision" not in builder
+    assert (
+        "expected_binary_source_revision == expected_packaging_source_revision"
+        not in verifier
+    )
+    assert "not binary_source_revision.startswith(source_revision_match.group(1))" in builder
+
+
 def test_repair_verifier_trusts_only_the_resolved_repository(monkeypatch) -> None:
     observed: list[str] = []
 

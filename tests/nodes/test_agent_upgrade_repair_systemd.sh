@@ -26,7 +26,7 @@ node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
-binary_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" log -1 --format=%H -- packaging/debian/preinst-repair)"
+binary_revision=$packaging_revision
 source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.1788260441+g0123456789ab
@@ -104,6 +104,7 @@ helper_receipt=/var/lib/vonk-forge/package-repair-helper.receipt
 agent_unit=vonk-forge-agent.service
 helper_unit=vonk-forge-package-helper.service
 socket_unit=vonk-forge-package-helper.socket
+running_agent_bypass=/run/systemd/system/$agent_unit.d/99-repair-fixture-bypass.conf
 agent_enablement=/etc/systemd/system/multi-user.target.wants/$agent_unit
 recovery_unit=vonk-forge-package-upgrade-recover-capsule.service
 firewall_name=vonk-forge-docker-firewall.service
@@ -235,6 +236,9 @@ cleanup() {
     "${source_capsule_gate%/*}" "${source_capsule_suppression%/*}" \
     >/dev/null 2>&1 || true
   rm -rf -- /run/vonk-forge-package-helper
+  rm -f -- "$running_agent_bypass"
+  rmdir --ignore-fail-on-non-empty "${running_agent_bypass%/*}" \
+    >/dev/null 2>&1 || true
   rm -f -- "$standard_runner"
   case "$fault" in
     dpkg-iU) fixture_dpkg_status='iU '; fixture_dpkg_version=$installed_version ;;
@@ -349,6 +353,9 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /run/vonk-forge-package-candidates \
     || -e /run/vonk-forge-package-helper \
     || -L /run/vonk-forge-package-helper \
+    || -e "$running_agent_bypass" \
+    || -L "$running_agent_bypass" \
+    || -L "${running_agent_bypass%/*}" \
     || -e "/var/lib/dpkg/tmp.ci/$repair_probe_control" \
     || -L "/var/lib/dpkg/tmp.ci/$repair_probe_control" \
     || -n "$probe_info_collision" \
@@ -1335,7 +1342,7 @@ run_wrong_binary_but_restore_installed() {
   local destination=$2
   local wrong_binary=$3
   local expected_installed=$4
-  local gate_backup=
+  local bypass_manager_path=
   local wrong_sha
   local restart_status
   local wrong_pid=
@@ -1355,7 +1362,11 @@ run_wrong_binary_but_restore_installed() {
   wrong_sha="$(sha256sum "$wrong_binary" | cut -d' ' -f1)"
   atomic_replace "$wrong_binary" "$destination" 0555
   if [[ "$unit" = "$agent_unit" ]]; then
-    gate_backup=$test_root/running-agent-source-gate
+    test -f "$source_capsule_gate"
+    test ! -L "$source_capsule_gate"
+    test "$(stat -c %u:%g:%a:%h "$source_capsule_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_capsule_gate" | cut -d' ' -f1)" \
+      = "$source_capsule_gate_sha"
     test -f "$source_gate"
     test ! -L "$source_gate"
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
@@ -1370,18 +1381,30 @@ run_wrong_binary_but_restore_installed() {
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]
     [[ "$gate_condition" = *"allow-agent-start"* ]]
-    install -o root -g root -m 0644 "$source_gate" "$gate_backup"
-    test "$(sha256sum "$gate_backup" | cut -d' ' -f1)" = "$source_gate_sha"
-    rm -f -- "$source_gate"
+    # Reset the accumulated ExecCondition list with a runtime-only fixture
+    # override so an already-running wrong process can be constructed without
+    # mutating either production gate. The override is removed and both exact
+    # gates are re-proved before repair is invoked.
+    test ! -e "$running_agent_bypass"
+    test ! -L "$running_agent_bypass"
+    test ! -L "${running_agent_bypass%/*}"
+    install -d -o root -g root -m 0755 "${running_agent_bypass%/*}"
+    test "$(stat -c %u:%g:%a "${running_agent_bypass%/*}")" = 0:0:755
+    printf '%s\n' '[Service]' 'ExecCondition=' > "$running_agent_bypass"
+    chown root:root "$running_agent_bypass"
+    chmod 0644 "$running_agent_bypass"
+    sync -f "$running_agent_bypass"
+    sync -f "${running_agent_bypass%/*}"
     systemctl --system daemon-reload
+    bypass_manager_path="$(realpath -e -- "$running_agent_bypass")"
     drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
       "$agent_unit")"
     [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
-    [[ " $drop_in_paths " != *" $source_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
+    [[ " $drop_in_paths " = *" $bypass_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
-    [[ "$gate_condition" = *"$source_runner"* ]]
-    [[ "$gate_condition" = *"allow-agent-start"* ]]
+    test -z "$gate_condition"
   fi
   set +e
   systemctl --system restart "$unit"
@@ -1420,17 +1443,25 @@ run_wrong_binary_but_restore_installed() {
       $1=""; sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print
     }' "/proc/$wrong_pid_before/status" 2>/dev/null)"
   fi
-  if [[ -n "$gate_backup" ]]; then
-    atomic_replace "$gate_backup" "$source_gate" 0644
+  if [[ -n "$bypass_manager_path" ]]; then
+    rm -f -- "$running_agent_bypass"
+    sync -f "${running_agent_bypass%/*}"
     systemctl --system daemon-reload
-    cmp -s "$gate_backup" "$source_gate"
+    test ! -e "$running_agent_bypass"
+    test ! -L "$running_agent_bypass"
+    test "$(stat -c %u:%g:%a:%h "$source_capsule_gate")" = 0:0:644:1
     test "$(stat -c %u:%g:%a:%h "$source_gate")" = 0:0:644:1
+    test "$(sha256sum "$source_capsule_gate" | cut -d' ' -f1)" \
+      = "$source_capsule_gate_sha"
     test "$(sha256sum "$source_gate" | cut -d' ' -f1)" = "$source_gate_sha"
+    test "$(realpath -e -- "$source_capsule_gate")" \
+      = "$source_capsule_gate_manager_path"
     test "$(realpath -e -- "$source_gate")" = "$source_gate_manager_path"
     drop_in_paths="$(systemctl --system show --property=DropInPaths --value \
       "$agent_unit")"
     [[ " $drop_in_paths " = *" $source_capsule_gate_manager_path "* ]]
     [[ " $drop_in_paths " = *" $source_gate_manager_path "* ]]
+    [[ " $drop_in_paths " != *" $bypass_manager_path "* ]]
     gate_condition="$(systemctl --system show \
       --property=ExecCondition --value "$agent_unit")"
     [[ "$gate_condition" = *"$source_runner"* ]]

@@ -57,7 +57,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert 'systemctl --system start "$socket_unit"' in harness
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
-    assert "log -1 --format=%H -- packaging/debian/preinst-repair" in harness
+    assert "binary_revision=$packaging_revision" in harness
     assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
     assert '"$test_root/target-dist" "$repo_root" "$binary_revision"' in harness
     assert "source_capsule_unit_file=$repo_root/packaging/systemd/" in harness
@@ -88,7 +88,7 @@ def _assert_frozen_schema2_runtime() -> None:
             "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
         ),
         ROOT / "scripts/build-agent-deb": (
-            "264ec76c89e951d4e240e8f6f0452ced3388bbab1d888b4743bfcdae8fb3c9fe"
+            "fec5fba5b5c285565bc370acd3b3e07f10671c34665d5755ac85ea1bf7f0c084"
         ),
     }
     for path, digest in expected.items():
@@ -174,7 +174,7 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
 
     assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
     assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
-    assert "log -1 --format=%H -- packaging/debian/preinst-repair" in harness
+    assert "binary_revision=$packaging_revision" in harness
     assert 'rev-parse HEAD)"' in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness
     assert harness.count('submit_helper_install "$') == 2
@@ -202,10 +202,14 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
         'fixture_self_test=$("$fixture_agent" --config /dev/null self-test)' in harness
     )
     assert "failed assertion: line=%s status=%s expected-agent=%s:%s" in harness
-    assert "gate_backup=$test_root/running-agent-source-gate" in harness
-    assert 'rm -f -- "$source_gate"' in harness
+    assert (
+        "running_agent_bypass=/run/systemd/system/"
+        "$agent_unit.d/99-repair-fixture-bypass.conf" in harness
+    )
+    assert "printf '%s\\n' '[Service]' 'ExecCondition='" in harness
+    assert 'rm -f -- "$running_agent_bypass"' in harness
     assert 'source_gate_manager_path="$(realpath -e -- "$source_gate")"' in harness
-    assert 'atomic_replace "$gate_backup" "$source_gate" 0644' in harness
+    assert 'test ! -e "$running_agent_bypass"' in harness
     assert "local destination=$2" in harness
     assert (
         'assert_fixture_equal "wrong-process restart status" 0 "$restart_status"'
