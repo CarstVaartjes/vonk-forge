@@ -491,7 +491,8 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
         "\nfi", 1
     )[0]
     assert "*,hermes,*)" in health
-    assert "hermes_is_available && serve_is_exact 1" in health
+    assert "hermes_is_available" in health
+    assert "serve_is_exact 1" in health
     assert "serve_is_exact 0" in health
     for forbidden in ("svc:*", "svc:ai-devbox", "tcp:22", "--tcp=22"):
         assert forbidden not in text

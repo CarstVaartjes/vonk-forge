@@ -307,12 +307,36 @@ hermes_is_available && include_hermes=1
 if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
     case ",${selected_profiles}," in
         *,hermes,*)
-            [ -S "${socket}" ] && service_host_is_active 1 \
-                && hermes_is_available && serve_is_exact 1
+            if ! [ -S "${socket}" ]; then
+                echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
+                exit 1
+            fi
+            if ! service_host_is_active 1; then
+                echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
+                exit 1
+            fi
+            if ! hermes_is_available; then
+                echo "ERROR: Tailscale configurator healthcheck: Hermes endpoints are unavailable" >&2
+                exit 1
+            fi
+            if ! serve_is_exact 1; then
+                echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
+                exit 1
+            fi
             ;;
         *)
-            [ -S "${socket}" ] && service_host_is_active 0 \
-                && serve_is_exact 0
+            if ! [ -S "${socket}" ]; then
+                echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
+                exit 1
+            fi
+            if ! service_host_is_active 0; then
+                echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
+                exit 1
+            fi
+            if ! serve_is_exact 0; then
+                echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
+                exit 1
+            fi
             ;;
     esac
     exit
