@@ -47,6 +47,7 @@ MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 MAX_RCLONE_CANDIDATE_WORKERS = 8
 MAX_PROMOTION_IO_WORKERS = 8
+INSTALLER_PUBLICATION_SCHEMA_VERSION = 2
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
@@ -633,7 +634,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "baseline_version": baseline_version,
         "images": images,
         "nas_payload": _record(payload_content),
-        "schema_version": 1,
+        "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": source_sha,
         "version": version,
     }
@@ -756,7 +757,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             "channel": channel,
             "generation": generation,
             "images": images,
-            "schema_version": 1,
+            "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
             "source_sha": source_sha,
             "version": baseline_version,
         }
@@ -787,7 +788,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             "channel": channel,
             "generation": generation,
             "images": images,
-            "schema_version": 1,
+            "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
             "source_sha": source_sha,
             "version": version,
         }
@@ -814,7 +815,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             entries.append(_object_entry(key, content, "endpoint"))
         claims = "".join(
             (
-                "schema_version=1\n",
+                f"schema_version={INSTALLER_PUBLICATION_SCHEMA_VERSION}\n",
                 f"channel={channel}\n",
                 f"generation={generation}\n",
                 f"version={version}\n",
@@ -841,7 +842,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             "generation": generation,
             "objects": entries,
             "public_key_sha256": hashlib.sha256(signing_public_key).hexdigest(),
-            "schema_version": 1,
+            "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
             "source_sha": source_sha,
             "version": version,
         }
@@ -899,18 +900,15 @@ def accept(arguments: argparse.Namespace) -> None:
             "version",
         }
         schema_version = report.get("schema_version")
-        if schema_version == 1:
-            valid_shape = set(report) == common_fields
-        elif schema_version == 2:
-            valid_shape = set(report) == common_fields | {
-                "lifecycle",
-                "platform",
-            }
-        else:
-            valid_shape = False
-        if not valid_shape:
-            if schema_version == 2:
-                raise PublicationError("Spark gate report is invalid")
+        if (
+            type(schema_version) is not int
+            or schema_version != INSTALLER_PUBLICATION_SCHEMA_VERSION
+        ):
+            raise PublicationError("behavioral gate report is invalid")
+        report_keys = set(report)
+        is_nas_report = report_keys == common_fields | {"lanes", "tailscale_modes"}
+        is_spark_report = report_keys == common_fields | {"lifecycle", "platform"}
+        if not (is_nas_report or is_spark_report):
             raise PublicationError("behavioral gate report is invalid")
         if (
             report.get("status") != "passed"
@@ -936,9 +934,20 @@ def accept(arguments: argparse.Namespace) -> None:
             or observed.intersection(gates)
         ):
             raise PublicationError("behavioral gate report is invalid")
-        if schema_version == 1:
-            if any(gate.startswith("spark_") for gate in gates):
-                raise PublicationError("Spark gate report lacks lifecycle provenance")
+        if is_nas_report:
+            lanes = report.get("lanes")
+            tailscale_modes = report.get("tailscale_modes")
+            if (
+                lanes != sorted(NAS_ACCEPTANCE_LANES)
+                or not isinstance(tailscale_modes, dict)
+                or tailscale_modes
+                != {
+                    lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane]
+                    for lane in sorted(NAS_ACCEPTANCE_LANES)
+                }
+                or any(gate.startswith("spark_") for gate in gates)
+            ):
+                raise PublicationError("behavioral gate report is invalid")
         else:
             platform = report.get("platform")
             if (
@@ -1072,10 +1081,14 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "channel": arguments.channel,
         "gates": sorted(NAS_GATES),
         "generation": arguments.generation,
+        "lanes": sorted(lanes),
         "run_id": arguments.run_id,
-        "schema_version": 1,
+        "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
+        "tailscale_modes": {
+            lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane] for lane in sorted(lanes)
+        },
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -1102,7 +1115,7 @@ def _load_plan(
             "source_sha",
             "version",
         }
-        or plan.get("schema_version") != 1
+        or plan.get("schema_version") != INSTALLER_PUBLICATION_SCHEMA_VERSION
     ):
         raise PublicationError("publication plan is invalid")
     if (
@@ -1217,7 +1230,7 @@ def _parse_channel_manifest(raw: bytes, public_key: bytes) -> dict[str, str]:
             raise PublicationError("current channel manifest is invalid")
         values[name] = value
     if (
-        values["schema_version"] != "1"
+        values["schema_version"] != str(INSTALLER_PUBLICATION_SCHEMA_VERSION)
         or values["channel"] not in {"dev", "stable"}
         or SHA256.fullmatch(values["generation"]) is None
         or SOURCE_SHA.fullmatch(values["source_sha"]) is None

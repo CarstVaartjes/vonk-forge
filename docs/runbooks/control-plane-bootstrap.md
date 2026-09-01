@@ -6,7 +6,10 @@ defines the exact unsuffixed Service names, policy/self-access grants,
 auto-approval, MagicDNS/HTTPS settings, OAuth scope/tag, and control hostname.
 Do not create any other Service names in an operator tailnet.
 
-Then prepare the complete control-plane project on a Linux or macOS workstation:
+The published installer channel and release manifests are schema-2-only for
+this greenfield deployment.
+
+Prepare the complete control-plane project on a Linux or macOS workstation:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh

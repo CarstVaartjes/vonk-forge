@@ -38,6 +38,7 @@ _RECIPE_KEY = re.compile(r"[^/\s]+/[^/\s]+\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _AUTHORITY_FILES = {
+    "nl-single-spark-989bfa00": "nl-single-spark-989bfa00.json",
     "nl-single-spark-ed77c3e7": "nl-single-spark-ed77c3e7.json",
     "nl-single-spark-224c4cc7": "nl-single-spark-224c4cc7.json",
     "nl-single-spark-9a6c7516": "nl-single-spark-9a6c7516.json",

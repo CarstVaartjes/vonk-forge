@@ -60,7 +60,7 @@ openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$claims"    
 field() {
     sed -n "$1{s/^[^=]*=//;p;}" "$claims"
 }
-[ "$(sed -n '1p' "$claims")" = 'schema_version=1' ] ||
+[ "$(sed -n '1p' "$claims")" = 'schema_version=2' ] ||
     fail "the current release manifest schema is unsupported"
 [ "$(sed -n '2p' "$claims")" = "channel=$channel" ] ||
     fail "the current release channel is invalid"

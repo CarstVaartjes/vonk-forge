@@ -164,7 +164,13 @@ def _inputs(
             tmp_path, platform, baseline_version
         )
     payload = tmp_path / "payload.json"
-    _canonical(payload, {"compose": "pinned", "schema_version": 1})
+    _canonical(
+        payload,
+        {
+            "docker_compose_yaml": "services: {}\n",
+            "schema_version": 2,
+        },
+    )
     return {
         "nas": nas,
         "spark": spark,
@@ -436,10 +442,15 @@ def _gate_report(
             "channel": plan["channel"],
             "gates": sorted(gates),
             "generation": plan["generation"],
+            "lanes": ["docker-29.4.3", "native"],
             "run_id": run_id,
-            "schema_version": 1,
+            "schema_version": 2,
             "source_sha": SOURCE_SHA,
             "status": "passed",
+            "tailscale_modes": {
+                "docker-29.4.3": "disabled",
+                "native": "full",
+            },
             "version": plan["version"],
         },
     )
@@ -532,10 +543,15 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
         "channel": "stable",
         "gates": sorted(NAS_GATES),
         "generation": DIGEST,
+        "lanes": ["docker-29.4.3", "native"],
         "run_id": 123456,
-        "schema_version": 1,
+        "schema_version": 2,
         "source_sha": SOURCE_SHA,
         "status": "passed",
+        "tailscale_modes": {
+            "docker-29.4.3": "disabled",
+            "native": "full",
+        },
         "version": "1.2.3",
     }
 
@@ -1696,7 +1712,7 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     publication = _assemble(tmp_path, inputs)
     plan = json.loads((publication / "publication-plan.json").read_text())
 
-    assert plan["schema_version"] == 1
+    assert plan["schema_version"] == 2
     assert plan["channel"] == "stable"
     phases = [entry["phase"] for entry in plan["objects"]]
     assert phases == sorted(
@@ -1983,7 +1999,7 @@ def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_end
     ]
     pointer = destination / "artifacts/stable/current.manifest"
     lines = pointer.read_text().splitlines()
-    assert lines[0] == "schema_version=1"
+    assert lines[0] == "schema_version=2"
     assert lines[1] == "channel=stable"
     assert lines[-1].startswith("signature=")
     claims = tmp_path / "claims"
@@ -2021,7 +2037,10 @@ def test_static_endpoints_do_not_change_between_release_generations(
     second_inputs["signing_public_key"] = first_inputs["signing_public_key"]
     _canonical(
         second_inputs["payload"],
-        {"compose": "new pinned generation", "schema_version": 1},
+        {
+            "docker_compose_yaml": "services:\n  control-api:\n    image: replacement\n",
+            "schema_version": 2,
+        },
     )
     command = _assemble_command(second_root, second_inputs)
     result = subprocess.run(
