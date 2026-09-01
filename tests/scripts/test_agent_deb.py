@@ -1159,7 +1159,7 @@ def test_recovery_lifecycle_collision_check_cannot_remove_host_state() -> None:
         "/var/lib/vonk-forge/helper-upgrade.pending",
         "/var/lib/vonk-forge/helper-upgrade.receipt",
         '"$observation_receipt_private"',
-        "vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+        '"$package_recovery_gate"',
         "vonk-forge-package-helper.socket.d",
     ):
         assert protected_path in collision_check

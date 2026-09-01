@@ -21,19 +21,20 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
     assert "shellcheck tests/nodes/test_agent_upgrade_recovery_systemd.sh" in text
     assert "cargo build --locked --release --package vonk-build-egress" in text
     assert "BUILD_EGRESS_BINARY" in text
-    assert text.count("VERSION=0.1.0~dev.381+ga122909feaa3") == 1
-    assert "HISTORICAL_A122=1" in text
     assert 'current_version="0.1.0~dev.$(git show -s --format=%ct HEAD)' in text
     assert 'VERSION="$current_version"' in text
-    assert "STALE_PENDING_FORMAT=legacy2" in text
-    assert "CRASH_MODE=full-cgroup" in text
+    assert text.count("\n            tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 1
+    assert "Validate current schema2 capsule post-remove boot recovery" in text
     assert "CRASH_MODE=post-remove" in text
     assert "STALE_PENDING_FORMAT=prior3" in text
     assert "CANDIDATE_CUSTODY=root" in text
-    assert "CANDIDATE_CUSTODY=legacy" in text
     assert "persist-credentials: false" in text
     assert "contents: read" in text
     for forbidden in (
+        "HISTORICAL_A122",
+        "0.1.0~dev.381+ga122909feaa3",
+        "STALE_PENDING_FORMAT=legacy2",
+        "CANDIDATE_CUSTODY=legacy",
         "environment:",
         "id-token: write",
         "secrets.",
@@ -43,18 +44,27 @@ def test_upgrade_recovery_workflow_runs_native_arm64_without_secrets() -> None:
         assert forbidden not in text
 
 
-def test_upgrade_recovery_harness_separates_historical_and_capsule_sources() -> None:
+def test_upgrade_recovery_harness_keeps_only_current_schema2_capsule_lane() -> None:
     harness = HARNESS.read_text()
 
-    assert "a122909feaa3b64d7b15371285e727965c3d7e9a" in harness
-    assert "HISTORICAL_A122" in harness
-    assert "target_source_root=$test_root/a122-source" in harness
-    assert "recovery_unit=$package_recovery_unit" in harness
-    assert "vonk-forge-package-upgrade-recover-capsule.service" in harness
-    assert 'test "$(wc -l < "$test_root/compat-intent")" -eq 14' in harness
-    assert "grep -Fxq 'schema_version=1'" in harness
-    assert "expected_recovery_load_state=loaded" in harness
-    assert "expected_recovery_load_state=not-found" in harness
+    assert 'crash_mode=${CRASH_MODE:-post-remove}' in harness
+    assert 'candidate_custody=${CANDIDATE_CUSTODY:-root}' in harness
+    assert "recovery_unit=vonk-forge-package-upgrade-recover-capsule.service" in harness
+    assert "test-post-remove-preinst-entered" in harness
+    assert 'systemctl --system restart multi-user.target' in harness
+    assert 'expected_recovery_load_state=not-found' in harness
+    assert "grep -Fxq 'schema_version=2'" in harness
+    assert "reason=exact_identity_proven" in harness
+    assert 'sha256sum "/proc/$helper_pid/exe"' in harness
+    assert 'sha256sum "/proc/$agent_pid/exe"' in harness
+    for forbidden in (
+        "HISTORICAL_A122",
+        "compatibility_trigger",
+        "a122909feaa3b64d7b15371285e727965c3d7e9a",
+        "target_source_root=$test_root/a122-source",
+        "spark3542_compat_reboot_fixture",
+    ):
+        assert forbidden not in harness
 
 
 def test_upgrade_recovery_workflow_is_scoped_to_recovery_inputs() -> None:
