@@ -996,15 +996,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "--input".to_owned(),
             archive.display().to_string(),
         ])?;
-        if !loaded.success
-            || !std::str::from_utf8(&loaded.stdout)
-                .ok()
-                .is_some_and(|value| {
-                    value
-                        .lines()
-                        .any(|line| line == format!("Loaded image: {image}:latest"))
-                })
-        {
+        // Docker's human-readable load output is not a stable interface: it
+        // varies across Docker releases and archive producers (some omit the
+        // tag, and some emit no output at all). The image reference and
+        // metadata are verified below, so requiring a particular output line
+        // would reject an otherwise valid, digest-bound import for no safety
+        // benefit.
+        if !loaded.success {
             return Err(OperationError::CommandFailed);
         }
         let inspected = self.inspect_runtime_image(image)?;
