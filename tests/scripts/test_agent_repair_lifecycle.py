@@ -87,7 +87,7 @@ def _assert_frozen_runtime_and_old_runner() -> None:
     # does not authenticate it.
     expected = {
             ROOT / "packaging/debian/preinst-repair": (
-                "3db1ee0d793b8978c0bbf993a64face8ca3e7a290e6b8d834bc4175dfd8ef944"
+                "004627f2f26fe3739adb13da5487d77e45af971c61c00de4a18c73f2638f9856"
             ),
             ROOT / "packaging/debian/postinst-repair": (
                 "c71ffce1a4fb20d4b346f7a1cb7e10558d84ab61ab4b061bcc43505f717055ac"

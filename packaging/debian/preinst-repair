@@ -1513,11 +1513,14 @@ repair_tree_exact_read_only() {
 }
 
 promote_hidden_repair() {
+    promoted_runner_sha=$(/usr/bin/sha256sum "$0" | /usr/bin/cut -d' ' -f1) \
+        || return 1
+    valid_digest "$promoted_runner_sha" || return 1
     load_authority \
         && safe_node_identity \
         && read_source_intent \
         && source_snapshot \
-        && source_state_core_exact "$repair_runner_sha" \
+        && source_state_core_exact "$promoted_runner_sha" \
         && safe_root_file "$source_blocker" 600 \
         && [ "$(/usr/bin/sha256sum "$source_blocker" \
             | /usr/bin/cut -d' ' -f1)" \
@@ -1537,6 +1540,7 @@ promote_hidden_repair() {
     done
     [ "$hidden_count" -eq 1 ] \
         && repair_tree_exact_read_only "$hidden_repair" \
+        && [ "$repair_runner_sha" = "$promoted_runner_sha" ] \
         && source_runner_is "$repair_runner_sha" \
         && standard_runner_ready \
         || return 1
