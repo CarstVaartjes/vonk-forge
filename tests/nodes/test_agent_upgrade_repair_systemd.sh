@@ -25,7 +25,7 @@ standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
-source_version=0.1.0~dev.381+g9162cae2c853
+source_version=0.1.0~dev.381+g9162cae286d1
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.0~dev.382+g0123456789ab
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
@@ -798,7 +798,7 @@ source_pending_sha="$(sha256sum "$source_pending" | cut -d' ' -f1)"
 boot_id="$(sed -n '1p' /proc/sys/kernel/random/boot_id)"
 source_nonce="$(openssl rand -hex 32)"
 printf '%s\n' \
-  'schema_version=1' \
+  'schema_version=2' \
   'package=vonk-forge-agent' \
   "target_version=$source_version" \
   'architecture=arm64' \
