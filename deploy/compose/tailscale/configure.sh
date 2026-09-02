@@ -243,6 +243,22 @@ serve_is_exact() {
         fi
 }
 
+serve_is_pending_ephemeral_acceptance() {
+    # A disposable child tailnet with no independent client can accept the
+    # tagged gateway before it accepts any Service advertisement. Newer
+    # tailscaled releases represent that state by omitting the whole local
+    # service map instead of retaining entries with `advertised:false`.
+    # Accept only that exact empty representation, and only under the existing
+    # explicit ephemeral/no-service-host acceptance boundary. Production and
+    # external-client acceptance remain strict.
+    pending_service_map=$(cat "${runtime_dir}/tailscale-serve-config.compact")
+    pending_serve_status=$(cat "${runtime_dir}/tailscale-serve-status.compact")
+    [ "${require_service_host}" = "0" ] \
+        && [ "${ephemeral}" = "true" ] \
+        && [ "${pending_service_map}" = '{"version":"0.0.1"}' ] \
+        && [ "${pending_serve_status}" = '{}' ]
+}
+
 configure_services() {
     include_hermes=$1
     # Configuration-file import currently infers the listener protocol from the
@@ -433,7 +449,8 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
                 echo "ERROR: Tailscale configurator healthcheck: Hermes endpoints are unavailable" >&2
                 exit 1
             fi
-            if ! serve_is_exact 1; then
+            if ! serve_is_exact 1 \
+                && ! serve_is_pending_ephemeral_acceptance; then
                 echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
                 report_serve_mismatch
                 exit 1
@@ -449,7 +466,8 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
                 echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
                 exit 1
             fi
-            if ! serve_is_exact 0; then
+            if ! serve_is_exact 0 \
+                && ! serve_is_pending_ephemeral_acceptance; then
                 echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
                 report_serve_mismatch
                 exit 1

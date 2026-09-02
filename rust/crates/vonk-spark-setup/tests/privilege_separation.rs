@@ -213,11 +213,20 @@ fn signed_release(
 struct RecordingRunner {
     commands: Vec<Command>,
     outputs: VecDeque<CommandOutput>,
+    fail_reset_failed: bool,
 }
 
 impl CommandRunner for RecordingRunner {
     fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
-        let default = if command.program == std::path::Path::new("/usr/bin/systemctl")
+        let default = if self.fail_reset_failed
+            && command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args.first().map(String::as_str) == Some("reset-failed")
+        {
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            }
+        } else if command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args.first().map(String::as_str) == Some("show")
         {
             CommandOutput::success(b"4242\n".to_vec())
@@ -528,6 +537,7 @@ fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
             CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
         ]
         .into(),
+        ..Default::default()
     }
 }
 
@@ -553,6 +563,7 @@ fn runner_with_private_controller_bootstrap(ca: &[u8]) -> RecordingRunner {
             CommandOutput::success(serde_json::to_vec(&bootstrap).unwrap()),
         ]
         .into(),
+        ..Default::default()
     }
 }
 
@@ -963,6 +974,56 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "paired-v1\n"
     );
+}
+
+#[test]
+fn start_converges_when_reset_failed_reports_unit_not_loaded() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = RecordingRunner::default();
+    let prepared = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let mut apply_runner = RecordingRunner {
+        fail_reset_failed: true,
+        ..Default::default()
+    };
+
+    apply_setup_from(
+        handoff_runner.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args == ["reset-failed", "vonk-forge-agent.service"]
+    }));
+    assert!(apply_runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/systemctl")
+            && command.args
+                == [
+                    "enable",
+                    "--now",
+                    "vonk-forge-docker-firewall.service",
+                    "vonk-forge-package-helper.socket",
+                    "vonk-forge-agent.service",
+                ]
+    }));
 }
 
 #[test]
@@ -1537,6 +1598,7 @@ fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
             serde_json::to_vec(&bootstrap).unwrap(),
         )]
         .into(),
+        ..Default::default()
     };
     let mut prompt = fresh_answers(&ca);
 
@@ -1573,6 +1635,7 @@ fn successful_pairing_enters_recovery_before_later_service_startup() {
             },
         ]
         .into(),
+        ..Default::default()
     };
 
     let result = apply_setup_from(

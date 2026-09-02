@@ -517,11 +517,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             let mut body = json!({
                                 "reason": "host runtime could not import the accepted OCI image",
                             });
-                            if let crate::host_runtime::HostRuntimeError::HelperRejected { code } =
-                                error
-                            {
-                                body["helper_error_code"] = Value::String(code);
-                            }
+                            let code = match error {
+                                crate::host_runtime::HostRuntimeError::HelperRejected { code } => {
+                                    code
+                                }
+                                crate::host_runtime::HostRuntimeError::Io(_) => {
+                                    "runtime_helper_unavailable".to_owned()
+                                }
+                                crate::host_runtime::HostRuntimeError::Controller(_) => {
+                                    "runtime_authority_unavailable".to_owned()
+                                }
+                                crate::host_runtime::HostRuntimeError::Protocol => {
+                                    "runtime_helper_protocol_invalid".to_owned()
+                                }
+                            };
+                            body["helper_error_code"] = Value::String(code);
                             ExecutionResult {
                                 state: "failed",
                                 body,
@@ -1956,6 +1966,9 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_image_inspect_failed"
             | "runtime_image_identity_invalid"
             | "runtime_image_receipt_failed"
+            | "runtime_helper_unavailable"
+            | "runtime_authority_unavailable"
+            | "runtime_helper_protocol_invalid"
     )
 }
 
@@ -2619,6 +2632,44 @@ mod tests {
         );
         assert!(rejected.body.get("helper_error_code").is_none());
         assert!(rejected.body.get("helper_exit_code").is_none());
+    }
+
+    #[test]
+    fn image_import_failure_preserves_only_bounded_helper_diagnostics() {
+        let mut import_claim = claim();
+        import_claim.operation = "recipe.image.import.v1".to_owned();
+        for code in [
+            "runtime_helper_unavailable",
+            "runtime_authority_unavailable",
+            "runtime_helper_protocol_invalid",
+        ] {
+            let result = normalize_execution_result(
+                &import_claim,
+                ExecutionResult {
+                    state: "failed",
+                    body: json!({
+                        "reason": "runtime image import failed",
+                        "helper_error_code": code,
+                        "untrusted_detail": "/root/authority/private-key",
+                    }),
+                },
+            );
+
+            assert_eq!(result.body["helper_error_code"], code);
+            assert!(result.body.get("untrusted_detail").is_none());
+        }
+
+        let rejected = normalize_execution_result(
+            &import_claim,
+            ExecutionResult {
+                state: "failed",
+                body: json!({
+                    "reason": "runtime image import failed",
+                    "helper_error_code": "arbitrary_host_detail",
+                }),
+            },
+        );
+        assert!(rejected.body.get("helper_error_code").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

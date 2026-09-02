@@ -772,7 +772,13 @@ class Runner:
                         if isinstance(value, dict) and isinstance(value.get("reason"), str):
                             reason = value["reason"].strip()
                             if reason:
-                                reasons.append(reason[:256])
+                                helper_code = value.get("helper_error_code")
+                                suffix = ""
+                                if isinstance(helper_code, str) and re.fullmatch(
+                                    r"[a-z][a-z0-9_]{0,63}", helper_code
+                                ):
+                                    suffix = f" [{helper_code}]"
+                                reasons.append(f"{reason[:256]}{suffix}")
                 if reasons:
                     detail = f": {reasons[0]}"
             raise SliceError(f"{label} operation ended in {state}{detail}")

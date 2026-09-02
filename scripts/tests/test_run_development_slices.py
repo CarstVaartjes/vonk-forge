@@ -84,6 +84,7 @@ class SliceServer(ThreadingHTTPServer):
         self.operation_owners: dict[str, str] = {}
         self.operation_states: dict[str, str] = {}
         self.operation_plan_digests: dict[str, str] = {}
+        self.operation_failure_evidence: dict[str, dict[str, object]] = {}
         self.build_operation_state = "succeeded"
         self.distribution_operation_state = "succeeded"
         self.install_operation_state = "succeeded"
@@ -444,6 +445,14 @@ class SliceHandler(BaseHTTPRequestHandler):
                     node_evidence[node] = {"installed_bytes": 123456789}
                 else:
                     node_evidence[node] = {"status": "ok"}
+            operation_state = self.server.operation_states.get(
+                operation_id, "succeeded"
+            )
+            if operation_state != "succeeded" and kind in self.server.operation_failure_evidence:
+                node_evidence = {
+                    node: dict(self.server.operation_failure_evidence[kind])
+                    for node in nodes
+                }
             self._json(
                 200,
                 {
@@ -452,9 +461,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "owner_id": self.server.operation_owners.get(
                         operation_id, "20000000-0000-4000-8000-000000000001"
                     ),
-                    "state": self.server.operation_states.get(
-                        operation_id, "succeeded"
-                    ),
+                    "state": operation_state,
                     "plan_digest": self.server.operation_plan_digests.get(
                         operation_id, "f" * 64
                     ),
@@ -2273,6 +2280,25 @@ def test_runner_stops_after_one_terminal_distribution_retry(
     assert result.returncode == 1
     assert "image distribution operation ended in failed" in result.stderr
     assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:4]
+
+
+def test_runner_reports_bounded_image_import_helper_stage(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.distribution_operation_state = "failed"
+    server.retry_operation_state = "failed"
+    server.operation_failure_evidence["distribution"] = {
+        "reason": "host runtime could not import the accepted OCI image",
+        "helper_error_code": "runtime_image_identity_invalid",
+    }
+
+    result, _evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert (
+        "host runtime could not import the accepted OCI image "
+        "[runtime_image_identity_invalid]" in result.stderr
+    )
 
 
 def test_runner_retries_one_failed_installation(

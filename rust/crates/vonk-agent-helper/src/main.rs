@@ -422,7 +422,18 @@ fn load_root_binary_public_key(path: &Path, group_gid: u32) -> Result<[u8; 32], 
 
 fn load_root_private_key(path: &Path) -> Result<Ed25519KeyPair, String> {
     let raw = read_root_bytes(path, 1, 128, 0, 0, 0o600)?;
-    Ed25519KeyPair::from_pkcs8(&raw)
+    parse_observation_private_key(&raw)
+}
+
+fn parse_observation_private_key(raw: &[u8]) -> Result<Ed25519KeyPair, String> {
+    // The Debian maintainer scripts deliberately use the system OpenSSL to
+    // generate this root-owned key. OpenSSL emits an Ed25519 PKCS#8 v1
+    // document, while ring's checked `from_pkcs8` accepts only v2 documents
+    // that embed a public key. Accept both encodings here, then compare the
+    // derived public key with the separately root-owned public-key file during
+    // helper startup. That preserves the key-pair consistency check without
+    // making helper availability depend on the host OpenSSL version.
+    Ed25519KeyPair::from_pkcs8_maybe_unchecked(raw)
         .map_err(|_| "observation receipt private key is invalid".to_owned())
 }
 
@@ -541,7 +552,11 @@ fn _classify_protocol_error(error: HelperError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker};
+    use super::{
+        HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker,
+        parse_observation_private_key,
+    };
+    use ring::signature::KeyPair;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -562,6 +577,20 @@ mod tests {
         drop(permits);
         assert_eq!(counter.load(Ordering::Acquire), 0);
         assert!(acquire_worker(&counter).is_some());
+    }
+
+    #[test]
+    fn openssl_ed25519_pkcs8_v1_key_is_accepted() {
+        // RFC 8410 PKCS#8 v1 wrapper around a deterministic 32-byte seed, the
+        // same document shape produced by `openssl genpkey -algorithm ED25519
+        // -outform DER` in the package post-install script.
+        let mut document = hex::decode("302e020100300506032b657004220420").unwrap();
+        document.extend(0_u8..32);
+
+        let key = parse_observation_private_key(&document).unwrap();
+
+        assert_eq!(key.public_key().as_ref().len(), 32);
+        assert!(parse_observation_private_key(b"not-pkcs8").is_err());
     }
 
     #[test]
