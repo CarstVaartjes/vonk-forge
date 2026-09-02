@@ -1687,11 +1687,19 @@ fn reset_agent_failure(
         runner,
         Command::new("/usr/bin/systemctl", ["daemon-reload"]),
     )?;
-    run_checked(
-        runner,
-        Command::new("/usr/bin/systemctl", ["reset-failed", &paths.service]),
-    )
-    .map(|_| ())
+    // `reset-failed` returns non-zero when the unit is not loaded yet. That is
+    // a benign state on a fresh install and after a package was purged then
+    // reinstalled quickly: the following `enable --now` is the authoritative
+    // operation and readiness verification still fails closed if the unit is
+    // actually unavailable. Do not turn the harmless negative lookup into an
+    // unrecoverable installer failure.
+    runner
+        .run(Command::new(
+            "/usr/bin/systemctl",
+            ["reset-failed", &paths.service],
+        ))
+        .map_err(SetupError::Command)?;
+    Ok(())
 }
 
 fn enable_runtime_units(

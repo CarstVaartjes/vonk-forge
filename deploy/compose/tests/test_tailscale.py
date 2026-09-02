@@ -732,6 +732,54 @@ def test_pending_advertisement_is_acceptance_only(
     assert result.returncode == expected_returncode, result.stderr
 
 
+@pytest.mark.parametrize(
+    ("require_service_host", "ephemeral", "expected_returncode"),
+    [("0", "true", 0), ("1", "false", 1), ("0", "false", 64)],
+)
+def test_empty_pending_service_map_is_ephemeral_acceptance_only(
+    tmp_path: Path,
+    require_service_host: str,
+    ephemeral: str,
+    expected_returncode: int,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *"serve status --json"*) printf \'%s\\n\' \'{}\' ;;\n'
+        '  *"serve get-config --all"*) printf \'%s\\n\' '
+        "'{\"version\":\"0.0.1\"}' ;;\n"
+        '  *"status --json"*) printf \'%s\\n\' '
+        "'{\"Self\":{\"CapMap\":{},\"PrimaryRoutes\":[]}}' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_HEALTHCHECK_ONLY": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "TS_REQUIRE_SERVICE_HOST": require_service_host,
+                "VONK_TAILSCALE_EPHEMERAL": ephemeral,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == expected_returncode, result.stderr
+
+
 def test_service_host_bypass_requires_ephemeral_gateway() -> None:
     result = subprocess.run(
         ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
