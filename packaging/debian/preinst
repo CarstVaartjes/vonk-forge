@@ -322,9 +322,12 @@ inside_package_helper() {
             helper_uid=$(/usr/bin/awk '/^Uid:/{print $2; exit}' \
                 "/proc/$helper_pid/status" 2>/dev/null || true)
             [ "$helper_uid" = 0 ] \
-                && [ "$(/usr/bin/stat -c %u:%a /usr/lib/vonk-forge/vonk-agent-helper \
-                    2>/dev/null || true)" = 0:755 ] \
-                && return 0
+                && case "$(/usr/bin/stat -c %u:%a \
+                    /usr/lib/vonk-forge/vonk-agent-helper \
+                    2>/dev/null || true)" in
+                    0:555|0:755) return 0 ;;
+                    *) false ;;
+                esac
         fi
         helper_parent=$(/usr/bin/awk '{print $4}' "/proc/$helper_pid/stat" 2>/dev/null || true)
         [ "$helper_parent" != "$helper_pid" ] || break
