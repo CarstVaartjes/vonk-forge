@@ -809,6 +809,53 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     assert probe_commands == []
 
 
+def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    compose = tmp_path / "compose"
+    compose.write_text("#!/bin/sh\n")
+    compose.chmod(0o755)
+    monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(compose))
+    local_status = _tailscale_status(hermes=False)
+    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
+    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
+
+    responses = iter((json.dumps(local_status), "{}", '{"version":"0.0.1"}'))
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command, 0, stdout=next(responses), stderr=""
+        )
+
+    monkeypatch.setattr(acceptance, "run", run)
+    acceptance.verify_tailscale_services(
+        tmp_path,
+        hermes=False,
+        tailnet_suffix="acceptance.example.test",
+        service_addresses=None,
+    )
+
+    responses = iter(
+        (
+            json.dumps(_tailscale_status(hermes=False)),
+            "{}",
+            '{"version":"0.0.1"}',
+        )
+    )
+    with pytest.raises(AcceptanceError, match="Serve status"):
+        acceptance.verify_tailscale_services(
+            tmp_path,
+            hermes=False,
+            tailnet_suffix="acceptance.example.test",
+            service_addresses={"svc:vonk-forge": "100.64.0.10"},
+        )
+
+    assert not acceptance.tailnet_serve_is_pending_ephemeral_advertisement(
+        "{}", '{"version":"0.0.1","services":{}}'
+    )
+
+
 def test_wait_for_tailnet_services_polls_until_all_are_visible(
     tmp_path: Path, monkeypatch
 ) -> None:

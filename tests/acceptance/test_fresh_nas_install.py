@@ -1311,6 +1311,18 @@ def assert_tailnet_serve_configuration(
         )
 
 
+def tailnet_serve_is_pending_ephemeral_advertisement(
+    status: str, configuration: str
+) -> bool:
+    """Recognize the one bounded no-client state accepted by the container."""
+    return _same_json_shape(
+        _parse_tailnet_serve_json(status, label="status"), {}
+    ) and _same_json_shape(
+        _parse_tailnet_serve_json(configuration, label="configuration"),
+        {"version": "0.0.1"},
+    )
+
+
 def verify_tailscale_services(
     bundle: Path,
     *,
@@ -1379,6 +1391,17 @@ def verify_tailscale_services(
         ],
         cwd=bundle,
     ).stdout
+    # A newly created disposable child tailnet without an independent client
+    # can keep the Service advertisement pending even though the gateway and
+    # the exact local Compose health boundary are healthy. Mirror the
+    # configurator's bounded exception here: only the exact empty status and
+    # version-only configuration are accepted, and only when this acceptance
+    # lane deliberately did not provision an external client. Production and
+    # client-backed acceptance continue to require the complete topology.
+    if service_addresses is None and tailnet_serve_is_pending_ephemeral_advertisement(
+        serve, configuration
+    ):
+        return
     assert_tailnet_serve_configuration(
         serve,
         configuration,
