@@ -291,9 +291,32 @@ agent_sha256=$expected_agent_sha256
 }
 
 inside_package_helper() {
-    [ -r /proc/self/cgroup ] \
+    # The helper service normally identifies itself through the cgroup path.
+    # Some systemd/container combinations expose a private cgroup namespace to
+    # maintainer scripts, however, so /proc/self/cgroup can contain only the
+    # transient dpkg scope.  In that case walk the bounded process ancestry and
+    # require the actual root-owned helper executable.  This keeps ordinary package-manager
+    # installs out of the controller-recovery path without depending on a
+    # namespace-specific cgroup spelling.
+    if [ -r /proc/self/cgroup ] \
         && grep -Eq '(^|/)vonk-forge-package-helper[.]service(/|$)' \
-            /proc/self/cgroup
+            /proc/self/cgroup; then
+        return 0
+    fi
+    helper_pid=$PPID
+    helper_depth=0
+    while [ "$helper_depth" -lt 16 ] && valid_pid "$helper_pid"; do
+        helper_exe=$(/usr/bin/readlink -f "/proc/$helper_pid/exe" 2>/dev/null || true)
+        if [ "$helper_exe" = /usr/lib/vonk-forge/vonk-agent-helper ]; then
+            [ "$(/usr/bin/stat -c %u:%a "/proc/$helper_pid/exe" 2>/dev/null || true)" = 0:755 ] \
+                && return 0
+        fi
+        helper_parent=$(/usr/bin/awk '{print $4}' "/proc/$helper_pid/stat" 2>/dev/null || true)
+        [ "$helper_parent" != "$helper_pid" ] || break
+        helper_pid=$helper_parent
+        helper_depth=$((helper_depth + 1))
+    done
+    return 1
 }
 
 package_directory_is_safe() {
