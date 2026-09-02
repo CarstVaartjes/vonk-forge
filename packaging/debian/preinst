@@ -303,26 +303,6 @@ inside_package_helper() {
             /proc/self/cgroup; then
         return 0
     fi
-    # A helper-spawned dpkg carries the controller custody path as its final
-    # argument.  This is a stronger signal than a transient cgroup name and is
-    # still fail-closed because the arm routine revalidates the same command,
-    # ownership, mode, digest, and package metadata before staging recovery.
-    if helper_command_file=$(/usr/bin/mktemp /tmp/.vonk-helper-context.XXXXXX); then
-        trap '/usr/bin/rm -f -- "$helper_command_file"' EXIT HUP INT TERM
-        if /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" \
-            > "$helper_command_file"; then
-            helper_candidate=$(/usr/bin/sed -n '4p' "$helper_command_file")
-            case "$helper_candidate" in
-                /run/vonk-forge-package-candidates/*/[0-9a-f]*.deb)
-                    /usr/bin/rm -f -- "$helper_command_file"
-                    trap - EXIT HUP INT TERM
-                    return 0
-                    ;;
-            esac
-        fi
-        /usr/bin/rm -f -- "$helper_command_file"
-        trap - EXIT HUP INT TERM
-    fi
     helper_pid=$PPID
     helper_depth=0
     while [ "$helper_depth" -lt 16 ] && valid_pid "$helper_pid"; do
@@ -1220,7 +1200,6 @@ fi
 
 if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
-    && [ -d /run/systemd/system ] \
     && inside_package_helper; then
     arm_controller_recovery || {
         echo 'vonk-forge-agent: cannot durably arm the signed controller upgrade' >&2
