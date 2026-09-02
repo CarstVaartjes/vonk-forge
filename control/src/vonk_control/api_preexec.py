@@ -8,7 +8,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .browser_auth import bootstrap_administrator
-from .db import build_engine, initialize_database, session_factory
+from .db import (
+    build_engine,
+    initialize_database,
+    run_with_database_startup_retry,
+    session_factory,
+)
 from .runtime_init import (
     prepare_shared_volumes,
     read_runtime_secret,
@@ -44,11 +49,15 @@ def initialize_administrator(database_url: str, password_path: Path) -> None:
         password = raw[:-1].decode("utf-8")
     except UnicodeDecodeError as error:
         raise RuntimeError("administrator password secret is invalid") from error
-    engine = build_engine(database_url)
-    try:
-        bootstrap_administrator(session_factory(engine), password)
-    finally:
-        engine.dispose()
+
+    def bootstrap_once() -> None:
+        engine = build_engine(database_url)
+        try:
+            bootstrap_administrator(session_factory(engine), password)
+        finally:
+            engine.dispose()
+
+    run_with_database_startup_retry(bootstrap_once, label="PostgreSQL")
 
 
 def _probe_source_secrets(path: Path) -> None:

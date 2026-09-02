@@ -346,7 +346,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from .agent_jobs import AgentJobService
-    from .db import build_engine, session_factory
+    from .db import build_engine, session_factory, wait_for_database
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
@@ -356,6 +356,7 @@ if __name__ == "__main__":
     from .worker_authority import HttpWorkerAuthority
 
     settings = WorkerSettings.from_env_and_secrets()
+    wait_for_database(settings.database_url)
     sessions = session_factory(build_engine(settings.database_url))
     clock = lambda: datetime.now(UTC)
     jobs = JobService(sessions, clock=clock)
