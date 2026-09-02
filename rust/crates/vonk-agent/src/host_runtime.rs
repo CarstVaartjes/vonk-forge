@@ -29,6 +29,8 @@ pub enum HostRuntimeError {
     Controller(#[from] ClientError),
     #[error("host runtime helper response is invalid")]
     Protocol,
+    #[error("host runtime helper rejected request: {code}")]
+    HelperRejected { code: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,13 +224,27 @@ impl HostRuntimeBoundary<'_> {
             let stop_uncertain = response.status == "container-runtime-stop-uncertain";
             if response.schema_version != 1
                 || response.request_id.as_deref() != Some(request_id.as_str())
-                || (!stop_uncertain && response.status != "container-runtime-request-executed")
-                || response.error_code.is_some()
-                || response
-                    .evidence_sha256
-                    .as_deref()
-                    .is_none_or(|value| !lower_hex(value, 64))
                 || response.observation_receipt.is_some()
+            {
+                return Err(HostRuntimeError::Protocol);
+            }
+            if let Some(code) = response.error_code {
+                if response.status != "rejected"
+                    || response.evidence_sha256.is_some()
+                    || response.exit_code.is_some()
+                    || !stable_runtime_error_code(&code)
+                {
+                    return Err(HostRuntimeError::Protocol);
+                }
+                return Err(HostRuntimeError::HelperRejected { code });
+            }
+            if !stop_uncertain && response.status != "container-runtime-request-executed" {
+                return Err(HostRuntimeError::Protocol);
+            }
+            if response
+                .evidence_sha256
+                .as_deref()
+                .is_none_or(|value| !lower_hex(value, 64))
             {
                 return Err(HostRuntimeError::Protocol);
             }
@@ -245,6 +261,23 @@ impl HostRuntimeBoundary<'_> {
         }
         .await
     }
+}
+
+fn stable_runtime_error_code(value: &str) -> bool {
+    matches!(
+        value,
+        "operation_failed"
+            | "operation_invalid"
+            | "operation_unsafe_path"
+            | "operation_invalid_artifact"
+            | "operation_command_failed"
+            | "operation_stop_uncertain"
+            | "operation_io"
+            | "runtime_image_load_failed"
+            | "runtime_image_inspect_failed"
+            | "runtime_image_identity_invalid"
+            | "runtime_image_receipt_failed"
+    )
 }
 
 fn require_inspection_receipt(

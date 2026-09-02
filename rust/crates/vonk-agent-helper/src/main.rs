@@ -119,6 +119,16 @@ impl HelperRejection {
             OperationError::UnsafePath | OperationError::Io(_) if package_install => {
                 ("package_custody_failed", None)
             }
+            OperationError::RuntimeImageLoadFailed => ("runtime_image_load_failed", None),
+            OperationError::RuntimeImageInspectFailed => ("runtime_image_inspect_failed", None),
+            OperationError::RuntimeImageIdentityInvalid => ("runtime_image_identity_invalid", None),
+            OperationError::RuntimeImageReceiptFailed => ("runtime_image_receipt_failed", None),
+            OperationError::InvalidOperation => ("operation_invalid", None),
+            OperationError::UnsafePath => ("operation_unsafe_path", None),
+            OperationError::InvalidArtifact => ("operation_invalid_artifact", None),
+            OperationError::CommandFailed => ("operation_command_failed", None),
+            OperationError::StopUncertain => ("operation_stop_uncertain", None),
+            OperationError::Io(_) => ("operation_io", None),
             _ => ("operation_failed", None),
         };
         Self {
@@ -536,7 +546,10 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    use vonk_agent_helper::{operations::OperationError, protocol::HostOperation};
+    use vonk_agent_helper::{
+        operations::OperationError,
+        protocol::{ContainerRuntimeAction, HostOperation},
+    };
 
     #[test]
     fn helper_request_concurrency_is_bounded_and_reusable() {
@@ -629,5 +642,40 @@ mod tests {
             OperationError::PackageMetadataInvalid,
         );
         assert_eq!(metadata.error_code, "package_metadata_failed");
+    }
+
+    #[test]
+    fn runtime_image_failures_identify_the_failed_stage_without_details() {
+        let operation = HostOperation::ExecuteContainerRuntimeRequest {
+            action: ContainerRuntimeAction::ImageImport,
+            job_id: uuid::Uuid::nil(),
+            operation_id: uuid::Uuid::nil(),
+            attempt: 1,
+            fence: uuid::Uuid::nil(),
+            request_sha256: "a".repeat(64),
+            observation_identity_sha256: None,
+        };
+        for (error, code) in [
+            (
+                OperationError::RuntimeImageLoadFailed,
+                "runtime_image_load_failed",
+            ),
+            (
+                OperationError::RuntimeImageInspectFailed,
+                "runtime_image_inspect_failed",
+            ),
+            (
+                OperationError::RuntimeImageIdentityInvalid,
+                "runtime_image_identity_invalid",
+            ),
+            (
+                OperationError::RuntimeImageReceiptFailed,
+                "runtime_image_receipt_failed",
+            ),
+        ] {
+            let rejection = HelperRejection::for_operation("request-1", &operation, error);
+            assert_eq!(rejection.error_code, code);
+            assert!(rejection.detail.contains("runtime image"));
+        }
     }
 }

@@ -43,6 +43,14 @@ pub enum OperationError {
     PackageInstallFailed { exit_code: Option<i32> },
     #[error("compiled command failed")]
     CommandFailed,
+    #[error("runtime image load failed")]
+    RuntimeImageLoadFailed,
+    #[error("runtime image inspection failed")]
+    RuntimeImageInspectFailed,
+    #[error("runtime image identity is invalid")]
+    RuntimeImageIdentityInvalid,
+    #[error("runtime image receipt could not be written")]
+    RuntimeImageReceiptFailed,
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("host mutation failed")]
@@ -991,11 +999,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .filter(|value| (1..=MAX_RUNTIME_ARCHIVE_BYTES).contains(value))
             .ok_or(OperationError::InvalidOperation)?;
         self.verify_runtime_archive(archive, archive_sha256, expected_bytes)?;
-        let loaded = self.run_docker(&[
-            "load".to_owned(),
-            "--input".to_owned(),
-            archive.display().to_string(),
-        ])?;
+        let loaded = self
+            .run_docker(&[
+                "load".to_owned(),
+                "--input".to_owned(),
+                archive.display().to_string(),
+            ])
+            .map_err(|error| match error {
+                OperationError::CommandFailed => OperationError::RuntimeImageLoadFailed,
+                other => other,
+            })?;
         // Docker's human-readable load output is not a stable interface: it
         // varies across Docker releases and archive producers (some omit the
         // tag, and some emit no output at all). The image reference and
@@ -1003,17 +1016,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // would reject an otherwise valid, digest-bound import for no safety
         // benefit.
         if !loaded.success {
-            return Err(OperationError::CommandFailed);
+            return Err(OperationError::RuntimeImageLoadFailed);
         }
-        let inspected = self.inspect_runtime_image(image)?;
+        let inspected = self
+            .inspect_runtime_image(image)
+            .map_err(|error| match error {
+                OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
+                OperationError::InvalidArtifact => OperationError::RuntimeImageIdentityInvalid,
+                other => other,
+            })?;
         if inspected.1 != "linux"
             || inspected.2 != "arm64"
             || inspected.3 != "v1"
             || !numeric_non_root_user(&inspected.4)
         {
-            return Err(OperationError::InvalidArtifact);
+            return Err(OperationError::RuntimeImageIdentityInvalid);
         }
         self.write_image_receipt(image_digest, image, &inspected.0)
+            .map_err(|error| match error {
+                OperationError::Io(_) | OperationError::InvalidArtifact => {
+                    OperationError::RuntimeImageReceiptFailed
+                }
+                other => other,
+            })
     }
 
     fn runtime_image_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
