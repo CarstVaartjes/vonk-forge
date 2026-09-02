@@ -1220,10 +1220,18 @@ fi
 if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
     && inside_package_helper; then
-    arm_controller_recovery || {
-        echo 'vonk-forge-agent: cannot durably arm the signed controller upgrade' >&2
-        exit 1
-    }
+    # Recovery is a hand-off optimization for an old, long-running helper,
+    # not a prerequisite for unpacking a controller-signed package.  A
+    # transient systemd namespace or permission difference must not turn a
+    # valid dpkg upgrade into a permanently rejected request.  postinst still
+    # schedules the bounded helper restart finisher below, and the Controller
+    # proves the resulting runtime identity before advancing the rollout.
+    if ! arm_controller_recovery; then
+        /usr/bin/logger -t vonk-forge-agent \
+            'controller recovery handoff unavailable; continue with package finisher' \
+            >/dev/null 2>&1 || true
+        echo 'vonk-forge-agent: controller recovery handoff unavailable; continuing package install' >&2
+    fi
     if ! helper_namespace_has_package_paths; then
         # The helper can outlive the package that started it.  Its already
         # running mount namespace may therefore still have the old package
