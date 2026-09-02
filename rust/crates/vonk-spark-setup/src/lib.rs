@@ -6,6 +6,7 @@ use std::{
     io::{self, BufRead, BufReader, Read, Write},
     net::Ipv4Addr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Stdio},
     thread,
@@ -18,6 +19,12 @@ use tempfile::TempDir;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
+use wait_timeout::ChildExt;
+
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const PACKAGE_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
+const ROOT_HANDOFF_TIMEOUT: Duration = Duration::from_secs(300);
+const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 
 const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CA_BYTES: usize = 64 * 1024;
@@ -2764,35 +2771,112 @@ pub struct SystemCommandRunner;
 
 impl CommandRunner for SystemCommandRunner {
     fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
-        let mut process = ProcessCommand::new(&command.program);
-        process
-            .args(&command.args)
-            .env_clear()
-            .env("LANG", "C.UTF-8")
-            .env("LC_ALL", "C.UTF-8")
-            .envs(command.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped());
-        process.stderr(match command.stderr {
-            CommandStderr::Inherit => Stdio::inherit(),
-            CommandStderr::Suppress => Stdio::null(),
-        });
-        let mut child = process
-            .spawn()
-            .map_err(|_| command.program.display().to_string())?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| command.program.display().to_string())?
-            .write_all(&command.stdin)
-            .map_err(|_| command.program.display().to_string())?;
-        let output = child
-            .wait_with_output()
-            .map_err(|_| command.program.display().to_string())?;
-        Ok(CommandOutput {
-            success: output.status.success(),
-            stdout: output.stdout,
-        })
+        let timeout = command_timeout(&command.program);
+        run_process(command, timeout)
+    }
+}
+
+fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, String> {
+    let program = command.program.clone();
+    let mut process = ProcessCommand::new(&command.program);
+    process
+        .args(&command.args)
+        .env_clear()
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .envs(command.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    process.stderr(match command.stderr {
+        CommandStderr::Inherit => Stdio::inherit(),
+        CommandStderr::Suppress => Stdio::null(),
+    });
+    // Put every privileged command in its own process group.  A timed-out
+    // sudo shell can otherwise leave apt/systemd descendants behind and
+    // the next upgrade would race those stale processes.
+    process.process_group(0);
+    let mut child = process.spawn().map_err(|_| program.display().to_string())?;
+
+    let writer = child.stdin.take().map(|mut stdin| {
+        let input = command.stdin;
+        thread::spawn(move || stdin.write_all(&input))
+    });
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| program.display().to_string())?;
+    let reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).map(|_| output)
+    });
+    let status = match child.wait_timeout(timeout) {
+        Ok(Some(status)) => status,
+        Ok(None) | Err(_) => {
+            terminate_process_group(&mut child);
+            // Do not join pipe threads on the deadline path.  A child that
+            // escaped its process group can keep a pipe open indefinitely;
+            // dropping these handles lets the setup process return its
+            // bounded failure while the OS closes the descriptors on exit.
+            drop(writer);
+            drop(reader);
+            return Err(format!(
+                "{} exceeded its command deadline",
+                program.display()
+            ));
+        }
+    };
+    if let Some(writer) = writer {
+        writer
+            .join()
+            .map_err(|_| program.display().to_string())?
+            .map_err(|_| program.display().to_string())?;
+    }
+    let stdout = reader
+        .join()
+        .map_err(|_| program.display().to_string())?
+        .map_err(|_| program.display().to_string())?;
+    Ok(CommandOutput {
+        success: status.success(),
+        stdout,
+    })
+}
+
+impl SystemCommandRunner {
+    #[cfg(test)]
+    fn run_with_deadline_for_test(
+        &mut self,
+        command: Command,
+        timeout: Duration,
+    ) -> Result<CommandOutput, String> {
+        run_process(command, timeout)
+    }
+}
+
+fn command_timeout(program: &Path) -> Duration {
+    match program.to_str() {
+        Some("/usr/bin/apt-get") => PACKAGE_COMMAND_TIMEOUT,
+        Some("/usr/bin/sudo") => ROOT_HANDOFF_TIMEOUT,
+        _ => DEFAULT_COMMAND_TIMEOUT,
+    }
+}
+
+fn terminate_process_group(child: &mut std::process::Child) {
+    let process_group = rustix::process::Pid::from_raw(child.id() as i32);
+    if let Some(process_group) = process_group {
+        let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
+    }
+    if child
+        .wait_timeout(TERMINATION_GRACE)
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        if let Some(process_group) = process_group {
+            let _ =
+                rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -2867,9 +2951,24 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
     use std::os::unix::fs::PermissionsExt;
+    use std::time::Instant;
     use tempfile::tempdir;
 
     struct Values(VecDeque<String>);
+
+    #[test]
+    fn system_commands_fail_closed_and_reap_descendants_at_the_deadline() {
+        let mut runner = SystemCommandRunner;
+        let started = Instant::now();
+        let error = runner
+            .run_with_deadline_for_test(
+                Command::new("/bin/sh", ["-c", "sleep 30 & wait"]),
+                Duration::from_millis(50),
+            )
+            .expect_err("stalled command must be bounded");
+        assert!(error.contains("/bin/sh exceeded its command deadline"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
 
     #[test]
     fn final_diagnostic_stdout_is_rendered_even_when_not_utf8() {
