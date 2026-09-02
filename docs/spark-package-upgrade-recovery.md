@@ -31,12 +31,16 @@ installed package is never removed or downgraded.
 
 `/var/lib/vonk-forge/package-upgrade.status` is a root-owned, seven-line,
 secret-free receipt containing only a bounded outcome, allowlisted stage,
-bounded reason token, exact target version and package digest, and bounded
-`dpkg` state. New helpers also return allowlisted package verification,
-metadata, custody, or installation codes; only installation failures may carry
-an exit status in the range 0 through 255. The Controller treats every one of
-these detailed failures as recoverable but operator-paused. It does not issue
-an automatic second mutation and does not dispatch the next Spark until a new
-authenticated protocol-v3 contact proves the exact binary digest, build
-digest, semantic version, required capabilities, architecture, and successful
-self-test.
+bounded reason token, the target package-version metadata and package digest,
+and bounded `dpkg` state. New helpers also return allowlisted package
+verification, metadata, custody, or installation codes; only installation
+failures may carry an exit status in the range 0 through 255. The Controller
+treats every one of these detailed failures as recoverable but operator-paused.
+It does not issue an automatic second mutation and does not dispatch the next
+Spark until a new authenticated protocol-v3 contact proves the exact signed
+package, binary digest, build digest, architecture, required upgrade
+capability, and successful self-test. Package and semantic version strings,
+plus any capabilities unknown to this Controller, are informational/open
+metadata and are not required to match across Controller and Spark. The
+protocol version and the required upgrade capability remain safety checks so
+the receiving side can understand and execute the signed operation.
