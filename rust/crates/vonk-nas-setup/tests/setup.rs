@@ -672,6 +672,88 @@ fn upgrade_rejects_unmanaged_top_level_entries_before_writing() {
 }
 
 #[test]
+fn upgrade_removes_an_empty_interrupted_installer_staging_directory() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let stale_staging = bundle.join(".vonk-forge.setup-16573-0");
+    std::fs::create_dir(&stale_staging).expect("stale staging directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("empty interrupted staging directory is recovered");
+
+    assert_eq!(
+        result.root,
+        std::fs::canonicalize(&bundle).expect("canonical bundle")
+    );
+    assert!(!stale_staging.exists());
+    assert_ne!(
+        std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
+        "old compose\n"
+    );
+}
+
+#[test]
+fn upgrade_rejects_a_nonempty_interrupted_installer_staging_directory() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let stale_staging = bundle.join(".vonk-forge.setup-16573-0");
+    std::fs::create_dir(&stale_staging).expect("stale staging directory");
+    std::fs::write(stale_staging.join("operator-data"), "preserve me\n").expect("staging content");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let error = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect_err("nonempty staging directory is not deleted");
+
+    assert!(error.to_string().contains("unexpected top-level entry"));
+    assert_eq!(
+        std::fs::read_to_string(stale_staging.join("operator-data"))
+            .expect("preserved staging content"),
+        "preserve me\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn upgrade_rejects_a_staging_name_symlink_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let outside = temporary.path().join("outside");
+    std::fs::create_dir(&outside).expect("outside directory");
+    symlink(&outside, bundle.join(".vonk-forge.setup-16573-0")).expect("staging symlink");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let error = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect_err("staging-name symlink is rejected");
+
+    assert!(error.to_string().contains("unexpected top-level entry"));
+    assert!(outside.exists());
+}
+
+#[test]
 fn prompts_retry_invalid_required_values_and_confirmation() {
     let temporary = tempdir().expect("temporary directory");
     let input = Cursor::new(b"\nforge.example.test\n\nperhaps\nyes\n".to_vec());
