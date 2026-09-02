@@ -1133,8 +1133,13 @@ if [ "$package_action" -eq 1 ] \
         exit 1
     }
     if ! helper_namespace_has_package_paths; then
-        echo 'vonk-forge-agent: inherited helper sandbox lacks package lifecycle paths' >&2
-        exit 1
+        # The helper can outlive the package that started it.  Its already
+        # running mount namespace may therefore still have the old package
+        # permissions even though the signed recovery capsule is durable.
+        # Do not strand dpkg behind that historical namespace: let this
+        # maintainer script finish its bounded preflight and let the capsule
+        # retry the exact cached package from a fresh systemd namespace.
+        echo 'vonk-forge-agent: inherited helper sandbox lacks package lifecycle paths; recovery capsule will retry outside it' >&2
     fi
 fi
 
