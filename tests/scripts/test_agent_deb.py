@@ -857,12 +857,14 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert "inherited helper sandbox lacks package lifecycle paths" in verifier
     assert "durable recovery armed outside the inherited helper sandbox" in verifier
     assert "preinst helper sandbox handoff is incomplete" in verifier
-    recovery_arm = preinst.index("arm_controller_recovery ||")
+    recovery_arm = preinst.index("if ! arm_controller_recovery; then")
     assert recovery_arm < namespace_probe
     assert "installed signed helper copies the agent-owned download" in preinst
     assert "root-only per-invocation custody directory" in preinst
     assert "controller recovery preflight failed" in preinst
     assert "package-upgrade.preflight.status" in preinst
+    assert "continuing package install" in preinst
+    assert "continue with package finisher" in preinst
 
 
 def test_recovery_does_not_probe_legacy_helper_socket_metadata() -> None:
