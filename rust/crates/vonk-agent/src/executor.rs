@@ -499,24 +499,35 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("exact OCI image archive is unavailable");
                 }
                 match importer.verify(&request, &archive) {
-                    Ok(evidence)
-                        if self
-                            .execute_host_runtime(
-                                claim,
-                                HostRuntimeAction::ImageImport,
-                                importer.runtime_arguments(&request, &archive),
-                            )
-                            .await
-                            .is_ok() =>
+                    Ok(evidence) => match self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::ImageImport,
+                            importer.runtime_arguments(&request, &archive),
+                        )
+                        .await
                     {
-                        ExecutionResult {
+                        Ok(()) => ExecutionResult {
                             state: "succeeded",
                             body: serde_json::to_value(evidence).unwrap_or_else(
                                 |_| json!({"reason": "image import evidence serialization failed"}),
                             ),
+                        },
+                        Err(error) => {
+                            let mut body = json!({
+                                "reason": "host runtime could not import the accepted OCI image",
+                            });
+                            if let crate::host_runtime::HostRuntimeError::HelperRejected { code } =
+                                error
+                            {
+                                body["helper_error_code"] = Value::String(code);
+                            }
+                            ExecutionResult {
+                                state: "failed",
+                                body,
+                            }
                         }
-                    }
-                    Ok(_) => failed("host runtime could not import the accepted OCI image"),
+                    },
                     Err(error) => ExecutionResult {
                         state: "failed",
                         body: json!({"reason": error.to_string()}),
@@ -1916,10 +1927,36 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             body["helper_exit_code"] = Value::from(exit_code);
         }
     }
+    if claim.operation == "recipe.image.import.v1"
+        && let Some(code) = executed
+            .body
+            .get("helper_error_code")
+            .and_then(Value::as_str)
+            .filter(|code| stable_runtime_helper_error_code(code))
+    {
+        body["helper_error_code"] = Value::String(code.to_owned());
+    }
     ExecutionResult {
         state: "failed",
         body,
     }
+}
+
+fn stable_runtime_helper_error_code(value: &str) -> bool {
+    matches!(
+        value,
+        "operation_failed"
+            | "operation_invalid"
+            | "operation_unsafe_path"
+            | "operation_invalid_artifact"
+            | "operation_command_failed"
+            | "operation_stop_uncertain"
+            | "operation_io"
+            | "runtime_image_load_failed"
+            | "runtime_image_inspect_failed"
+            | "runtime_image_identity_invalid"
+            | "runtime_image_receipt_failed"
+    )
 }
 
 async fn run_heartbeats<C: LoopClient>(
