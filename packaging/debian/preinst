@@ -308,7 +308,10 @@ inside_package_helper() {
     while [ "$helper_depth" -lt 16 ] && valid_pid "$helper_pid"; do
         helper_exe=$(/usr/bin/readlink -f "/proc/$helper_pid/exe" 2>/dev/null || true)
         helper_comm=$(tr -d '\n' < "/proc/$helper_pid/comm" 2>/dev/null || true)
+        # Linux exposes the task comm field with a 15-byte limit, so the
+        # helper's `vonk-agent-helper` name is reported as `vonk-agent-help`.
         if [ "$helper_exe" = /usr/lib/vonk-forge/vonk-agent-helper ] \
+            || [ "$helper_comm" = vonk-agent-help ] \
             || [ "$helper_comm" = vonk-agent-helper ]; then
             helper_uid=$(/usr/bin/awk '/^Uid:/{print $2; exit}' \
                 "/proc/$helper_pid/status" 2>/dev/null || true)
