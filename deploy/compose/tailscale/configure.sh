@@ -51,16 +51,10 @@ validate_service_name "${control_service}" \
     && [ "${hermes_api_service}" != "${hermes_dashboard_service}" ] \
     || { echo "ERROR: Tailscale Service names must be distinct." >&2; exit 64; }
 
-default_map_services_first=$(printf \
-    '{"services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}' \
-    "${control_service}")
-default_map_version_first=$(printf \
+default_service_map=$(printf \
     '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
     "${control_service}")
-hermes_map_services_first=$(printf \
-    '{"services":{"%s":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"%s":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}' \
-    "${hermes_api_service}" "${hermes_dashboard_service}" "${control_service}")
-hermes_map_version_first=$(printf \
+hermes_service_map=$(printf \
     '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"%s":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
     "${hermes_api_service}" "${hermes_dashboard_service}" "${control_service}")
 
@@ -146,6 +140,55 @@ withdraw_all_services() {
     ts serve set-config --all "${empty_service_map}" >/dev/null 2>&1 || true
 }
 
+canonicalize_service_map() {
+    service_map=$1
+    destination=$2
+    # `tailscale serve get-config --all` emits a JSON object whose service
+    # member is a Go map. Its member order is deliberately unspecified and can
+    # differ across otherwise identical processes or Tailscale versions. Keep
+    # the document shape and every service detail exact, but compare the
+    # individual service entries after sorting them by their complete value.
+    service_entries=$(printf '%s\n' "${service_map}" | sed -n \
+        -e 's/^{"version":"0.0.1","services":{\(.*\)}}$/\1/p' \
+        -e 's/^{"services":{\(.*\)},"version":"0.0.1"}$/\1/p')
+    [ -n "${service_entries}" ] || return 1
+    printf '%s\n' "${service_entries}" \
+        | sed 's/},"/}\
+"/g' \
+        | sort >"${destination}"
+}
+
+service_map_is_exact() {
+    actual_map=$1
+    expected_map=$2
+    canonicalize_service_map \
+        "${actual_map}" "${runtime_dir}/tailscale-serve-config.actual" \
+        && canonicalize_service_map \
+            "${expected_map}" "${runtime_dir}/tailscale-serve-config.expected" \
+        && cmp -s \
+            "${runtime_dir}/tailscale-serve-config.actual" \
+            "${runtime_dir}/tailscale-serve-config.expected"
+}
+
+report_serve_mismatch() {
+    # Serve configuration contains only validated Service names and local
+    # upstreams. Include bounded diagnostics in Docker's health log so a future
+    # Tailscale representation change is actionable instead of looking like a
+    # hung deployment.
+    printf 'ERROR: actual Tailscale Serve config: ' >&2
+    if [ -r "${runtime_dir}/tailscale-serve-config.compact" ]; then
+        cut -c 1-4096 "${runtime_dir}/tailscale-serve-config.compact" >&2
+    else
+        printf '<unavailable>\n' >&2
+    fi
+    printf 'ERROR: actual Tailscale Serve status: ' >&2
+    if [ -r "${runtime_dir}/tailscale-serve-status.compact" ]; then
+        cut -c 1-4096 "${runtime_dir}/tailscale-serve-status.compact" >&2
+    else
+        printf '<unavailable>\n' >&2
+    fi
+}
+
 shutdown_services() {
     trap - 1 2 15
     if [ -S "${socket}" ]; then
@@ -190,13 +233,13 @@ serve_is_exact() {
                 "${runtime_dir}/tailscale-serve-status.compact" \
                 && grep -Fq "\"${hermes_dashboard_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
                     "${runtime_dir}/tailscale-serve-status.compact" \
-                && { [ "${comparable_service_map}" = "${hermes_map_services_first}" ] \
-                    || [ "${comparable_service_map}" = "${hermes_map_version_first}" ]; }
+                && service_map_is_exact \
+                    "${comparable_service_map}" "${hermes_service_map}"
         else
             ! grep -Fq "\"${hermes_api_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
                 && ! grep -Fq "\"${hermes_dashboard_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
-                && { [ "${comparable_service_map}" = "${default_map_services_first}" ] \
-                    || [ "${comparable_service_map}" = "${default_map_version_first}" ]; }
+                && service_map_is_exact \
+                    "${comparable_service_map}" "${default_service_map}"
         fi
 }
 
@@ -392,6 +435,7 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
             fi
             if ! serve_is_exact 1; then
                 echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
+                report_serve_mismatch
                 exit 1
             fi
             ;;
@@ -407,6 +451,7 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
             fi
             if ! serve_is_exact 0; then
                 echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
+                report_serve_mismatch
                 exit 1
             fi
             ;;

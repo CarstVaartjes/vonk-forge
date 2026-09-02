@@ -1025,6 +1025,23 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
         command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args == ["reset-failed", "vonk-forge-agent.service"]
     }));
+    let reload_position = apply_runner
+        .commands
+        .iter()
+        .position(|command| {
+            command.program == std::path::Path::new("/usr/bin/systemctl")
+                && command.args == ["daemon-reload"]
+        })
+        .unwrap();
+    let reset_position = apply_runner
+        .commands
+        .iter()
+        .position(|command| {
+            command.program == std::path::Path::new("/usr/bin/systemctl")
+                && command.args == ["reset-failed", "vonk-forge-agent.service"]
+        })
+        .unwrap();
+    assert!(reload_position < reset_position);
     assert!(apply_runner.commands.iter().any(|command| {
         command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args

@@ -934,7 +934,17 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
     ready.touch()
     key = tmp_path / "hermes-api-key"
     key.write_text("test-hermes-key\n", encoding="utf-8")
-    expected_map = json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":"))
+    # Tailscale's declarative format stores services in a Go map, so its JSON
+    # encoder is free to emit any member order. Deliberately use the reverse of
+    # configure.sh's construction order to prove readiness is semantic while
+    # every service name, listener, and upstream remains exact.
+    expected_map = json.dumps(
+        {
+            "version": HERMES_MAP["version"],
+            "services": dict(reversed(HERMES_MAP["services"].items())),
+        },
+        separators=(",", ":"),
+    )
     healthy_status = json.dumps(
         {
             "Services": {
