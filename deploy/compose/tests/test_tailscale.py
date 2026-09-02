@@ -682,10 +682,17 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
     assert result.returncode == 0, result.stderr
 
 
-def test_local_acceptance_without_client_allows_pending_service_host(
+@pytest.mark.parametrize(
+    ("require_service_host", "ephemeral", "expected_returncode"),
+    [("0", "true", 0), ("1", "false", 1)],
+)
+def test_pending_advertisement_is_acceptance_only(
     tmp_path: Path,
+    require_service_host: str,
+    ephemeral: str,
+    expected_returncode: int,
 ) -> None:
-    """A child tailnet may not publish service-host state without a client."""
+    """Only ephemeral no-client acceptance may ignore advertised=false."""
     socket_path = tmp_path / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
@@ -696,9 +703,9 @@ def test_local_acceptance_without_client_allows_pending_service_host(
         '  *"serve status --json"*) printf \'%s\\n\' '
         "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
         '  *"serve get-config --all"*) printf \'%s\\n\' '
-        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}' ;;\n"
+        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"},\"advertised\":false}}}' ;;\n"
         '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{},\"PrimaryRoutes\":[]}}' ;;\n"
+        "'{\"Self\":{\"CapMap\":{\"service-host\":[{\"svc:vonk-forge\":[\"100.70.230.202\"]}]},\"PrimaryRoutes\":[\"100.70.230.202/32\"]}}' ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -711,8 +718,8 @@ def test_local_acceptance_without_client_allows_pending_service_host(
                 "PATH": f"{tmp_path}:{os.environ['PATH']}",
                 "TS_HEALTHCHECK_ONLY": "1",
                 "TS_SOCKET_PATH": str(socket_path),
-                "TS_REQUIRE_SERVICE_HOST": "0",
-                "VONK_TAILSCALE_EPHEMERAL": "true",
+                "TS_REQUIRE_SERVICE_HOST": require_service_host,
+                "VONK_TAILSCALE_EPHEMERAL": ephemeral,
             },
             capture_output=True,
             text=True,
@@ -722,7 +729,7 @@ def test_local_acceptance_without_client_allows_pending_service_host(
     finally:
         daemon_socket.close()
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected_returncode, result.stderr
 
 
 def test_service_host_bypass_requires_ephemeral_gateway() -> None:

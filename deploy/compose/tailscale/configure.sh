@@ -169,6 +169,18 @@ serve_is_exact() {
         >"${runtime_dir}/tailscale-serve-config.compact"
 
     actual_service_map=$(cat "${runtime_dir}/tailscale-serve-config.compact")
+    # Tailscale reports an unapproved/pending service advertisement as the
+    # advisory `advertised:false` field in get-config output.  Disposable
+    # acceptance without an independent tailnet client deliberately permits
+    # that control-plane state; it still requires the exact local HTTPS
+    # endpoint map and status below.  Production keeps the advertised bit
+    # strict because it must prove that the Service is actually published.
+    comparable_service_map=${actual_service_map}
+    if [ "${require_service_host}" = "0" ] && [ "${ephemeral}" = "true" ]; then
+        comparable_service_map=$(printf '%s' "${comparable_service_map}" \
+            | sed -e 's/,"advertised":false//g' \
+                -e 's/"advertised":false,//g')
+    fi
     grep -Fq "\"${control_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
         "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"443":{"HTTP":true}' "${runtime_dir}/tailscale-serve-status.compact" \
@@ -178,13 +190,13 @@ serve_is_exact() {
                 "${runtime_dir}/tailscale-serve-status.compact" \
                 && grep -Fq "\"${hermes_dashboard_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
                     "${runtime_dir}/tailscale-serve-status.compact" \
-                && { [ "${actual_service_map}" = "${hermes_map_services_first}" ] \
-                    || [ "${actual_service_map}" = "${hermes_map_version_first}" ]; }
+                && { [ "${comparable_service_map}" = "${hermes_map_services_first}" ] \
+                    || [ "${comparable_service_map}" = "${hermes_map_version_first}" ]; }
         else
             ! grep -Fq "\"${hermes_api_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
                 && ! grep -Fq "\"${hermes_dashboard_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
-                && { [ "${actual_service_map}" = "${default_map_services_first}" ] \
-                    || [ "${actual_service_map}" = "${default_map_version_first}" ]; }
+                && { [ "${comparable_service_map}" = "${default_map_services_first}" ] \
+                    || [ "${comparable_service_map}" = "${default_map_version_first}" ]; }
         fi
 }
 
