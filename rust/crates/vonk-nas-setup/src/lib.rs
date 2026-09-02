@@ -2120,6 +2120,17 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     for entry in fs::read_dir(&bundle)? {
         let entry = entry?;
         let name = entry.file_name();
+        if is_stale_staging_directory_name(&name) {
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                match fs::remove_dir(&path) {
+                    Ok(()) => continue,
+                    Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
         if name != ".env" && name != "docker-compose.yaml" && name != "secrets" {
             return Err(SetupError::UnsafeDestination(format!(
                 "{} is an unexpected top-level entry",
@@ -2133,6 +2144,22 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     require_real_directory(&secrets)?;
     validate_secret_tree(&secrets)?;
     Ok(())
+}
+
+fn is_stale_staging_directory_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let Some(remainder) = name.strip_prefix(".vonk-forge.setup-") else {
+        return false;
+    };
+    let Some((pid, sequence)) = remainder.split_once('-') else {
+        return false;
+    };
+    !pid.is_empty()
+        && !sequence.is_empty()
+        && pid.bytes().all(|byte| byte.is_ascii_digit())
+        && sequence.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn validate_secret_tree(directory: &Path) -> Result<(), SetupError> {
