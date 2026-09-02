@@ -607,10 +607,39 @@ arm_controller_recovery() {
     # no-follow descriptor into this root-only per-invocation custody directory
     # before invoking dpkg. Revalidate that exact current protocol here before
     # taking the durable package cache copy.
-    case "$PPID" in ''|*[!0-9]*) return 1 ;; esac
+    arm_failure() {
+        arm_reason=$1
+        # Keep the first failing preflight reason outside the helper's noisy
+        # dpkg transaction.  This is deliberately a separate, root-owned
+        # schema-2 receipt so an old helper can be diagnosed without exposing
+        # package contents or relying on its suppressed stderr.
+        /usr/bin/logger -t vonk-forge-agent \
+            "controller recovery preflight failed: $arm_reason" \
+            >/dev/null 2>&1 || true
+        arm_receipt=$state_parent/package-upgrade.preflight.status
+        arm_parent=$state_parent
+        if [ -d "$arm_parent" ] && [ ! -L "$arm_parent" ]; then
+            arm_new=$(/usr/bin/mktemp "$arm_parent/.vonk-preflight.XXXXXX") \
+                || return 1
+            trap '/usr/bin/rm -f -- "$arm_new"' EXIT HUP INT TERM
+            printf '%s\n' \
+                'schema_version=2' \
+                'outcome=failed' \
+                'stage=dispatch' \
+                "reason=$arm_reason" > "$arm_new" || return 1
+            /usr/bin/chown root:root "$arm_new" || return 1
+            /usr/bin/chmod 0644 "$arm_new" || return 1
+            /usr/bin/sync -f "$arm_new" || return 1
+            /usr/bin/mv -f -- "$arm_new" "$arm_receipt" || return 1
+            /usr/bin/sync -f "$arm_parent" || return 1
+            trap - EXIT HUP INT TERM
+        fi
+        return 1
+    }
+    case "$PPID" in ''|*[!0-9]*) arm_failure invalid-dpkg-parent-pid ;; esac
     [ -r "/proc/$PPID/exe" ] && [ -r "/proc/$PPID/cmdline" ] \
         && [ "$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg ] \
-        || return 1
+        || arm_failure invalid-dpkg-parent-process
     command_file=$(/usr/bin/mktemp /tmp/.vonk-dpkg-command.XXXXXX)
     trap '/usr/bin/rm -f -- "$command_file"' EXIT HUP INT TERM
     /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" > "$command_file"
@@ -618,44 +647,56 @@ arm_controller_recovery() {
         && [ "$(/usr/bin/sed -n '1p' "$command_file")" = /usr/bin/dpkg ] \
         && [ "$(/usr/bin/sed -n '2p' "$command_file")" = --install ] \
         && [ "$(/usr/bin/sed -n '3p' "$command_file")" = --force-confold ] \
-        || return 1
+        || arm_failure invalid-dpkg-command
     candidate=$(/usr/bin/sed -n '4p' "$command_file")
     /usr/bin/rm -f -- "$command_file"
     trap - EXIT HUP INT TERM
     custody_root=/run/vonk-forge-package-candidates
     case "$candidate" in
         "$custody_root"/*/[0-9a-f]*.deb)
-            invocation_dir=$(/usr/bin/dirname "$candidate") || return 1
+            invocation_dir=$(/usr/bin/dirname "$candidate") \
+                || arm_failure invalid-custody-path
             [ "$(/usr/bin/dirname "$invocation_dir")" = "$custody_root" ] \
-                || return 1
+                || arm_failure invalid-custody-parent
             invocation=${invocation_dir##*/}
-            case "$invocation" in *[!0-9a-f]*|'') return 1 ;; esac
-            [ "${#invocation}" -eq 32 ] || return 1
+            case "$invocation" in
+                *[!0-9a-f]*|'') arm_failure invalid-custody-invocation ;;
+            esac
+            [ "${#invocation}" -eq 32 ] \
+                || arm_failure invalid-custody-invocation-length
             safe_root_directory "$custody_root" 700 \
                 && safe_root_directory "$invocation_dir" 700 \
-                || return 1
+                || arm_failure unsafe-custody-directory
             ;;
-        *) return 1 ;;
+        *) arm_failure invalid-custody-candidate ;;
     esac
     package_digest=${candidate##*/}
     package_digest=${package_digest%.deb}
-    valid_digest "$package_digest" || return 1
-    [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+    valid_digest "$package_digest" \
+        || arm_failure invalid-package-digest
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+        || arm_failure invalid-candidate-file
     candidate_before=$(/usr/bin/stat -Lc %d:%i:%u:%g:%a:%h:%s:%Y:%Z "$candidate") \
-        || return 1
+        || arm_failure candidate-stat-failed
     [ "$(/usr/bin/stat -Lc %u:%g:%a:%h "$candidate")" = 0:0:600:1 ] \
-        || return 1
-    package_bytes=$(/usr/bin/stat -Lc %s "$candidate") || return 1
-    case "$package_bytes" in ''|*[!0-9]*|0) return 1 ;; esac
+        || arm_failure unsafe-candidate-metadata
+    package_bytes=$(/usr/bin/stat -Lc %s "$candidate") \
+        || arm_failure candidate-size-failed
+    case "$package_bytes" in
+        ''|*[!0-9]*|0) arm_failure invalid-candidate-size ;;
+    esac
     [ "$(/usr/bin/dpkg-deb --field "$candidate" Package)" = "$package_name" ] \
         && [ "$(/usr/bin/dpkg-deb --field "$candidate" Version)" = "$target_version" ] \
         && [ "$(/usr/bin/dpkg-deb --field "$candidate" Architecture)" \
             = "$target_architecture" ] \
         && [ "$(/usr/bin/dpkg --print-architecture)" = "$target_architecture" ] \
-        || return 1
-    ensure_root_directory "$state_parent" 755 || return 1
-    ensure_root_directory "$state_dir" 700 || return 1
-    capsule_shadow_paths_absent || return 1
+        || arm_failure candidate-package-metadata
+    ensure_root_directory "$state_parent" 755 \
+        || arm_failure unsafe-state-parent
+    ensure_root_directory "$state_dir" 700 \
+        || arm_failure unsafe-state-directory
+    capsule_shadow_paths_absent \
+        || arm_failure stale-recovery-shadow
     if [ -e "$intent" ] || [ -L "$intent" ]; then
         read_intent \
             && [ "$intent_version" = "$target_version" ] \
