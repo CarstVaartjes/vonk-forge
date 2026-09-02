@@ -1454,6 +1454,7 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     assert "intent changed before gate retirement" in preinst
     assert "intent changed before retirement" in preinst
     assert '"/proc/$service_pid/exe"' in preinst
+    assert '"/proc/$helper_pid/cgroup"' in preinst
     # Packaged executables are deliberately root-owned and non-writable (0555).
     # The bounded ancestry fallback must recognize that deployed mode while
     # retaining compatibility with a locally repaired 0755 helper.

@@ -306,6 +306,13 @@ inside_package_helper() {
     helper_pid=$PPID
     helper_depth=0
     while [ "$helper_depth" -lt 16 ] && valid_pid "$helper_pid"; do
+        helper_cgroup=$(cat "/proc/$helper_pid/cgroup" 2>/dev/null || true)
+        if printf '%s\n' "$helper_cgroup" \
+            | grep -Eq '(^|/)vonk-forge-package-helper[.]service(/|$)'; then
+            helper_uid=$(/usr/bin/awk '/^Uid:/{print $2; exit}' \
+                "/proc/$helper_pid/status" 2>/dev/null || true)
+            [ "$helper_uid" = 0 ] && return 0
+        fi
         helper_exe=$(/usr/bin/readlink -f "/proc/$helper_pid/exe" 2>/dev/null || true)
         helper_comm=$(tr -d '\n' < "/proc/$helper_pid/comm" 2>/dev/null || true)
         helper_cmdline=$(tr '\000' ' ' < "/proc/$helper_pid/cmdline" 2>/dev/null || true)
