@@ -1544,6 +1544,97 @@ def promote(arguments: argparse.Namespace) -> None:
     _copy_publication_entry(filesystem, remote, *pointers[0])
 
 
+def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
+    """Retire one exact invalid dev pointer without interpreting its schema."""
+    if SHA256.fullmatch(arguments.expected_sha256) is None:
+        raise PublicationError("expected pointer digest is invalid")
+    filesystem, remote = _destination(arguments)
+    pointer_key = "artifacts/dev/current.manifest"
+    retired_key = (
+        f"artifacts/dev/retired-pointers/{arguments.expected_sha256}.manifest"
+    )
+    if filesystem is not None:
+        pointer_path = filesystem / pointer_key
+        retired_path = filesystem / retired_key
+        if not pointer_path.exists():
+            if (
+                retired_path.is_file()
+                and not retired_path.is_symlink()
+                and hashlib.sha256(
+                    _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
+                ).hexdigest()
+                == arguments.expected_sha256
+            ):
+                already_quarantined = True
+            else:
+                raise PublicationError("dev channel pointer is unavailable")
+        else:
+            current = _safe_bytes(
+                pointer_path, "dev channel pointer", 64 * 1024
+            )
+            if hashlib.sha256(current).hexdigest() != arguments.expected_sha256:
+                raise PublicationError("dev channel pointer digest changed")
+            with tempfile.TemporaryDirectory(
+                prefix=".installer-pointer-quarantine-", dir=filesystem
+            ) as directory:
+                source = Path(directory) / "current.manifest"
+                source.write_bytes(current)
+                _atomic_local_copy(source, retired_path, True)
+            pointer_path.unlink()
+            already_quarantined = False
+        if pointer_path.exists() or hashlib.sha256(
+            _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
+        ).hexdigest() != arguments.expected_sha256:
+            raise PublicationError("dev channel pointer quarantine is incomplete")
+    else:
+        assert remote is not None
+        current = _rclone_bytes(remote, pointer_key, 64 * 1024)
+        if current is None:
+            if _rclone_digest(remote, retired_key) != arguments.expected_sha256:
+                raise PublicationError("dev channel pointer is unavailable")
+            already_quarantined = True
+        else:
+            if hashlib.sha256(current).hexdigest() != arguments.expected_sha256:
+                raise PublicationError("dev channel pointer digest changed")
+            with tempfile.TemporaryDirectory(
+                prefix=".installer-pointer-quarantine-"
+            ) as directory:
+                source = Path(directory) / "current.manifest"
+                source.write_bytes(current)
+                _rclone_copy(
+                    source,
+                    remote,
+                    {
+                        "key": retired_key,
+                        "phase": "immutable",
+                        "sha256": arguments.expected_sha256,
+                    },
+                )
+            result = subprocess.run(
+                ["rclone", "deletefile", f"{remote}/{pointer_key}"], check=False
+            )
+            if result.returncode != 0:
+                raise PublicationError("dev channel pointer removal failed")
+            already_quarantined = False
+        if _rclone_object_exists(remote, pointer_key) or _rclone_digest(
+            remote, retired_key
+        ) != arguments.expected_sha256:
+            raise PublicationError("dev channel pointer quarantine is incomplete")
+    print(
+        json.dumps(
+            {
+                "already_quarantined": already_quarantined,
+                "channel": "dev",
+                "key": pointer_key,
+                "phase": "quarantine",
+                "retired_key": retired_key,
+                "sha256": arguments.expected_sha256,
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def _published_bytes(
     filesystem: Path | None,
     remote: str | None,
@@ -1724,6 +1815,11 @@ def parser() -> argparse.ArgumentParser:
     promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
     promotion_destinations.add_argument("--filesystem", type=Path)
     promotion_destinations.add_argument("--rclone-remote")
+    quarantine = commands.add_parser("quarantine-dev-pointer")
+    quarantine.add_argument("--expected-sha256", required=True)
+    quarantine_destinations = quarantine.add_mutually_exclusive_group(required=True)
+    quarantine_destinations.add_argument("--filesystem", type=Path)
+    quarantine_destinations.add_argument("--rclone-remote")
     renewal = commands.add_parser("refresh")
     renewal.add_argument("--channel", choices=("dev", "stable"), required=True)
     renewal.add_argument("--expires-at", required=True, type=int)
@@ -1749,6 +1845,8 @@ def main(argv: list[str] | None = None) -> int:
             publish_candidate(arguments)
         elif arguments.command == "promote":
             promote(arguments)
+        elif arguments.command == "quarantine-dev-pointer":
+            quarantine_dev_pointer(arguments)
         else:
             refresh(arguments)
     except (OSError, PublicationError) as error:

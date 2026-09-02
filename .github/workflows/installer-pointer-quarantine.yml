@@ -1,0 +1,74 @@
+name: Installer dev pointer quarantine
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha256:
+        description: Exact SHA-256 of the obsolete dev current.manifest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  quarantine:
+    name: Quarantine one exact obsolete dev pointer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: installer-promotion-dev
+    concurrency:
+      group: vonk-forge-installer-r2-dev
+      cancel-in-progress: false
+    steps:
+      - name: Check out exact recovery tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require current main recovery authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$GITHUB_SHA" = \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+
+      - name: Install R2 publication client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes rclone
+
+      - name: Preserve and remove the exact obsolete pointer
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          scripts/install-release-publication quarantine-dev-pointer \
+            --expected-sha256 "$EXPECTED_SHA256" \
+            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
+            | tee "$RUNNER_TEMP/installer-pointer-quarantine.json"
+          test "$(jq -r .phase "$RUNNER_TEMP/installer-pointer-quarantine.json")" = \
+            quarantine
+
+      - name: Upload quarantine receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-dev-pointer-quarantine-${{ inputs.expected_sha256 }}
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ runner.temp }}/installer-pointer-quarantine.json
