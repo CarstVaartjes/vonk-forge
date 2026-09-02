@@ -420,6 +420,11 @@ elif command == "copyto":
         shutil.copyfile(source, destination)
     finally:
         update_activity(-1)
+elif command == "deletefile":
+    path = object_path(arguments[0])
+    if not path.is_file():
+        raise SystemExit(3)
+    path.unlink()
 else:
     raise SystemExit(64)
 """,
@@ -1485,6 +1490,87 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
         publication / "objects/spark"
     ).read_bytes()
     assert (object_root / "artifacts/stable/current.manifest").is_file()
+
+
+def test_dev_pointer_quarantine_is_exact_preserving_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "public"
+    pointer = destination / "artifacts/dev/current.manifest"
+    pointer.parent.mkdir(parents=True)
+    legacy = b"schema_version=1\nchannel=dev\n"
+    pointer.write_bytes(legacy)
+    digest = hashlib.sha256(legacy).hexdigest()
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "quarantine-dev-pointer",
+        "--expected-sha256",
+        digest,
+        "--filesystem",
+        str(destination),
+    ]
+
+    quarantined = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+
+    assert quarantined.returncode == 0, quarantined.stderr
+    receipt = json.loads(quarantined.stdout)
+    retired = destination / receipt["retired_key"]
+    assert receipt["already_quarantined"] is False
+    assert not pointer.exists()
+    assert retired.read_bytes() == legacy
+
+    repeated = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)["already_quarantined"] is True
+
+
+def test_rclone_dev_pointer_quarantine_refuses_digest_drift_then_preserves(
+    tmp_path: Path,
+) -> None:
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    pointer = object_root / "artifacts/dev/current.manifest"
+    pointer.parent.mkdir(parents=True)
+    legacy = b"schema_version=1\nchannel=dev\n"
+    pointer.write_bytes(legacy)
+    digest = hashlib.sha256(legacy).hexdigest()
+    base = [
+        sys.executable,
+        str(SCRIPT),
+        "quarantine-dev-pointer",
+        "--rclone-remote",
+        "r2:vonk-forge-installers",
+        "--expected-sha256",
+    ]
+
+    drifted = subprocess.run(
+        [*base, "0" * 64],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert drifted.returncode == 2
+    assert "pointer digest changed" in drifted.stderr
+    assert pointer.read_bytes() == legacy
+
+    quarantined = subprocess.run(
+        [*base, digest],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert quarantined.returncode == 0, quarantined.stderr
+    receipt = json.loads(quarantined.stdout)
+    assert not pointer.exists()
+    assert (object_root / receipt["retired_key"]).read_bytes() == legacy
 
 
 def test_rclone_candidate_objects_publish_with_bounded_parallelism(

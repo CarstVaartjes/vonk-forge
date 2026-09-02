@@ -12,6 +12,7 @@ WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 SETUPS = ROOT / ".github/workflows/installer-setups.yml"
 DEV_IMAGES = ROOT / ".github/workflows/dev-images.yml"
 AGENT_RELEASE = ROOT / ".github/workflows/agent-release.yml"
+POINTER_QUARANTINE = ROOT / ".github/workflows/installer-pointer-quarantine.yml"
 
 
 def _workflow(path: Path = WORKFLOW) -> dict[str, object]:
@@ -64,6 +65,26 @@ def _run_workflow_shell(
     result.docker_log = log.read_text() if log.exists() else ""  # type: ignore[attr-defined]
     result.github_environment = github_environment  # type: ignore[attr-defined]
     return result
+
+
+def test_dev_pointer_quarantine_is_manual_exact_and_main_authorized() -> None:
+    workflow = _workflow(POINTER_QUARANTINE)
+    assert set(workflow["on"]) == {"workflow_dispatch"}
+    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"expected_sha256"}
+    assert inputs["expected_sha256"]["required"] == "true"
+    job = workflow["jobs"]["quarantine"]
+    assert job["environment"] == "installer-promotion-dev"
+    assert job["concurrency"]["group"] == "vonk-forge-installer-r2-dev"
+    steps = _steps(job)
+    authority = steps["Require current main recovery authority"]["run"]
+    quarantine = steps["Preserve and remove the exact obsolete pointer"]
+    assert 'test "$GITHUB_SHA" =' in authority
+    assert "refs/remotes/origin/main^{commit}" in authority
+    assert quarantine["env"]["EXPECTED_SHA256"] == "${{ inputs.expected_sha256 }}"
+    assert "quarantine-dev-pointer" in quarantine["run"]
+    assert "--expected-sha256 \"$EXPECTED_SHA256\"" in quarantine["run"]
+    assert "--rclone-remote \"r2:$R2_INSTALLER_PUBLIC_BUCKET\"" in quarantine["run"]
 
 
 def test_publication_requires_candidate_acceptance_before_promotion() -> None:
