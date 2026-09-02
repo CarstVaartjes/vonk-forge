@@ -295,6 +295,12 @@ def configure_tailnet_service_names(
         "TS_REQUIRE_PRIMARY_ROUTES": (
             "1" if require_external_tailnet_client else "0"
         ),
+        # A child tailnet without a separate client cannot reliably publish a
+        # service-host mapping. Keep the gateway and exact Serve checks active,
+        # while leaving service-host/route publication to external acceptance.
+        "TS_REQUIRE_SERVICE_HOST": (
+            "1" if require_external_tailnet_client else "0"
+        ),
     }
     environment = bundle / ".env"
     try:
@@ -1336,11 +1342,11 @@ def verify_tailscale_services(
     expected_services = {control_service}
     if hermes:
         expected_services.update({hermes_api_service, hermes_dashboard_service})
-    assert_tailnet_service_mappings(
-        document,
-        expected_services=expected_services,
-    )
     if service_addresses is not None:
+        assert_tailnet_service_mappings(
+            document,
+            expected_services=expected_services,
+        )
         assert_tailnet_service_primary_routes(
             document,
             expected_services=expected_services,

@@ -438,10 +438,12 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     assert configurator["restart"] == "unless-stopped"
     assert configurator["environment"] == {
         "VONK_SELECTED_PROFILES": "",
+        "VONK_TAILSCALE_EPHEMERAL": "false",
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
         "TS_REQUIRE_PRIMARY_ROUTES": "1",
+        "TS_REQUIRE_SERVICE_HOST": "1",
     }
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
@@ -520,10 +522,12 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
     assert configurator["environment"] == {
         "VONK_SELECTED_PROFILES": "hermes",
+        "VONK_TAILSCALE_EPHEMERAL": "false",
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
         "TS_REQUIRE_PRIMARY_ROUTES": "1",
+        "TS_REQUIRE_SERVICE_HOST": "1",
     }
 
 
@@ -676,6 +680,67 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
         daemon_socket.close()
 
     assert result.returncode == 0, result.stderr
+
+
+def test_local_acceptance_without_client_allows_pending_service_host(
+    tmp_path: Path,
+) -> None:
+    """A child tailnet may not publish service-host state without a client."""
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *"serve status --json"*) printf \'%s\\n\' '
+        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
+        '  *"serve get-config --all"*) printf \'%s\\n\' '
+        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}' ;;\n"
+        '  *"status --json"*) printf \'%s\\n\' '
+        "'{\"Self\":{\"CapMap\":{},\"PrimaryRoutes\":[]}}' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_HEALTHCHECK_ONLY": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "TS_REQUIRE_SERVICE_HOST": "0",
+                "VONK_TAILSCALE_EPHEMERAL": "true",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_service_host_bypass_requires_ephemeral_gateway() -> None:
+    result = subprocess.run(
+        ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+        env=os.environ
+        | {
+            "TS_REQUIRE_SERVICE_HOST": "0",
+            "VONK_TAILSCALE_EPHEMERAL": "false",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 64
+    assert "limited to ephemeral acceptance" in result.stderr
 
 
 def test_configurator_re_advertises_pending_service_host(

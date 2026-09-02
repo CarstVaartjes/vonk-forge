@@ -4,9 +4,28 @@ set -eu
 socket=${TS_SOCKET_PATH:-/var/run/tailscale/tailscaled.sock}
 remaining=120
 route_wait_seconds=${TS_ROUTE_WAIT_SECONDS:-300}
-# Service-host mappings are sufficient for local readiness. External acceptance
-# can opt into the additional PrimaryRoutes assertion.
+# Service-host mappings are sufficient for local readiness. An acceptance run
+# without an independent tailnet client can opt out of service-host publication
+# entirely; it still validates gateway liveness and exact Serve configuration.
 require_primary_routes=${TS_REQUIRE_PRIMARY_ROUTES:-1}
+require_service_host=${TS_REQUIRE_SERVICE_HOST:-1}
+ephemeral=${VONK_TAILSCALE_EPHEMERAL:-false}
+case "${require_primary_routes}" in
+    0|1) ;;
+    *) echo "ERROR: TS_REQUIRE_PRIMARY_ROUTES must be 0 or 1." >&2; exit 64 ;;
+esac
+case "${require_service_host}" in
+    0|1) ;;
+    *) echo "ERROR: TS_REQUIRE_SERVICE_HOST must be 0 or 1." >&2; exit 64 ;;
+esac
+case "${ephemeral}" in
+    true|false) ;;
+    *) echo "ERROR: VONK_TAILSCALE_EPHEMERAL must be true or false." >&2; exit 64 ;;
+esac
+if [ "${require_service_host}" = "0" ] && [ "${ephemeral}" != "true" ]; then
+    echo "ERROR: TS_REQUIRE_SERVICE_HOST=0 is limited to ephemeral acceptance." >&2
+    exit 64
+fi
 reconcile_interval=${TS_RECONCILE_INTERVAL_SECONDS:-30}
 hermes_api_host=${HERMES_API_HOST:-hermes-agent}
 hermes_api_port=${HERMES_API_PORT:-8642}
@@ -350,7 +369,8 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
                 echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
                 exit 1
             fi
-            if ! service_host_is_active 1; then
+            if [ "${require_service_host}" = "1" ] \
+                && ! service_host_is_active 1; then
                 echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
                 exit 1
             fi
@@ -368,7 +388,8 @@ if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
                 echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
                 exit 1
             fi
-            if ! service_host_is_active 0; then
+            if [ "${require_service_host}" = "1" ] \
+                && ! service_host_is_active 0; then
                 echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
                 exit 1
             fi
@@ -411,43 +432,45 @@ if ! wait_for_exact_services "${include_hermes}"; then
     configuration_ready=0
 fi
 
-remaining=${route_wait_seconds}
-route_repair_remaining=0
 routes_ready=1
-while [ "${remaining}" -gt 0 ]; do
-    if service_host_is_active "${include_hermes}"; then
-        break
-    fi
-    if [ "${route_repair_remaining}" -le 0 ]; then
-        # The first advertisement can race tailnet policy propagation. A
-        # pending advertisement is not represented by service-host, so retry
-        # the exact local advertisement until approval appears. Once control
-        # has mapped the TailVIPs but tailscaled has not activated their
-        # PrimaryRoutes, replace the exact Serve map: an idempotent
-        # `serve advertise` is insufficient for the stale-host state where
-        # local Serve config is exact but the daemon retained an advertisement
-        # without installing its primary routes. The policy remains the only
-        # authority that approves the host.
-        if reconfigure_approved_services "${include_hermes}"; then
-            wait_for_exact_services "${include_hermes}" || true
-        else
-            advertise_services || true
+if [ "${require_service_host}" = "1" ]; then
+    remaining=${route_wait_seconds}
+    route_repair_remaining=0
+    while [ "${remaining}" -gt 0 ]; do
+        if service_host_is_active "${include_hermes}"; then
+            break
         fi
-        route_repair_remaining=30
+        if [ "${route_repair_remaining}" -le 0 ]; then
+            # The first advertisement can race tailnet policy propagation. A
+            # pending advertisement is not represented by service-host, so retry
+            # the exact local advertisement until approval appears. Once control
+            # has mapped the TailVIPs but tailscaled has not activated their
+            # PrimaryRoutes, replace the exact Serve map: an idempotent
+            # `serve advertise` is insufficient for the stale-host state where
+            # local Serve config is exact but the daemon retained an advertisement
+            # without installing its primary routes. The policy remains the only
+            # authority that approves the host.
+            if reconfigure_approved_services "${include_hermes}"; then
+                wait_for_exact_services "${include_hermes}" || true
+            else
+                advertise_services || true
+            fi
+            route_repair_remaining=30
+        fi
+        sleep 2
+        remaining=$((remaining - 2))
+        route_repair_remaining=$((route_repair_remaining - 2))
+    done
+    if [ "${remaining}" -le 0 ]; then
+        echo "ERROR: Tailscale has not approved and activated the selected Service hosts;" \
+            "verify auto-approval and grant tag:vonk-gateway TCP 443 access" \
+            "to every hosted Service." >&2
+        # Do not exit the long-running reconciler here. Tailscale may publish the
+        # service-host route after the initial bounded wait; the reconciler below
+        # will re-advertise it once the child policy is visible. TS_CONFIGURE_ONCE
+        # remains fail-closed for one-shot validation and acceptance checks.
+        routes_ready=0
     fi
-    sleep 2
-    remaining=$((remaining - 2))
-    route_repair_remaining=$((route_repair_remaining - 2))
-done
-if [ "${remaining}" -le 0 ]; then
-    echo "ERROR: Tailscale has not approved and activated the selected Service hosts;" \
-        "verify auto-approval and grant tag:vonk-gateway TCP 443 access" \
-        "to every hosted Service." >&2
-    # Do not exit the long-running reconciler here. Tailscale may publish the
-    # service-host route after the initial bounded wait; the reconciler below
-    # will re-advertise it once the child policy is visible. TS_CONFIGURE_ONCE
-    # remains fail-closed for one-shot validation and acceptance checks.
-    routes_ready=0
 fi
 
 if [ "${TS_CONFIGURE_ONCE:-0}" = "1" ]; then
@@ -474,7 +497,8 @@ while :; do
     # forces the same configuration path as a fresh gateway without Docker
     # access or a container restart. The policy remains the only authority that
     # approves the host.
-    if ! service_host_is_active "${desired_hermes}"; then
+    if [ "${require_service_host}" = "1" ] \
+        && ! service_host_is_active "${desired_hermes}"; then
         if reconfigure_approved_services "${desired_hermes}"; then
             wait_for_exact_services "${desired_hermes}" || true
         else
