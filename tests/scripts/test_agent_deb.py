@@ -861,6 +861,8 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert recovery_arm < namespace_probe
     assert "installed signed helper copies the agent-owned download" in preinst
     assert "root-only per-invocation custody directory" in preinst
+    assert "controller recovery preflight failed" in preinst
+    assert "package-upgrade.preflight.status" in preinst
 
 
 def test_recovery_does_not_probe_legacy_helper_socket_metadata() -> None:
