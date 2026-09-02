@@ -63,6 +63,11 @@
 
 (control_proxy) {
 	reverse_proxy control-api:8000 {
+		# PostgreSQL migrations can keep the API socket closed briefly after a
+		# Compose or host restart. Retry connection failures for a bounded
+		# interval so agents do not see a startup burst of 502 responses.
+		lb_try_duration 3s
+		lb_try_interval 250ms
 		# Never permit a caller to inject agent identity into control-api.
 		header_up -X-Vonk-Agent-*
 	}
@@ -78,7 +83,10 @@
 
 (browser_control_proxy) {
 	import browser_proxy_headers
-	reverse_proxy control-api:8000
+	reverse_proxy control-api:8000 {
+		lb_try_duration 3s
+		lb_try_interval 250ms
+	}
 }
 
 (litellm_route_lease) {
@@ -233,10 +241,12 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 		path /agent/v1/*
 		not path /agent/v1/enroll
 	}
-	handle @agent_api {
+		handle @agent_api {
 		# Remove caller-controlled identity before adding Caddy's verified values.
 		request_header -X-Vonk-Agent-*
 		reverse_proxy control-api:8000 {
+		lb_try_duration 3s
+			lb_try_interval 250ms
 			header_up X-Vonk-Agent-Node {vonk_agent_node}
 			header_up X-Vonk-Agent-Serial {tls_client_serial}
 			header_up X-Vonk-Agent-Fingerprint {tls_client_fingerprint}
