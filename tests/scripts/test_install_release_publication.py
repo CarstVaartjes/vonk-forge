@@ -1355,34 +1355,54 @@ def _promote(
     signature: Path,
     public_key: Path,
 ) -> subprocess.CompletedProcess[str]:
-    encoded = subprocess.run(
-        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
-        check=True,
-        capture_output=True,
-    ).stdout
     return subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "promote",
-            "--bundle",
-            str(publication),
-            "--accepted-evidence",
-            str(receipt),
-            "--accepted-evidence-signature",
-            str(signature),
-            "--acceptance-public-key",
-            str(public_key),
-            "--acceptance-public-key-sha256",
-            hashlib.sha256(encoded).hexdigest(),
-            "--filesystem",
-            str(destination),
-        ],
+        _promote_command(
+            publication, receipt, signature, public_key, filesystem=destination
+        ),
         cwd=ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
+
+
+def _promote_command(
+    publication: Path,
+    receipt: Path,
+    signature: Path,
+    public_key: Path,
+    *,
+    filesystem: Path | None = None,
+    remote: str | None = None,
+) -> list[str]:
+    if (filesystem is None) == (remote is None):
+        raise AssertionError("select one promotion destination")
+    encoded = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    destination = (
+        ["--filesystem", str(filesystem)]
+        if filesystem is not None
+        else ["--rclone-remote", str(remote)]
+    )
+    return [
+        sys.executable,
+        str(SCRIPT),
+        "promote",
+        "--bundle",
+        str(publication),
+        "--accepted-evidence",
+        str(receipt),
+        "--accepted-evidence-signature",
+        str(signature),
+        "--acceptance-public-key",
+        str(public_key),
+        "--acceptance-public-key-sha256",
+        hashlib.sha256(encoded).hexdigest(),
+        *destination,
+    ]
 
 
 def _publish_accepted(
@@ -1792,6 +1812,101 @@ def test_promotion_publishes_signed_acceptance_receipt_before_channel_pointer(
     assert (destination / "nas").is_file()
     assert (destination / "spark").is_file()
     assert (destination / "artifacts/stable/current.manifest").is_file()
+
+
+def test_promotion_replays_existing_signed_acceptance_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    destination = tmp_path / "public"
+    assert _publish_candidate(publication, destination).returncode == 0
+    first_receipt, first_signature, first_public_key = _acceptance_receipt(
+        tmp_path / "first", publication
+    )
+    first = _promote(
+        publication, destination, first_receipt, first_signature, first_public_key
+    )
+    assert first.returncode == 0, first.stderr
+    stored_receipt = destination / (
+        "artifacts/stable/releases/"
+        + json.loads((publication / "publication-plan.json").read_text())["generation"]
+        + "/acceptance/receipt.json"
+    )
+    original = stored_receipt.read_bytes()
+
+    second_receipt, second_signature, second_public_key = _acceptance_receipt(
+        tmp_path / "second", publication
+    )
+    second = _promote(
+        publication, destination, second_receipt, second_signature, second_public_key
+    )
+
+    assert second.returncode == 0, second.stderr
+    assert stored_receipt.read_bytes() == original
+    assert (destination / "artifacts/stable/current.manifest").is_file()
+
+
+def test_rclone_promotion_replays_existing_signed_acceptance_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    environment, object_root = _fake_rclone_environment(tmp_path)
+    candidate = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "publish-candidate",
+            "--bundle",
+            str(publication),
+            "--rclone-remote",
+            "r2:vonk-forge-installers",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert candidate.returncode == 0, candidate.stderr
+    first = _acceptance_receipt(tmp_path / "first", publication)
+    first_result = subprocess.run(
+        _promote_command(
+            publication,
+            first[0],
+            first[1],
+            first[2],
+            remote="r2:vonk-forge-installers",
+        ),
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert first_result.returncode == 0, first_result.stderr
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    stored_receipt = object_root / (
+        f"artifacts/stable/releases/{plan['generation']}/acceptance/receipt.json"
+    )
+    original = stored_receipt.read_bytes()
+
+    second = _acceptance_receipt(tmp_path / "second", publication)
+    second_result = subprocess.run(
+        _promote_command(
+            publication,
+            second[0],
+            second[1],
+            second[2],
+            remote="r2:vonk-forge-installers",
+        ),
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert second_result.returncode == 0, second_result.stderr
+    assert stored_receipt.read_bytes() == original
 
 
 def test_assemble_builds_complete_immutable_generation_and_final_pointer(

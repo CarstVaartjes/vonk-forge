@@ -47,6 +47,7 @@ MAX_EVIDENCE_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 MAX_RCLONE_CANDIDATE_WORKERS = 8
 MAX_PROMOTION_IO_WORKERS = 8
+ACCEPTANCE_REPLAY_TIMEOUT = 30
 INSTALLER_PUBLICATION_SCHEMA_VERSION = 2
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
@@ -1505,6 +1506,112 @@ def _copy_promotion_group(
         )
 
 
+def _acceptance_object_bytes(
+    filesystem: Path | None, remote: str | None, key: str
+) -> bytes | None:
+    if filesystem is not None:
+        path = filesystem / key
+        if not path.exists():
+            return None
+        return _safe_bytes(
+            path, f"published acceptance object {key}", MAX_EVIDENCE_BYTES
+        )
+    assert remote is not None
+    return _rclone_bytes(remote, key, MAX_EVIDENCE_BYTES)
+
+
+def _reuse_existing_acceptance(
+    plan: dict[str, Any],
+    filesystem: Path | None,
+    remote: str | None,
+) -> bool:
+    """Accept a completed replay of the same generation's signed evidence.
+
+    Publication fan-in can trigger more than once for one source generation.
+    Acceptance receipts intentionally remain immutable, so a later run may
+    have a different run id and signature even though it proves the same
+    generation.  Reuse the first complete, independently verifiable triplet;
+    never overwrite it, and bound the wait if the first publisher is still
+    uploading its three objects.
+    """
+    prefix = f"artifacts/{plan['channel']}/releases/{plan['generation']}/acceptance"
+    keys = (
+        f"{prefix}/receipt.json",
+        f"{prefix}/receipt.sig",
+        f"{prefix}/public-key.pem",
+    )
+    deadline = time.monotonic() + ACCEPTANCE_REPLAY_TIMEOUT
+    while True:
+        objects = tuple(
+            _acceptance_object_bytes(filesystem, remote, key) for key in keys
+        )
+        present = tuple(content is not None for content in objects)
+        if not any(present):
+            return False
+        if all(present):
+            evidence_raw, signature_raw, public_key_raw = objects
+            assert evidence_raw is not None
+            assert signature_raw is not None
+            assert public_key_raw is not None
+            try:
+                evidence = json.loads(evidence_raw)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise PublicationError(
+                    "published acceptance evidence is invalid"
+                ) from error
+            if not isinstance(evidence, dict) or evidence_raw != _canonical(evidence):
+                raise PublicationError("published acceptance evidence is invalid")
+            _validate_evidence(
+                evidence,
+                plan["channel"],
+                plan["version"],
+                plan["source_sha"],
+                plan["generation"],
+            )
+            if not signature_raw.endswith(b"\n") or signature_raw.count(b"\n") != 1:
+                raise PublicationError("published acceptance signature is invalid")
+            try:
+                signature = base64.b64decode(signature_raw.strip(), validate=True)
+            except ValueError as error:
+                raise PublicationError(
+                    "published acceptance signature is invalid"
+                ) from error
+            if not signature:
+                raise PublicationError("published acceptance signature is invalid")
+            with tempfile.TemporaryDirectory(prefix=".installer-replay-") as directory:
+                public_key_path = Path(directory) / "public-key.pem"
+                public_key_path.write_bytes(public_key_raw)
+                encoded = subprocess.run(
+                    [
+                        "openssl",
+                        "pkey",
+                        "-pubin",
+                        "-in",
+                        public_key_path,
+                        "-outform",
+                        "DER",
+                    ],
+                    cwd=ROOT,
+                    capture_output=True,
+                    check=False,
+                )
+                if encoded.returncode != 0:
+                    raise PublicationError("published acceptance public key is invalid")
+                public_key = _acceptance_public_key(
+                    public_key_path,
+                    hashlib.sha256(encoded.stdout).hexdigest(),
+                )
+            _verify_signature(
+                public_key, evidence_raw, signature, "published acceptance evidence"
+            )
+            for key in keys:
+                print(json.dumps({"key": key, "phase": "acceptance"}, sort_keys=True))
+            return True
+        if time.monotonic() >= deadline:
+            raise PublicationError("published acceptance generation is incomplete")
+        time.sleep(0.1)
+
+
 def promote(arguments: argparse.Namespace) -> None:
     plan, entries, release_public_key = _load_plan(arguments.bundle)
     evidence_raw, signature_raw, acceptance_public_key = _validate_signed_evidence(
@@ -1531,7 +1638,8 @@ def promote(arguments: argparse.Namespace) -> None:
             arguments.acceptance_public_key,
         ),
     )
-    _copy_promotion_group(filesystem, remote, acceptance_objects)
+    if not _reuse_existing_acceptance(plan, filesystem, remote):
+        _copy_promotion_group(filesystem, remote, acceptance_objects)
     endpoints = tuple(
         (entry, source) for entry, source in entries if entry["phase"] == "endpoint"
     )
