@@ -450,6 +450,7 @@ def test_acceptance_service_override_accepts_canonical_names_and_matches_hostnam
         "VONK_TAILSCALE_EPHEMERAL=true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
         "TS_REQUIRE_PRIMARY_ROUTES=0",
+        "TS_REQUIRE_SERVICE_HOST=0",
     ]
     assert (
         acceptance.tailscale_service_hostname(
@@ -786,9 +787,12 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
         acceptance._tailnet_tunnel("hermes-dashboard.acceptance.example.test", 443),
     ]
 
+    local_status = _tailscale_status(hermes=True)
+    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
+    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
     responses = iter(
         (
-            json.dumps(_tailscale_status(hermes=True)),
+            json.dumps(local_status),
             json.dumps(_serve_status(hermes=True)),
             json.dumps(_serve_configuration(hermes=True)),
         )

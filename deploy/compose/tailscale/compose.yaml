@@ -80,10 +80,12 @@ services:
       # report the default topology healthy while a selected Hermes route is
       # still absent.
       VONK_SELECTED_PROFILES: ${COMPOSE_PROFILES:-}
+      VONK_TAILSCALE_EPHEMERAL: ${VONK_TAILSCALE_EPHEMERAL:-false}
       VONK_TAILSCALE_CONTROL_SERVICE: ${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
       VONK_TAILSCALE_HERMES_API_SERVICE: ${VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api}
       VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE: ${VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard}
       TS_REQUIRE_PRIMARY_ROUTES: ${TS_REQUIRE_PRIMARY_ROUTES:-1}
+      TS_REQUIRE_SERVICE_HOST: ${TS_REQUIRE_SERVICE_HOST:-1}
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro
