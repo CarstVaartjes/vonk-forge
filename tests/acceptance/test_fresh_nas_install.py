@@ -276,6 +276,7 @@ def configure_tailnet_service_names(
     gateway_hostname: str,
     hermes_api: str,
     hermes_dashboard: str,
+    require_external_tailnet_client: bool,
 ) -> None:
     services = {
         "VONK_TAILSCALE_CONTROL_SERVICE": control,
@@ -291,6 +292,9 @@ def configure_tailnet_service_names(
     settings = services | {
         "VONK_TAILSCALE_EPHEMERAL": "true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME": gateway_hostname,
+        "TS_REQUIRE_PRIMARY_ROUTES": (
+            "1" if require_external_tailnet_client else "0"
+        ),
     }
     environment = bundle / ".env"
     try:
@@ -1151,11 +1155,11 @@ def _parse_tailnet_serve_json(raw: str, *, label: str) -> object:
         raise AcceptanceError(f"Tailscale Serve {label} is invalid JSON") from error
 
 
-def assert_tailnet_service_primary_routes(
+def _tailnet_service_mapping_addresses(
     document: object,
     *,
     expected_services: set[str],
-) -> None:
+) -> tuple[dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]], dict]:
     if (
         not isinstance(document, dict)
         or not expected_services
@@ -1170,8 +1174,7 @@ def assert_tailnet_service_primary_routes(
         raise AcceptanceError("Tailscale gateway route ownership is invalid")
     cap_map = self_status.get("CapMap")
     service_hosts = cap_map.get("service-host") if isinstance(cap_map, dict) else None
-    primary_routes = self_status.get("PrimaryRoutes")
-    if not isinstance(service_hosts, list) or not isinstance(primary_routes, list):
+    if not isinstance(service_hosts, list):
         raise AcceptanceError("Tailscale gateway route ownership is invalid")
 
     mapped: dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]] = {}
@@ -1203,6 +1206,30 @@ def assert_tailnet_service_primary_routes(
 
     if not expected_services.issubset(mapped):
         raise AcceptanceError("Tailscale gateway route ownership is incomplete")
+
+    return mapped, self_status
+
+
+def assert_tailnet_service_mappings(
+    document: object,
+    *,
+    expected_services: set[str],
+) -> None:
+    _tailnet_service_mapping_addresses(document, expected_services=expected_services)
+
+
+def assert_tailnet_service_primary_routes(
+    document: object,
+    *,
+    expected_services: set[str],
+) -> None:
+    mapped, self_status = _tailnet_service_mapping_addresses(
+        document,
+        expected_services=expected_services,
+    )
+    primary_routes = self_status.get("PrimaryRoutes")
+    if not isinstance(primary_routes, list):
+        raise AcceptanceError("Tailscale gateway route ownership is invalid")
     if any(not isinstance(route, str) for route in primary_routes) or len(
         primary_routes
     ) != len(set(primary_routes)):
@@ -1309,10 +1336,15 @@ def verify_tailscale_services(
     expected_services = {control_service}
     if hermes:
         expected_services.update({hermes_api_service, hermes_dashboard_service})
-    assert_tailnet_service_primary_routes(
+    assert_tailnet_service_mappings(
         document,
         expected_services=expected_services,
     )
+    if service_addresses is not None:
+        assert_tailnet_service_primary_routes(
+            document,
+            expected_services=expected_services,
+        )
     serve = run(
         [
             *compose,
@@ -1624,6 +1656,7 @@ def main() -> None:
                 configure_tailnet_service_names(
                     bundle,
                     gateway_hostname=gateway_hostname,
+                    require_external_tailnet_client=require_external_tailnet_client,
                     **services,
                 )
         for bundle in (first, hermes):

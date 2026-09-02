@@ -99,6 +99,13 @@ self-access grant. Never add the `funnel` node attribute as a workaround; it
 enables public internet exposure rather than approving a tailnet-only Service
 host.
 
+The production configurator keeps `TS_REQUIRE_PRIMARY_ROUTES=1` by default.
+Only a local acceptance bundle that has no separate tailnet client may set it to
+`0`; that mode checks the documented `Self.CapMap["service-host"]` mapping and
+exact Serve configuration, while a separate-client or physical acceptance lane
+must still prove route ownership and HTTPS reachability. Never carry the
+acceptance override into an operator bundle.
+
 ## Secrets and unattended startup
 
 The OAuth client is created under **Tailscale admin console → Trust credentials

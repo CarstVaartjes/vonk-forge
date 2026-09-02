@@ -83,6 +83,7 @@ services:
       VONK_TAILSCALE_CONTROL_SERVICE: ${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
       VONK_TAILSCALE_HERMES_API_SERVICE: ${VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api}
       VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE: ${VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard}
+      TS_REQUIRE_PRIMARY_ROUTES: ${TS_REQUIRE_PRIMARY_ROUTES:-1}
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro

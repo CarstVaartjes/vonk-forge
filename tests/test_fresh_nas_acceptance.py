@@ -438,6 +438,7 @@ def test_acceptance_service_override_accepts_canonical_names_and_matches_hostnam
         gateway_hostname="vonk-forge-ci-123-1",
         hermes_api="svc:hermes-api",
         hermes_dashboard="svc:hermes-dashboard",
+        require_external_tailnet_client=False,
     )
 
     assert environment.stat().st_mode & 0o777 == 0o600
@@ -448,6 +449,7 @@ def test_acceptance_service_override_accepts_canonical_names_and_matches_hostnam
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard",
         "VONK_TAILSCALE_EPHEMERAL=true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
+        "TS_REQUIRE_PRIMARY_ROUTES=0",
     ]
     assert (
         acceptance.tailscale_service_hostname(
@@ -463,6 +465,7 @@ def test_acceptance_service_override_accepts_canonical_names_and_matches_hostnam
             gateway_hostname="vonk-forge-ci-123-1",
             hermes_api="svc:duplicate",
             hermes_dashboard="svc:hermes-dashboard",
+            require_external_tailnet_client=False,
         )
 
     with pytest.raises(AcceptanceError, match="gateway hostname"):
@@ -472,6 +475,7 @@ def test_acceptance_service_override_accepts_canonical_names_and_matches_hostnam
             gateway_hostname="INVALID HOSTNAME",
             hermes_api="svc:hermes-api",
             hermes_dashboard="svc:hermes-dashboard",
+            require_external_tailnet_client=False,
         )
 
 
@@ -594,6 +598,18 @@ def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> No
                 status,
                 expected_services=expected,
             )
+
+
+def test_tailnet_service_mapping_does_not_require_primary_routes() -> None:
+    acceptance = _acceptance_module()
+    expected = {"svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"}
+    status = _tailscale_status(hermes=True)
+    status["Self"].pop("PrimaryRoutes")
+
+    acceptance.assert_tailnet_service_mappings(
+        status,
+        expected_services=expected,
+    )
 
 
 def _serve_configuration(*, hermes: bool) -> dict[str, object]:

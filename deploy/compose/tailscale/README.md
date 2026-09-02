@@ -44,5 +44,12 @@ default permanent identity. This keeps restart recovery representative without
 leaking offline CI machines into the tailnet after the acceptance volumes are
 removed.
 
+`TS_REQUIRE_PRIMARY_ROUTES` defaults to `1` for operator deployments and
+requires the additional TailVIP route-ownership check. A local acceptance run
+without a separate tailnet client may set it to `0`: the configurator still
+requires the approved `service-host` mapping and exact Serve configuration, but
+the external route and HTTPS checks must be performed by a separate-client or
+physical acceptance lane. Do not use `0` to weaken an operator deployment.
+
 See [the gateway runbook](../../../docs/runbooks/tailscale.md) for setup,
 verification, backup, and recovery.
