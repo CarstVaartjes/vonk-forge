@@ -2363,6 +2363,7 @@ dependencies = [
  "toml",
  "url",
  "uuid",
+ "wait-timeout",
 ]
 
 [[package]]
