@@ -863,15 +863,14 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert "root-only per-invocation custody directory" in preinst
 
 
-def test_recovery_accepts_active_legacy_helper_socket_without_enablement() -> None:
+def test_recovery_does_not_probe_legacy_helper_socket_metadata() -> None:
     preinst = PREINST.read_text()
-    start = preinst.index(
-        'if ! /usr/bin/systemctl --system is-enabled --quiet "$helper_socket"'
-    )
-    end = preinst.index("\n    fi", start) + len("\n    fi")
+    start = preinst.index("    ensure_root_directory \"$socket_dropin_dir\" 755")
+    end = preinst.index("\n    boot_id=", start)
     handoff = preinst[start:end]
-    assert 'is-active --quiet "$helper_socket"' in handoff
-    assert "historical unit metadata" in preinst
+    assert "systemctl --system is-enabled" not in handoff
+    assert "systemctl --system is-active" not in handoff
+    assert "namespace restrictions" in handoff
 
 
 def test_durable_recovery_fallback_is_exact_package_scoped_and_nonce_bound() -> None:
