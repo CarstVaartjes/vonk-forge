@@ -1200,7 +1200,6 @@ fi
 
 if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
-    && [ -d /run/systemd/system ] \
     && inside_package_helper; then
     arm_controller_recovery || {
         echo 'vonk-forge-agent: cannot durably arm the signed controller upgrade' >&2
