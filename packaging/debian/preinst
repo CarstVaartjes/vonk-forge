@@ -742,7 +742,15 @@ arm_controller_recovery() {
 Wants=vonk-forge-package-upgrade-recover.service
 '
     atomic_text "$socket_dropin" 644 "$dropin_text" || return 1
-    /usr/bin/systemctl --system is-enabled --quiet "$helper_socket" || return 1
+    # Older helpers can be active through a dependency or a manually restored
+    # socket without carrying the current enablement symlink. The active
+    # socket is sufficient for this hand-off: the recovery capsule starts in
+    # the host systemd namespace and the next package install will restore
+    # enablement. Do not strand dpkg solely on historical unit metadata.
+    if ! /usr/bin/systemctl --system is-enabled --quiet "$helper_socket" \
+        && ! /usr/bin/systemctl --system is-active --quiet "$helper_socket"; then
+        return 1
+    fi
 
     boot_id=$(/usr/bin/sed -n '1p' /proc/sys/kernel/random/boot_id)
     valid_boot_id "$boot_id" || return 1
