@@ -307,8 +307,14 @@ inside_package_helper() {
     helper_depth=0
     while [ "$helper_depth" -lt 16 ] && valid_pid "$helper_pid"; do
         helper_exe=$(/usr/bin/readlink -f "/proc/$helper_pid/exe" 2>/dev/null || true)
-        if [ "$helper_exe" = /usr/lib/vonk-forge/vonk-agent-helper ]; then
-            [ "$(/usr/bin/stat -c %u:%a "/proc/$helper_pid/exe" 2>/dev/null || true)" = 0:755 ] \
+        helper_comm=$(tr -d '\n' < "/proc/$helper_pid/comm" 2>/dev/null || true)
+        if [ "$helper_exe" = /usr/lib/vonk-forge/vonk-agent-helper ] \
+            || [ "$helper_comm" = vonk-agent-helper ]; then
+            helper_uid=$(/usr/bin/awk '/^Uid:/{print $2; exit}' \
+                "/proc/$helper_pid/status" 2>/dev/null || true)
+            [ "$helper_uid" = 0 ] \
+                && [ "$(/usr/bin/stat -c %u:%a /usr/lib/vonk-forge/vonk-agent-helper \
+                    2>/dev/null || true)" = 0:755 ] \
                 && return 0
         fi
         helper_parent=$(/usr/bin/awk '{print $4}' "/proc/$helper_pid/stat" 2>/dev/null || true)
