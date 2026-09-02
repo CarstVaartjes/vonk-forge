@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -206,6 +207,21 @@ def test_development_source_generation_runs_for_every_main_commit() -> None:
         assert push["branches"] == ["main"]
         assert "paths" not in push
         assert "paths-ignore" not in push
+
+
+def test_stale_development_fan_in_is_a_clean_noop() -> None:
+    authority = _steps(_workflow()["jobs"]["authority"])[
+        "Bind accepted workflow evidence to source authority"
+    ]["run"]
+
+    assert 'if test "$SOURCE_SHA" != \\' in authority
+    assert 'refs/remotes/origin/main^{commit})"; then' in authority
+    assert re.search(r"not_ready\n\s+fi", authority)
+    assert (
+        'test "$SOURCE_SHA" = \\\n'
+        '                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"'
+        not in authority
+    )
 
 
 def test_nas_acceptance_uses_verified_compatibility_fixtures_and_a_gate_report() -> (

@@ -1676,6 +1676,17 @@ fn reset_agent_failure(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    // Package installation normally asks systemd to reload units, but that
+    // notification is not a reliable synchronization boundary across Debian
+    // versions and containerized/systemd acceptance hosts. A fresh install can
+    // otherwise reach reset-failed while systemd still considers the newly
+    // installed agent unit unknown. Reload explicitly before touching unit
+    // state so both fresh installs and upgrades converge on the package that
+    // was just committed.
+    run_checked(
+        runner,
+        Command::new("/usr/bin/systemctl", ["daemon-reload"]),
+    )?;
     run_checked(
         runner,
         Command::new("/usr/bin/systemctl", ["reset-failed", &paths.service]),

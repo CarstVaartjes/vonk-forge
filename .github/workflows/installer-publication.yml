@@ -91,8 +91,15 @@ jobs:
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
-              test "$SOURCE_SHA" = \
-                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+              # A successful prerequisite can finish after main has already
+              # advanced. That generation is intentionally no longer
+              # publishable, but it is an expected stale trigger rather than a
+              # broken deployment. End this fan-in run cleanly while the
+              # current main generation continues independently.
+              if test "$SOURCE_SHA" != \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"; then
+                not_ready
+              fi
               package_runs=$RUNNER_TEMP/development-agent-runs.json
               gh api --paginate \
                 -H 'Accept: application/vnd.github+json' \
