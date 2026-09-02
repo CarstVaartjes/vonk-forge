@@ -849,11 +849,14 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert "helper sandbox keyring directory is not writable" in preinst
     assert "helper sandbox package document directory is not writable" in preinst
     assert "helper sandbox write probes have unsafe metadata" in preinst
+    assert "recovery capsule will retry outside it" in preinst
+    namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
+    namespace_handoff = preinst[namespace_probe:]
+    assert "exit 1" not in namespace_handoff.split("fi\nfi\n\nexit 0", 1)[0]
     verifier = VERIFY.read_text()
     assert "inherited helper sandbox lacks package lifecycle paths" in verifier
     assert "durable recovery armed outside the inherited helper sandbox" in verifier
     assert "preinst helper sandbox handoff is incomplete" in verifier
-    namespace_probe = preinst.index("if ! helper_namespace_has_package_paths")
     recovery_arm = preinst.index("arm_controller_recovery ||")
     assert recovery_arm < namespace_probe
     assert "installed signed helper copies the agent-owned download" in preinst
