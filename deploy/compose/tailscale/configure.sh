@@ -4,6 +4,9 @@ set -eu
 socket=${TS_SOCKET_PATH:-/var/run/tailscale/tailscaled.sock}
 remaining=120
 route_wait_seconds=${TS_ROUTE_WAIT_SECONDS:-300}
+# Service-host mappings are sufficient for local readiness. External acceptance
+# can opt into the additional PrimaryRoutes assertion.
+require_primary_routes=${TS_REQUIRE_PRIMARY_ROUTES:-1}
 reconcile_interval=${TS_RECONCILE_INTERVAL_SECONDS:-30}
 hermes_api_host=${HERMES_API_HOST:-hermes-agent}
 hermes_api_port=${HERMES_API_PORT:-8642}
@@ -312,24 +315,29 @@ service_host_is_active() {
 
     # services/* capabilities authorize this node as a client of a TailVIP;
     # they do not prove that control has approved this tagged node to host it.
-    # service-host maps approved names to TailVIPs. PrimaryRoutes proves the
-    # userspace host actually owns those routes; without it, clients resolve
-    # the VIP but report "no matching peer" and HTTPS silently times out.
+    # service-host maps approved names to TailVIPs. PrimaryRoutes is generic
+    # subnet-route state and is not consistently populated for Service hosts
+    # (tailscale/tailscale#19666). Keep it as an opt-in external acceptance
+    # assertion; local healthchecks validate the documented service-host map
+    # and exact Serve configuration instead.
     service_hosts=${runtime_dir}/tailscale-service-hosts.compact
-    primary_routes=${runtime_dir}/tailscale-primary-routes.compact
     extract_json_array service-host \
         "${runtime_dir}/tailscale-status.compact" "${service_hosts}" \
         || return 1
-    extract_json_array PrimaryRoutes \
-        "${runtime_dir}/tailscale-status.compact" "${primary_routes}" \
-        || return 1
-    service_has_primary_routes "${control_service}" \
-        || return 1
-    if [ "${include_hermes}" = "0" ]; then
-        return 0
+    if [ "${require_primary_routes}" = "1" ]; then
+        primary_routes=${runtime_dir}/tailscale-primary-routes.compact
+        extract_json_array PrimaryRoutes \
+            "${runtime_dir}/tailscale-status.compact" "${primary_routes}" \
+            || return 1
+        service_has_primary_routes "${control_service}" || return 1
+        if [ "${include_hermes}" = "0" ]; then
+            return 0
+        fi
+        service_has_primary_routes "${hermes_api_service}" \
+            && service_has_primary_routes "${hermes_dashboard_service}"
+        return
     fi
-    service_has_primary_routes "${hermes_api_service}" \
-        && service_has_primary_routes "${hermes_dashboard_service}"
+    service_host_is_approved "${include_hermes}"
 }
 
 include_hermes=0

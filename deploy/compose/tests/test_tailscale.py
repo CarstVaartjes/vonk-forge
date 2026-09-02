@@ -441,6 +441,7 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
+        "TS_REQUIRE_PRIMARY_ROUTES": "1",
     }
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
@@ -522,6 +523,7 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
         "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
+        "TS_REQUIRE_PRIMARY_ROUTES": "1",
     }
 
 
@@ -635,7 +637,7 @@ def test_unapproved_advertisement_does_not_claim_service_host_readiness(
     assert result.returncode != 0
 
 
-def test_service_host_mapping_without_primary_routes_is_unhealthy(
+def test_service_host_mapping_without_primary_routes_is_healthy(
     tmp_path: Path,
 ) -> None:
     socket_path = tmp_path / "tailscaled.sock"
@@ -645,6 +647,10 @@ def test_service_host_mapping_without_primary_routes_is_unhealthy(
     fake.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'
+        '  *"serve status --json"*) printf \'%s\\n\' '
+        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
+        '  *"serve get-config --all"*) printf \'%s\\n\' '
+        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}' ;;\n"
         '  *"status --json"*) printf \'%s\\n\' '
         "'{\"Self\":{\"CapMap\":{\"service-host\":[{\"svc:vonk-forge\":[\"100.70.230.202\"]}]},\"PrimaryRoutes\":[]}}' ;;\n"
         "esac\n",
@@ -659,6 +665,7 @@ def test_service_host_mapping_without_primary_routes_is_unhealthy(
                 "PATH": f"{tmp_path}:{os.environ['PATH']}",
                 "TS_HEALTHCHECK_ONLY": "1",
                 "TS_SOCKET_PATH": str(socket_path),
+                "TS_REQUIRE_PRIMARY_ROUTES": "0",
             },
             capture_output=True,
             text=True,
@@ -668,7 +675,7 @@ def test_service_host_mapping_without_primary_routes_is_unhealthy(
     finally:
         daemon_socket.close()
 
-    assert result.returncode != 0
+    assert result.returncode == 0, result.stderr
 
 
 def test_configurator_re_advertises_pending_service_host(
