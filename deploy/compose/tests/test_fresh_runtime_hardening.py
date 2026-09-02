@@ -94,6 +94,16 @@ def test_caddy_healthcheck_does_not_depend_on_a_virtual_host() -> None:
     assert "http://127.0.0.1:8082" in caddyfile
 
 
+def test_caddy_retries_control_api_startup_for_a_bounded_interval() -> None:
+    caddyfile = (COMPOSE_ROOT / "Caddyfile").read_text(encoding="utf-8")
+
+    # The API can remain unavailable while PostgreSQL DNS and migrations settle
+    # after a host restart. Keep the edge retry finite: callers get a response,
+    # while agents avoid a burst of transient 502s during normal recovery.
+    assert caddyfile.count("lb_try_duration 3s") == 3
+    assert caddyfile.count("lb_try_interval 250ms") == 3
+
+
 def test_caddy_serves_the_site_controller_certificate() -> None:
     canonical = _document("compose.yaml")
     caddy = canonical["services"]["caddy"]
