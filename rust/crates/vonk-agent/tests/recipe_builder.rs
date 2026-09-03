@@ -565,7 +565,7 @@ impl PrivateContainerd {
         fs::write(
             &config,
             format!(
-                "version = 3\n[grpc]\n  uid = {}\n  gid = {}\n[ttrpc]\n  uid = {}\n  gid = {}\n",
+                "version = 3\ndisabled_plugins = [\"io.containerd.nri.v1.nri\"]\n[grpc]\n  uid = {}\n  gid = {}\n[ttrpc]\n  uid = {}\n  gid = {}\n",
                 metadata.uid(),
                 metadata.gid(),
                 metadata.uid(),
