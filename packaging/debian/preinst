@@ -359,6 +359,19 @@ inside_package_helper() {
     helper_candidate=$(/usr/bin/sed -n '4p' "$helper_dpkg_command_file")
     case "$helper_candidate" in
         /run/vonk-forge-package-candidates/*/*.deb) ;;
+        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb)
+            # A pre-509 helper has no root-custody namespace yet.  Bind this
+            # fallback to the agent-owned incoming directory; arm_controller_recovery
+            # immediately re-homes the candidate before writing any state.
+            incoming_uid=$(/usr/bin/stat -Lc %u /var/lib/vonk-forge/incoming \
+                2>/dev/null || true)
+            agent_uid=$(/usr/bin/awk -F: \
+                '$1 == "vonk-agent" { print $3; exit }' /etc/passwd)
+            [ -n "$agent_uid" ] && [ "$incoming_uid" = "$agent_uid" ] \
+                || return 1
+            [ "$(/usr/bin/stat -Lc '%u:%a:%h' "$helper_candidate" \
+                2>/dev/null || true)" = "$agent_uid:600:1" ] || return 1
+            ;;
         *) return 1 ;;
     esac
     helper_invocation_dir=$(/usr/bin/dirname "$helper_candidate") || return 1
