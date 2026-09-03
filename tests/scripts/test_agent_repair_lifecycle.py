@@ -92,7 +92,7 @@ def _assert_frozen_schema2_runtime() -> None:
             "81d7d1ba132485368bcf10aeab1634dbda5910e1f38692cfc376bc06b00a1ca0"
         ),
         ROOT / "packaging/debian/postinst-repair": (
-            "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
+            "f22422eab5c7408f1295780dc297ceec7a09f1d24f219571614691021517b677"
         ),
         ROOT / "scripts/build-agent-deb": (
             "fec5fba5b5c285565bc370acd3b3e07f10671c34665d5755ac85ea1bf7f0c084"

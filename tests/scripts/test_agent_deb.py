@@ -1638,6 +1638,17 @@ def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
     assert "ssh_host_" not in postinst
 
 
+def test_agent_uses_package_managed_private_temp_directory() -> None:
+    postinst = POSTINST.read_text()
+    repair_postinst = (ROOT / "packaging/debian/postinst-repair").read_text()
+    unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
+
+    for lifecycle in (postinst, repair_postinst):
+        assert "install -d -o vonk-agent -g vonk-agent -m 0700 \\" in lifecycle
+        assert "/var/lib/vonk-forge-agent/tmp" in lifecycle
+    assert "Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp" in unit
+
+
 @pytest.mark.parametrize(
     ("package_version", "expected_semantic"),
     (
