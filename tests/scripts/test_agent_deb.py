@@ -1644,6 +1644,7 @@ def test_agent_uses_package_managed_private_temp_directory() -> None:
     unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
 
     for lifecycle in (postinst, repair_postinst):
+        assert "install -d -o vonk-agent -g vonk-agent -m 0700 \\" in lifecycle
         assert "/var/lib/vonk-forge-agent/tmp" in lifecycle
     assert "Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp" in unit
 
