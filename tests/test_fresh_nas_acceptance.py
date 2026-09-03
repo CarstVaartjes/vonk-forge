@@ -156,7 +156,7 @@ def test_generate_bundle_allows_the_installer_to_reuse_its_target(
     def install(_command, *, cwd, **_kwargs):
         (cwd / "vonk-forge").mkdir(exist_ok=True)
 
-    monkeypatch.setattr(acceptance, "run_interactive", install)
+    monkeypatch.setattr(acceptance, "run", install)
     monkeypatch.setattr(acceptance, "assert_bundle_contract", lambda _bundle: None)
 
     arguments = {
