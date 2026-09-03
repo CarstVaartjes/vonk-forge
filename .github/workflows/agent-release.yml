@@ -3,6 +3,29 @@ name: Rust Vonk Forge agent development
 on:
   push:
     branches: [main]
+    paths:
+      - .github/actions/agent-package-build/**
+      - .github/actions/agent-package-compile/**
+      - .github/actions/agent-package-security/**
+      - .github/workflows/agent-release.yml
+      - Cargo.lock
+      - Cargo.toml
+      - packaging/**
+      - rust/crates/vonk-agent/**
+      - rust/crates/vonk-agent-helper/**
+      - rust/crates/vonk-agent-protocol/**
+      - rust/crates/vonk-build-egress/**
+      - rust/crates/vonk-repair-helper-probe/**
+      - scripts/agent-package-metadata
+      - scripts/build-agent-deb
+      - scripts/materialize-agent-tools
+      - scripts/test-agent-package-native-lifecycle
+      - scripts/test_agent_deb.py
+      - scripts/test_docker_firewall.sh
+      - scripts/verify-agent-binaries
+      - scripts/verify-agent-deb
+      - scripts/verify-agent-systemd
+      - scripts/verify-release-tag-authority
   workflow_dispatch:
 
 permissions:

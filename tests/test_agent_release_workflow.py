@@ -637,8 +637,8 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
     metadata = text.split("\n  compile-arm64-candidate:\n", 1)[0]
 
-    assert "  push:\n    branches: [main]\n  workflow_dispatch:" in text
-    assert "paths:" not in text.split("  workflow_dispatch:", 1)[0]
+    assert "  push:\n    branches: [main]\n    paths:" in text
+    assert "rust/crates/vonk-agent/**" in text.split("  workflow_dispatch:", 1)[0]
     assert "paths-ignore:" not in text.split("  workflow_dispatch:", 1)[0]
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
@@ -904,6 +904,7 @@ def test_development_metadata_uses_actions_publication_sequence() -> None:
 
 def test_development_workflows_bind_both_literal_environment_boundaries() -> None:
     text = WORKFLOW.read_text()
+    jobs = text.split("\njobs:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "uses: ./.github/actions/agent-package-build" in text
@@ -937,7 +938,7 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
         "scripts/build-agent-deb",
         "cosign sign-blob",
     ):
-        assert forbidden not in text
+        assert forbidden not in jobs
 
 
 def test_development_publication_requires_native_amd64_lifecycle() -> None:
@@ -1461,6 +1462,7 @@ def test_action_pin_guard_scans_yaml_and_keeps_local_calls_exempt(
 
 def test_development_agent_workflow_has_no_production_authority() -> None:
     text = WORKFLOW.read_text()
+    jobs = text.split("\njobs:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "publish-apt:" not in text
@@ -1468,7 +1470,7 @@ def test_development_agent_workflow_has_no_production_authority() -> None:
     assert "apt-development" in publisher
     assert "apt-release" not in publisher
     assert "apt-release" not in text
-    assert "agent-release" not in text
+    assert "environment: agent-release" not in jobs
     assert "channel: stable" not in text
     assert "distribution: stable" not in text
     assert "gh release" not in text

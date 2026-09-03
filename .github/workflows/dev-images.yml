@@ -3,6 +3,25 @@ name: Development images
 on:
   push:
     branches: [main]
+    paths:
+      - .dockerignore
+      - .github/workflows/dev-images.yml
+      - config/execution-harnesses/**
+      - control/**
+      - deploy/compose/**
+      - inventory/wheels/**
+      - pyproject.toml
+      - schemas/global/**
+      - scripts/accept-development-image-archive
+      - scripts/dev-image-acceptance-receipt
+      - scripts/dev-image-metadata
+      - scripts/promote-image-aliases
+      - scripts/publish-immutable-image
+      - scripts/render-dev-compose
+      - scripts/render-production-compose
+      - scripts/verify-public-image-inputs
+      - scripts/verify-published-image
+      - src/cluster_profiles/**
   workflow_dispatch:
 
 permissions:
