@@ -21,6 +21,7 @@ def _copy(tmp_path: Path) -> Path:
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
+        ".github/workflows/installer-publication-source.yml",
         ".github/workflows/installer-publication.yml",
         ".github/workflows/installer-setups.yml",
         ".github/workflows/workload-artifacts.yml",

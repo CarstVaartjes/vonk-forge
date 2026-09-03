@@ -5,6 +5,12 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - .github/workflows/installer-setups.yml
+      - Cargo.lock
+      - Cargo.toml
+      - rust/crates/vonk-nas-setup/**
+      - rust/crates/vonk-spark-setup/**
 
 permissions:
   contents: read

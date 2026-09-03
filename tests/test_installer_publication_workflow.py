@@ -12,6 +12,7 @@ WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 SETUPS = ROOT / ".github/workflows/installer-setups.yml"
 DEV_IMAGES = ROOT / ".github/workflows/dev-images.yml"
 AGENT_RELEASE = ROOT / ".github/workflows/agent-release.yml"
+PUBLICATION_SOURCE = ROOT / ".github/workflows/installer-publication-source.yml"
 POINTER_QUARANTINE = ROOT / ".github/workflows/installer-pointer-quarantine.yml"
 
 
@@ -93,6 +94,7 @@ def test_publication_requires_candidate_acceptance_before_promotion() -> None:
     assert set(triggers["workflows"]) == {
         "CI",
         "Development images",
+        "Installer publication source",
         "Installer setup programs",
         "Rust Vonk Forge agent development",
     }
@@ -196,7 +198,7 @@ def test_publication_concurrency_only_serializes_pushes_for_the_same_source() ->
         "github.event.workflow_run.event == 'push' && "
         "github.event.workflow_run.head_sha) || github.run_id }}"
     )
-    assert concurrency["cancel-in-progress"] == "false"
+    assert concurrency["cancel-in-progress"] == "true"
 
     def selected_identity(
         event_name: str,
@@ -222,12 +224,56 @@ def test_publication_concurrency_only_serializes_pushes_for_the_same_source() ->
         )
 
 
-def test_development_source_generation_runs_for_every_main_commit() -> None:
+def test_development_producers_run_only_for_changed_inputs() -> None:
+    agent_paths = set(_workflow(AGENT_RELEASE)["on"]["push"]["paths"])
+    image_paths = set(_workflow(DEV_IMAGES)["on"]["push"]["paths"])
+    setup_paths = set(_workflow(SETUPS)["on"]["push"]["paths"])
+
+    assert {"Cargo.toml", "Cargo.lock", "packaging/**"} <= agent_paths
+    assert "rust/crates/vonk-agent/**" in agent_paths
+    assert "rust/crates/vonk-nas-setup/**" not in agent_paths
+    assert {"control/**", "deploy/compose/**", "src/cluster_profiles/**"} <= image_paths
+    assert {
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust/crates/vonk-nas-setup/**",
+        "rust/crates/vonk-spark-setup/**",
+    } <= setup_paths
+    assert "rust/crates/vonk-agent/**" not in setup_paths
     for path in (DEV_IMAGES, AGENT_RELEASE, SETUPS):
         push = _workflow(path)["on"]["push"]
         assert push["branches"] == ["main"]
-        assert "paths" not in push
         assert "paths-ignore" not in push
+
+
+def test_publication_source_is_a_lightweight_changed_source_trigger() -> None:
+    workflow = _workflow(PUBLICATION_SOURCE)
+    push = workflow["on"]["push"]
+    assert push["branches"] == ["main"]
+    assert ".github/workflows/installer-publication.yml" in push["paths"]
+    assert "scripts/install-release-publication" in push["paths"]
+    assert set(workflow["jobs"]) == {"source"}
+    assert workflow["permissions"] == {"contents": "read"}
+
+
+def test_development_fan_in_reuses_only_accepted_ancestral_components() -> None:
+    authority_job = _workflow()["jobs"]["authority"]
+    authority = _steps(authority_job)[
+        "Bind accepted workflow evidence to source authority"
+    ]["run"]
+
+    assert "workflow_run.conclusion" not in authority_job["if"]
+    assert 'test "$TRIGGER_CONCLUSION" = success' in authority
+    assert "development_run()" in authority
+    assert "head_sha=$SOURCE_SHA" in authority
+    assert 'test "$run_conclusion" = success' in authority
+    assert 'git merge-base --is-ancestor "$run_sha" "$SOURCE_SHA"' in authority
+    assert '.status == "completed" and .conclusion == "success"' in authority
+    assert "setup_source_sha=$setup_source_sha" in authority
+    candidate = _steps(_workflow()["jobs"]["candidate"])
+    assert candidate["Download accepted native setup programs"]["with"]["pattern"] == (
+        "installer-setup-${{ needs.authority.outputs.setup_source_sha }}-*"
+    )
 
 
 def test_stale_development_fan_in_is_a_clean_noop() -> None:

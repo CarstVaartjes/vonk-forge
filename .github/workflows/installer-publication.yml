@@ -7,6 +7,7 @@ on:
     workflows:
       - CI
       - Development images
+      - Installer publication source
       - Installer setup programs
       - Rust Vonk Forge agent development
     types: [completed]
@@ -23,20 +24,24 @@ concurrency:
        github.event.workflow_run.head_sha) ||
       github.run_id
     }}
-  cancel-in-progress: false
+  # Every changed producer emits a completion event. Keep only the newest
+  # fan-in attempt for one source generation; it has at least as much completed
+  # evidence as the attempt it replaces.
+  cancel-in-progress: true
 
 jobs:
   authority:
     name: Accept one complete source generation
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       (((github.event.workflow_run.name == 'Rust Vonk Forge agent development' ||
          github.event.workflow_run.name == 'Development images' ||
+         github.event.workflow_run.name == 'Installer publication source' ||
          github.event.workflow_run.name == 'Installer setup programs') &&
        github.event.workflow_run.head_branch == 'main') ||
        github.event.workflow_run.name == 'CI')
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: read
@@ -58,6 +63,7 @@ jobs:
       compose_run_id: ${{ steps.accept.outputs.compose_run_id }}
       compose_artifact: ${{ steps.accept.outputs.compose_artifact }}
       setup_run_id: ${{ steps.accept.outputs.setup_run_id }}
+      setup_source_sha: ${{ steps.accept.outputs.setup_source_sha }}
     steps:
       - name: Check out the exact accepted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,6 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           TRIGGER_NAME: ${{ github.event.workflow_run.name }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
@@ -80,14 +87,75 @@ jobs:
             printf 'ready=false\n' >> "$GITHUB_OUTPUT"
             exit 0
           }
+          development_run() {
+            local workflow=$1 exact_runs candidate
+            exact_runs=$RUNNER_TEMP/${workflow%.yml}-exact-runs.json
+            for attempt in $(seq 1 360); do
+              gh api --paginate \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&head_sha=$SOURCE_SHA&per_page=100" \
+                --jq '.workflow_runs[]' | jq -s . > "$exact_runs"
+              candidate=$(jq -r --arg sha "$SOURCE_SHA" '
+                [.[] | select(
+                  .head_sha == $sha and .head_branch == "main" and
+                  .event == "push"
+                )] | sort_by(.created_at) | reverse | .[0] // empty |
+                [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
+              ' "$exact_runs")
+              if test -z "$candidate"; then
+                break
+              fi
+              IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion \
+                <<< "$candidate"
+              if test "$run_status" != completed; then
+                sleep 5
+                continue
+              fi
+              test "$run_conclusion" = success
+              printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
+              return 0
+            done
+            if test -n "$candidate"; then
+              echo "$workflow did not complete for $SOURCE_SHA" >&2
+              return 1
+            fi
+
+            # A path-filtered producer has no run for an unchanged component.
+            # Reuse only the newest successful main run whose source is an
+            # ancestor of this exact generation.
+            local completed_runs=$RUNNER_TEMP/${workflow%.yml}-completed-runs.json
+            gh api --paginate \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&status=completed&branch=main&per_page=100" \
+              --jq '.workflow_runs[]' | jq -s . > "$completed_runs"
+            while IFS=$'\t' read -r run_id run_number run_sha; do
+              if git merge-base --is-ancestor "$run_sha" "$SOURCE_SHA"; then
+                printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
+                return 0
+              fi
+            done < <(
+              jq -r '
+                [.[] | select(
+                  .head_branch == "main" and .event == "push" and
+                  .status == "completed" and .conclusion == "success"
+                )] | sort_by(.created_at) | reverse | .[] |
+                [.id, .run_number, .head_sha] | @tsv
+              ' "$completed_runs"
+            )
+            echo "no accepted ancestral run for $workflow at $SOURCE_SHA" >&2
+            return 1
+          }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$TRIGGER_CONCLUSION" = success
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs')
+            'Rust Vonk Forge agent development'|'Development images'|'Installer publication source'|'Installer setup programs')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
@@ -100,46 +168,17 @@ jobs:
                 "$(git rev-parse --verify refs/remotes/origin/main^{commit})"; then
                 not_ready
               fi
-              package_runs=$RUNNER_TEMP/development-agent-runs.json
-              gh api --paginate \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "/repos/$GITHUB_REPOSITORY/actions/workflows/agent-release.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
-                --jq '.workflow_runs[]' | jq -s . > "$package_runs"
-              mapfile -t accepted_package_runs < <(
-                jq -r --arg sha "$SOURCE_SHA" '
-                  .[] | select(
-                    .head_sha == $sha and .head_branch == "main" and
-                    .event == "push" and .status == "completed" and
-                    .conclusion == "success"
-                  ) | [.id, .run_number] | @tsv
-                ' "$package_runs"
-              )
-              test "${#accepted_package_runs[@]}" -ge 1 || not_ready
-              read -r package_run_id package_run_number \
-                <<< "${accepted_package_runs[0]}"
+              IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
+                < <(development_run agent-release.yml)
               metadata=$(
                 scripts/agent-package-metadata \
-                  development branch main "$SOURCE_SHA" "$package_run_number"
+                  development branch main "$package_source_sha" "$package_run_number"
               )
-              compose_runs=$RUNNER_TEMP/development-image-runs.json
-              gh api --paginate \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "/repos/$GITHUB_REPOSITORY/actions/workflows/dev-images.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
-                --jq '.workflow_runs[]' | jq -s . > "$compose_runs"
-              mapfile -t compose_run_ids < <(
-                jq -r --arg sha "$SOURCE_SHA" '
-                  .[] | select(
-                    .head_sha == $sha and .head_branch == "main" and
-                    .event == "push" and .status == "completed" and
-                    .conclusion == "success"
-                  ) | .id
-                ' "$compose_runs"
-              )
-              test "${#compose_run_ids[@]}" -ge 1 || not_ready
-              compose_run_id=${compose_run_ids[0]}
-              compose_artifact="vonk-forge-dev-compose-$SOURCE_SHA"
+              IFS=$'\t' read -r compose_run_id _ compose_source_sha \
+                < <(development_run dev-images.yml)
+              compose_artifact="vonk-forge-dev-compose-$compose_source_sha"
+              IFS=$'\t' read -r setup_run_id _ setup_source_sha \
+                < <(development_run installer-setups.yml)
               ;;
             CI)
               channel=stable
@@ -161,6 +200,21 @@ jobs:
               package_run_id=$TRIGGER_RUN_ID
               compose_run_id=$TRIGGER_RUN_ID
               compose_artifact="platform-build-${release_tag#v}"
+              setup_source_sha=$SOURCE_SHA
+              setup_runs=$RUNNER_TEMP/installer-setup-runs.json
+              gh api --paginate \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
+                --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
+              setup_run_id=$(jq -r --arg sha "$SOURCE_SHA" '
+                [.[] | select(
+                  .head_sha == $sha and .head_branch == "main" and
+                  .event == "push" and .status == "completed" and
+                  .conclusion == "success"
+                )] | sort_by(.created_at) | reverse | .[0].id // empty
+              ' "$setup_runs")
+              test -n "$setup_run_id"
               ;;
             *)
               exit 64
@@ -178,32 +232,14 @@ jobs:
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
 
-          setup_runs=$RUNNER_TEMP/installer-setup-runs.json
-          gh api --paginate \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "/repos/$GITHUB_REPOSITORY/actions/workflows/installer-setups.yml/runs?event=push&status=completed&head_sha=$SOURCE_SHA&per_page=100" \
-            --jq '.workflow_runs[]' | jq -s . > "$setup_runs"
-          mapfile -t setup_run_ids < <(
-            jq -r --arg sha "$SOURCE_SHA" '
-              .[] | select(
-                .head_sha == $sha and .head_branch == "main" and
-                .event == "push" and .status == "completed" and
-                .conclusion == "success"
-              ) | .id
-            ' "$setup_runs"
-          )
-          test "${#setup_run_ids[@]}" -ge 1 || not_ready
-          setup_run_id=${setup_run_ids[0]}
-
           artifacts=$RUNNER_TEMP/accepted-artifacts.json
           gh api --paginate \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$package_run_id/artifacts?per_page=100" \
             --jq '.artifacts[]' | jq -s . > "$artifacts"
-          test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
-          test "$(jq --arg name "$baseline_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+          test "$(jq --arg name "$package_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
+          test "$(jq --arg name "$baseline_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
           if [[ "$compose_run_id" != "$package_run_id" ]]; then
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \
@@ -211,15 +247,15 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/actions/runs/$compose_run_id/artifacts?per_page=100" \
               --jq '.artifacts[]' | jq -s . > "$artifacts"
           fi
-          test "$(jq --arg name "$compose_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+          test "$(jq --arg name "$compose_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
           gh api --paginate \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$setup_run_id/artifacts?per_page=100" \
             --jq '.artifacts[]' | jq -s . > "$artifacts"
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            setup_artifact="installer-setup-$SOURCE_SHA-$platform"
-            test "$(jq --arg name "$setup_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1 || not_ready
+            setup_artifact="installer-setup-$setup_source_sha-$platform"
+            test "$(jq --arg name "$setup_artifact" '[.[] | select(.name == $name and (.expired | not))] | length' "$artifacts")" = 1
           done
 
           printf '%s\n' \
@@ -240,6 +276,7 @@ jobs:
             "compose_run_id=$compose_run_id" \
             "compose_artifact=$compose_artifact" \
             "setup_run_id=$setup_run_id" \
+            "setup_source_sha=$setup_source_sha" \
             >> "$GITHUB_OUTPUT"
 
   candidate:
@@ -277,7 +314,7 @@ jobs:
       - name: Download accepted native setup programs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: installer-setup-${{ needs.authority.outputs.source_sha }}-*
+          pattern: installer-setup-${{ needs.authority.outputs.setup_source_sha }}-*
           path: ${{ runner.temp }}/setups
           merge-multiple: true
           run-id: ${{ needs.authority.outputs.setup_run_id }}
