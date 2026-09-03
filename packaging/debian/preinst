@@ -1220,6 +1220,25 @@ fi
 if [ "$package_action" -eq 1 ] \
     && [ "${SYSTEMD_OFFLINE:-0}" != 1 ] \
     && inside_package_helper; then
+    preflight_trace() {
+        # Keep a bounded, non-secret breadcrumb readable by the unprivileged
+        # operator account.  The old helper suppresses dpkg stderr, so without
+        # this marker a rejected request is otherwise indistinguishable from a
+        # package-manager failure.
+        preflight_trace_stage=$1
+        preflight_trace_tmp=$state_parent/.package-upgrade.preflight.trace
+        printf '%s\n' \
+            'schema_version=2' \
+            "stage=$preflight_trace_stage" \
+            "target_version=$target_version" \
+            "timestamp=$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
+            > "$preflight_trace_tmp" 2>/dev/null || return 0
+        /usr/bin/chown root:root "$preflight_trace_tmp" 2>/dev/null || true
+        /usr/bin/chmod 0644 "$preflight_trace_tmp" 2>/dev/null || true
+        /usr/bin/mv -f -- "$preflight_trace_tmp" \
+            "$state_parent/package-upgrade.preflight.trace" 2>/dev/null || true
+    }
+    preflight_trace arm-enter
     # Recovery is a hand-off optimization for an old, long-running helper,
     # not a prerequisite for unpacking a controller-signed package.  A
     # transient systemd namespace or permission difference must not turn a
@@ -1227,10 +1246,13 @@ if [ "$package_action" -eq 1 ] \
     # schedules the bounded helper restart finisher below, and the Controller
     # proves the resulting runtime identity before advancing the rollout.
     if ! arm_controller_recovery; then
+        preflight_trace arm-failed
         /usr/bin/logger -t vonk-forge-agent \
             'controller recovery handoff unavailable; continue with package finisher' \
             >/dev/null 2>&1 || true
         echo 'vonk-forge-agent: controller recovery handoff unavailable; continuing package install' >&2
+    else
+        preflight_trace arm-complete
     fi
     if ! helper_namespace_has_package_paths; then
         # The helper can outlive the package that started it.  Its already
