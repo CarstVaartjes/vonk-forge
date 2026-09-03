@@ -185,7 +185,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         struct.pack_into("<H", raw, 18, 183)
         marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
         raw[128 : 128 + len(marker)] = marker
-        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
         if name == "vonk-build-egress":
             struct.pack_into("<Q", raw, 32, 320)
@@ -203,7 +203,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             ROOT / "scripts/build-agent-deb",
             "--version",
-            "0.1.0",
+            "0.1.1",
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -228,7 +228,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             "/usr/bin/dpkg-deb",
             "--extract",
-            output / "vonk-forge-agent_0.1.0_arm64.deb",
+            output / "vonk-forge-agent_0.1.1_arm64.deb",
             payload,
         ],
         check=False,
@@ -240,7 +240,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
     assert (
         b"vonkforge.invalid"
-        not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
+        not in (output / "vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
     )
 
 

@@ -1248,7 +1248,7 @@ requires-dist = [{ name = "jsonschema", specifier = "==4.25.1" }]
 
 [[package]]
 name = "vonk-cluster-profiles"
-version = "0.1.0"
+version = "0.1.1"
 source = { directory = "../" }
 dependencies = [
     { name = "argon2-cffi" },
@@ -1282,7 +1282,7 @@ dev = [
 
 [[package]]
 name = "vonk-control"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
