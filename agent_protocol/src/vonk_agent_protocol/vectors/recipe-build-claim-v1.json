@@ -16,6 +16,7 @@
       }
     ],
     "base_image_storage_bytes": 68719476736,
+    "capabilities": [],
     "dockerfile": "containers/runtime/Dockerfile",
     "platform": "linux/arm64",
     "arguments": [
@@ -28,6 +29,31 @@
       "mode": "none",
       "hosts": []
     },
+    "options": {
+      "additional_contexts": [],
+      "annotations": [],
+      "environment": [],
+      "format": "oci",
+      "identity_label": true,
+      "ignorefile": null,
+      "jobs": 1,
+      "labels": [],
+      "layer_compression": "disabled",
+      "layer_labels": [],
+      "layers": true,
+      "no_hostname": false,
+      "no_hosts": false,
+      "omit_history": false,
+      "os_features": [],
+      "os_version": null,
+      "shm_bytes": 67108864,
+      "skip_unused_stages": true,
+      "squash": "none",
+      "timestamp": null,
+      "unset_environment": [],
+      "unset_labels": []
+    },
+    "target": null,
     "limits": {
       "cpu_cores": 8,
       "memory_bytes": 8589934592,
@@ -64,10 +90,62 @@
       ]
     },
     {
+      "name": "valid target stage",
+      "valid": true,
+      "changes": [
+        {"op": "set", "path": ["target"], "value": "runtime-final"}
+      ]
+    },
+    {
+      "name": "valid bounded capabilities",
+      "valid": true,
+      "changes": [
+        {"op": "set", "path": ["capabilities"], "value": ["CHOWN", "DAC_OVERRIDE"]}
+      ]
+    },
+    {
+      "name": "valid closed Podman options",
+      "valid": true,
+      "changes": [
+        {"op": "set", "path": ["options", "additional_contexts"], "value": [{"name": "assets", "path": "assets/model"}]},
+        {"op": "set", "path": ["options", "annotations"], "value": [{"name": "org.example/source", "value": "https://example.com/value"}]},
+        {"op": "set", "path": ["options", "environment"], "value": [{"name": "MODEL_PATH", "value": "/opt/model"}]},
+        {"op": "set", "path": ["options", "unset_labels"], "value": ["org.example/old"]}
+      ]
+    },
+    {
+      "name": "unknown capability",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["capabilities"], "value": ["SYS_ADMIN"]}
+      ]
+    },
+    {
+      "name": "unknown Podman option",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["options", "device"], "value": "/dev/nvidia0"}
+      ]
+    },
+    {
+      "name": "duplicate capability",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["capabilities"], "value": ["CHOWN", "CHOWN"]}
+      ]
+    },
+    {
       "name": "unknown top-level field",
       "valid": false,
       "changes": [
         {"op": "set", "path": ["ambient_store"], "value": true}
+      ]
+    },
+    {
+      "name": "invalid target stage",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["target"], "value": "runtime/final"}
       ]
     },
     {

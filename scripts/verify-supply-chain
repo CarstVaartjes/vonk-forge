@@ -15,7 +15,7 @@ import tomllib
 from pathlib import Path
 
 IMAGE = re.compile(r"^[^\s@]+(?::[^\s@]+)?@sha256:[0-9a-f]{64}$")
-PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
 RETIRED_SBOMS = ("inventory/sbom/agent-python.spdx.json",)
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
@@ -212,7 +212,7 @@ def protocol_version(lock: bytes) -> str:
     ]
     expected_source = (
         'source = { path = "../inventory/wheels/'
-        'vonk_agent_protocol-2.1.0-py3-none-any.whl" }'
+        'vonk_agent_protocol-2.2.0-py3-none-any.whl" }'
     )
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
         raise ValueError("control and agent must resolve the verified protocol wheel")

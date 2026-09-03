@@ -30,7 +30,7 @@ config/*
 !config/execution-harnesses/*.json
 !inventory/
 !inventory/wheels/
-!inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl
+!inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl
 **/__pycache__/**
 **/*.py[cod]
 **/.dev

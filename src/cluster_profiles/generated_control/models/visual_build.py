@@ -7,9 +7,11 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
+from typing import cast, Union
 
 if TYPE_CHECKING:
   from ..models.visual_build_context import VisualBuildContext
+  from ..models.visual_build_options import VisualBuildOptions
 
 
 
@@ -23,24 +25,34 @@ T = TypeVar("T", bound="VisualBuild")
 class VisualBuild:
     """
         Attributes:
+            capabilities (list[str]):
             context (VisualBuildContext):
+            cpu_cores (int):
             dockerfile (str):
             download_bytes (int):
             memory_bytes (int):
             network_hosts (list[str]):
             network_mode (str):
+            options (VisualBuildOptions):
             platform (str):
+            processes (int):
+            target (Union[None, str]):
             temporary_bytes (int):
             timeout_seconds (int):
      """
 
+    capabilities: list[str]
     context: 'VisualBuildContext'
+    cpu_cores: int
     dockerfile: str
     download_bytes: int
     memory_bytes: int
     network_hosts: list[str]
     network_mode: str
+    options: 'VisualBuildOptions'
     platform: str
+    processes: int
+    target: Union[None, str]
     temporary_bytes: int
     timeout_seconds: int
 
@@ -50,7 +62,14 @@ class VisualBuild:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.visual_build_context import VisualBuildContext
+        from ..models.visual_build_options import VisualBuildOptions
+        capabilities = self.capabilities
+
+
+
         context = self.context.to_dict()
+
+        cpu_cores = self.cpu_cores
 
         dockerfile = self.dockerfile
 
@@ -64,7 +83,14 @@ class VisualBuild:
 
         network_mode = self.network_mode
 
+        options = self.options.to_dict()
+
         platform = self.platform
+
+        processes = self.processes
+
+        target: Union[None, str]
+        target = self.target
 
         temporary_bytes = self.temporary_bytes
 
@@ -74,13 +100,18 @@ class VisualBuild:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "capabilities": capabilities,
             "context": context,
+            "cpu_cores": cpu_cores,
             "dockerfile": dockerfile,
             "download_bytes": download_bytes,
             "memory_bytes": memory_bytes,
             "network_hosts": network_hosts,
             "network_mode": network_mode,
+            "options": options,
             "platform": platform,
+            "processes": processes,
+            "target": target,
             "temporary_bytes": temporary_bytes,
             "timeout_seconds": timeout_seconds,
         })
@@ -92,11 +123,17 @@ class VisualBuild:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.visual_build_context import VisualBuildContext
+        from ..models.visual_build_options import VisualBuildOptions
         d = dict(src_dict)
+        capabilities = cast(list[str], d.pop("capabilities"))
+
+
         context = VisualBuildContext.from_dict(d.pop("context"))
 
 
 
+
+        cpu_cores = d.pop("cpu_cores")
 
         dockerfile = d.pop("dockerfile")
 
@@ -109,20 +146,40 @@ class VisualBuild:
 
         network_mode = d.pop("network_mode")
 
+        options = VisualBuildOptions.from_dict(d.pop("options"))
+
+
+
+
         platform = d.pop("platform")
+
+        processes = d.pop("processes")
+
+        def _parse_target(data: object) -> Union[None, str]:
+            if data is None:
+                return data
+            return cast(Union[None, str], data)
+
+        target = _parse_target(d.pop("target"))
+
 
         temporary_bytes = d.pop("temporary_bytes")
 
         timeout_seconds = d.pop("timeout_seconds")
 
         visual_build = cls(
+            capabilities=capabilities,
             context=context,
+            cpu_cores=cpu_cores,
             dockerfile=dockerfile,
             download_bytes=download_bytes,
             memory_bytes=memory_bytes,
             network_hosts=network_hosts,
             network_mode=network_mode,
+            options=options,
             platform=platform,
+            processes=processes,
+            target=target,
             temporary_bytes=temporary_bytes,
             timeout_seconds=timeout_seconds,
         )

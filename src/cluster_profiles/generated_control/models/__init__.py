@@ -324,7 +324,13 @@ from .update_recipe_draft_request_document import UpdateRecipeDraftRequestDocume
 from .validation_error import ValidationError
 from .visual_artifact import VisualArtifact
 from .visual_build import VisualBuild
+from .visual_build_additional_context import VisualBuildAdditionalContext
 from .visual_build_context import VisualBuildContext
+from .visual_build_option_value import VisualBuildOptionValue
+from .visual_build_options import VisualBuildOptions
+from .visual_build_options_format import VisualBuildOptionsFormat
+from .visual_build_options_layer_compression import VisualBuildOptionsLayerCompression
+from .visual_build_options_squash import VisualBuildOptionsSquash
 from .visual_catalog_identity import VisualCatalogIdentity
 from .visual_catalog_identity_kind import VisualCatalogIdentityKind
 from .visual_execution import VisualExecution
@@ -671,7 +677,13 @@ __all__ = (
     "ValidationError",
     "VisualArtifact",
     "VisualBuild",
+    "VisualBuildAdditionalContext",
     "VisualBuildContext",
+    "VisualBuildOptions",
+    "VisualBuildOptionsFormat",
+    "VisualBuildOptionsLayerCompression",
+    "VisualBuildOptionsSquash",
+    "VisualBuildOptionValue",
     "VisualCatalogIdentity",
     "VisualCatalogIdentityKind",
     "VisualExecution",

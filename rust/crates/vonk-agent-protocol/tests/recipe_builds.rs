@@ -35,10 +35,22 @@ fn build_payload() -> serde_json::Value {
             "manifest_digest": format!("sha256:{}", "d".repeat(64))
         }],
         "base_image_storage_bytes": 68719476736_u64,
+        "capabilities": [],
         "dockerfile": "Dockerfile",
         "platform": "linux/arm64",
         "arguments": [{"name": "runtime-version", "value": "1"}],
         "network": {"mode": "none", "hosts": []},
+        "options": {
+            "additional_contexts": [], "annotations": [], "environment": [],
+            "format": "oci", "identity_label": true, "ignorefile": null,
+            "jobs": 1, "labels": [], "layer_compression": "disabled",
+            "layer_labels": [], "layers": true, "no_hostname": false,
+            "no_hosts": false, "omit_history": false, "os_features": [],
+            "os_version": null, "shm_bytes": 67108864,
+            "skip_unused_stages": true, "squash": "none", "timestamp": null,
+            "unset_environment": [], "unset_labels": []
+        },
+        "target": null,
         "limits": {
             "cpu_cores": 8,
             "memory_bytes": 8589934592_u64,

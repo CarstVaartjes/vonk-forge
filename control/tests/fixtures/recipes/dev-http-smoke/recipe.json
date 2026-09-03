@@ -41,12 +41,16 @@
       "mode": "none",
       "hosts": []
     },
+    "options": {"additional_contexts": [], "annotations": [], "environment": [], "format": "oci", "identity_label": true, "ignorefile": null, "jobs": 1, "labels": [], "layer_compression": "disabled", "layer_labels": [], "layers": true, "no_hostname": false, "no_hosts": false, "omit_history": false, "os_features": [], "os_version": null, "shm_bytes": 67108864, "skip_unused_stages": true, "squash": "none", "timestamp": null, "unset_environment": [], "unset_labels": []},
     "resources": {
+      "cpu_cores": 2,
       "download_bytes": 268435456,
       "temporary_bytes": 536870912,
       "memory_bytes": 134217728,
+      "processes": 1024,
       "timeout_seconds": 300
-    }
+    },
+    "security": {"capabilities": []}
   },
   "parameters": [],
   "artifacts": [

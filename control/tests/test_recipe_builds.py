@@ -104,10 +104,14 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     document["build"]["context"]["sha256"] = bundle.sha256
     document["build"]["context"]["expected_bytes"] = len(bundle.archive)
     document["identity"]["slug"] = "qwen3-vllm"
+    document["build"]["target"] = "runtime"
+    document["build"]["security"] = {"capabilities": ["DAC_OVERRIDE"]}
     document["build"]["resources"] = {
+        "cpu_cores": 6,
         "download_bytes": 100,
         "temporary_bytes": 200,
         "memory_bytes": 300,
+        "processes": 2048,
         "timeout_seconds": 600,
     }
     with sessions.begin() as session:
@@ -179,7 +183,11 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
 
     assert plan.agent_payload["kind"] == "recipe.build.v1"
     assert "command" not in plan.agent_payload
+    assert plan.agent_payload["target"] == "runtime"
+    assert plan.agent_payload["capabilities"] == ["DAC_OVERRIDE"]
+    assert plan.agent_payload["limits"]["cpu_cores"] == 6
     assert plan.agent_payload["limits"]["gpu"] == 0
+    assert plan.agent_payload["limits"]["processes"] == 2048
     assert plan.agent_payload["base_images"] == [
         {
             "manifest_digest": "sha256:" + "a" * 64,

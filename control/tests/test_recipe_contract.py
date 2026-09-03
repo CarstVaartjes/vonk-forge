@@ -80,6 +80,20 @@ def test_recipe_has_one_topology_and_exact_bindings() -> None:
     }
 
 
+def test_recipe_build_options_are_closed_and_unsafe_podman_args_are_absent() -> None:
+    document = recipe_document()
+    document["build"]["options"]["device"] = "/dev/nvidia0"
+
+    with pytest.raises(RecipeContractError, match="unexpected field: device"):
+        validate_recipe(document)
+
+    document = recipe_document()
+    document["build"]["security"]["capabilities"] = ["SYS_ADMIN"]
+
+    with pytest.raises(RecipeContractError):
+        validate_recipe(document)
+
+
 def test_recipe_patch_bundle_is_nullable_and_part_of_exact_references() -> None:
     document = recipe_document()
     document["execution"]["patch_bundle"] = {

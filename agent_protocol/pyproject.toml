@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vonk-agent-protocol"
-version = "2.1.0"
+version = "2.2.0"
 description = "Versioned, fenced contracts for Vonk Forge agents"
 requires-python = ">=3.12"
 dependencies = ["jsonschema==4.25.1"]
