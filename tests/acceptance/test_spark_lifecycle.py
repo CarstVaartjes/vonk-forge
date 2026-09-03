@@ -853,9 +853,6 @@ class SparkLifecycle:
             "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ": (
                 f"198.19.{self.synthetic_fabric_octet}.0/24"
             ),
-            f"Agent enrollment hostname (enroll.<tailnet>.ts.net) [{ENROLLMENT_HOST}]: ": ENROLLMENT_HOST,
-            f"Agent controller hostname (agents.<tailnet>.ts.net) [{AGENT_HOST}]: ": AGENT_HOST,
-            f"Registry hostname (registry.<tailnet>.ts.net) [{REGISTRY_HOST}]: ": REGISTRY_HOST,
         }
 
     def _start_controller(self) -> None:
@@ -874,6 +871,9 @@ class SparkLifecycle:
             hermes=False,
             control_service=self.tailnet_services["control"],
             hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
+            enrollment_hostname=ENROLLMENT_HOST,
+            agent_hostname=AGENT_HOST,
+            registry_hostname=REGISTRY_HOST,
         )
         replacements = self._controller_response_replacements()
         responses = [

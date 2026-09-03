@@ -95,6 +95,28 @@ def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
     assert (prompt, "") in enabled
 
 
+def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
+    acceptance = _acceptance_module()
+    responses = acceptance.nas_responses(
+        nas_ip="127.0.0.1",
+        tailnet_suffix="spark.acceptance.invalid",
+        oauth_client_id="disabled",
+        oauth_client_secret="disabled",
+        upstream_key="upstream-key",
+        hermes=False,
+        control_service="svc:vonk-forge-spark-local",
+        enrollment_hostname="enroll.spark.localhost",
+        agent_hostname="agents.spark.localhost",
+        registry_hostname="registry.spark.localhost",
+    )
+
+    assert [answer for _, answer in responses[5:8]] == [
+        "enroll.spark.localhost",
+        "agents.spark.localhost",
+        "registry.spark.localhost",
+    ]
+
+
 def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> None:
     acceptance = _acceptance_module()
     renderer = _script_module(PRODUCTION_RENDERER, "acceptance_prompt_renderer")

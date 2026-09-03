@@ -193,14 +193,19 @@ def nas_responses(
     hermes: bool,
     control_service: str = "svc:vonk-forge",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
+    enrollment_hostname: str | None = None,
+    agent_hostname: str | None = None,
+    registry_hostname: str | None = None,
 ) -> list[tuple[str, str]]:
     control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
     hermes_dashboard_hostname = tailscale_service_hostname(
         hermes_dashboard_service, tailnet_suffix
     )
-    enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
-    agent_hostname = f"agents.acceptance.{tailnet_suffix}"
-    registry_hostname = f"registry.acceptance.{tailnet_suffix}"
+    enrollment_hostname = (
+        enrollment_hostname or f"enroll.acceptance.{tailnet_suffix}"
+    )
+    agent_hostname = agent_hostname or f"agents.acceptance.{tailnet_suffix}"
+    registry_hostname = registry_hostname or f"registry.acceptance.{tailnet_suffix}"
     derived_enrollment_hostname = f"enroll.{tailnet_suffix}"
     derived_agent_hostname = f"agents.{tailnet_suffix}"
     derived_registry_hostname = f"registry.{tailnet_suffix}"
