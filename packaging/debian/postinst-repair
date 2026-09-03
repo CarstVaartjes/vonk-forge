@@ -310,7 +310,8 @@ install -d -o vonk-agent -g vonk-agent -m 0750 \
 install -d -o vonk-agent -g vonk-agent -m 0700 \
     /var/lib/vonk-forge-agent/image-imports \
     /var/lib/vonk-forge-agent/installations \
-    /var/lib/vonk-forge-agent/run-metadata /var/lib/vonk-forge-agent/runs
+    /var/lib/vonk-forge-agent/run-metadata /var/lib/vonk-forge-agent/runs \
+    /var/lib/vonk-forge-agent/tmp
 machine_evidence=/var/lib/vonk-forge-agent/machine-evidence
 if [ -e "$machine_evidence" ] || [ -L "$machine_evidence" ]; then
     [ -f "$machine_evidence" ] && [ ! -L "$machine_evidence" ] \
