@@ -86,6 +86,8 @@ pub enum PodmanImportDiagnostic {
 pub enum PodmanBuildDiagnostic {
     TemporaryStorageExhausted,
     SubordinateIdMappingUnavailable,
+    UserNamespaceDenied,
+    ProcMountDenied,
     PermissionDenied,
     MemoryLimitExceeded,
     StorageDriverFailure,
@@ -99,6 +101,8 @@ impl fmt::Display for PodmanBuildDiagnostic {
         formatter.write_str(match self {
             Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
             Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
+            Self::UserNamespaceDenied => "user-namespace-denied",
+            Self::ProcMountDenied => "proc-mount-denied",
             Self::PermissionDenied => "permission-denied",
             Self::MemoryLimitExceeded => "memory-limit-exceeded",
             Self::StorageDriverFailure => "storage-driver-failure",
@@ -665,6 +669,19 @@ fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuil
         || evidence.contains("lchown")
     {
         PodmanBuildDiagnostic::SubordinateIdMappingUnavailable
+    } else if (evidence.contains("apparmor") && evidence.contains("denied"))
+        || evidence.contains("user namespace is not enabled")
+        || evidence.contains("user namespaces are not enabled")
+        || evidence.contains("cannot clone: operation not permitted")
+    {
+        PodmanBuildDiagnostic::UserNamespaceDenied
+    } else if (evidence.contains("mount `proc`")
+        || evidence.contains("mount 'proc'")
+        || evidence.contains("mount \"proc\"")
+        || evidence.contains("mount proc to proc"))
+        && (evidence.contains("permission denied") || evidence.contains("operation not permitted"))
+    {
+        PodmanBuildDiagnostic::ProcMountDenied
     } else if evidence.contains("permission denied") || evidence.contains("operation not permitted")
     {
         PodmanBuildDiagnostic::PermissionDenied
@@ -1094,6 +1111,21 @@ mod tests {
                 b"".as_slice(),
                 b"Failed to start transient scope unit".as_slice(),
                 "systemd-scope-failure",
+            ),
+            (
+                b"".as_slice(),
+                b"apparmor=\"DENIED\" operation=\"userns_create\" profile=\"podman\"".as_slice(),
+                "user-namespace-denied",
+            ),
+            (
+                b"".as_slice(),
+                b"mount `proc` to `proc`: Operation not permitted".as_slice(),
+                "proc-mount-denied",
+            ),
+            (
+                b"".as_slice(),
+                b"open /private/secret: permission denied".as_slice(),
+                "permission-denied",
             ),
             (
                 b"opaque /private/secret".as_slice(),
