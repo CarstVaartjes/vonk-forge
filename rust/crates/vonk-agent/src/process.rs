@@ -3,7 +3,7 @@ use std::{
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -22,6 +22,7 @@ pub enum Program {
     Oras,
     Podman,
     SystemdRun,
+    Systemctl,
 }
 
 impl Program {
@@ -34,6 +35,7 @@ impl Program {
             Self::Oras => "/usr/lib/vonk-forge/oras",
             Self::Podman => "/usr/bin/podman",
             Self::SystemdRun => "/usr/bin/systemd-run",
+            Self::Systemctl => "/usr/bin/systemctl",
         }
     }
 }
@@ -486,13 +488,11 @@ fn run_process(
             break status;
         }
         if cancellation.is_some_and(|cancelled| cancelled()) {
-            let _ = child.kill();
-            child.wait()?;
+            terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Cancelled);
         }
         if started.elapsed() >= timeout {
-            child.kill()?;
-            child.wait()?;
+            terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
         let stdout_bytes = stdout.metadata()?.len();
@@ -501,20 +501,17 @@ fn run_process(
             || stderr_bytes > output_limit
             || stdout_bytes.saturating_add(stderr_bytes) > output_limit
         {
-            child.kill()?;
-            child.wait()?;
+            terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::OutputLimit);
         }
         if let Some((directory, maximum_bytes)) = storage_limit {
             match directory_bytes(directory) {
                 Ok(bytes) if bytes > maximum_bytes => {
-                    child.kill()?;
-                    child.wait()?;
+                    terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::StorageLimit);
                 }
                 Err(error) => {
-                    child.kill()?;
-                    child.wait()?;
+                    terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::Io(error));
                 }
                 Ok(_) => {}
@@ -529,6 +526,42 @@ fn run_process(
         success: status.success(),
         stdout: bounded_read(&mut stdout, output_limit)?,
         stderr: bounded_read(&mut stderr, output_limit)?,
+    })
+}
+
+fn terminate_process(
+    child: &mut Child,
+    program: Program,
+    arguments: &[String],
+) -> Result<(), std::io::Error> {
+    if let Some(unit) = transient_user_service_unit(program, arguments) {
+        let environment =
+            subprocess_environment(Program::Systemctl, rustix::process::geteuid().as_raw(), &[]);
+        let _ = Command::new(Program::Systemctl.path())
+            .args(["--user", "stop", unit])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env_clear()
+            .envs(environment)
+            .status();
+    }
+    let _ = child.kill();
+    child.wait()?;
+    Ok(())
+}
+
+fn transient_user_service_unit(program: Program, arguments: &[String]) -> Option<&str> {
+    if program != Program::SystemdRun || !arguments.iter().any(|value| value == "--user") {
+        return None;
+    }
+    arguments.iter().find_map(|value| {
+        let unit = value.strip_prefix("--unit=vonk-recipe-build-")?;
+        (!unit.is_empty()
+            && unit
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'))
+        .then_some(value.strip_prefix("--unit=").unwrap())
     })
 }
 
@@ -601,7 +634,10 @@ fn subprocess_environment(
             "/etc/vonk-forge-agent/containers-storage.conf".to_owned(),
         ),
     ]);
-    if matches!(program, Program::Podman | Program::SystemdRun) {
+    if matches!(
+        program,
+        Program::Podman | Program::SystemdRun | Program::Systemctl
+    ) {
         let runtime = format!("/run/user/{effective_uid}");
         environment.insert("XDG_RUNTIME_DIR", runtime.clone());
         environment.insert(
@@ -694,6 +730,7 @@ mod tests {
     use super::{
         ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes,
         podman_image_tmpdir, present_during_scan, subprocess_environment,
+        transient_user_service_unit,
     };
     use std::{
         fs,
@@ -739,6 +776,35 @@ mod tests {
 
         assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/vonk-forge-agent");
         assert!(!environment.contains_key("DBUS_SESSION_BUS_ADDRESS"));
+    }
+
+    #[test]
+    fn only_the_fixed_recipe_build_user_service_is_stoppable() {
+        let arguments = vec![
+            "--user".to_owned(),
+            "--unit=vonk-recipe-build-00000000-0000-4000-8000-000000000002".to_owned(),
+        ];
+        assert_eq!(
+            transient_user_service_unit(Program::SystemdRun, &arguments),
+            Some("vonk-recipe-build-00000000-0000-4000-8000-000000000002")
+        );
+        assert_eq!(
+            transient_user_service_unit(
+                Program::SystemdRun,
+                &["--unit=unrelated.service".to_owned()]
+            ),
+            None
+        );
+        assert_eq!(
+            transient_user_service_unit(
+                Program::SystemdRun,
+                &[
+                    "--user".to_owned(),
+                    "--unit=vonk-recipe-build-../../other".to_owned(),
+                ]
+            ),
+            None
+        );
     }
 
     #[test]

@@ -1013,12 +1013,21 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     assert_eq!(build.0, Program::SystemdRun);
     for required in [
         "--user",
-        "--scope",
+        "--wait",
+        "--pipe",
         "--collect",
         "--quiet",
+        "--service-type=exec",
+        "--unit=vonk-recipe-build-00000000-0000-4000-8000-000000000002",
+        "--setenv=HOME=/var/lib/vonk-forge-agent",
+        "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent",
+        "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf",
         "--property=MemoryMax=8589934592",
         "--property=CPUQuota=800%",
         "--property=TasksMax=4096",
+        "--property=RuntimeMaxSec=3600s",
+        "--property=TimeoutStopSec=5s",
+        "--property=KillMode=control-group",
         "/usr/bin/podman",
         "--cgroup-manager=cgroupfs",
         "--runtime=/usr/bin/crun",
@@ -1069,6 +1078,20 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     ] {
         assert!(build.1.iter().any(|value| value == required), "{required}");
     }
+    assert!(
+        build
+            .1
+            .iter()
+            .any(|value| value.starts_with("--setenv=TMPDIR=")
+                && value.ends_with("/podman-image-tmp"))
+    );
+    assert!(
+        build
+            .1
+            .iter()
+            .any(|value| value.starts_with("--setenv=XDG_RUNTIME_DIR=") && value.ends_with("/xdg"))
+    );
+    assert!(!build.1.iter().any(|value| value == "--scope"));
     assert!(!build.1.iter().any(|value| {
         value.contains("privileged")
             || value.contains("docker.sock")
