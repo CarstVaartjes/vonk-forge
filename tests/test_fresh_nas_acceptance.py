@@ -133,6 +133,14 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
     )
 
     assert [prompt for prompt, _ in responses[: len(required)]] == canonical_prompts
+    assert responses[1] == (
+        "Trusted Spark management CIDRs: ",
+        "192.168.1.0/24",
+    )
+    assert responses[2] == (
+        "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
+        "",
+    )
     assert responses[3] == (
         "Operator jurisdiction (uppercase country code, or EU): ",
         "NL",

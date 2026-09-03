@@ -213,7 +213,7 @@ def nas_responses(
     }
     responses = [
         ("Reserved NAS LAN IP: ", nas_ip),
-        ("Trusted Spark management CIDRs: ", "0.0.0.0/0"),
+        ("Trusted Spark management CIDRs: ", "192.168.1.0/24"),
         (
             "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
             "",
