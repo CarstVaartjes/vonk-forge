@@ -751,6 +751,63 @@ arm_controller_recovery() {
                 && safe_root_directory "$invocation_dir" 700 \
                 || arm_failure unsafe-custody-directory
             ;;
+        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb)
+            # A pre-509 helper may still dispatch from its agent-owned
+            # incoming directory.  Only accept this transitional shape after
+            # inside_package_helper proved the root helper ancestry above,
+            # then copy it into the current root-only custody protocol before
+            # recording recovery state.
+            incoming_dir=/var/lib/vonk-forge/incoming
+            incoming_uid=$(/usr/bin/stat -Lc %u "$incoming_dir" 2>/dev/null || true)
+            agent_uid=$(/usr/bin/awk -F: \
+                '$1 == "vonk-agent" { print $3; exit }' /etc/passwd)
+            [ -n "$agent_uid" ] && [ "$incoming_uid" = "$agent_uid" ] \
+                || arm_failure unsafe-incoming-directory
+            [ "$(/usr/bin/stat -Lc '%u:%a' "$candidate" \
+                2>/dev/null || true)" = "$agent_uid:600" ] \
+                || arm_failure unsafe-incoming-candidate
+            ensure_root_directory "$custody_root" 700 \
+                || arm_failure unsafe-custody-directory
+            invocation=$(/usr/bin/openssl rand -hex 16) \
+                || arm_failure custody-invocation-failed
+            valid_digest "$invocation" \
+                || arm_failure invalid-custody-invocation
+            invocation_dir=$custody_root/$invocation
+            /usr/bin/install -d -o root -g root -m 0700 "$invocation_dir" \
+                || arm_failure custody-directory-create-failed
+            legacy_source=$candidate
+            incoming_digest=${candidate##*/}
+            incoming_digest=${incoming_digest%.deb}
+            valid_digest "$incoming_digest" \
+                || arm_failure invalid-package-digest
+            candidate=$invocation_dir/${candidate##*/}
+            [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+                || arm_failure custody-candidate-exists
+            legacy_before=$(/usr/bin/stat -Lc '%d:%i:%u:%g:%a:%h:%s:%Y:%Z' \
+                "$legacy_source") || arm_failure incoming-stat-failed
+            legacy_new=$(/usr/bin/mktemp "$invocation_dir/.candidate.XXXXXX") \
+                || arm_failure custody-staging-failed
+            trap '/usr/bin/rm -f -- "${legacy_new:-}"' EXIT HUP INT TERM
+            /usr/bin/cp --reflink=never -- "$legacy_source" "$legacy_new" \
+                || arm_failure incoming-copy-failed
+            legacy_after=$(/usr/bin/stat -Lc '%d:%i:%u:%g:%a:%h:%s:%Y:%Z' \
+                "$legacy_source") || arm_failure incoming-stat-failed
+            [ "$legacy_before" = "$legacy_after" ] \
+                && [ "$(/usr/bin/sha256sum "$legacy_new" 2>/dev/null \
+                    | /usr/bin/cut -d' ' -f1)" = "$incoming_digest" ] \
+                || arm_failure incoming-copy-changed
+            /usr/bin/chown root:root "$legacy_new" \
+                || arm_failure custody-chown-failed
+            /usr/bin/chmod 0600 "$legacy_new" \
+                || arm_failure custody-chmod-failed
+            /usr/bin/sync -f "$legacy_new" \
+                || arm_failure custody-sync-failed
+            /usr/bin/mv -- "$legacy_new" "$candidate" \
+                || arm_failure custody-rename-failed
+            /usr/bin/sync -f "$invocation_dir" \
+                || arm_failure custody-sync-failed
+            trap - EXIT HUP INT TERM
+            ;;
         *) arm_failure invalid-custody-candidate ;;
     esac
     package_digest=${candidate##*/}
