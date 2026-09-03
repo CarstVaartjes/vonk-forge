@@ -248,6 +248,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }
         fs::create_dir_all(&storage)?;
         fs::create_dir(&podman_image_tmp)?;
+        let podman_runtime = runroot.path().join("xdg");
+        fs::create_dir(&podman_runtime)?;
         let source = materialize_source_bundle(archive, &request.source_bundle_sha256, &context)?;
         let policy = inspect_build_source(&source.files, &request.dockerfile);
         if !policy.passed {
@@ -282,13 +284,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             )?),
         };
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
-        // Rootless Podman 4.9 cannot reliably create a user-manager scope when
-        // invoked by the agent's system service. Start the build itself in a
-        // transient user scope, then let cgroupfs children inherit that
-        // scope's resource envelope.
+        // Start the build as a transient user service rather than a scope.
+        // A scope inherits this agent service's mount namespace, whose
+        // ProtectKernelTunables/ProtectKernelLogs procfs overmounts prevent a
+        // rootless OCI runtime from mounting the build container's /proc. The
+        // user manager starts a service from its clean mount namespace while
+        // cgroupfs children still inherit this resource envelope.
         let mut podman_arguments =
             podman_storage_arguments_with_cgroup_manager(&storage, runroot.path(), "cgroupfs");
         podman_arguments.extend([
+            "--runtime=/usr/bin/crun".to_owned(),
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
@@ -399,15 +404,30 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         podman_arguments.push(context.display().to_string());
         let mut arguments = vec![
             "--user".to_owned(),
-            "--scope".to_owned(),
+            "--wait".to_owned(),
+            "--pipe".to_owned(),
             "--collect".to_owned(),
             "--quiet".to_owned(),
+            "--service-type=exec".to_owned(),
+            format!("--unit=vonk-recipe-build-{operation_id}"),
+            "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
+            "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
+            format!("--setenv=XDG_RUNTIME_DIR={}", podman_runtime.display()),
+            format!("--setenv=TMPDIR={}", podman_image_tmp.display()),
+            "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
+                .to_owned(),
             format!("--property=MemoryMax={}", request.limits.memory_bytes),
             format!(
                 "--property=CPUQuota={}%",
                 u64::from(request.limits.cpu_cores) * 100
             ),
             format!("--property=TasksMax={}", request.limits.processes),
+            format!(
+                "--property=RuntimeMaxSec={}s",
+                request.limits.timeout_seconds
+            ),
+            "--property=TimeoutStopSec=5s".to_owned(),
+            "--property=KillMode=control-group".to_owned(),
             "/usr/bin/podman".to_owned(),
         ];
         arguments.extend(podman_arguments);

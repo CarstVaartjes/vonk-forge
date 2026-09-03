@@ -4,8 +4,8 @@ export type Scalar = string | number | boolean;
 export type PresetName = "custom" | "vllm" | "diffusers";
 export type InterfaceAdapter = "openai" | "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job";
 export type TopologyMode = "single" | "distributed" | "tensor_parallel" | "pipeline_parallel" | "data_parallel" | "hybrid" | "ray" | "mpi";
-export type BuildCapability = "CHOWN" | "DAC_OVERRIDE" | "FOWNER" | "FSETID" | "KILL" | "MKNOD" | "NET_BIND_SERVICE" | "SETFCAP" | "SETGID" | "SETPCAP" | "SETUID" | "SYS_CHROOT";
-export const BUILD_CAPABILITIES: readonly BuildCapability[] = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"];
+export type BuildCapability = "CHOWN" | "DAC_OVERRIDE" | "FOWNER" | "FSETID" | "KILL" | "MKNOD" | "NET_BIND_SERVICE" | "SETFCAP" | "SETGID" | "SETPCAP" | "SETUID";
+export const BUILD_CAPABILITIES: readonly BuildCapability[] = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID"];
 
 export type CanonicalReference = {
   kind: "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";

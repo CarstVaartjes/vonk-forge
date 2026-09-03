@@ -352,7 +352,7 @@ jobs:
           scripts/verify-agent-deb --json "baseline/$ARM64_BASELINE_PACKAGE"
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
+            crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
           shellcheck \
             packaging/bin/vonk-forge-docker-firewall \
             scripts/test-agent-package-native-lifecycle \
@@ -420,7 +420,7 @@ jobs:
           test "$(uname -m)" = x86_64
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            acl iproute2 iptables podman shellcheck slirp4netns uidmap
+            acl crun iproute2 iptables podman shellcheck slirp4netns uidmap
           package="accepted/$AMD64_PACKAGE"
           scripts/verify-agent-deb --json "$package"
           sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"

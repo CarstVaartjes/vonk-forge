@@ -364,7 +364,7 @@ def _exact_repair_script_fixture(
     control_template = (
         b"Package: vonk-forge-agent\nVersion: @VERSION@\n"
         b"Architecture: @ARCHITECTURE@\n"
-        b"Depends: acl, iproute2, iptables, podman, uidmap\n"
+        b"Depends: acl, crun, iproute2, iptables, podman, uidmap\n"
     )
     prerm = (
         b"#!/bin/sh\n# helper-upgrade.pending helper-upgrade.receipt\n"
@@ -2347,6 +2347,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         check=True,
     ).stdout
     assert "curl" in fields
+    assert "crun" in fields
     assert "podman" in fields
     assert "util-linux" in fields
     assert "uidmap" in fields
@@ -2401,7 +2402,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "ProtectControlGroups=yes" in unit
-    # Rootless runc must set the hostname inside each build's private UTS
+    # The rootless OCI runtime must set the hostname inside each build's private UTS
     # namespace. The dedicated service user still has no ambient host
     # capability, so ProtectHostname would only break container creation.
     assert "ProtectHostname=no" in unit

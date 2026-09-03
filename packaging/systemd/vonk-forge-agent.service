@@ -53,7 +53,7 @@ ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
-# Rootless runc creates a private UTS namespace and must set that container's
+# The rootless OCI runtime creates a private UTS namespace and must set that container's
 # hostname. The dedicated service user has no ambient host capability, so the
 # host hostname remains protected by normal kernel capability checks.
 ProtectHostname=no

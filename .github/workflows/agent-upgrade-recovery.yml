@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            acl adduser build-essential ca-certificates init-system-helpers \
+            acl adduser build-essential ca-certificates crun init-system-helpers \
             fuse-overlayfs iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
       - name: Validate current schema2 capsule boot recovery

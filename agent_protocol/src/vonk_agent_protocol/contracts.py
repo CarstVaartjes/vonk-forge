@@ -50,7 +50,6 @@ RECIPE_BUILD_CAPABILITIES = frozenset(
         "SETGID",
         "SETPCAP",
         "SETUID",
-        "SYS_CHROOT",
     }
 )
 MAX_RECIPE_BUILD_STORAGE_BYTES = 16 * 1024**4
@@ -568,10 +567,14 @@ def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
     ):
         raise AgentProtocolError("recipe build target is not canonical")
     capabilities = _build_sequence(
-        value["capabilities"], name="capabilities", maximum=12
+        value["capabilities"], name="capabilities", maximum=11
     )
     if (
-        any(capability not in RECIPE_BUILD_CAPABILITIES for capability in capabilities)
+        any(
+            capability.startswith("SYS_")
+            or capability not in RECIPE_BUILD_CAPABILITIES
+            for capability in capabilities
+        )
         or len(set(capabilities)) != len(capabilities)
     ):
         raise AgentProtocolError("recipe build capabilities are not allowed")

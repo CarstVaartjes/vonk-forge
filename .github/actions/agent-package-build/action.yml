@@ -552,7 +552,7 @@ runs:
         trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
         sudo apt-get update
         sudo apt-get install --no-install-recommends -y \
-          fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
+          crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \
           scripts/test-agent-package-native-lifecycle \
