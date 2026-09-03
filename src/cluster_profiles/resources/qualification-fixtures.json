@@ -3889,7 +3889,7 @@
       }
     },
     "vonk-forge/deepseek-v4-flash-vision-exp-mia-dual": {
-      "content_sha256": "2a090d1628de993e48d5386b0d7ed743f566c27c0c707009192cc9381131c01d",
+      "content_sha256": "6fb0aeb3c29b51fe3f33b063364186d1497e9744598975b74eecdfc1970d5df7",
       "alias": "deepseek-v4-flash-vision-exp",
       "smoke_cases": [
         "M0",
