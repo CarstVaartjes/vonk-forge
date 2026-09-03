@@ -50,8 +50,8 @@ pub enum RecipeBuildError {
     BaseImageImport { diagnostic: PodmanImportDiagnostic },
     #[error("Podman imported base image evidence is invalid")]
     BaseImageInspect,
-    #[error("Podman recipe image build failed")]
-    ImageBuild,
+    #[error("Podman recipe image build failed ({diagnostic})")]
+    ImageBuild { diagnostic: PodmanBuildDiagnostic },
     #[error("built recipe image evidence is invalid")]
     ImageInspect,
     #[error("Podman could not export the built recipe image")]
@@ -82,6 +82,33 @@ pub enum PodmanImportDiagnostic {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PodmanBuildDiagnostic {
+    TemporaryStorageExhausted,
+    SubordinateIdMappingUnavailable,
+    PermissionDenied,
+    MemoryLimitExceeded,
+    StorageDriverFailure,
+    SystemdScopeFailure,
+    NonzeroWithoutOutput,
+    Unknown,
+}
+
+impl fmt::Display for PodmanBuildDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
+            Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
+            Self::PermissionDenied => "permission-denied",
+            Self::MemoryLimitExceeded => "memory-limit-exceeded",
+            Self::StorageDriverFailure => "storage-driver-failure",
+            Self::SystemdScopeFailure => "systemd-scope-failure",
+            Self::NonzeroWithoutOutput => "nonzero-without-output",
+            Self::Unknown => "unclassified-podman-build-failure",
+        })
+    }
+}
+
 impl fmt::Display for PodmanImportDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
@@ -105,6 +132,11 @@ impl RecipeBuildError {
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "base-image-import",
+            }),
+            Self::ImageBuild { diagnostic } => serde_json::json!({
+                "diagnostic": diagnostic.to_string(),
+                "reason": self.to_string(),
+                "stage": "image-build",
             }),
             _ => serde_json::json!({"reason": self.to_string()}),
         }
@@ -394,7 +426,9 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 cancelled,
             )?;
         if !output.success {
-            return Err(RecipeBuildError::ImageBuild);
+            return Err(RecipeBuildError::ImageBuild {
+                diagnostic: podman_build_diagnostic(&output),
+            });
         }
         let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
         inspect_arguments.extend([
@@ -588,6 +622,53 @@ fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImp
         PodmanImportDiagnostic::ArchiveFormatRejected
     } else {
         PodmanImportDiagnostic::Unknown
+    }
+}
+
+fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
+    let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
+    evidence.extend_from_slice(&output.stdout);
+    evidence.push(b'\n');
+    evidence.extend_from_slice(&output.stderr);
+    let evidence = String::from_utf8_lossy(&evidence).to_ascii_lowercase();
+    if output.stdout.is_empty() && output.stderr.is_empty() {
+        PodmanBuildDiagnostic::NonzeroWithoutOutput
+    } else if evidence.contains("no space left on device")
+        || evidence.contains("disk quota exceeded")
+    {
+        PodmanBuildDiagnostic::TemporaryStorageExhausted
+    } else if evidence.contains("insufficient uids or gids")
+        || evidence.contains("subuid")
+        || evidence.contains("subgid")
+        || evidence.contains("newuidmap")
+        || evidence.contains("newgidmap")
+        || evidence.contains("lchown")
+    {
+        PodmanBuildDiagnostic::SubordinateIdMappingUnavailable
+    } else if evidence.contains("permission denied") || evidence.contains("operation not permitted")
+    {
+        PodmanBuildDiagnostic::PermissionDenied
+    } else if evidence.contains("out of memory")
+        || evidence.contains("memory limit")
+        || evidence.contains("oom-kill")
+        || evidence.contains("signal: killed")
+    {
+        PodmanBuildDiagnostic::MemoryLimitExceeded
+    } else if evidence.contains("fuse-overlayfs")
+        || evidence.contains("overlay mount")
+        || evidence.contains("error committing")
+        || evidence.contains("writing blob")
+        || evidence.contains("storage driver")
+    {
+        PodmanBuildDiagnostic::StorageDriverFailure
+    } else if evidence.contains("transient scope")
+        || evidence.contains("scope unit")
+        || evidence.contains("systemd-run")
+        || evidence.contains("failed with result")
+    {
+        PodmanBuildDiagnostic::SystemdScopeFailure
+    } else {
+        PodmanBuildDiagnostic::Unknown
     }
 }
 
@@ -972,8 +1053,48 @@ fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecipeBuildError, podman_import_process_error};
-    use crate::process::ProcessError;
+    use super::{RecipeBuildError, podman_build_diagnostic, podman_import_process_error};
+    use crate::process::{ProcessError, ProcessOutput};
+
+    #[test]
+    fn podman_build_failures_have_stable_secret_free_diagnostics() {
+        for (stdout, stderr, diagnostic) in [
+            (b"".as_slice(), b"".as_slice(), "nonzero-without-output"),
+            (
+                b"".as_slice(),
+                b"write /private/secret: no space left on device".as_slice(),
+                "temporary-storage-exhausted",
+            ),
+            (
+                b"".as_slice(),
+                b"fuse-overlayfs: operation failed for /private/secret".as_slice(),
+                "storage-driver-failure",
+            ),
+            (
+                b"".as_slice(),
+                b"Failed to start transient scope unit".as_slice(),
+                "systemd-scope-failure",
+            ),
+            (
+                b"opaque /private/secret".as_slice(),
+                b"".as_slice(),
+                "unclassified-podman-build-failure",
+            ),
+        ] {
+            let classified = podman_build_diagnostic(&ProcessOutput {
+                success: false,
+                stdout: stdout.to_vec(),
+                stderr: stderr.to_vec(),
+            });
+            let error = RecipeBuildError::ImageBuild {
+                diagnostic: classified,
+            };
+            assert_eq!(error.failure_evidence()["stage"], "image-build");
+            assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
+            assert!(!error.failure_evidence().to_string().contains("private"));
+            assert!(!error.failure_evidence().to_string().contains("secret"));
+        }
+    }
 
     #[test]
     fn podman_import_process_failures_have_stable_secret_free_evidence() {
