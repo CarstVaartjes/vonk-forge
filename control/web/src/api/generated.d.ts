@@ -4963,7 +4963,11 @@ export interface components {
         };
         /** VisualBuild */
         VisualBuild: {
+            /** Capabilities */
+            capabilities: string[];
             context: components["schemas"]["VisualBuildContext"];
+            /** Cpu Cores */
+            cpu_cores: number;
             /** Dockerfile */
             dockerfile: string;
             /** Download Bytes */
@@ -4974,12 +4978,24 @@ export interface components {
             network_hosts: string[];
             /** Network Mode */
             network_mode: string;
+            options: components["schemas"]["VisualBuildOptions"];
             /** Platform */
             platform: string;
+            /** Processes */
+            processes: number;
+            /** Target */
+            target: string | null;
             /** Temporary Bytes */
             temporary_bytes: number;
             /** Timeout Seconds */
             timeout_seconds: number;
+        };
+        /** VisualBuildAdditionalContext */
+        VisualBuildAdditionalContext: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
         };
         /** VisualBuildContext */
         VisualBuildContext: {
@@ -4989,6 +5005,69 @@ export interface components {
             media_type: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** VisualBuildOptionValue */
+        VisualBuildOptionValue: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** VisualBuildOptions */
+        VisualBuildOptions: {
+            /** Additional Contexts */
+            additional_contexts: components["schemas"]["VisualBuildAdditionalContext"][];
+            /** Annotations */
+            annotations: components["schemas"]["VisualBuildOptionValue"][];
+            /** Environment */
+            environment: components["schemas"]["VisualBuildOptionValue"][];
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "oci" | "docker";
+            /** Identity Label */
+            identity_label: boolean;
+            /** Ignorefile */
+            ignorefile: string | null;
+            /** Jobs */
+            jobs: number;
+            /** Labels */
+            labels: components["schemas"]["VisualBuildOptionValue"][];
+            /**
+             * Layer Compression
+             * @enum {string}
+             */
+            layer_compression: "disabled" | "gzip";
+            /** Layer Labels */
+            layer_labels: components["schemas"]["VisualBuildOptionValue"][];
+            /** Layers */
+            layers: boolean;
+            /** No Hostname */
+            no_hostname: boolean;
+            /** No Hosts */
+            no_hosts: boolean;
+            /** Omit History */
+            omit_history: boolean;
+            /** Os Features */
+            os_features: string[];
+            /** Os Version */
+            os_version: string | null;
+            /** Shm Bytes */
+            shm_bytes: number;
+            /** Skip Unused Stages */
+            skip_unused_stages: boolean;
+            /**
+             * Squash
+             * @enum {string}
+             */
+            squash: "none" | "new" | "all";
+            /** Timestamp */
+            timestamp?: number | null;
+            /** Unset Environment */
+            unset_environment: string[];
+            /** Unset Labels */
+            unset_labels: string[];
         };
         /** VisualCatalogIdentity */
         VisualCatalogIdentity: {

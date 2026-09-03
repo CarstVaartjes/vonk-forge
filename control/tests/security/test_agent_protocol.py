@@ -34,7 +34,7 @@ PROBE_RESULT = {
         "nvidia": {"tools": {}},
     },
 }
-PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 
 
@@ -192,17 +192,17 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         if package["name"] == "vonk-agent-protocol"
     ]
 
-    assert '"vonk-agent-protocol==2.1.0"' in control_project
+    assert '"vonk-agent-protocol==2.2.0"' in control_project
     assert protocol_sources == [
-        {"path": "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"},
+        {"path": "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"},
     ]
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
     assert (
-        "COPY inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl /wheels/"
+        "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/"
         in dockerfile
     )
-    assert "/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" in dockerfile
+    assert "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" in dockerfile
     dockerignore = set(dockerignore_path.read_text().splitlines())
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
@@ -213,7 +213,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "!control/src/**",
         "!control/web/**",
         "control/.venv",
-        "!inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
     } <= dockerignore
     assert {
         "**/__pycache__/**",
@@ -272,11 +272,11 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     )
 
     assert direct_url["url"].endswith(
-        "/inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+        "/inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
     )
     assert package["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-2.1.0-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-2.2.0-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -328,10 +328,10 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
     )
     installed = json.loads(result.stdout)
 
-    assert installed["version"] == "2.1.0"
+    assert installed["version"] == "2.2.0"
     assert (
         installed["direct_url"]["url"]
-        == "file:///wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+        == "file:///wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
     )
     assert (
         installed["direct_url"]["archive_info"]["hash"]

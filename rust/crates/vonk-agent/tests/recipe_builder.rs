@@ -19,8 +19,9 @@ use vonk_agent::{
     recipe_builder::{RecipeBuildError, RecipeBuilder},
 };
 use vonk_agent_protocol::{
-    RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildNetwork,
-    RecipeBuildRequest, canonical_json, hex_sha256,
+    RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits,
+    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
+    canonical_json, hex_sha256,
 };
 
 struct Runner {
@@ -378,6 +379,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             manifest_digest: base.manifest_digest,
             reference: base.reference,
         }],
+        capabilities: vec!["DAC_OVERRIDE".to_owned()],
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000009").unwrap(),
         build_input_sha256: "c".repeat(64),
         dockerfile: "Dockerfile".to_owned(),
@@ -398,12 +400,52 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             hosts: Vec::new(),
             mode: "none".to_owned(),
         },
+        options: RecipeBuildOptions {
+            additional_contexts: vec![RecipeBuildAdditionalContext {
+                name: "assets".to_owned(),
+                path: "assets".to_owned(),
+            }],
+            annotations: vec![RecipeBuildMetadata {
+                name: "org.example.annotation".to_owned(),
+                value: "present".to_owned(),
+            }],
+            environment: vec![RecipeBuildArgument {
+                name: "BUILD_MODE".to_owned(),
+                value: serde_json::json!("release"),
+            }],
+            format: "oci".to_owned(),
+            identity_label: true,
+            ignorefile: Some(".containerignore".to_owned()),
+            jobs: 2,
+            labels: vec![RecipeBuildMetadata {
+                name: "org.example.label".to_owned(),
+                value: "value".to_owned(),
+            }],
+            layer_compression: "disabled".to_owned(),
+            layer_labels: vec![RecipeBuildMetadata {
+                name: "org.example.layer".to_owned(),
+                value: "value".to_owned(),
+            }],
+            layers: true,
+            no_hostname: false,
+            no_hosts: false,
+            omit_history: false,
+            os_features: vec!["feature-a".to_owned()],
+            os_version: Some("1.0".to_owned()),
+            shm_bytes: 67_108_864,
+            skip_unused_stages: true,
+            squash: "none".to_owned(),
+            timestamp: Some(0),
+            unset_environment: vec!["OLD_ENV".to_owned()],
+            unset_labels: vec!["org.example.old".to_owned()],
+        },
         platform: "linux/arm64".to_owned(),
         recipe_content_sha256: "a".repeat(64),
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         schema_version: 1,
         source_bundle_bytes: bundle_bytes as u64,
         source_bundle_sha256: digest,
+        target: None,
     }
 }
 
@@ -898,13 +940,15 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
 
+    let mut build_request = request(archive.len(), digest);
+    build_request.target = Some("runtime".to_owned());
     let evidence = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
         egress_binary: Path::new("/bin/true"),
     }
-    .build(&request(archive.len(), digest), operation, &archive)
+    .build(&build_request, operation, &archive)
     .unwrap();
 
     assert_eq!(evidence.image_digest, format!("sha256:{}", "d".repeat(64)));
@@ -935,23 +979,59 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         .iter()
         .find(|call| call.1.iter().any(|value| value == "build"))
         .unwrap();
-    assert_eq!(build.0, Program::Podman);
+    assert_eq!(build.0, Program::SystemdRun);
     for required in [
-        "--cgroup-manager=systemd",
+        "--user",
+        "--scope",
+        "--collect",
+        "--quiet",
+        "--property=MemoryMax=8589934592",
+        "--property=CPUQuota=800%",
+        "--property=TasksMax=4096",
+        "/usr/bin/podman",
+        "--cgroup-manager=cgroupfs",
         "--no-cache",
         "--pull=never",
         "--cap-drop=all",
+        "--cap-add=DAC_OVERRIDE",
         "--security-opt=no-new-privileges",
         "--storage-opt",
         "overlay.ignore_chown_errors=true",
         "overlay.mount_program=/usr/bin/fuse-overlayfs",
-        "--cpu-period=100000",
-        "--cpu-quota=800000",
-        "--memory=8589934592b",
         "--ulimit=nproc=4096:4096",
         "--network=none",
+        "--format=oci",
+        "--identity-label=true",
+        "--jobs=2",
+        "--disable-compression=true",
+        "--layers=true",
+        "--no-hostname=false",
+        "--no-hosts=false",
+        "--omit-history=false",
+        "--shm-size=67108864",
+        "--skip-unused-stages=true",
+        "--annotation",
+        "org.example.annotation=present",
+        "--env",
+        "BUILD_MODE=release",
+        "--ignorefile",
+        "--label",
+        "org.example.label=value",
+        "--layer-label",
+        "org.example.layer=value",
+        "--os-feature",
+        "feature-a",
+        "--os-version",
+        "1.0",
+        "--timestamp=0",
+        "--unsetenv",
+        "OLD_ENV",
+        "--unsetlabel",
+        "org.example.old",
         "--platform",
         "linux/arm64",
+        "--target",
+        "runtime",
         "--root",
         "--runroot",
     ] {
@@ -964,14 +1044,20 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             || value == "--device"
             || value == "--volume"
             || value.starts_with("--cpus=")
+            || value.starts_with("--cpu-period=")
+            || value.starts_with("--cpu-quota=")
+            || value.starts_with("--memory=")
             || value.starts_with("--pids-limit=")
     }));
-    for (_, arguments) in calls.iter() {
+    for (program, arguments) in calls.iter() {
         assert!(
-            arguments
-                .iter()
-                .any(|value| value == "--cgroup-manager=systemd"),
-            "every isolated Podman call must use the rootless user systemd manager"
+            arguments.iter().any(|value| value
+                == if *program == Program::SystemdRun {
+                    "--cgroup-manager=cgroupfs"
+                } else {
+                    "--cgroup-manager=systemd"
+                }),
+            "the build must inherit its user-service envelope; other Podman calls use the user manager"
         );
         for option in [
             "overlay.ignore_chown_errors=true",

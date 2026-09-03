@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import itertools
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -545,12 +546,30 @@ def _visual_recipe(
                 media_type=_bounded_text(context["media_type"], 128),
             ),
             dockerfile=_bounded_text(build["dockerfile"], 256),
+            target=(
+                None
+                if build.get("target") is None
+                else _bounded_text(build["target"], 64)
+            ),
             platform=_bounded_text(build["platform"], 64),
             network_mode=_bounded_text(network["mode"], 32),
             network_hosts=[_bounded_text(item, 256) for item in network["hosts"]][:64],
+            capabilities=[
+                _bounded_text(item, 32)
+                for item in build["security"]["capabilities"]
+            ][:12],
+            options={
+                **copy.deepcopy(build["options"]),
+                "environment": [
+                    {"name": item["name"], "value": str(item["value"])}
+                    for item in build["options"]["environment"]
+                ],
+            },
+            cpu_cores=int(build_resources["cpu_cores"]),
             download_bytes=_saturating_nonnegative(build_resources["download_bytes"]),
             temporary_bytes=_saturating_nonnegative(build_resources["temporary_bytes"]),
             memory_bytes=_saturating_nonnegative(build_resources["memory_bytes"]),
+            processes=int(build_resources["processes"]),
             timeout_seconds=int(build_resources["timeout_seconds"]),
         ),
         parameters=[

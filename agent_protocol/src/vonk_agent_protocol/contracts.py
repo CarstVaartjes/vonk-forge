@@ -37,6 +37,22 @@ MODEL_REPOSITORY = re.compile(
 MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
 PINNED_OCI_IMAGE = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,511}@sha256:[0-9a-f]{64}\Z")
 RECIPE_BUILD_NAME = re.compile(r"[a-z][a-z0-9._-]{0,63}\Z")
+RECIPE_BUILD_CAPABILITIES = frozenset(
+    {
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "FSETID",
+        "KILL",
+        "MKNOD",
+        "NET_BIND_SERVICE",
+        "SETFCAP",
+        "SETGID",
+        "SETPCAP",
+        "SETUID",
+        "SYS_CHROOT",
+    }
+)
 MAX_RECIPE_BUILD_STORAGE_BYTES = 16 * 1024**4
 
 
@@ -165,14 +181,37 @@ def _validate_safe_keys(
         for key, item in value.items():
             if not isinstance(key, str):
                 raise AgentProtocolError("JSON object keys must be strings")
+            typed_recipe_build_key = (
+                operation is AgentOperation.RECIPE_BUILD
+                and (
+                    (
+                        path == ("options",)
+                        and key in {"environment", "ignorefile", "unset_environment"}
+                    )
+                    or (
+                        len(path) == 3
+                        and path[0] == "options"
+                        and path[1] == "additional_contexts"
+                        and isinstance(path[2], int)
+                        and key == "path"
+                    )
+                )
+            )
             if _is_path_key(key) and not (
-                operation is AgentOperation.RECIPE_JOB_RUN
-                and path == ("output_limits",)
-                and key == "max_file_bytes"
+                typed_recipe_build_key
+                or (
+                    operation is AgentOperation.RECIPE_JOB_RUN
+                    and path == ("output_limits",)
+                    and key == "max_file_bytes"
+                )
             ):
                 raise AgentProtocolError(f"filesystem path key is not allowed: {key}")
             if UNSAFE_KEY.search(key) and not (
-                allow_secret_refs and (key == "secrets" or field_name == "secrets")
+                typed_recipe_build_key
+                or (
+                    allow_secret_refs
+                    and (key == "secrets" or field_name == "secrets")
+                )
             ):
                 raise AgentProtocolError(f"unsafe protocol key: {key}")
             _validate_safe_keys(
@@ -232,9 +271,7 @@ def _is_path_key(key: str) -> bool:
 
 
 def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
-    if path == ("platform",):
-        return value == "linux/arm64"
-    if path == ("dockerfile",):
+    def bundle_path() -> bool:
         return (
             0 < len(value.encode("utf-8")) <= 512
             and not value.startswith("/")
@@ -242,6 +279,34 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
             and "\x00" not in value
             and all(part not in {"", ".", ".."} for part in value.split("/"))
         )
+
+    if path == ("platform",):
+        return value == "linux/arm64"
+    if path == ("dockerfile",):
+        return bundle_path()
+    if path == ("options", "ignorefile"):
+        return bundle_path()
+    if (
+        len(path) == 4
+        and path[:2] == ("options", "additional_contexts")
+        and isinstance(path[2], int)
+        and path[3] == "path"
+    ):
+        return bundle_path()
+    if (
+        len(path) == 4
+        and path[0] == "options"
+        and path[1] in {"annotations", "environment", "labels", "layer_labels"}
+        and isinstance(path[2], int)
+        and path[3] in {"name", "value"}
+    ):
+        return len(value) <= 1024 and "\x00" not in value
+    if (
+        len(path) == 3
+        and path[:2] == ("options", "unset_labels")
+        and isinstance(path[2], int)
+    ):
+        return len(value) <= 128 and "\x00" not in value
     if (
         len(path) == 3
         and path[0] == "base_images"
@@ -456,16 +521,19 @@ def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
             "base_images",
             "build_id",
             "build_input_sha256",
+            "capabilities",
             "dockerfile",
             "kind",
             "limits",
             "network",
+            "options",
             "platform",
             "recipe_content_sha256",
             "recipe_revision_id",
             "schema_version",
             "source_bundle_bytes",
             "source_bundle_sha256",
+            "target",
         },
     )
     _version(value["schema_version"])
@@ -493,6 +561,20 @@ def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
         ("dockerfile",), dockerfile
     ):
         raise AgentProtocolError("recipe build Dockerfile is not canonical")
+    target = value["target"]
+    if target is not None and (
+        not isinstance(target, str)
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", target) is None
+    ):
+        raise AgentProtocolError("recipe build target is not canonical")
+    capabilities = _build_sequence(
+        value["capabilities"], name="capabilities", maximum=12
+    )
+    if (
+        any(capability not in RECIPE_BUILD_CAPABILITIES for capability in capabilities)
+        or len(set(capabilities)) != len(capabilities)
+    ):
+        raise AgentProtocolError("recipe build capabilities are not allowed")
 
     arguments = _build_sequence(value["arguments"], name="arguments", maximum=64)
     for argument in arguments:
@@ -545,6 +627,36 @@ def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
     ):
         raise AgentProtocolError("recipe build network host is not public")
 
+    options = _mapping(value["options"])
+    _fields(
+        options,
+        required={
+            "additional_contexts",
+            "annotations",
+            "environment",
+            "format",
+            "identity_label",
+            "ignorefile",
+            "jobs",
+            "labels",
+            "layer_compression",
+            "layer_labels",
+            "layers",
+            "no_hostname",
+            "no_hosts",
+            "omit_history",
+            "os_features",
+            "os_version",
+            "shm_bytes",
+            "skip_unused_stages",
+            "squash",
+            "timestamp",
+            "unset_environment",
+            "unset_labels",
+        },
+    )
+    _validate_recipe_build_options(options)
+
     limits = _mapping(value["limits"])
     _fields(
         limits,
@@ -563,7 +675,7 @@ def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
     )
     for name, maximum in (
         ("cpu_cores", 256),
-        ("processes", 65_536),
+        ("processes", 65_535),
         ("timeout_seconds", 86_400),
     ):
         _bounded_build_integer(limits[name], name=name, minimum=1, maximum=maximum)
@@ -591,6 +703,115 @@ def _bounded_build_integer(value: Any, *, name: str, minimum: int, maximum: int)
     ):
         raise AgentProtocolError(f"{name} is outside its signed bound")
     return value
+
+
+def _validate_recipe_build_options(value: Mapping[str, Any]) -> None:
+    metadata_name = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
+    environment_name = re.compile(r"[A-Z_][A-Z0-9_]{0,127}\Z")
+
+    contexts = _build_sequence(
+        value["additional_contexts"], name="additional_contexts", maximum=16
+    )
+    context_names: set[str] = set()
+    for raw in contexts:
+        item = _mapping(raw)
+        _fields(item, required={"name", "path"})
+        if (
+            not isinstance(item["name"], str)
+            or RECIPE_BUILD_NAME.fullmatch(item["name"]) is None
+            or item["name"] in context_names
+            or not isinstance(item["path"], str)
+            or not _typed_build_string(
+                ("options", "additional_contexts", 0, "path"), item["path"]
+            )
+        ):
+            raise AgentProtocolError("recipe build additional context is not canonical")
+        context_names.add(item["name"])
+
+    for field in ("annotations", "labels", "layer_labels"):
+        entries = _build_sequence(value[field], name=field, maximum=64)
+        names: set[str] = set()
+        for raw in entries:
+            item = _mapping(raw)
+            _fields(item, required={"name", "value"})
+            if (
+                not isinstance(item["name"], str)
+                or metadata_name.fullmatch(item["name"]) is None
+                or item["name"] in names
+                or not isinstance(item["value"], str)
+                or len(item["value"]) > 1024
+            ):
+                raise AgentProtocolError(f"recipe build {field} is not canonical")
+            names.add(item["name"])
+
+    environment = _build_sequence(value["environment"], name="environment", maximum=64)
+    environment_names: set[str] = set()
+    for raw in environment:
+        item = _mapping(raw)
+        _fields(item, required={"name", "value"})
+        if (
+            not isinstance(item["name"], str)
+            or environment_name.fullmatch(item["name"]) is None
+            or item["name"] in environment_names
+            or not _valid_build_scalar(item["value"])
+        ):
+            raise AgentProtocolError("recipe build environment is not canonical")
+        environment_names.add(item["name"])
+
+    if value["format"] not in {"oci", "docker"}:
+        raise AgentProtocolError("recipe build format is not supported")
+    if value["layer_compression"] not in {"disabled", "gzip"}:
+        raise AgentProtocolError("recipe build layer compression is not supported")
+    if value["squash"] not in {"none", "new", "all"}:
+        raise AgentProtocolError("recipe build squash mode is not supported")
+    for field in (
+        "identity_label",
+        "layers",
+        "no_hostname",
+        "no_hosts",
+        "omit_history",
+        "skip_unused_stages",
+    ):
+        if not isinstance(value[field], bool):
+            raise AgentProtocolError(f"recipe build {field} must be boolean")
+    ignorefile = value["ignorefile"]
+    if ignorefile is not None and (
+        not isinstance(ignorefile, str)
+        or not _typed_build_string(("options", "ignorefile"), ignorefile)
+    ):
+        raise AgentProtocolError("recipe build ignorefile is not canonical")
+    _bounded_build_integer(value["jobs"], name="jobs", minimum=1, maximum=32)
+    _bounded_build_integer(
+        value["shm_bytes"], name="shm_bytes", minimum=65_536, maximum=64 * 1024**3
+    )
+    timestamp = value["timestamp"]
+    if timestamp is not None:
+        _bounded_build_integer(
+            timestamp, name="timestamp", minimum=0, maximum=4_102_444_800
+        )
+    os_version = value["os_version"]
+    if os_version is not None and (
+        not isinstance(os_version, str)
+        or re.fullmatch(r"[A-Za-z0-9._+-]{1,64}", os_version) is None
+    ):
+        raise AgentProtocolError("recipe build OS version is not canonical")
+    os_features = _build_sequence(value["os_features"], name="os_features", maximum=32)
+    if len(set(os_features)) != len(os_features) or any(
+        not isinstance(item, str)
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item) is None
+        for item in os_features
+    ):
+        raise AgentProtocolError("recipe build OS features are not canonical")
+    for field, pattern in (
+        ("unset_environment", environment_name),
+        ("unset_labels", metadata_name),
+    ):
+        entries = _build_sequence(value[field], name=field, maximum=64)
+        if len(set(entries)) != len(entries) or any(
+            not isinstance(item, str) or pattern.fullmatch(item) is None
+            for item in entries
+        ):
+            raise AgentProtocolError(f"recipe build {field} is not canonical")
 
 
 def _build_sequence(value: Any, *, name: str, maximum: int) -> tuple[Any, ...]:

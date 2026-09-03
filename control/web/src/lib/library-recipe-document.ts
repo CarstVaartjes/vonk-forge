@@ -100,11 +100,12 @@ function validateDocument(value: unknown): VisualRecipeDocument {
   const execution = object(root.execution, "$.execution", ["harness", "patch_bundle"]);
   identity(execution.harness, "$.execution.harness", ["execution-harness"]);
   if (execution.patch_bundle !== null) identity(execution.patch_bundle, "$.execution.patch_bundle", ["patch-bundle"]);
-  const build = object(root.build, "$.build", ["context", "dockerfile", "platform", "network_mode", "network_hosts", "download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"]);
+  const build = object(root.build, "$.build", ["context", "dockerfile", "target", "platform", "network_mode", "network_hosts", "capabilities", "options", "cpu_cores", "download_bytes", "temporary_bytes", "memory_bytes", "processes", "timeout_seconds"]);
   const context = object(build.context, "$.build.context", ["sha256", "expected_bytes", "media_type"]);
   digest(context.sha256, "$.build.context.sha256"); integer(context.expected_bytes, "$.build.context.expected_bytes"); string(context.media_type, "$.build.context.media_type");
-  string(build.dockerfile, "$.build.dockerfile"); string(build.platform, "$.build.platform"); string(build.network_mode, "$.build.network_mode"); strings(build.network_hosts, "$.build.network_hosts");
-  for (const key of ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"] as const) integer(build[key], `$.build.${key}`, key === "timeout_seconds" ? 1 : 0);
+  string(build.dockerfile, "$.build.dockerfile"); if (build.target !== null) string(build.target, "$.build.target"); string(build.platform, "$.build.platform"); string(build.network_mode, "$.build.network_mode"); strings(build.network_hosts, "$.build.network_hosts"); strings(build.capabilities, "$.build.capabilities");
+  object(build.options, "$.build.options", ["additional_contexts", "annotations", "environment", "format", "identity_label", "ignorefile", "jobs", "labels", "layer_compression", "layer_labels", "layers", "no_hostname", "no_hosts", "omit_history", "os_features", "os_version", "shm_bytes", "skip_unused_stages", "squash", "timestamp", "unset_environment", "unset_labels"]);
+  for (const key of ["cpu_cores", "download_bytes", "temporary_bytes", "memory_bytes", "processes", "timeout_seconds"] as const) integer(build[key], `$.build.${key}`, ["cpu_cores", "processes", "timeout_seconds"].includes(key) ? 1 : 0);
   array(root.artifacts, "$.artifacts").forEach((item, index) => {
     const artifact = object(item, `$.artifacts[${index}]`, ["id", "kind", "repository", "revision", "include_paths", "download_bytes", "installed_bytes", "roles"]);
     for (const key of ["id", "kind", "repository", "revision"] as const) string(artifact[key], `$.artifacts[${index}].${key}`);

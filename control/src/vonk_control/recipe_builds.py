@@ -211,6 +211,16 @@ class RecipeBuildService:
             )
         temporary_bytes = int(resources["temporary_bytes"])
         memory_bytes = int(resources["memory_bytes"])
+        cpu_cores = int(resources["cpu_cores"])
+        processes = int(resources["processes"])
+        security = build.get("security")
+        if not isinstance(security, dict) or not isinstance(
+            security.get("capabilities"), list
+        ):
+            raise RecipeBuildError(
+                "build.security_invalid", "build security envelope is invalid"
+            )
+        capabilities = list(security["capabilities"])
         with self._sessions() as session:
             disk_reserved = _reserved(session, builder_node_id, "disk")
             memory_reserved = _reserved(session, builder_node_id, "host-memory")
@@ -246,10 +256,10 @@ class RecipeBuildService:
         build_input_sha256 = _digest(build_identity)
         proposed_build_id = str(uuid.uuid4())
         limits = {
-            "cpu_cores": 8,
+            "cpu_cores": cpu_cores,
             "memory_bytes": memory_bytes,
             "temporary_bytes": temporary_bytes,
-            "processes": 4096,
+            "processes": processes,
             "timeout_seconds": int(resources["timeout_seconds"]),
             "output_bytes": output_bytes,
             "gpu": 0,
@@ -268,11 +278,14 @@ class RecipeBuildService:
             "build_input_sha256": build_input_sha256,
             "base_images": copy.deepcopy(base_images),
             "base_image_storage_bytes": base_image_storage_bytes,
+            "capabilities": capabilities,
             "dockerfile": build["dockerfile"],
             "platform": build["platform"],
             "arguments": copy.deepcopy(build["arguments"]),
             "network": copy.deepcopy(build["network"]),
+            "options": copy.deepcopy(build["options"]),
             "limits": limits,
+            "target": build.get("target"),
         }
         policy_document = {
             "passed": policy.passed,

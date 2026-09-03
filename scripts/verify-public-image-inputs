@@ -16,7 +16,7 @@ INPUTS = (
     "control/pyproject.toml",
     "control/src",
     "control/web",
-    "inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl",
+    "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
     "deploy/compose/hermes-agent/Dockerfile",
     "deploy/compose/hermes-agent/entrypoint.sh",
 )

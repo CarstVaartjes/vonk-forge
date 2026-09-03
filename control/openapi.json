@@ -10871,8 +10871,24 @@
       "VisualBuild": {
         "additionalProperties": false,
         "properties": {
+          "capabilities": {
+            "items": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Capabilities",
+            "type": "array"
+          },
           "context": {
             "$ref": "#/components/schemas/VisualBuildContext"
+          },
+          "cpu_cores": {
+            "maximum": 256.0,
+            "minimum": 1.0,
+            "title": "Cpu Cores",
+            "type": "integer"
           },
           "dockerfile": {
             "maxLength": 256,
@@ -10908,11 +10924,33 @@
             "title": "Network Mode",
             "type": "string"
           },
+          "options": {
+            "$ref": "#/components/schemas/VisualBuildOptions"
+          },
           "platform": {
             "maxLength": 64,
             "minLength": 1,
             "title": "Platform",
             "type": "string"
+          },
+          "processes": {
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Processes",
+            "type": "integer"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
           },
           "temporary_bytes": {
             "maximum": 9.223372036854776e+18,
@@ -10930,15 +10968,43 @@
         "required": [
           "context",
           "dockerfile",
+          "target",
           "platform",
           "network_mode",
           "network_hosts",
+          "capabilities",
+          "options",
+          "cpu_cores",
           "download_bytes",
           "temporary_bytes",
           "memory_bytes",
+          "processes",
           "timeout_seconds"
         ],
         "title": "VisualBuild",
+        "type": "object"
+      },
+      "VisualBuildAdditionalContext": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "VisualBuildAdditionalContext",
         "type": "object"
       },
       "VisualBuildContext": {
@@ -10968,6 +11034,228 @@
           "media_type"
         ],
         "title": "VisualBuildContext",
+        "type": "object"
+      },
+      "VisualBuildOptionValue": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 1024,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "VisualBuildOptionValue",
+        "type": "object"
+      },
+      "VisualBuildOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "additional_contexts": {
+            "items": {
+              "$ref": "#/components/schemas/VisualBuildAdditionalContext"
+            },
+            "maxItems": 16,
+            "title": "Additional Contexts",
+            "type": "array"
+          },
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/VisualBuildOptionValue"
+            },
+            "maxItems": 64,
+            "title": "Annotations",
+            "type": "array"
+          },
+          "environment": {
+            "items": {
+              "$ref": "#/components/schemas/VisualBuildOptionValue"
+            },
+            "maxItems": 64,
+            "title": "Environment",
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "oci",
+              "docker"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "identity_label": {
+            "title": "Identity Label",
+            "type": "boolean"
+          },
+          "ignorefile": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ignorefile"
+          },
+          "jobs": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/VisualBuildOptionValue"
+            },
+            "maxItems": 64,
+            "title": "Labels",
+            "type": "array"
+          },
+          "layer_compression": {
+            "enum": [
+              "disabled",
+              "gzip"
+            ],
+            "title": "Layer Compression",
+            "type": "string"
+          },
+          "layer_labels": {
+            "items": {
+              "$ref": "#/components/schemas/VisualBuildOptionValue"
+            },
+            "maxItems": 64,
+            "title": "Layer Labels",
+            "type": "array"
+          },
+          "layers": {
+            "title": "Layers",
+            "type": "boolean"
+          },
+          "no_hostname": {
+            "title": "No Hostname",
+            "type": "boolean"
+          },
+          "no_hosts": {
+            "title": "No Hosts",
+            "type": "boolean"
+          },
+          "omit_history": {
+            "title": "Omit History",
+            "type": "boolean"
+          },
+          "os_features": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Os Features",
+            "type": "array"
+          },
+          "os_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Os Version"
+          },
+          "shm_bytes": {
+            "maximum": 68719476736.0,
+            "minimum": 65536.0,
+            "title": "Shm Bytes",
+            "type": "integer"
+          },
+          "skip_unused_stages": {
+            "title": "Skip Unused Stages",
+            "type": "boolean"
+          },
+          "squash": {
+            "enum": [
+              "none",
+              "new",
+              "all"
+            ],
+            "title": "Squash",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "maximum": 4102444800.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "unset_environment": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Unset Environment",
+            "type": "array"
+          },
+          "unset_labels": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Unset Labels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "additional_contexts",
+          "annotations",
+          "environment",
+          "format",
+          "identity_label",
+          "ignorefile",
+          "jobs",
+          "labels",
+          "layer_compression",
+          "layer_labels",
+          "layers",
+          "no_hostname",
+          "no_hosts",
+          "omit_history",
+          "os_features",
+          "os_version",
+          "shm_bytes",
+          "skip_unused_stages",
+          "squash",
+          "unset_environment",
+          "unset_labels"
+        ],
+        "title": "VisualBuildOptions",
         "type": "object"
       },
       "VisualCatalogIdentity": {

@@ -32,12 +32,16 @@
       "platform": "linux/arm64",
       "arguments": [],
       "network": {"mode": "none", "hosts": []},
+      "options": {"additional_contexts": [], "annotations": [], "environment": [], "format": "oci", "identity_label": true, "ignorefile": null, "jobs": 1, "labels": [], "layer_compression": "disabled", "layer_labels": [], "layers": true, "no_hostname": false, "no_hosts": false, "omit_history": false, "os_features": [], "os_version": null, "shm_bytes": 67108864, "skip_unused_stages": true, "squash": "none", "timestamp": null, "unset_environment": [], "unset_labels": []},
       "resources": {
+        "cpu_cores": 8,
         "download_bytes": 0,
         "temporary_bytes": 4294967296,
         "memory_bytes": 17179869184,
+        "processes": 4096,
         "timeout_seconds": 3600
-      }
+      },
+      "security": {"capabilities": []}
     },
     "parameters": [],
     "artifacts": [
@@ -130,7 +134,7 @@
       "execution": {"harness": {"slug": "vllm-openai"}},
       "build": {
         "network": {"mode": "public", "hosts": ["huggingface.co"]},
-        "resources": {"download_bytes": 85899345920, "temporary_bytes": 17179869184, "memory_bytes": 68719476736}
+        "resources": {"cpu_cores": 8, "download_bytes": 85899345920, "temporary_bytes": 17179869184, "memory_bytes": 68719476736, "processes": 4096}
       },
       "artifacts": [
         {
@@ -190,7 +194,7 @@
       "execution": {"harness": {"slug": "diffusers-service"}},
       "build": {
         "network": {"mode": "public", "hosts": ["huggingface.co"]},
-        "resources": {"download_bytes": 34359738368, "temporary_bytes": 12884901888, "memory_bytes": 51539607552}
+        "resources": {"cpu_cores": 8, "download_bytes": 34359738368, "temporary_bytes": 12884901888, "memory_bytes": 51539607552, "processes": 4096}
       },
       "artifacts": [
         {

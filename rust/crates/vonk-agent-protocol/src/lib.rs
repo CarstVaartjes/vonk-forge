@@ -425,7 +425,7 @@ pub struct EnrollmentEvidence {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
-    Build(RecipeBuildRequest),
+    Build(Box<RecipeBuildRequest>),
     ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
     Install(RecipeInstallRequest),
@@ -579,18 +579,21 @@ pub struct RecipeBuildRequest {
     pub arguments: Vec<RecipeBuildArgument>,
     pub base_image_storage_bytes: u64,
     pub base_images: Vec<RecipeBuildBaseImage>,
+    pub capabilities: Vec<String>,
     pub build_id: Uuid,
     pub build_input_sha256: String,
     pub dockerfile: String,
     pub kind: String,
     pub limits: RecipeBuildLimits,
     pub network: RecipeBuildNetwork,
+    pub options: RecipeBuildOptions,
     pub platform: String,
     pub recipe_content_sha256: String,
     pub recipe_revision_id: Uuid,
     pub schema_version: u8,
     pub source_bundle_bytes: u64,
     pub source_bundle_sha256: String,
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -612,6 +615,47 @@ pub struct RecipeBuildArgument {
 pub struct RecipeBuildNetwork {
     pub hosts: Vec<String>,
     pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildOptions {
+    pub additional_contexts: Vec<RecipeBuildAdditionalContext>,
+    pub annotations: Vec<RecipeBuildMetadata>,
+    pub environment: Vec<RecipeBuildArgument>,
+    pub format: String,
+    pub identity_label: bool,
+    pub ignorefile: Option<String>,
+    pub jobs: u8,
+    pub labels: Vec<RecipeBuildMetadata>,
+    pub layer_compression: String,
+    pub layer_labels: Vec<RecipeBuildMetadata>,
+    pub layers: bool,
+    pub no_hostname: bool,
+    pub no_hosts: bool,
+    pub omit_history: bool,
+    pub os_features: Vec<String>,
+    pub os_version: Option<String>,
+    pub shm_bytes: u64,
+    pub skip_unused_stages: bool,
+    pub squash: String,
+    pub timestamp: Option<u64>,
+    pub unset_environment: Vec<String>,
+    pub unset_labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildAdditionalContext {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildMetadata {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -742,7 +786,7 @@ impl RecipeOperationRequest {
         let request = match claim.operation.as_str() {
             "recipe.build.v1" => {
                 validate_build_wire(&claim.payload)?;
-                Self::Build(serde_json::from_value(claim.payload.clone())?)
+                Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
             }
             "recipe.image.import.v1" => {
                 Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
@@ -1290,11 +1334,40 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         && (1..=64 * 1024 * 1024).contains(&value.source_bundle_bytes)
         && value.platform == "linux/arm64"
         && valid_bundle_path(&value.dockerfile)
+        && value.target.as_ref().is_none_or(|target| {
+            !target.is_empty()
+                && target.len() <= 64
+                && target
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        })
         && value.arguments.len() <= 64
         && value
             .arguments
             .iter()
             .all(|argument| valid_name(&argument.name) && valid_scalar(&argument.value))
+        && value.capabilities.len() <= 12
+        && value
+            .capabilities
+            .iter()
+            .enumerate()
+            .all(|(index, capability)| {
+                matches!(
+                    capability.as_str(),
+                    "CHOWN"
+                        | "DAC_OVERRIDE"
+                        | "FOWNER"
+                        | "FSETID"
+                        | "KILL"
+                        | "MKNOD"
+                        | "NET_BIND_SERVICE"
+                        | "SETFCAP"
+                        | "SETGID"
+                        | "SETPCAP"
+                        | "SETUID"
+                        | "SYS_CHROOT"
+                ) && !value.capabilities[..index].contains(capability)
+            })
         && value.base_images.len() <= 8
         && value.base_images.iter().enumerate().all(|(index, image)| {
             valid_pinned_image(&image.reference, &image.manifest_digest)
@@ -1316,6 +1389,7 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
             .hosts
             .iter()
             .all(|host| valid_public_host(host))
+        && valid_build_options(&value.options)
         && value.limits.cpu_cores >= 1
         && value.limits.cpu_cores <= 256
         && value.limits.memory_bytes > 0
@@ -1323,7 +1397,7 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         && value.limits.temporary_bytes > 0
         && value.limits.temporary_bytes <= 16 * 1024_u64.pow(4)
         && value.limits.processes >= 1
-        && value.limits.processes <= 65_536
+        && value.limits.processes <= 65_535
         && value.limits.timeout_seconds >= 1
         && value.limits.timeout_seconds <= 86_400
         && value.limits.output_bytes >= 1
@@ -1471,6 +1545,103 @@ fn valid_bundle_path(value: &str) -> bool {
         && value
             .split('/')
             .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+}
+
+fn valid_build_metadata_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().enumerate().all(|(index, byte)| {
+            (index > 0 || byte.is_ascii_alphanumeric())
+                && (byte.is_ascii_alphanumeric() || b"._/-".contains(&byte))
+        })
+}
+
+fn valid_build_environment_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().enumerate().all(|(index, byte)| {
+            (index > 0 || byte.is_ascii_uppercase() || byte == b'_')
+                && (byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+        })
+}
+
+fn valid_build_options(value: &RecipeBuildOptions) -> bool {
+    value.additional_contexts.len() <= 16
+        && value
+            .additional_contexts
+            .iter()
+            .enumerate()
+            .all(|(index, item)| {
+                valid_name(&item.name)
+                    && valid_bundle_path(&item.path)
+                    && !value.additional_contexts[..index]
+                        .iter()
+                        .any(|prior| prior.name == item.name)
+            })
+        && [&value.annotations, &value.labels, &value.layer_labels]
+            .into_iter()
+            .all(|entries| {
+                entries.len() <= 64
+                    && entries.iter().enumerate().all(|(index, item)| {
+                        valid_build_metadata_name(&item.name)
+                            && item.value.len() <= 1024
+                            && !item.value.contains('\0')
+                            && !entries[..index].iter().any(|prior| prior.name == item.name)
+                    })
+            })
+        && value.environment.len() <= 64
+        && value.environment.iter().enumerate().all(|(index, item)| {
+            valid_build_environment_name(&item.name)
+                && valid_scalar(&item.value)
+                && !value.environment[..index]
+                    .iter()
+                    .any(|prior| prior.name == item.name)
+        })
+        && matches!(value.format.as_str(), "oci" | "docker")
+        && value
+            .ignorefile
+            .as_ref()
+            .is_none_or(|path| valid_bundle_path(path))
+        && (1..=32).contains(&value.jobs)
+        && matches!(value.layer_compression.as_str(), "disabled" | "gzip")
+        && value.os_features.len() <= 32
+        && value
+            .os_features
+            .iter()
+            .enumerate()
+            .all(|(index, feature)| {
+                !feature.is_empty()
+                    && feature.len() <= 64
+                    && feature
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+                    && !value.os_features[..index].contains(feature)
+            })
+        && value.os_version.as_ref().is_none_or(|version| {
+            !version.is_empty()
+                && version.len() <= 64
+                && version
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte))
+        })
+        && (65_536..=64 * 1024_u64.pow(3)).contains(&value.shm_bytes)
+        && matches!(value.squash.as_str(), "none" | "new" | "all")
+        && value
+            .timestamp
+            .is_none_or(|timestamp| timestamp <= 4_102_444_800)
+        && value.unset_environment.len() <= 64
+        && value
+            .unset_environment
+            .iter()
+            .enumerate()
+            .all(|(index, name)| {
+                valid_build_environment_name(name)
+                    && !value.unset_environment[..index].contains(name)
+            })
+        && value.unset_labels.len() <= 64
+        && value.unset_labels.iter().enumerate().all(|(index, name)| {
+            valid_build_metadata_name(name) && !value.unset_labels[..index].contains(name)
+        })
 }
 
 fn valid_public_host(value: &str) -> bool {

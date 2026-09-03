@@ -214,6 +214,20 @@ def recipe_model_dependencies(
 
 def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
     recipe_references(document)
+    build = _mapping(document.get("build"), "build")
+    options = _mapping(build.get("options"), "build.options")
+    for field in (
+        "additional_contexts",
+        "annotations",
+        "environment",
+        "labels",
+        "layer_labels",
+    ):
+        _unique_field(
+            _mapping_sequence(options.get(field), f"build.options.{field}"),
+            "name",
+            f"build.options.{field}",
+        )
     parameters = _mapping_sequence(document.get("parameters"), "parameters")
     parameter_names = _unique_field(parameters, "name", "parameters")
     for index, parameter in enumerate(parameters):

@@ -250,13 +250,13 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             )?),
         };
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
-        // Ubuntu 24.04's supported Podman 4.9 build command does not accept
-        // the `--cpus` or `--pids-limit` aliases. Express the same boundaries
-        // with the portable CFS quota and nproc ulimit forms.
-        let cpu_period = 100_000_u64;
-        let cpu_quota = u64::from(request.limits.cpu_cores) * cpu_period;
-        let mut arguments = podman_storage_arguments(&storage, runroot.path());
-        arguments.extend([
+        // Rootless Podman 4.9 cannot reliably create a user-manager scope when
+        // invoked by the agent's system service. Start the build itself in a
+        // transient user scope, then let cgroupfs children inherit that
+        // scope's resource envelope.
+        let mut podman_arguments =
+            podman_storage_arguments_with_cgroup_manager(&storage, runroot.path(), "cgroupfs");
+        podman_arguments.extend([
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
@@ -268,9 +268,6 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             tag.clone(),
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
-            format!("--cpu-period={cpu_period}"),
-            format!("--cpu-quota={cpu_quota}"),
-            format!("--memory={}b", request.limits.memory_bytes),
             format!("--ulimit=nproc={0}:{0}", request.limits.processes),
             format!(
                 "--network={}",
@@ -278,28 +275,115 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                     .as_ref()
                     .map_or("none", |value| value.internal_network.as_str())
             ),
+            format!("--format={}", request.options.format),
+            format!("--identity-label={}", request.options.identity_label),
+            format!("--jobs={}", request.options.jobs),
+            format!(
+                "--disable-compression={}",
+                request.options.layer_compression == "disabled"
+            ),
+            format!("--layers={}", request.options.layers),
+            format!("--no-hostname={}", request.options.no_hostname),
+            format!("--no-hosts={}", request.options.no_hosts),
+            format!("--omit-history={}", request.options.omit_history),
+            format!("--shm-size={}", request.options.shm_bytes),
+            format!(
+                "--skip-unused-stages={}",
+                request.options.skip_unused_stages
+            ),
         ]);
+        for item in &request.options.additional_contexts {
+            podman_arguments.push("--build-context".to_owned());
+            podman_arguments.push(format!(
+                "{}={}",
+                item.name,
+                context.join(&item.path).display()
+            ));
+        }
+        for (flag, entries) in [
+            ("--annotation", &request.options.annotations),
+            ("--label", &request.options.labels),
+            ("--layer-label", &request.options.layer_labels),
+        ] {
+            for item in entries {
+                podman_arguments.push(flag.to_owned());
+                podman_arguments.push(format!("{}={}", item.name, item.value));
+            }
+        }
+        for item in &request.options.environment {
+            podman_arguments.push("--env".to_owned());
+            podman_arguments.push(format!("{}={}", item.name, scalar(&item.value)?));
+        }
+        if let Some(ignorefile) = &request.options.ignorefile {
+            podman_arguments.push("--ignorefile".to_owned());
+            podman_arguments.push(context.join(ignorefile).display().to_string());
+        }
+        for feature in &request.options.os_features {
+            podman_arguments.push("--os-feature".to_owned());
+            podman_arguments.push(feature.clone());
+        }
+        if let Some(version) = &request.options.os_version {
+            podman_arguments.push("--os-version".to_owned());
+            podman_arguments.push(version.clone());
+        }
+        match request.options.squash.as_str() {
+            "new" => podman_arguments.push("--squash".to_owned()),
+            "all" => podman_arguments.push("--squash-all".to_owned()),
+            _ => {}
+        }
+        if let Some(timestamp) = request.options.timestamp {
+            podman_arguments.push(format!("--timestamp={timestamp}"));
+        }
+        for name in &request.options.unset_environment {
+            podman_arguments.push("--unsetenv".to_owned());
+            podman_arguments.push(name.clone());
+        }
+        for name in &request.options.unset_labels {
+            podman_arguments.push("--unsetlabel".to_owned());
+            podman_arguments.push(name.clone());
+        }
         if let Some(egress) = &egress {
             let proxy = format!("http://{}:18080", egress.proxy_name);
             for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-                arguments.push("--build-arg".to_owned());
-                arguments.push(format!("{name}={proxy}"));
+                podman_arguments.push("--build-arg".to_owned());
+                podman_arguments.push(format!("{name}={proxy}"));
             }
             for name in ["NO_PROXY", "no_proxy"] {
-                arguments.push("--build-arg".to_owned());
-                arguments.push(format!("{name}="));
+                podman_arguments.push("--build-arg".to_owned());
+                podman_arguments.push(format!("{name}="));
             }
         }
         for argument in &request.arguments {
-            arguments.push("--build-arg".to_owned());
-            arguments.push(format!("{}={}", argument.name, scalar(&argument.value)?));
+            podman_arguments.push("--build-arg".to_owned());
+            podman_arguments.push(format!("{}={}", argument.name, scalar(&argument.value)?));
         }
-        arguments.push(context.display().to_string());
+        for capability in &request.capabilities {
+            podman_arguments.push(format!("--cap-add={capability}"));
+        }
+        if let Some(target) = &request.target {
+            podman_arguments.push("--target".to_owned());
+            podman_arguments.push(target.clone());
+        }
+        podman_arguments.push(context.display().to_string());
+        let mut arguments = vec![
+            "--user".to_owned(),
+            "--scope".to_owned(),
+            "--collect".to_owned(),
+            "--quiet".to_owned(),
+            format!("--property=MemoryMax={}", request.limits.memory_bytes),
+            format!(
+                "--property=CPUQuota={}%",
+                u64::from(request.limits.cpu_cores) * 100
+            ),
+            format!("--property=TasksMax={}", request.limits.processes),
+            "/usr/bin/podman".to_owned(),
+        ];
+        arguments.extend(podman_arguments);
         let timeout = Duration::from_secs(request.limits.timeout_seconds.into());
         let output = self
             .runner
             .run_bounded_directory_with_output_limit_cancellable(
-                Program::Podman,
+                Program::SystemdRun,
                 &arguments,
                 timeout,
                 ProcessOutputBounds::new(
@@ -803,8 +887,16 @@ fn write_proxy_rootfs(binary: &Path, destination: &Path) -> Result<(), RecipeBui
 }
 
 fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
+    podman_storage_arguments_with_cgroup_manager(storage, runroot, "systemd")
+}
+
+fn podman_storage_arguments_with_cgroup_manager(
+    storage: &Path,
+    runroot: &Path,
+    cgroup_manager: &str,
+) -> Vec<String> {
     vec![
-        "--cgroup-manager=systemd".to_owned(),
+        format!("--cgroup-manager={cgroup_manager}"),
         "--root".to_owned(),
         storage.display().to_string(),
         "--runroot".to_owned(),

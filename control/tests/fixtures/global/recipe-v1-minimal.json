@@ -31,12 +31,16 @@
     "platform": "linux/arm64",
     "arguments": [],
     "network": {"mode": "public", "hosts": ["pypi.org"]},
+    "options": {"additional_contexts": [], "annotations": [], "environment": [], "format": "oci", "identity_label": true, "ignorefile": null, "jobs": 1, "labels": [], "layer_compression": "disabled", "layer_labels": [], "layers": true, "no_hostname": false, "no_hosts": false, "omit_history": false, "os_features": [], "os_version": null, "shm_bytes": 67108864, "skip_unused_stages": true, "squash": "none", "timestamp": null, "unset_environment": [], "unset_labels": []},
     "resources": {
+      "cpu_cores": 8,
       "download_bytes": 1000000000,
       "temporary_bytes": 12000000000,
       "memory_bytes": 8000000000,
+      "processes": 4096,
       "timeout_seconds": 3600
-    }
+    },
+    "security": {"capabilities": []}
   },
   "parameters": [
     {

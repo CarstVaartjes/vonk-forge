@@ -21,6 +21,7 @@ pub enum Program {
     NvidiaSmi,
     Oras,
     Podman,
+    SystemdRun,
 }
 
 impl Program {
@@ -32,6 +33,7 @@ impl Program {
             Self::NvidiaSmi => "/usr/bin/nvidia-smi",
             Self::Oras => "/usr/lib/vonk-forge/oras",
             Self::Podman => "/usr/bin/podman",
+            Self::SystemdRun => "/usr/bin/systemd-run",
         }
     }
 }
@@ -599,7 +601,7 @@ fn subprocess_environment(
             "/etc/vonk-forge-agent/containers-storage.conf".to_owned(),
         ),
     ]);
-    if program == Program::Podman {
+    if matches!(program, Program::Podman | Program::SystemdRun) {
         let runtime = format!("/run/user/{effective_uid}");
         environment.insert("XDG_RUNTIME_DIR", runtime.clone());
         environment.insert(
@@ -704,25 +706,27 @@ mod tests {
     use tempfile::{tempdir, tempfile};
 
     #[test]
-    fn podman_uses_the_effective_users_systemd_bus() {
+    fn podman_and_its_user_service_wrapper_use_the_effective_users_systemd_bus() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("podman-storage");
         let arguments = vec!["--root".to_owned(), root.display().to_string()];
-        let environment = subprocess_environment(Program::Podman, 128, &arguments);
+        for program in [Program::Podman, Program::SystemdRun] {
+            let environment = subprocess_environment(program, 128, &arguments);
 
-        assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/user/128");
-        assert_eq!(
-            environment["DBUS_SESSION_BUS_ADDRESS"],
-            "unix:path=/run/user/128/bus"
-        );
-        assert_eq!(
-            environment["TMPDIR"],
-            temporary
-                .path()
-                .join("podman-image-tmp")
-                .display()
-                .to_string()
-        );
+            assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/user/128");
+            assert_eq!(
+                environment["DBUS_SESSION_BUS_ADDRESS"],
+                "unix:path=/run/user/128/bus"
+            );
+            assert_eq!(
+                environment["TMPDIR"],
+                temporary
+                    .path()
+                    .join("podman-image-tmp")
+                    .display()
+                    .to_string()
+            );
+        }
         assert_eq!(
             podman_image_tmpdir(&arguments),
             Some(temporary.path().join("podman-image-tmp"))

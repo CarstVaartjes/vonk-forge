@@ -4,6 +4,8 @@ export type Scalar = string | number | boolean;
 export type PresetName = "custom" | "vllm" | "diffusers";
 export type InterfaceAdapter = "openai" | "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job";
 export type TopologyMode = "single" | "distributed" | "tensor_parallel" | "pipeline_parallel" | "data_parallel" | "hybrid" | "ray" | "mpi";
+export type BuildCapability = "CHOWN" | "DAC_OVERRIDE" | "FOWNER" | "FSETID" | "KILL" | "MKNOD" | "NET_BIND_SERVICE" | "SETFCAP" | "SETGID" | "SETPCAP" | "SETUID" | "SYS_CHROOT";
+export const BUILD_CAPABILITIES: readonly BuildCapability[] = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"];
 
 export type CanonicalReference = {
   kind: "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";
@@ -51,7 +53,15 @@ export type CanonicalRecipeDocument = {
     platform: string;
     arguments: Array<{name: string; value: Scalar}>;
     network: {mode: "none" | "public"; hosts: string[]};
-    resources: {download_bytes: number; temporary_bytes: number; memory_bytes: number; timeout_seconds: number};
+    options: {
+      additional_contexts: Array<{name: string; path: string}>; annotations: Array<{name: string; value: string}>; environment: Array<{name: string; value: Scalar}>;
+      format: "oci" | "docker"; identity_label: boolean; ignorefile: string | null; jobs: number; labels: Array<{name: string; value: string}>;
+      layer_compression: "disabled" | "gzip"; layer_labels: Array<{name: string; value: string}>; layers: boolean; no_hostname: boolean; no_hosts: boolean;
+      omit_history: boolean; os_features: string[]; os_version: string | null; shm_bytes: number; skip_unused_stages: boolean; squash: "none" | "new" | "all";
+      timestamp: number | null; unset_environment: string[]; unset_labels: string[];
+    };
+    resources: {cpu_cores: number; download_bytes: number; temporary_bytes: number; memory_bytes: number; processes: number; timeout_seconds: number};
+    security: {capabilities: BuildCapability[]};
   };
   parameters: Array<{name: string; description: string; type: "string" | "integer" | "boolean" | "enum"; default: Scalar; minimum?: number; maximum?: number; allowed_values?: Scalar[]; pattern?: string; change_effect: "rebuild" | "reinstall" | "restart"}>;
   artifacts: CanonicalArtifact[];
@@ -195,7 +205,20 @@ function validateShape(value: unknown): CanonicalRecipeDocument {
   requireArray(build, "arguments", "$.build").forEach((item, index) => { const path = `$.build.arguments[${index}]`; const argument = objectAt(item, path); requireString(argument, "name", path); scalarAt(argument.value, `${path}.value`); });
   const network = requireObject(build, "network", "$.build"); requireString(network, "mode", "$.build.network"); requireStrings(network, "hosts", "$.build.network");
   const buildResources = requireObject(build, "resources", "$.build");
-  for (const key of ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"]) requireInteger(buildResources, key, "$.build.resources");
+  for (const key of ["cpu_cores", "download_bytes", "temporary_bytes", "memory_bytes", "processes", "timeout_seconds"]) requireInteger(buildResources, key, "$.build.resources");
+  const buildSecurity = requireObject(build, "security", "$.build");
+  const buildCapabilities = requireStrings(buildSecurity, "capabilities", "$.build.security");
+  if (new Set(buildCapabilities).size !== buildCapabilities.length || buildCapabilities.some(capability => !BUILD_CAPABILITIES.includes(capability as BuildCapability))) throw new ShapeError("$.build.security.capabilities contains a duplicate or unsupported capability.");
+  const buildOptions = requireObject(build, "options", "$.build");
+  for (const key of ["identity_label", "layers", "no_hostname", "no_hosts", "omit_history", "skip_unused_stages"]) requireBoolean(buildOptions, key, "$.build.options");
+  for (const key of ["jobs", "shm_bytes"]) requireInteger(buildOptions, key, "$.build.options");
+  for (const key of ["format", "layer_compression", "squash"]) requireString(buildOptions, key, "$.build.options");
+  if (buildOptions.ignorefile !== null) stringAt(buildOptions.ignorefile, "$.build.options.ignorefile");
+  if (buildOptions.os_version !== null) stringAt(buildOptions.os_version, "$.build.options.os_version");
+  if (buildOptions.timestamp !== null) integerAt(buildOptions.timestamp, "$.build.options.timestamp");
+  for (const key of ["os_features", "unset_environment", "unset_labels"]) requireStrings(buildOptions, key, "$.build.options");
+  for (const key of ["annotations", "environment", "labels", "layer_labels"]) requireArray(buildOptions, key, "$.build.options").forEach((item, index) => { const path = `$.build.options.${key}[${index}]`; const entry = objectAt(item, path); requireString(entry, "name", path); if (key === "environment") scalarAt(entry.value, `${path}.value`); else requireString(entry, "value", path); });
+  requireArray(buildOptions, "additional_contexts", "$.build.options").forEach((item, index) => { const path = `$.build.options.additional_contexts[${index}]`; const entry = objectAt(item, path); requireString(entry, "name", path); requireString(entry, "path", path); });
 
   requireArray(root, "parameters").forEach((item, index) => {
     const path = `$.parameters[${index}]`; const parameter = objectAt(item, path);

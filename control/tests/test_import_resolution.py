@@ -47,9 +47,11 @@ def test_exact_overlays_do_not_authorize_a_raw_runtime_command() -> None:
         imported,
         {
             "build_resources": {
+                "cpu_cores": 8,
                 "download_bytes": 50,
                 "temporary_bytes": 50,
                 "memory_bytes": 100,
+                "processes": 4096,
                 "timeout_seconds": 600,
             },
             "artifact_sizes": {

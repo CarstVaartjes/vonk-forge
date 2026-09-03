@@ -176,9 +176,11 @@ def test_workflow_keeps_raw_runtime_command_blocked_after_exact_overlays(
             expected_revision=1,
             overlays={
                 "build_resources": {
+                    "cpu_cores": 8,
                     "download_bytes": 50,
                     "temporary_bytes": 50,
                     "memory_bytes": 100,
+                    "processes": 4096,
                     "timeout_seconds": 600,
                 },
                 "artifact_sizes": {

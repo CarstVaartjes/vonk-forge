@@ -93,9 +93,11 @@ def resolve_import(
             "import.build_resources_required", "build resource overlay is required"
         )
     build["resources"] = {
+        "cpu_cores": _positive_int(build_resources, "cpu_cores", "build"),
         "download_bytes": _nonnegative_int(build_resources, "download_bytes", "build"),
         "temporary_bytes": _positive_int(build_resources, "temporary_bytes", "build"),
         "memory_bytes": _positive_int(build_resources, "memory_bytes", "build"),
+        "processes": _positive_int(build_resources, "processes", "build"),
         "timeout_seconds": _positive_int(build_resources, "timeout_seconds", "build"),
     }
     if overlays.get("security_acknowledged") is not True:

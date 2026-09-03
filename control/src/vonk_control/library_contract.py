@@ -174,15 +174,55 @@ class VisualBuildContext(_StrictModel):
     media_type: Text128
 
 
+class VisualBuildOptionValue(_StrictModel):
+    name: Text128
+    value: str = Field(max_length=1024)
+
+
+class VisualBuildAdditionalContext(_StrictModel):
+    name: Text64
+    path: Text256
+
+
+class VisualBuildOptions(_StrictModel):
+    additional_contexts: list[VisualBuildAdditionalContext] = Field(max_length=16)
+    annotations: list[VisualBuildOptionValue] = Field(max_length=64)
+    environment: list[VisualBuildOptionValue] = Field(max_length=64)
+    format: Literal["oci", "docker"]
+    identity_label: bool
+    ignorefile: Text256 | None
+    jobs: int = Field(ge=1, le=32)
+    labels: list[VisualBuildOptionValue] = Field(max_length=64)
+    layer_compression: Literal["disabled", "gzip"]
+    layer_labels: list[VisualBuildOptionValue] = Field(max_length=64)
+    layers: bool
+    no_hostname: bool
+    no_hosts: bool
+    omit_history: bool
+    os_features: list[Text64] = Field(max_length=32)
+    os_version: Text64 | None
+    shm_bytes: int = Field(ge=65_536, le=68_719_476_736)
+    skip_unused_stages: bool
+    squash: Literal["none", "new", "all"]
+    timestamp: int | None = Field(default=None, ge=0, le=4_102_444_800)
+    unset_environment: list[Text128] = Field(max_length=64)
+    unset_labels: list[Text128] = Field(max_length=64)
+
+
 class VisualBuild(_StrictModel):
     context: VisualBuildContext
     dockerfile: Text256
+    target: Text64 | None
     platform: Text64
     network_mode: Text32
     network_hosts: list[Text256] = Field(max_length=64)
+    capabilities: list[Text32] = Field(max_length=12)
+    options: VisualBuildOptions
+    cpu_cores: int = Field(ge=1, le=256)
     download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     temporary_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    processes: int = Field(ge=1, le=65_535)
     timeout_seconds: int = Field(ge=1, le=86_400)
 
 

@@ -29,6 +29,7 @@ export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}
       <dl className="visual-field-grid">
         <div><dt>Schema version</dt><dd> {document.schema_version}</dd></div>
         <div><dt>Dockerfile</dt><dd> {document.build.dockerfile}</dd></div>
+        <div><dt>Target stage</dt><dd> {document.build.target ?? "Final stage"}</dd></div>
         <div><dt>Platform</dt><dd> {document.build.platform}</dd></div>
         <div><dt>Network mode</dt><dd> {document.build.network_mode}</dd></div>
         <div><dt>Network hosts</dt><dd> {values(document.build.network_hosts, "None")}</dd></div>
@@ -37,6 +38,10 @@ export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}
         <div><dt>Download</dt><dd> {bytes(document.build.download_bytes)}</dd></div>
         <div><dt>Temporary storage</dt><dd> {bytes(document.build.temporary_bytes)}</dd></div>
         <div><dt>Build memory</dt><dd> {bytes(document.build.memory_bytes)}</dd></div>
+        <div><dt>Build CPU</dt><dd> {document.build.cpu_cores.toLocaleString("en-US")} cores</dd></div>
+        <div><dt>Process limit</dt><dd> {document.build.processes.toLocaleString("en-US")}</dd></div>
+        <div><dt>Build capabilities</dt><dd> {document.build.capabilities.length ? document.build.capabilities.join(", ") : "None"}</dd></div>
+        <div><dt>Build format</dt><dd> {document.build.options.format.toUpperCase()} · {document.build.options.jobs.toLocaleString("en-US")} parallel {document.build.options.jobs === 1 ? "stage" : "stages"}</dd></div>
         <div><dt>Timeout</dt><dd> {document.build.timeout_seconds.toLocaleString("en-US")} seconds</dd></div>
       </dl>
       <TechnicalDetails items={[{label: "Context digest", value: `sha256:${document.build.context.sha256}`}]}/>

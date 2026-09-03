@@ -6,12 +6,14 @@ import {
 } from "../lib/canonical-recipe-document";
 import type {
   CanonicalArtifact,
+  BuildCapability,
   CanonicalInterface,
   CanonicalRecipeDocument,
   InterfaceAdapter,
   PresetName,
   TopologyMode,
 } from "../lib/canonical-recipe-document";
+import {BUILD_CAPABILITIES} from "../lib/canonical-recipe-document";
 import "./library.css";
 import "./custom-recipe-builder.css";
 
@@ -187,10 +189,13 @@ function errorsFor(document: CanonicalRecipeDocument, slug: string, selectedStep
   });
 
   integer(3, "context-size", document.build.context.expected_bytes, "Build context size", 1);
+  integer(3, "cpu-cores", document.build.resources.cpu_cores, "Build CPU cores", 1);
   integer(3, "download-size", document.build.resources.download_bytes, "Additional download size");
   integer(3, "temporary-size", document.build.resources.temporary_bytes, "Temporary storage", 1);
   integer(3, "memory-size", document.build.resources.memory_bytes, "Build memory", 1);
+  integer(3, "processes", document.build.resources.processes, "Build process limit", 1);
   integer(3, "build-timeout", document.build.resources.timeout_seconds, "Build timeout", 1);
+  if (new Set(document.build.security.capabilities).size !== document.build.security.capabilities.length || document.build.security.capabilities.some(capability => !BUILD_CAPABILITIES.includes(capability))) add(3, "build-capabilities", "Choose each build capability at most once from the supported rootless set.");
   integer(3, "pre-start-count", document.runtime.lifecycle.pre_start.length, "Pre-start phase count");
   integer(3, "post-stop-count", document.runtime.lifecycle.post_stop.length, "Post-stop phase count");
   integer(3, "stop-timeout", document.runtime.lifecycle.stop_timeout_seconds, "Stop timeout", 1);
@@ -520,14 +525,17 @@ export function CustomRecipeBuilderPage({api, onNavigate, onBusyChange, onDirtyC
       </div>}
 
       {step === 3 && <div className="builder-step-fields">
-        <div className="builder-resource-summary" aria-label="Resource envelope"><div><span>Context</span><strong>{formatBytes(document.build.context.expected_bytes)}</strong></div><div><span>Download</span><strong>{formatBytes(document.build.resources.download_bytes + document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</strong></div><div><span>Temporary</span><strong>{formatBytes(document.build.resources.temporary_bytes)}</strong></div><div><span>Build memory</span><strong>{formatBytes(document.build.resources.memory_bytes)}</strong></div></div>
+        <div className="builder-resource-summary" aria-label="Resource envelope"><div><span>Context</span><strong>{formatBytes(document.build.context.expected_bytes)}</strong></div><div><span>Download</span><strong>{formatBytes(document.build.resources.download_bytes + document.artifacts.reduce((total, item) => total + item.download_bytes, 0))}</strong></div><div><span>Temporary</span><strong>{formatBytes(document.build.resources.temporary_bytes)}</strong></div><div><span>Build memory</span><strong>{formatBytes(document.build.resources.memory_bytes)}</strong></div><div><span>Build CPU</span><strong>{document.build.resources.cpu_cores} cores</strong></div><div><span>Processes</span><strong>{document.build.resources.processes}</strong></div></div>
         <fieldset className="custom-recipe-section"><legend>Resource envelope</legend><p className="custom-recipe-section-help">Enter normal human units; the recipe is saved using exact bytes.</p><div className="builder-unit-grid">
           <HumanBytesField id="context-size" label="Build context" value={document.build.context.expected_bytes} onChange={value => update(current => ({...current, build: {...current.build, context: {...current.build.context, expected_bytes: value}}}))} error={error("context-size")}/>
           <HumanBytesField id="download-size" label="Additional downloads" value={document.build.resources.download_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, download_bytes: value}}}))} error={error("download-size")}/>
           <HumanBytesField id="temporary-size" label="Temporary storage" value={document.build.resources.temporary_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, temporary_bytes: value}}}))} error={error("temporary-size")}/>
           <HumanBytesField id="memory-size" label="Build memory" value={document.build.resources.memory_bytes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, memory_bytes: value}}}))} error={error("memory-size")}/>
         </div><div className="custom-recipe-fields custom-recipe-fields-three">
+          <TextField id="cpu-cores" label="Build CPU cores" type="number" min={1} max={256} value={document.build.resources.cpu_cores} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, cpu_cores: Number(value)}}}))} error={error("cpu-cores")}/>
+          <TextField id="processes" label="Build process limit" type="number" min={1} max={65535} value={document.build.resources.processes} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, processes: Number(value)}}}))} error={error("processes")}/>
           <TextField id="build-timeout" label="Build timeout (seconds)" type="number" min={1} value={document.build.resources.timeout_seconds} onChange={value => update(current => ({...current, build: {...current.build, resources: {...current.build.resources, timeout_seconds: Number(value)}}}))} error={error("build-timeout")}/>
+          <TextField id="build-capabilities" label="Rootless build capabilities" value={joinList(document.build.security.capabilities)} onChange={value => update(current => ({...current, build: {...current.build, security: {capabilities: splitList(value) as BuildCapability[]}}}))} error={error("build-capabilities")} helper={`Comma-separated allowlist: ${BUILD_CAPABILITIES.join(", ")}. The agent drops all capabilities before adding these.`}/>
           <TextField id="pre-start-count" label="Pre-start commands" type="number" min={0} value={document.runtime.lifecycle.pre_start.length} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, pre_start: resizeCommands(current.runtime.lifecycle.pre_start, Number(value), "pre-start")}}}))} error={error("pre-start-count")}/>
           <TextField id="post-stop-count" label="Post-stop commands" type="number" min={0} value={document.runtime.lifecycle.post_stop.length} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, post_stop: resizeCommands(current.runtime.lifecycle.post_stop, Number(value), "post-stop")}}}))} error={error("post-stop-count")}/>
           <TextField id="stop-timeout" label="Stop timeout (seconds)" type="number" min={1} value={document.runtime.lifecycle.stop_timeout_seconds} onChange={value => update(current => ({...current, runtime: {...current.runtime, lifecycle: {...current.runtime.lifecycle, stop_timeout_seconds: Number(value)}}}))} error={error("stop-timeout")}/>
