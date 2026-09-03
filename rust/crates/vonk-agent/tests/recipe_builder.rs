@@ -1816,7 +1816,16 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
     .build(&request(archive.len(), digest), operation, &archive)
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::ImageBuild));
+    assert!(matches!(
+        error,
+        RecipeBuildError::ImageBuild {
+            diagnostic: vonk_agent::recipe_builder::PodmanBuildDiagnostic::NonzeroWithoutOutput
+        }
+    ));
+    assert_eq!(
+        error.to_string(),
+        "Podman recipe image build failed (nonzero-without-output)"
+    );
     assert_eq!(
         fs::read_dir(root.path().join("build-staging"))
             .unwrap()
